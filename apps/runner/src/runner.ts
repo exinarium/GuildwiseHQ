@@ -37,6 +37,7 @@ import {
   PACK_SCRIPT_GATE_CAPABILITY,
   PACKS_CAPABILITY,
   POST_AS_CAPABILITY,
+  type PostAsPlan,
   PR_LIST_CAPABILITY,
   PR_NOTICE_CAPABILITY,
   PR_REVIEW_CAPABILITY,
@@ -128,6 +129,8 @@ import { JiraCredentialStore, jiraFile, resolveJira } from './external/jira-stor
 import { OutboundExecutor } from './external/outbound.ts';
 import { AgentGit } from './forge/agent-git.ts';
 import { LiveOnce, postCommitStatus } from './forge/commit-status.ts';
+import { type ActorScope, actorScope, appOriginRefusal } from './forge/app-actor.ts';
+import { appRepos } from './forge/app-repos.ts';
 import { recheckFile, touchRecheck } from './forge/connect.ts';
 import {
   branchRulesFor,
@@ -815,6 +818,10 @@ export class Runner {
       targetSecrets: this.targetSecrets,
       orgSourceFolder: (orgId) => this.orgSourceFolder(orgId),
       gitAuth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+      shiftCredentials: (plan) => {
+        const scope = this.scopeFor(plan);
+        return { auth: scope.auth, originRefusal: (url) => appOriginRefusal(scope, url) };
+      },
       syncAfterFetch: (t) => this.sync.sync(t, { fetch: false, locked: true }).then(() => undefined),
       mcpSignInNote: (granted) => this.mcpSignInNote(granted),
       external: () => this.external,
@@ -1067,6 +1074,14 @@ export class Runner {
 
   /** This runner's token source for GitHub issue traffic as a project's GitHub App (per runner, like `appProbe`). */
   private readonly appTokenSource: AppTokenSource = brokerTokenSource(() => this.appBroker());
+
+  /**
+   * The credentials one payload acts with: without a plan (or with no repository on an app) exactly today's forge env
+   * and git auth; repositories that post as an app push, fetch and call gh with this runner's installation tokens.
+   */
+  private scopeFor(plan?: PostAsPlan | null): ActorScope {
+    return actorScope(this.forgeEnv, this.appBroker(), plan, appRepos.forRoot(this.paths.root));
+  }
 
   /** Hosts of the GitHub and GitLab repositories on this workstation (instances of those integrations). */
   private repoHosts(): Partial<Record<'github' | 'gitlab', string[]>> {
@@ -2346,19 +2361,23 @@ export class Runner {
         if (!repo) {
           done(true, { ok: false, action: p.action, error: `no local clone for ${p.remoteUrlNormalized}` });
         } else {
-          const completion = await executeCompletion({
-            payload: p,
-            repoPath: repo.localPath,
-            appProbe: this.appProbe,
-            worktreePath: this.paths.worktreePath(p.projectKey, p.ref, p.projectId),
-            worktreesDir: this.paths.worktrees,
-            integrationDir: this.paths.integration,
-            pr: this.opts.prCreator ?? forgePrCreator(this.forgeEnv),
-            auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
-            rules:
-              this.opts.branchRules ??
-              ((cwd, branch, forge) => branchRulesFor(this.forgeEnv, cwd, branch, forge)),
-          });
+          const scope = this.scopeFor(p.postAs);
+          const sshRefusal = appOriginRefusal(scope, repo.remoteUrl);
+          const completion = sshRefusal
+            ? { ok: false, action: p.action, error: sshRefusal }
+            : await executeCompletion({
+                payload: p,
+                repoPath: repo.localPath,
+                appProbe: this.appProbe,
+                worktreePath: this.paths.worktreePath(p.projectKey, p.ref, p.projectId),
+                worktreesDir: this.paths.worktrees,
+                integrationDir: this.paths.integration,
+                pr: this.opts.prCreator ?? forgePrCreator(scope.forgeEnv),
+                auth: scope.auth,
+                rules:
+                  this.opts.branchRules ??
+                  ((cwd, branch, forge) => branchRulesFor(scope.forgeEnv, cwd, branch, forge)),
+              });
           done(true, completion);
           // The working branch on origin may have moved (a merge, or a pull request merged since): bring the local one along.
           if (completion.ok && (p.action === 'pr' || p.action === 'merge'))
@@ -2449,7 +2468,7 @@ export class Runner {
               repoPath: repo.localPath,
               appProbe: this.appProbe,
               integrationDir: this.paths.integration,
-              auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+              auth: this.scopeFor(p.postAs).auth,
             })
           : {
               ok: false,
@@ -2484,7 +2503,7 @@ export class Runner {
               appProbe: this.appProbe,
               integrationDir: this.paths.integration,
               dataDir: this.paths.root,
-              auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+              auth: this.scopeFor(p.postAs).auth,
               // The repository's own build scripts (the PDF guide), with the toolchain PATH; output is redacted.
               exec: async (cmd, args, o) => {
                 const tc = this.toolchains.resolve();
@@ -2520,9 +2539,9 @@ export class Runner {
               repoPath: repo.localPath,
               appProbe: this.appProbe,
               integrationDir: this.paths.integration,
-              forgeEnv: this.forgeEnv,
-              auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
-              pr: this.opts.prCreator ?? forgePrCreator(this.forgeEnv),
+              forgeEnv: this.scopeFor(p.postAs).forgeEnv,
+              auth: this.scopeFor(p.postAs).auth,
+              pr: this.opts.prCreator ?? forgePrCreator(this.scopeFor(p.postAs).forgeEnv),
             })
           : {
               ok: false,
@@ -2549,7 +2568,7 @@ export class Runner {
                 repoPath: repo.localPath,
                 appProbe: this.appProbe,
                 integrationDir: this.paths.integration,
-                auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+                auth: this.scopeFor(p.postAs).auth,
               })
             : { ok: false, error: `no local clone for ${p.remoteUrlNormalized}` },
         );

@@ -5,10 +5,11 @@ import {
   type FinalizeResult,
   guardsInternalRef,
   isSafeGitRef,
+  postAsFor,
 } from '@aom/shared';
 import { statusLinesWithoutStubs } from '../adapters/sandbox-placeholders.ts';
 import type { BranchRules } from '../forge/types.ts';
-import { isProtectedBranchRejection, type PrCreator } from './gh.ts';
+import { describePushRejection, isProtectedBranchRejection, type PrCreator } from './gh.ts';
 import { advanceLocalBranch, git, gitOk, hasRemote, revParse } from './git.ts';
 import {
   AppIdentityError,
@@ -76,6 +77,35 @@ const fail = (action: FinalizeResult['action'], error: string): FinalizeResult =
   action,
   error,
 });
+
+/** The app the card's repository posts as (for refusal reports), if any. */
+const appOfCard = (p: FinalizeExecutePayload) => {
+  const e = postAsFor(p.postAs, p.remoteUrlNormalized);
+  return e?.source === 'app' ? (e.app ?? null) : null;
+};
+
+/** A refused push with what the owner must change, when the app lacks a bypass or a permission. */
+const pushFailure = (p: FinalizeExecutePayload, what: string, why: string): string => {
+  const report = describePushRejection(why, appOfCard(p));
+  return `${what}: ${why}${report ? `\n${report}` : ''}`;
+};
+
+/**
+ * Fetches `base` from origin with the host's credentials. When those cannot be had (a selected app that cannot mint)
+ * nothing is fetched: the local view is used, and the push that follows fails closed with the reason.
+ */
+async function fetchBase(input: CompletionInput, cwd: string, base: string): Promise<void> {
+  let a: { args: string[]; env: Record<string, string> } = { args: [], env: {} };
+  if (input.auth) {
+    const url = (await git(cwd, ['remote', 'get-url', 'origin'])).stdout.trim();
+    try {
+      if (url) a = await input.auth(url, input.payload.forge);
+    } catch {
+      return;
+    }
+  }
+  await git(cwd, [...a.args, 'fetch', '--', 'origin', base], { env: a.env });
+}
 
 /**
  * The completion action of a card (docs/ARCHITECTURE.md sections 13.5, 13.6, 24.13): deterministic runner code, no
@@ -175,10 +205,21 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
     });
   const remote = await hasRemote(wt);
   if (!remote) return fail(action, 'cannot open a PR: the repository has no origin remote');
+  return openChangePath(input, wt).catch((err) => {
+    if (err instanceof AppIdentityError) return fail(action, appIdentityWire(err));
+    throw err;
+  });
+}
+
+/** Pushes the card branch and opens its pull request (an app that cannot mint throws AppIdentityError). */
+async function openChangePath(input: CompletionInput, wt: string): Promise<FinalizeResult> {
+  const { payload: p } = input;
+  const action = p.action;
   // A pull request goes out under <prefix>/<ticket>.
   const head = await remoteBranchFor(input, wt);
   const push = await pushBranch(input, wt, head);
-  if (push.exitCode !== 0) return fail(action, `git push failed: ${(push.stderr || push.stdout).trim()}`);
+  if (push.exitCode !== 0)
+    return fail(action, pushFailure(p, 'git push failed', (push.stderr || push.stdout).trim()));
 
   try {
     const r = await input.pr.create({
@@ -198,7 +239,10 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
       };
     return { ok: true, action, pushedBranch: head, ...(r.url ? { prUrl: r.url } : {}) };
   } catch (err) {
-    return fail(action, errMsg(err));
+    if (err instanceof AppIdentityError) return fail(action, appIdentityWire(err));
+    const msg = errMsg(err);
+    const report = describePushRejection(msg, appOfCard(p));
+    return fail(action, report ? `${msg}\n${report}` : msg);
   }
 }
 
@@ -264,7 +308,7 @@ async function pushBranch(input: CompletionInput, wt: string, remoteName?: strin
  */
 async function alreadyLanded(input: CompletionInput, wt: string): Promise<string | null> {
   const base = input.payload.baseBranch;
-  if (await hasRemote(input.repoPath)) await git(input.repoPath, ['fetch', '--', 'origin', base]);
+  if (await hasRemote(input.repoPath)) await fetchBase(input, input.repoPath, base);
   const target = await baseTarget(input.repoPath, base);
   const tip = await revParse(input.repoPath, target);
   const head = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
@@ -286,7 +330,7 @@ async function mergeLocked(input: CompletionInput, wt: string): Promise<Finalize
     const rules = await input.rules(repoPath, base, p.forge).catch(() => null);
     if (rules && !rules.directPushAllowed) return viaChange(input, wt, base);
   }
-  if (remote) await git(repoPath, ['fetch', '--', 'origin', base]);
+  if (remote) await fetchBase(input, repoPath, base);
   const startPoint = await baseTarget(repoPath, base);
   if (!(await revParse(repoPath, startPoint))) return fail('merge', `base branch ${base} not found`);
 
@@ -339,7 +383,7 @@ async function mergeLocked(input: CompletionInput, wt: string): Promise<Finalize
           const why = (push.stderr || push.stdout).trim();
           // The host refused (branch policy we could not read beforehand): fall back to a change.
           if (isProtectedBranchRejection(why)) return viaChange(input, wt, base, why);
-          return fail('merge', `pushing ${base} failed: ${why}`);
+          return fail('merge', pushFailure(p, `pushing ${base} failed`, why));
         }
       }
       await advanceLocalBranch(repoPath, base, mergeCommit);
@@ -364,7 +408,8 @@ async function viaChange(
   const { payload: p } = input;
   const head = await remoteBranchFor(input, wt);
   const push = await pushBranch(input, wt, head);
-  if (push.exitCode !== 0) return fail('pr', `git push failed: ${(push.stderr || push.stdout).trim()}`);
+  if (push.exitCode !== 0)
+    return fail('pr', pushFailure(p, 'git push failed', (push.stderr || push.stdout).trim()));
   const why = reason ? `${base} refused a direct push` : `${base} is protected on the git host`;
   try {
     const r = await input.pr.create({

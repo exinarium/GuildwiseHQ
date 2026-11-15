@@ -1,4 +1,11 @@
-import type { ForgeKind, GitConnection, MergedChange, OpenChange, RepoRef } from '@aom/shared';
+import type {
+  ForgeKind,
+  GitConnection,
+  MergedChange,
+  OpenChange,
+  PostAsAppIdentity,
+  RepoRef,
+} from '@aom/shared';
 import type { Executor } from '../toolchain/exec.ts';
 import type { SshEnv } from './ssh.ts';
 import type { StatusTokenStore } from './status-tokens.ts';
@@ -19,6 +26,20 @@ export interface ForgeEnv {
   /** SSH access (key choice, known_hosts). Absent: ssh remotes use the user's own ssh setup. */
   ssh?: SshEnv;
   now?: () => Date;
+  /**
+   * The app a repository posts as (host and lower-cased `owner/name`), or null for today's credentials. Set only by a
+   * payload's actor scope (`app-actor.ts`); absent everywhere else.
+   */
+  app?: (host: string, fullName: string) => AppActor | null;
+}
+
+/** A selected app acting on one repository. */
+export interface AppActor {
+  app: PostAsAppIdentity;
+  /** `owner/name`, lower-cased. */
+  repoName: string;
+  /** A current token for this repository; `AppIdentityError` on any failure. Never cached by the caller. */
+  token(): Promise<string>;
 }
 
 export interface CommitStatusInput {

@@ -1,6 +1,9 @@
 import type { GitConnection, MergedChange, OpenChange, RepoRef } from '@aom/shared';
 import { githubApiBase } from '../review/review-poster.ts';
 import { errText, ForgeUnavailableError, isHttps } from './http.ts';
+import { normalizeRemoteUrl } from '@aom/shared';
+import { APP_GIT_MARKER } from './app-repos.ts';
+import { errText, ForgeUnavailableError, isHttps, tokenHelperEnv } from './http.ts';
 import type {
   BranchRules,
   ChangeState,
@@ -50,6 +53,9 @@ interface GhRepo {
 
 const FIELDS = 'nameWithOwner,url,sshUrl,isPrivate,defaultBranchRef';
 
+/** `owner/name` of a remote url. */
+const fullNameOf = (url: string): string => normalizeRemoteUrl(url).split('/').slice(-2).join('/');
+
 /**
  * GitHub.com and GitHub Enterprise Server through the `gh` CLI, which holds the login (workstation-held credentials:
  * `gh auth login --web`). For https, git borrows gh's login via `gh auth git-credential`; ssh uses the user's keys.
@@ -67,7 +73,22 @@ export class GitHubForge implements Forge {
     return this.env.ghBin ?? 'gh';
   }
 
-  private gh(args: string[], input?: string) {
+  /** The app this repository posts as, if the payload's scope selected one. */
+  private actor(fullName: string | undefined) {
+    return fullName ? (this.env.app?.(this.host.toLowerCase(), fullName.toLowerCase()) ?? null) : null;
+  }
+
+  /**
+   * One `gh` process. For a repository that posts as an app, a fresh installation token is fetched for this call only
+   * (GH_TOKEN, GH_ENTERPRISE_TOKEN on GitHub Enterprise); when it cannot be had, `AppIdentityError` and gh is not run.
+   */
+  private async gh(args: string[], input?: string, repo?: string) {
+    const actor = this.actor(repo);
+    let tokenEnv: Record<string, string> = {};
+    if (actor) {
+      const t = await actor.token();
+      tokenEnv = this.host === 'github.com' ? { GH_TOKEN: t } : { GH_ENTERPRISE_TOKEN: t };
+    }
     return this.env.exec.run(this.bin, args, {
       timeoutMs: 120_000,
       ...(input === undefined ? {} : { input }),
@@ -75,6 +96,7 @@ export class GitHubForge implements Forge {
         GH_PROMPT_DISABLED: '1',
         NO_COLOR: '1',
         ...(this.host !== 'github.com' ? { GH_HOST: this.host } : {}),
+        ...tokenEnv,
       },
     });
   }
@@ -101,6 +123,18 @@ export class GitHubForge implements Forge {
 
   async gitAuth(url: string): Promise<GitAuth> {
     if (!isHttps(url)) return { args: [], env: {} };
+    const actor = this.actor(fullNameOf(url));
+    if (actor) {
+      // AppIdentityError propagates: fail closed, never the owner's gh login for this host.
+      const token = await actor.token();
+      return {
+        args: [],
+        env: {
+          ...tokenHelperEnv(this.host, 'x-access-token', token),
+          [APP_GIT_MARKER]: actor.app.integrationId,
+        },
+      };
+    }
     return {
       args: [
         '-c',
@@ -147,15 +181,11 @@ export class GitHubForge implements Forge {
   }
 
   async defaultBranch(repo: RemoteRepo): Promise<string | null> {
-    const v = await this.gh([
-      'repo',
-      'view',
+    const v = await this.gh(
+      ['repo', 'view', repo.fullName, '--json', 'defaultBranchRef', '--jq', '.defaultBranchRef.name'],
+      undefined,
       repo.fullName,
-      '--json',
-      'defaultBranchRef',
-      '--jq',
-      '.defaultBranchRef.name',
-    ]);
+    );
     return v.exitCode === 0 && v.stdout.trim() ? v.stdout.trim() : null;
   }
 
@@ -164,18 +194,22 @@ export class GitHubForge implements Forge {
     repo: RemoteRepo,
     limit: number,
   ): Promise<{ changes: OpenChange[]; complete: boolean }> {
-    const r = await this.gh([
-      'pr',
-      'list',
-      '--repo',
+    const r = await this.gh(
+      [
+        'pr',
+        'list',
+        '--repo',
+        repo.fullName,
+        '--state',
+        'open',
+        '--json',
+        'number,url,title,author,headRefName,baseRefName,createdAt,additions,deletions,changedFiles,isCrossRepository,headRefOid',
+        '--limit',
+        String(limit + 1),
+      ],
+      undefined,
       repo.fullName,
-      '--state',
-      'open',
-      '--json',
-      'number,url,title,author,headRefName,baseRefName,createdAt,additions,deletions,changedFiles,isCrossRepository,headRefOid',
-      '--limit',
-      String(limit + 1),
-    ]);
+    );
     if (r.exitCode === 127) throw new ForgeUnavailableError('gh is not available');
     if (r.exitCode !== 0)
       throw new Error(`gh pr list failed: ${(r.stderr || r.stdout).trim().slice(0, 300)}`);
@@ -204,18 +238,22 @@ export class GitHubForge implements Forge {
 
   /** The merged pull requests (`gh pr list --state merged`), newest first; those without a merge commit are dropped. */
   async listMergedChanges(repo: RemoteRepo, limit: number): Promise<MergedChange[]> {
-    const r = await this.gh([
-      'pr',
-      'list',
-      '--repo',
+    const r = await this.gh(
+      [
+        'pr',
+        'list',
+        '--repo',
+        repo.fullName,
+        '--state',
+        'merged',
+        '--json',
+        'number,url,title,author,headRefName,baseRefName,headRefOid,mergeCommit,mergedAt,additions,deletions',
+        '--limit',
+        String(limit),
+      ],
+      undefined,
       repo.fullName,
-      '--state',
-      'merged',
-      '--json',
-      'number,url,title,author,headRefName,baseRefName,headRefOid,mergeCommit,mergedAt,additions,deletions',
-      '--limit',
-      String(limit),
-    ]);
+    );
     if (r.exitCode === 127) throw new ForgeUnavailableError('gh is not available');
     if (r.exitCode !== 0)
       throw new Error(`gh pr list failed: ${(r.stderr || r.stdout).trim().slice(0, 300)}`);
@@ -240,22 +278,26 @@ export class GitHubForge implements Forge {
 
   /** The open pull request from `head` into `base`, if any (a reopened card's branch already has one). */
   private async existingChange(repo: RemoteRepo, c: OpenChangeInput) {
-    const found = await this.gh([
-      'pr',
-      'list',
-      '--repo',
+    const found = await this.gh(
+      [
+        'pr',
+        'list',
+        '--repo',
+        repo.fullName,
+        '--head',
+        c.head,
+        '--base',
+        c.base,
+        '--state',
+        'open',
+        '--json',
+        'number,url',
+        '--limit',
+        '1',
+      ],
+      undefined,
       repo.fullName,
-      '--head',
-      c.head,
-      '--base',
-      c.base,
-      '--state',
-      'open',
-      '--json',
-      'number,url',
-      '--limit',
-      '1',
-    ]);
+    );
     if (found.exitCode !== 0) return null;
     try {
       const hit = (JSON.parse(found.stdout) as Array<{ number: number; url: string }>)[0];
@@ -268,20 +310,24 @@ export class GitHubForge implements Forge {
   async openChange(repo: RemoteRepo, c: OpenChangeInput) {
     const existing = await this.existingChange(repo, c);
     if (existing) return existing;
-    const r = await this.gh([
-      'pr',
-      'create',
-      '--repo',
+    const r = await this.gh(
+      [
+        'pr',
+        'create',
+        '--repo',
+        repo.fullName,
+        '--base',
+        c.base,
+        '--head',
+        c.head,
+        '--title',
+        c.title,
+        '--body',
+        c.body,
+      ],
+      undefined,
       repo.fullName,
-      '--base',
-      c.base,
-      '--head',
-      c.head,
-      '--title',
-      c.title,
-      '--body',
-      c.body,
-    ]);
+    );
     if (r.exitCode === 127) throw new ForgeUnavailableError('gh is not available');
     if (r.exitCode !== 0) throw new Error(`gh pr create failed: ${(r.stderr || r.stdout).trim()}`);
     const url = r.stdout
@@ -294,7 +340,11 @@ export class GitHubForge implements Forge {
   }
 
   async changeState(repo: RemoteRepo, id: string): Promise<ChangeState> {
-    const r = await this.gh(['pr', 'view', id, '--repo', repo.fullName, '--json', 'state', '--jq', '.state']);
+    const r = await this.gh(
+      ['pr', 'view', id, '--repo', repo.fullName, '--json', 'state', '--jq', '.state'],
+      undefined,
+      repo.fullName,
+    );
     if (r.exitCode !== 0)
       throw new Error(`gh pr view failed: ${(r.stderr || r.stdout).trim().slice(0, 200)}`);
     const s = r.stdout.trim().toUpperCase();
@@ -302,7 +352,11 @@ export class GitHubForge implements Forge {
   }
 
   async changeHeads(repo: RemoteRepo, id: string): Promise<{ headSha: string; baseSha: string }> {
-    const r = await this.gh(['pr', 'view', id, '--repo', repo.fullName, '--json', 'headRefOid,baseRefOid']);
+    const r = await this.gh(
+      ['pr', 'view', id, '--repo', repo.fullName, '--json', 'headRefOid,baseRefOid'],
+      undefined,
+      repo.fullName,
+    );
     if (r.exitCode === 127) throw new ForgeUnavailableError('gh is not available');
     if (r.exitCode !== 0)
       throw new Error(`gh pr view failed: ${(r.stderr || r.stdout).trim().slice(0, 200)}`);
@@ -353,7 +407,11 @@ export class GitHubForge implements Forge {
   }
 
   async findRelease(repo: RemoteRepo, tag: string): Promise<ForgeRelease | null> {
-    const r = await this.gh(['release', 'view', tag, '--repo', repo.fullName, '--json', 'url,isDraft']);
+    const r = await this.gh(
+      ['release', 'view', tag, '--repo', repo.fullName, '--json', 'url,isDraft'],
+      undefined,
+      repo.fullName,
+    );
     if (r.exitCode === 127) throw new ForgeUnavailableError('gh is not available');
     if (r.exitCode !== 0) {
       const why = (r.stderr || r.stdout).trim();
@@ -382,6 +440,7 @@ export class GitHubForge implements Forge {
         ...(c.prerelease ? ['--prerelease'] : []),
       ],
       c.notes,
+      repo.fullName,
     );
     if (r.exitCode === 127) throw new ForgeUnavailableError('gh is not available');
     if (r.exitCode !== 0) {
@@ -402,17 +461,11 @@ export class GitHubForge implements Forge {
   }
 
   async changeMergeCommit(repo: RemoteRepo, id: string): Promise<string | null> {
-    const r = await this.gh([
-      'pr',
-      'view',
-      id,
-      '--repo',
+    const r = await this.gh(
+      ['pr', 'view', id, '--repo', repo.fullName, '--json', 'mergeCommit', '--jq', '.mergeCommit.oid'],
+      undefined,
       repo.fullName,
-      '--json',
-      'mergeCommit',
-      '--jq',
-      '.mergeCommit.oid',
-    ]);
+    );
     if (r.exitCode !== 0) return null;
     const sha = r.stdout.trim();
     return /^[0-9a-f]{40}$/.test(sha) ? sha : null;
@@ -422,7 +475,11 @@ export class GitHubForge implements Forge {
     try {
       const enc = encodeURIComponent(branch);
       let requiresChange = false;
-      const prot = await this.gh(['api', `repos/${repo.fullName}/branches/${enc}/protection`]);
+      const prot = await this.gh(
+        ['api', `repos/${repo.fullName}/branches/${enc}/protection`],
+        undefined,
+        repo.fullName,
+      );
       if (prot.exitCode === 0) {
         const p = JSON.parse(prot.stdout || '{}') as {
           required_pull_request_reviews?: unknown;
@@ -434,7 +491,11 @@ export class GitHubForge implements Forge {
       } else if (!/not protected|404/i.test(prot.stderr + prot.stdout)) {
         return null; // no permission to read protection (403) or gh missing: unknown
       }
-      const rules = await this.gh(['api', `repos/${repo.fullName}/rules/branches/${enc}`]);
+      const rules = await this.gh(
+        ['api', `repos/${repo.fullName}/rules/branches/${enc}`],
+        undefined,
+        repo.fullName,
+      );
       if (rules.exitCode === 0) {
         const list = JSON.parse(rules.stdout || '[]') as Array<{ type?: string }>;
         if (list.some((x) => x.type === 'pull_request' || x.type === 'required_status_checks'))
