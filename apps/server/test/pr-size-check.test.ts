@@ -254,6 +254,7 @@ describe('AC3: a first timeout within budget leaves the PR not reviewed', () => 
     const before = await deskCount();
     await m.addRun(pr, { state: 'timed_out', code: 'timeout' }); // the earlier run (an automatic one)
     await q().query(`UPDATE pr_review_runs SET state='failed' WHERE pr_review_id=$1`, [pr]);
+    await q().query(`UPDATE pr_review_rounds SET state='failed' WHERE pr_review_id=$1`, [pr]);
     await timeOut(pr);
     // the owner's "Review now" after a failure is a first timeout here
     expect(await stateOf(pr)).toMatchObject({ review_state: 'not_reviewed', attention: null });
