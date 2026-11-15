@@ -2832,7 +2832,13 @@ export class ShiftSupervisor {
       ? params.refspecs.filter((r): r is string => typeof r === 'string' && r.length > 0)
       : [];
     const op = method === 'git.push' ? 'push' : 'fetch';
-    const plan = devopsPushPlan(op, refspecs, params.delete === true, params.tags === true);
+    const plan = devopsPushPlan(
+      op,
+      refspecs,
+      params.delete === true,
+      params.tags === true,
+      devopsGuardFor(s.msg)?.protectedBranches ?? [],
+    );
     if ('error' in plan) return denied(plan.error);
     const url = (await git(dir, ['remote', 'get-url', 'origin'])).stdout.trim();
     if (!url) return denied(`${repo} has no origin`);

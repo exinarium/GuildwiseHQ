@@ -292,6 +292,12 @@ describe('aom git push|fetch --repo (runner side plan)', () => {
     expect(devopsPushPlan('push', ['--force'], false, false)).toHaveProperty('error');
     expect(devopsPushPlan('push', ['main'], true, false)).toHaveProperty('error');
     expect(devopsPushPlan('push', [':main'], false, false)).toHaveProperty('error');
+    // a delete names plain branches only, and never a protected one (the guard's set plus the shift's own)
+    expect(devopsPushPlan('push', ['main:refs/heads/main'], true, false)).toHaveProperty('error');
+    expect(devopsPushPlan('push', ['refs/heads/master'], true, false)).toHaveProperty('error');
+    expect(devopsPushPlan('push', ['HEAD'], true, false)).toHaveProperty('error');
+    expect(devopsPushPlan('push', ['development'], true, false, ['development'])).toHaveProperty('error');
+    expect(devopsPushPlan('push', ['development'], true, false)).not.toHaveProperty('error');
     expect(devopsPushPlan('push', [], false, false)).toHaveProperty('error');
     expect(devopsPushPlan('fetch', ['main'], false, false)).toHaveProperty('error');
   });

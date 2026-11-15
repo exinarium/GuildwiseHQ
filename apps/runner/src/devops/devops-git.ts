@@ -1,5 +1,4 @@
 import { isSafeGitRef, type PostAsPlan } from '@aom/shared';
-import { CONVENTIONAL_MAIN_BRANCHES } from '../git/git.ts';
 import {
   AppIdentityError,
   type AppTokenProbe,
@@ -10,16 +9,20 @@ import {
   repoNameOf,
   resolveCommitIdentity,
 } from '../git/identity.ts';
+import { PROTECTED_BRANCHES } from './guard.ts';
 
 /**
  * The git argv of the DevOps engineer's `aom git push|fetch --repo <dir>` (run by the runner with the repository's
- * credentials). Refspecs are plain `src[:dst]` names: no force (`+`), no options, no main branch deleted.
+ * credentials). Refspecs are plain `src[:dst]` names: no force (`+`), no options. A delete names plain branches only
+ * (no `src:dst`) and never a protected branch: the guard's set (main, master, develop, trunk) plus the shift's own
+ * protected branches (the project's working branch and the worktree base), the same rule as the guard's push check.
  */
 export function devopsPushPlan(
   op: 'push' | 'fetch',
   refspecs: string[],
   del: boolean,
   tags: boolean,
+  protectedBranches: readonly string[] = [],
 ): { args: string[]; operation: string } | { error: string } {
   if (op === 'fetch') {
     if (refspecs.length > 0 || del || tags) return { error: 'aom git fetch --repo <dir> takes no refspec' };
@@ -36,9 +39,11 @@ export function devopsPushPlan(
       parts.some((p) => p !== '' && !isSafeGitRef(p.replace(/^refs\/(heads|tags)\//, '')))
     )
       return { error: `refusing unsafe refspec ${JSON.stringify(r)}` };
+    if (del && parts.length > 1)
+      return { error: `--delete takes plain branch names, not ${JSON.stringify(r)}` };
     const dst = (parts[1] ?? parts[0] ?? '').replace(/^refs\/heads\//, '');
-    if (del && CONVENTIONAL_MAIN_BRANCHES.includes(dst))
-      return { error: `refusing to delete ${dst} from origin` };
+    if (del && (dst === 'HEAD' || PROTECTED_BRANCHES.includes(dst) || protectedBranches.includes(dst)))
+      return { error: `refusing to delete ${dst} from origin: it is a protected branch` };
     if (!del && parts[0] === '') return { error: 'use --delete to remove a branch from origin' };
   }
   const operation = del
