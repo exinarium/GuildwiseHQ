@@ -1,8 +1,11 @@
 import type { GitConnection, MergedChange, OpenChange, RepoRef } from '@aom/shared';
+import { githubApiBase } from '../review/review-poster.ts';
 import { errText, ForgeUnavailableError, isHttps } from './http.ts';
 import type {
   BranchRules,
   ChangeState,
+  CommitStatusInput,
+  CommitStatusOutcome,
   CreateReleaseInput,
   CreateRepoInput,
   Forge,
@@ -306,6 +309,47 @@ export class GitHubForge implements Forge {
     const j = JSON.parse(r.stdout || '{}') as { headRefOid?: string; baseRefOid?: string };
     if (!j.headRefOid || !j.baseRefOid) throw new Error('gh pr view printed no head and base commit');
     return { headSha: j.headRefOid, baseSha: j.baseRefOid };
+  }
+
+  /**
+   * Sets a commit status over the REST API with the size check status token. The `gh` login is never used, and the
+   * token only ever goes into the Authorization header: no message below contains it.
+   */
+  async setCommitStatus(repo: RemoteRepo, c: CommitStatusInput): Promise<CommitStatusOutcome> {
+    const token = this.env.statusTokens?.get('github', this.host)?.token;
+    if (!token) return { ok: false, code: 'no_token', error: 'no status token is saved for this host' };
+    let res: Response;
+    try {
+      res = await this.env.fetch(`${githubApiBase(this.host)}/repos/${repo.fullName}/statuses/${c.sha}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+          'Content-Type': 'application/json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+        body: JSON.stringify({
+          state: c.state,
+          context: c.context,
+          description: c.description,
+          ...(c.targetUrl ? { target_url: c.targetUrl } : {}),
+        }),
+        redirect: 'manual',
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch {
+      return { ok: false, code: 'error', error: 'the git host could not be reached' };
+    }
+    if (res.status === 201 || res.status === 200) return { ok: true };
+    if (res.status === 401)
+      return { ok: false, code: 'no_token', error: 'the host does not accept the status token (401)' };
+    if (res.status === 403)
+      return { ok: false, code: 'forbidden', error: 'the status token may not set statuses here (403)' };
+    if (res.status === 404)
+      return { ok: false, code: 'not_found', error: 'repository or commit not found for this token (404)' };
+    if (res.status === 422)
+      return { ok: false, code: 'invalid_sha', error: 'the host refused the commit (422)' };
+    return { ok: false, code: 'error', error: `the host answered ${res.status}` };
   }
 
   async findRelease(repo: RemoteRepo, tag: string): Promise<ForgeRelease | null> {

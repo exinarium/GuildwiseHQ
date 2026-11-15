@@ -12,6 +12,7 @@ import {
   CHECKS_CAPABILITY,
   CLAUDE_ACCOUNTS_CAPABILITY,
   CLAUDE_MAIN_SWAP_CAPABILITY,
+  COMMIT_STATUS_CAPABILITY,
   CommandPayloadSchemas,
   DELEGATE_GRANTS_FEATURE,
   DELIVERY_CAPABILITY,
@@ -126,9 +127,11 @@ import { ExternalAdapters } from './external/index.ts';
 import { JiraCredentialStore, jiraFile, resolveJira } from './external/jira-store.ts';
 import { OutboundExecutor } from './external/outbound.ts';
 import { AgentGit } from './forge/agent-git.ts';
+import { LiveOnce, postCommitStatus } from './forge/commit-status.ts';
 import { recheckFile, touchRecheck } from './forge/connect.ts';
 import {
   branchRulesFor,
+  FileStatusTokenStore,
   FileTokenStore,
   forgeForUrl,
   forgePrCreator,
@@ -426,6 +429,8 @@ export class Runner {
   readonly forgeEnv: ForgeEnv;
   private readonly agentGit: AgentGit;
   private lastGit: string | undefined;
+  /** Commit status posts that are in flight, by status id. */
+  private readonly statusPosts = new LiveOnce();
   private lastJira: string | undefined;
   /** The runner's own HTTP calls to the server (attachment bytes); the token is read fresh (it can rotate). */
   private readonly serverHttp: ServerHttp;
@@ -470,6 +475,11 @@ export class Runner {
     this.forgeEnv = {
       exec: this.exec,
       fetch: globalThis.fetch,
+      statusTokens: new FileStatusTokenStore(
+        join(this.paths.secrets, 'status-tokens.json'),
+        (n) => this.keys.deriveFileKey(n),
+        { warn: (m) => this.log.warn(m) },
+      ),
       tokens: new FileTokenStore(
         join(this.paths.secrets, 'git-tokens.json'),
         (n) => this.keys.deriveFileKey(n),
@@ -1669,6 +1679,7 @@ export class Runner {
         READONLY_DESIGN_CAPABILITY,
         RELEASE_FACTS_CAPABILITY,
         PR_LIST_CAPABILITY,
+        COMMIT_STATUS_CAPABILITY,
         PR_REVIEW_CAPABILITY,
         PR_REVIEW_PAIR_CAPABILITY,
         PR_NOTICE_CAPABILITY,
@@ -1834,10 +1845,11 @@ export class Runner {
         }
       }
       const connections = await gitConnections(this.forgeEnv, hosts);
-      const key = JSON.stringify(connections.map(({ checkedAt: _c, ...c }) => c));
+      const statusTokens = (this.forgeEnv.statusTokens?.list() ?? []).map((t) => t.key).sort();
+      const key = JSON.stringify([connections.map(({ checkedAt: _c, ...c }) => c), statusTokens]);
       if (!force && key === this.lastGit) return;
       this.lastGit = key;
-      this.client.send('git.report', { connections });
+      this.client.send('git.report', { connections, statusTokens });
     } catch (err) {
       this.log.warn(`git status check failed: ${String(err)}`);
     }
@@ -2392,6 +2404,17 @@ export class Runner {
         done(
           true,
           await listOpenPrs({ payload: p, remoteUrl: repo?.remoteUrl ?? null, forgeEnv: this.forgeEnv }),
+        );
+      } else if (command === 'repo.commit_status') {
+        // Sets one commit status with the size check status token. A resent command for a post that is still live
+        // is answered once, under its own command id.
+        const p = CommandPayloadSchemas['repo.commit_status'].parse(payload);
+        const repo = await this.findRepo(p.remoteUrlNormalized);
+        done(
+          true,
+          await this.statusPosts.once(p.statusId, () =>
+            postCommitStatus({ payload: p, remoteUrl: repo?.remoteUrl ?? null, forgeEnv: this.forgeEnv }),
+          ),
         );
       } else if (command === 'repo.list_merged_prs') {
         // Read-only (20-PR replay). "No clone here", an unsupported git host and a missing login are answers.

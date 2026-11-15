@@ -305,6 +305,16 @@ export const ProjectDtoSchema = z.object({
       status: ReviewSettingsStatusSchema,
     })
     .optional(),
+  /** The hard size check on pull requests (a commit status, read-only here); absent in lists that do not compute it. */
+  sizeStatus: z
+    .object({
+      context: z.string(),
+      state: z.enum(['inactive', 'active', 'no_token', 'no_runner']),
+      /** Pull requests whose status is failing now. */
+      failing: z.number().int(),
+      lastPostedAt: IsoTime.nullable(),
+    })
+    .optional(),
   /** The monthly budget and this month's spend (amounts hidden from guests); absent in lists that do not compute it. */
   budget: BudgetDtoSchema.optional(),
   /**

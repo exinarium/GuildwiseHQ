@@ -29,6 +29,7 @@ import { pendingConversionOf } from '../commands/convert.ts';
 import { hygieneDtos } from '../commands/hygiene.ts';
 import { mcpServerCandidates } from '../commands/mcp-servers.ts';
 import { loadPrReviewStatus } from '../commands/pr-only.ts';
+import { sizeStatusDtoOf } from '../commands/pr-size-status.ts';
 import { UPDATE_CHECK_MIN_INTERVAL_MS, UPDATE_CHECK_TIMEOUT_MS } from '../commands/update-check.ts';
 import type { Ctx } from '../context.ts';
 import { budgetDto, canEditBudget, monthSpendByProject, orgCostCtx, seesAmounts } from '../costs/index.ts';
@@ -390,6 +391,7 @@ export async function getProjectDetail(
     project: {
       ...toProjectDto(p, p.my_role),
       secondReviewer: await secondReviewerDto(ctx, p),
+      sizeStatus: await sizeStatusDtoOf(ctx.pool, p.id),
       pendingConversion: await pendingConversionOf(ctx.pool, p),
       budget: (await budgetsFor(ctx, userId, [p])).get(p.id) as BudgetDto,
       ...(limit ? { usageLimit: limit } : {}),

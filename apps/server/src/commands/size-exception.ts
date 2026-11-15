@@ -15,11 +15,12 @@ import {
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
-import { type Tx, withAppendTx } from '../db/tx.ts';
+import { afterCommit, type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, notFound } from '../errors.ts';
 import { agentActor, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { userTimezone } from './owner-pending.ts';
 import { loadSizeContext, sendPrBackToAuthorIn, verdictOf } from './pr-size-check.ts';
+import { refreshSizeStatuses } from './pr-size-status.ts';
 
 /**
  * Size exception requests. The CEO agent asks, with a reason, to let an over-budget pull request stay as one; the owner
@@ -312,6 +313,8 @@ export async function resolveSizeExceptionIn(
     { tx },
   );
   if (resolution === 'rejected') await sendBackIfStillOver(ctx, tx, row, 'size_exception_rejected');
+  // the hard size check follows the decision: an approval passes the status, a rejection keeps it failing
+  afterCommit(tx, () => refreshSizeStatuses(ctx, { projectId, repoId: row.project_repo_id as string }));
 }
 
 /** A pull request closed while its request waits: the request is withdrawn and the owner's item closed. */
@@ -403,6 +406,7 @@ export async function sizeExceptionSweep(ctx: Ctx): Promise<{ lapsed: number; wi
         'Lapsed: no answer within 2 working days; sent back to the author to split',
       );
       await sendBackIfStillOver(ctx, tx, row, 'size_exception_lapsed');
+      afterCommit(tx, () => refreshSizeStatuses(ctx, { projectId, repoId: row.project_repo_id as string }));
       return 'lapsed' as const;
     }).catch((err) => {
       ctx.log.error({ err, sizeExceptionId: c.id }, 'a size exception could not be lapsed');

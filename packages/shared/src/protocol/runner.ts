@@ -921,6 +921,32 @@ export type RepoListPrsPayload = z.infer<typeof RepoListPrsPayloadSchema>;
 export const PR_LIST_CAPABILITY = 'pr-list:1';
 
 /**
+ * `repo.commit_status`: sets a commit status (for example the hard size check, context `size-budget`) on a commit of the
+ * repository's git host, with the workstation's size check status token. The answer is a `RepoCommitStatusResult`.
+ */
+export const RepoCommitStatusPayloadSchema = z.object({
+  statusId: z.uuid(),
+  repoId: z.uuid(),
+  remoteUrlNormalized: z.string(),
+  forge: ForgeKindSchema.optional(),
+  sha: z.string().regex(/^[0-9a-f]{40}$/),
+  state: z.enum(['success', 'failure', 'pending']),
+  context: z.string().min(1).max(100),
+  description: z.string().max(140),
+  targetUrl: z.string().url().max(500).optional(),
+});
+export type RepoCommitStatusPayload = z.infer<typeof RepoCommitStatusPayloadSchema>;
+export const RepoCommitStatusResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true) }),
+  z.object({
+    ok: z.literal(false),
+    code: z.enum(['no_clone', 'no_token', 'forbidden', 'not_found', 'invalid_sha', 'unsupported', 'error']),
+    error: z.string().max(400),
+  }),
+]);
+export type RepoCommitStatusResult = z.infer<typeof RepoCommitStatusResultSchema>;
+
+/**
  * `repo.list_merged_prs`: read-only. The most recently merged pull requests of a repository (20-PR replay). The answer
  * is a `RepoListMergedPrsResult`.
  */
@@ -1320,6 +1346,7 @@ export const RunnerCommandNameSchema = z.enum([
   'repo.open_pr',
   'repo.release_facts',
   'repo.list_prs',
+  'repo.commit_status',
   'repo.list_merged_prs',
   'pr_review.run',
   'pr_review.cancel',
@@ -1446,6 +1473,7 @@ export const CommandPayloadSchemas = {
   'repo.open_pr': RepoOpenPrPayloadSchema,
   'repo.release_facts': RepoReleaseFactsPayloadSchema,
   'repo.list_prs': RepoListPrsPayloadSchema,
+  'repo.commit_status': RepoCommitStatusPayloadSchema,
   'repo.list_merged_prs': RepoListMergedPrsPayloadSchema,
   'pr_review.run': PrReviewRunPayloadSchema,
   'pr_review.cancel': PrReviewCancelPayloadSchema,
@@ -1644,7 +1672,11 @@ export const RuntimesReportSchema = msg('runtimes.report', { runtimes: z.array(R
  * Which git providers this workstation is connected to (facts only, never a token). Sent after `hello`, after
  * `aom-runner git-connect` and on the `git.status` command.
  */
-export const GitReportSchema = msg('git.report', { connections: GitConnectionsSchema });
+export const GitReportSchema = msg('git.report', {
+  connections: GitConnectionsSchema,
+  /** Keys (`github@github.com`) of the size check status tokens this workstation holds; never a token. */
+  statusTokens: z.array(z.string().max(200)).max(50).optional(),
+});
 /**
  * Jira on this workstation (docs/RUNNER.md "Jira on the runner"): facts only, never the token. `connected`: the saved
  * credentials were accepted; `refused`: Jira said no (wrong or expired token); `not_connected`: none saved.

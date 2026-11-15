@@ -17,6 +17,7 @@ import { pollPrOnlyRepos } from '../commands/pr-only.ts';
 import { dispatchReplayRuns } from '../commands/pr-replays.ts';
 import { dispatchPrReviews, sweepStalePrReviewRuns } from '../commands/pr-review-runs.ts';
 import { deliverSplitNotices } from '../commands/pr-size-check.ts';
+import { deliverSizeStatuses } from '../commands/pr-size-status.ts';
 import { pruneFormSubmissions } from '../commands/public-forms.ts';
 import { expireRuns } from '../commands/runs.ts';
 import { deliverDue } from '../commands/schedule-delivery.ts';
@@ -162,6 +163,8 @@ export class Scheduler {
       await expireRuns(this.ctx).catch((err) => this.ctx.log.error({ err }, 'run environment expiry failed'));
       // PR-only repositories: ask a workstation with the clone for the open pull requests (throttled per repository).
       await pollPrOnlyRepos(this.ctx).catch((err) => this.ctx.log.error({ err }, 'PR-only polling failed'));
+      // The hard size check: the commit status of every open pull request is posted by a workstation with the status token.
+      await deliverSizeStatuses(this.ctx).catch((err) => this.ctx.log.error({ err }, 'size statuses failed'));
       // Pull requests sent back for size: the author is told on the pull request.
       await deliverSplitNotices(this.ctx).catch((err) => this.ctx.log.error({ err }, 'split notices failed'));
       // The first reviewer: runs start on reviewable pull requests (a token is held); lost runs and posts are given up.

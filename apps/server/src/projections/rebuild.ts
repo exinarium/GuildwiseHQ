@@ -34,6 +34,10 @@ export const SAVED: Array<{ table: string; restoreWhere: string }> = [
   { table: 'pr_review_polls', restoreWhere: 'project_repo_id IN (SELECT id FROM project_repos)' },
   // the open pull requests of a PR-only repository as last listed (migration 2970): operational, refreshed by polling
   { table: 'pr_open_changes', restoreWhere: 'project_repo_id IN (SELECT id FROM project_repos)' },
+  // The hard size check (migration 2990): the commit status wanted and posted per open pull request, and the repositories
+  // that ever had one: operational, refreshed by polling.
+  { table: 'pr_size_statuses', restoreWhere: 'project_repo_id IN (SELECT id FROM project_repos)' },
+  { table: 'pr_size_status_repos', restoreWhere: 'project_repo_id IN (SELECT id FROM project_repos)' },
   // Two-factor secrets and recovery codes are operational (they never enter the event log).
   // Which relay integrations a runner serves (migration 2751): operational, references a projection table.
   { table: 'relay_presence', restoreWhere: 'integration_id IN (SELECT id FROM relay_integrations)' },
@@ -142,7 +146,7 @@ export async function rebuildProjections(
     );
     await exec(
       tx,
-      'CREATE TEMP TABLE _save_ws ON COMMIT DROP AS SELECT id, connected, last_seen_at, runtimes, hostname, platform, runner_version, runner_update, runner_update_check, org_folders, org_folder_errors, org_folder_candidates, org_folders_checked_at, mcp_servers, mcp_servers_checked_at, toolchains, toolchains_checked_at, jira_status, jira_checked_at, claude_account_ensure FROM workstations',
+      'CREATE TEMP TABLE _save_ws ON COMMIT DROP AS SELECT id, connected, last_seen_at, runtimes, hostname, platform, runner_version, runner_update, runner_update_check, org_folders, org_folder_errors, org_folder_candidates, org_folders_checked_at, mcp_servers, mcp_servers_checked_at, toolchains, toolchains_checked_at, jira_status, jira_checked_at, claude_account_ensure, status_tokens FROM workstations',
     );
     // Live claims keep the lease the heartbeats extended: replay alone would reset it to `claimed_at + 1h`, which
     // for a long shift is already in the past and would make the reaper release a claim that is still working.
@@ -190,7 +194,8 @@ export async function rebuildProjections(
             org_folder_candidates = s.org_folder_candidates, org_folders_checked_at = s.org_folders_checked_at,
             mcp_servers = s.mcp_servers, mcp_servers_checked_at = s.mcp_servers_checked_at,
             toolchains = s.toolchains, toolchains_checked_at = s.toolchains_checked_at,
-            jira_status = s.jira_status, jira_checked_at = s.jira_checked_at, claude_account_ensure = s.claude_account_ensure
+            jira_status = s.jira_status, jira_checked_at = s.jira_checked_at, claude_account_ensure = s.claude_account_ensure,
+            status_tokens = s.status_tokens
          FROM _save_ws s WHERE w.id = s.id`,
     );
     await exec(

@@ -42,6 +42,12 @@ import { JiraCredentialStore, jiraFile } from './external/jira-store.ts';
 import { connectSteps, describeConnection, sshUploadHelp, touchRecheck } from './forge/connect.ts';
 import { AzureDevOpsForge, defaultHost, FileTokenStore, gitConnections } from './forge/index.ts';
 import { runSshAction, SshSettingsStore } from './forge/ssh.ts';
+import {
+  STATUS_TOKEN_SETTINGS_LINES,
+  saveStatusToken,
+  statusTokenStatusLines,
+} from './forge/status-token-cli.ts';
+import { FileStatusTokenStore } from './forge/status-tokens.ts';
 import { gitVersion } from './git/git.ts';
 import { scanRepos } from './git/repo-scan.ts';
 import { installErrorHandlers } from './health/runner-error.ts';
@@ -936,6 +942,52 @@ async function reviewerTokenCommand(
   );
 }
 
+/**
+ * `guildwise-runner status-token github [--host <h>] [--status] [--remove]`: the token the hard size check posts its
+ * commit status with (Commit statuses: write only). Read without echo, kept encrypted on this machine, never sent to the
+ * server. Not the git host login and not the reviewer token.
+ */
+async function statusTokenCommand(
+  provider: string,
+  opts: { dataDir?: string; pairing?: string; host?: string; status?: boolean; remove?: boolean },
+): Promise<void> {
+  if (provider !== 'github')
+    throw new Error('the size check status is supported for GitHub only: `status-token github`');
+  const host = (opts.host ?? 'github.com').toLowerCase();
+  const { root, entries } = selectPairings(opts);
+  const stores = entries.map((e) => {
+    const paths = runnerPaths(entryDir(root, e));
+    return {
+      paths,
+      store: new FileStatusTokenStore(`${paths.secrets}/status-tokens.json`, fileKeyOf(paths.secrets)),
+    };
+  });
+  if (opts.status) {
+    for (const l of statusTokenStatusLines((stores[0] as (typeof stores)[number]).store)) console.log(l);
+    return;
+  }
+  if (opts.remove) {
+    for (const s of stores) s.store.remove('github', host);
+    for (const s of stores) touchRecheck(s.paths.secrets);
+    console.log(`Status token for ${host} removed from this machine.`);
+    return;
+  }
+  for (const l of STATUS_TOKEN_SETTINGS_LINES) console.log(l);
+  const token = await promptSecret('Paste the status token (it is not shown): ');
+  for (const s of stores) {
+    const r = saveStatusToken({ store: s.store, host, token });
+    if (!r.ok) {
+      console.error(`The token was not saved: ${r.error}.`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+  for (const s of stores) touchRecheck(s.paths.secrets);
+  console.log(
+    'Saved on this machine only (encrypted, mode 0600). A running runner reports it within a minute.',
+  );
+}
+
 interface GitConnectOpts {
   dataDir?: string;
   pairing?: string;
@@ -1533,6 +1585,17 @@ export function buildProgram(): Command {
     .option(...pairingOpt)
     .option(...dataDirOpt)
     .action(reviewerTokenCommand);
+  program
+    .command('status-token <provider>')
+    .description(
+      'set, show or remove the token the hard size check posts its commit status with (provider: github); it stays encrypted on this machine',
+    )
+    .option('--host <host>', 'the git host (default github.com; set it for GitHub Enterprise Server)')
+    .option('--status', 'only show which hosts have a token')
+    .option('--remove', 'remove the token for the host')
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action(statusTokenCommand);
   program
     .command('whatsapp-connect [integration-id]')
     .description(

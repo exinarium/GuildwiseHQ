@@ -1397,6 +1397,16 @@ The token lives sealed in `secrets/reviewer-tokens.json` (mode 0600, keyed by th
 git host logins in `git-tokens.json`. The server learns only present or missing per repository (`repos.report`,
 `workstation_repos.reviewer_token`), never the token.
 
+**Hard size check status (`repo.commit_status`, announced as `commit-status:1`).** The server decides the status of each open
+pull request; the runner only posts it. `repo.commit_status` sets one commit status (context `size-budget`, state, a description of
+at most 140 characters) with `POST /repos/{owner}/{repo}/statuses/{sha}` on `api.github.com`, or `<host>/api/v3` for GitHub
+Enterprise Server, over `fetch`. It uses a token of its own, never the `gh` login and never the reviewer token. Create a
+fine-grained token with **Commit statuses: Read and write** only, then run `guildwise-runner status-token github [--host <host>]`
+(hidden prompt; `--status` lists hosts, `--remove` deletes). The token lives sealed in `secrets/status-tokens.json` (mode 0600, keyed
+`github@<host>`), separate from `git-tokens.json` and `reviewer-tokens.json`. The server learns only the keys
+(`git.report` `statusTokens`), never a token, and a token never appears in a log or an answer. Answers: `no_token` (none saved, or
+GitHub answered 401), `forbidden` (403), `not_found` (404), `invalid_sha` (422), `no_clone`, `unsupported`, `error`.
+
 ### Per-agent directories
 
 - `agents/<agentId>/home/`: HOME directory with a `.gitconfig` that holds the commit identity of the current shift (see "Commit identity")

@@ -1,6 +1,7 @@
 import type { ForgeKind, GitConnection, MergedChange, OpenChange, RepoRef } from '@aom/shared';
 import type { Executor } from '../toolchain/exec.ts';
 import type { SshEnv } from './ssh.ts';
+import type { StatusTokenStore } from './status-tokens.ts';
 import type { TokenStore } from './tokens.ts';
 
 /** Everything an adapter needs from the machine. Tests inject fakes: nothing talks to a real forge from tests. */
@@ -8,6 +9,8 @@ export interface ForgeEnv {
   exec: Executor;
   fetch: typeof fetch;
   tokens: TokenStore;
+  /** Tokens that post commit statuses (the hard size check). Absent: no status can be posted. */
+  statusTokens?: StatusTokenStore;
   ghBin?: string;
   glabBin?: string;
   azBin?: string;
@@ -17,6 +20,17 @@ export interface ForgeEnv {
   ssh?: SshEnv;
   now?: () => Date;
 }
+
+export interface CommitStatusInput {
+  sha: string;
+  state: 'success' | 'failure' | 'pending';
+  context: string;
+  description: string;
+  targetUrl?: string;
+}
+export type CommitStatusOutcome =
+  | { ok: true }
+  | { ok: false; code: 'no_token' | 'forbidden' | 'not_found' | 'invalid_sha' | 'error'; error: string };
 
 /** Where a repository is on its forge. */
 export interface RemoteRepo {
@@ -117,4 +131,8 @@ export interface Forge {
    * not supported for reviews.
    */
   changeHeads?(repo: RemoteRepo, id: string): Promise<{ headSha: string; baseSha: string }>;
+  /**
+   * Sets a commit status with the size check status token (never the CLI login). Absent: not supported on this host.
+   */
+  setCommitStatus?(repo: RemoteRepo, s: CommitStatusInput): Promise<CommitStatusOutcome>;
 }
