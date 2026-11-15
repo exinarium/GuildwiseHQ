@@ -20,6 +20,7 @@ import {
 } from '@aom/shared';
 import { applyCapabilitiesReport } from '../capabilities/registry.ts';
 import { ceoRpc } from '../ceo/gateway.ts';
+import { appIdentityAlertEvents, appIdentityFailureText, commandProject } from '../commands/app-identity-alert.ts';
 import { announceRestart } from '../ceo/restart.ts';
 import { endCeoShift } from '../ceo/shift.ts';
 import type { ChatTerminal } from '../chat/relay.ts';
@@ -419,6 +420,7 @@ export class RunnerHandlers {
         if (!claimed) return this.ack(conn, msg);
         try {
           await this.applyCommandResult(conn, msg, cmd);
+          await this.alertAppIdentityFailure(msg, cmd);
         } catch (err) {
           await exec(
             this.ctx.pool,
@@ -527,6 +529,22 @@ export class RunnerHandlers {
 
   /** A re-probe: store the runtimes and, when availability or sandbox state moved, tell the browsers (live refresh). */
   /** What a runner's answer to a durable command does, by the command's type. Called once per command (see the claim). */
+  /**
+   * A repository command (commit status, PR notice, a command refused for a missing plan) that failed because the
+   * project's selected app could not be used raises the project's app alert, the same as a stopped shift.
+   */
+  private async alertAppIdentityFailure(msg: RunnerToServerOf<'command.result'>, cmd: Row): Promise<void> {
+    const result = msg.result as { error?: unknown } | undefined;
+    const detail = appIdentityFailureText(msg.error) ?? appIdentityFailureText(result?.error);
+    if (!detail) return;
+    const target = await commandProject(this.ctx.pool, cmd.payload);
+    if (!target) return;
+    await withAppendTx(this.ctx.pool, async (tx) => {
+      const events = await appIdentityAlertEvents(tx, { ...target, detail, what: 'Repository commands' });
+      if (events.length) await this.ctx.store.append(events, { tx });
+    });
+  }
+
   private async applyCommandResult(
     conn: RunnerConn,
     msg: RunnerToServerOf<'command.result'>,

@@ -14,6 +14,11 @@ import {
   POST_AS_RUNNER_TOO_OLD_MESSAGE,
   postAsFieldFor,
 } from '../src/commands/commit-as.ts';
+import {
+  appIdentityAlertEvents,
+  appIdentityFailureText,
+  commandProject,
+} from '../src/commands/app-identity-alert.ts';
 import { pickStatusWorkstation } from '../src/commands/pr-size-status.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
@@ -212,5 +217,38 @@ describe('an app selected', () => {
     } finally {
       await capabilities(ALL);
     }
+  });
+});
+
+describe('the app alert for repository commands and DevOps hygiene', () => {
+  const wire =
+    'app_identity_failed: The app Guild bot could not be used: the installation was revoked (project GWP, operation commit status, repository acme/web). Nothing was committed or pushed under another identity.';
+
+  it('reads the failure text from the wire form and the plain sentence only', () => {
+    expect(appIdentityFailureText(wire)).toMatch(/^The app Guild bot could not be used/);
+    expect(appIdentityFailureText('The app X could not be used: gone.')).toBe('The app X could not be used: gone.');
+    expect(appIdentityFailureText('push rejected')).toBeNull();
+    expect(appIdentityFailureText(undefined)).toBeNull();
+  });
+
+  it('a commit-status command names its repository: one alert per project and work, naming the app', async () => {
+    const target = await commandProject(db(), { repoId: w.repoId, statusId: 'x' });
+    expect(target).toEqual({ projectId: w.projectId, orgId, cardId: null });
+    expect(await commandProject(db(), { something: 'else' })).toBeNull();
+    const name = (await q('SELECT name FROM projects WHERE id=$1', [w.projectId]))[0]?.name as string;
+    const events = await appIdentityAlertEvents(db(), { ...target!, detail: wire, what: 'Repository commands' });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.event.payload).toMatchObject({
+      kind: 'alert',
+      title: `Repository commands for ${name} stopped: the app Guild bot cannot be used`,
+      projectId: w.projectId,
+    });
+    expect(String((events[0]?.event.payload as any).body)).toContain('commit status');
+    await w.t.app.ctx.store.append(events);
+    // already open: not raised twice
+    expect(await appIdentityAlertEvents(db(), { ...target!, detail: wire, what: 'Repository commands' })).toEqual([]);
+    // DevOps hygiene is its own alert
+    const hygiene = await appIdentityAlertEvents(db(), { ...target!, detail: wire, what: 'DevOps hygiene' });
+    expect((hygiene[0]?.event.payload as any).title).toContain('DevOps hygiene for');
   });
 });

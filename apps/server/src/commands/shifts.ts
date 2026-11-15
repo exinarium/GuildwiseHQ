@@ -61,6 +61,7 @@ import { applyBaTaskReport, endBaTaskShift } from './ba-tasks.ts';
 import { checkBriefNote } from './brief-check.ts';
 import { cardView, workflowView } from './cards.ts';
 import { markAccountOut } from './claude-accounts.ts';
+import { appIdentityAlertEvents } from './app-identity-alert.ts';
 import { agentActor, cardMessage, orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from './common.ts';
 import { cardConflictAttemptEvents } from './conflict-attempts.ts';
 import { decideDesignGate, designGateMessage } from './design-gate.ts';
@@ -1377,41 +1378,13 @@ async function noCommitIdentityNotice(tx: Tx, ws: WsRef, card: Row): Promise<App
 
 /** One open alert per project and reason when a shift stopped because the project's selected app could not be used. */
 async function appIdentityFailedNotice(tx: Tx, card: Row, detail: string): Promise<AppendInput[]> {
-  const project = await one<{ name: string }>(tx, 'SELECT name FROM projects WHERE id=$1', [card.project_id]);
-  const reason = detail.slice(`${APP_IDENTITY_FAILED_CODE}:`.length).trim().slice(0, 1000);
-  const label = /^The app (.+?) could not be used:/.exec(reason)?.[1] ?? 'selected';
-  const title = `Shifts for ${project?.name ?? 'a project'} stopped: the app ${label} cannot be used`;
-  const open = await one(
-    tx,
-    `SELECT id FROM desk_items WHERE project_id=$1 AND subkind=$2 AND status='open' AND title=$3`,
-    [card.project_id, DESK_SUBKIND.appIdentityFailed, title],
-  );
-  if (open) return [];
-  const deskItemId = randomUUID();
-  return [
-    {
-      streamId: streamId.desk(deskItemId),
-      event: {
-        type: 'DeskItemCreated',
-        payload: {
-          deskItemId,
-          kind: 'alert',
-          subkind: DESK_SUBKIND.appIdentityFailed,
-          title,
-          body: reason,
-          options: [],
-          blocking: false,
-          pinned: false,
-          cardId: card.id,
-          projectId: card.project_id,
-          affectedCardIds: [],
-          askedBy: { kind: 'system' },
-        },
-      },
-      actor: SYSTEM_ACTOR,
-      scope: projectScope(card.org_id, card.project_id),
-    },
-  ];
+  return appIdentityAlertEvents(tx, {
+    orgId: card.org_id as string,
+    projectId: card.project_id as string,
+    cardId: card.id as string,
+    detail,
+    what: 'Shifts',
+  });
 }
 
 export async function applyShiftRejected(
