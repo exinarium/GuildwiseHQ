@@ -3,10 +3,11 @@ import {
   type CommitAs,
   filesOutsideWritable,
   missingNewVideoFiles,
+  type PostAsRepo,
   type ReleasePrepShift,
 } from '@aom/shared';
 import { git } from './git.ts';
-import { commitEnv, requireCommitIdentity } from './identity.ts';
+import { commitEnv, identityErrorWire, requireCommitIdentity } from './identity.ts';
 import { withRepoLock } from './repo-lock.ts';
 
 /**
@@ -70,6 +71,8 @@ export async function finishPrepTask(
   wt: PrepTaskWorktree,
   rp: ReleasePrepShift,
   commitAs: CommitAs | null | undefined,
+  /** The repository's entry of the post-as plan: with an app, the commit is the app's or none (fail closed). */
+  postAs?: PostAsRepo | null,
 ): Promise<PrepTaskFinish> {
   const files = await changedFiles(wt);
   const outside = filesOutsideWritable(files, rp.writable);
@@ -79,9 +82,12 @@ export async function finishPrepTask(
   if (missing.length > 0) return { ok: false, reason: `missing ${missing.join(', ')}` };
   let identity: Awaited<ReturnType<typeof requireCommitIdentity>>;
   try {
-    identity = await requireCommitIdentity(wt.repoPath, commitAs ?? undefined);
+    identity = await requireCommitIdentity(wt.repoPath, commitAs ?? undefined, postAs);
   } catch (err) {
-    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+    return {
+      ok: false,
+      reason: identityErrorWire(err) ?? (err instanceof Error ? err.message : String(err)),
+    };
   }
   return withRepoLock(wt.repoPath, async (): Promise<PrepTaskFinish> => {
     // The agent's own commits are folded into one: reset to the start, keep the files, commit once.

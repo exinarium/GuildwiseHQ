@@ -1,5 +1,6 @@
-import { isSafeGitRef } from '@aom/shared';
+import { isSafeGitRef, type PostAsRepo } from '@aom/shared';
 import { git, hasRemote } from './git.ts';
+import { identityErrorWire } from './identity.ts';
 import { mergeInProgress, mergeMainIntoCard } from './sync-main.ts';
 import type { GitAuth } from './worktrees.ts';
 
@@ -17,6 +18,8 @@ export interface ArchitectGitContext {
   /** The repository's main branch when the server named it. */
   mainBranch?: string;
   ref: string;
+  /** The card repository's entry of the post-as plan: with an app, the merge is the app's or none. */
+  postAs?: PostAsRepo | null;
   auth?: GitAuth;
   /** Remembers the `origin/<main>` SHA merged into the card branch (the post-shift guard exempts what it changed). */
   recordMainSha: (sha: string) => void;
@@ -68,11 +71,19 @@ export async function architectMergeMain(ctx: ArchitectGitContext): Promise<GitR
     if (main && isSafeGitRef(main))
       await git(ctx.worktree, [...a.args, 'fetch', 'origin', main], { env: a.env });
   }
-  const r = await mergeMainIntoCard(ctx.worktree, {
-    ...(ctx.mainBranch ? { mainBranch: ctx.mainBranch } : {}),
-    ref: ctx.ref,
-    ...(ctx.auth ? { auth: ctx.auth } : {}),
-  });
+  let r: Awaited<ReturnType<typeof mergeMainIntoCard>>;
+  try {
+    r = await mergeMainIntoCard(ctx.worktree, {
+      ...(ctx.mainBranch ? { mainBranch: ctx.mainBranch } : {}),
+      ref: ctx.ref,
+      ...(ctx.postAs ? { postAs: ctx.postAs } : {}),
+      ...(ctx.auth ? { auth: ctx.auth } : {}),
+    });
+  } catch (err) {
+    const wire = identityErrorWire(err);
+    if (wire) return { ok: false, error: wire };
+    throw err;
+  }
   if ('error' in r) return { ok: false, error: r.error };
   ctx.recordMainSha(r.main);
   if (r.result === 'up_to_date')

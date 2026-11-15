@@ -1,9 +1,10 @@
 import {
   type CommitAs,
-  type PostAsPlan,
   type CommitAsResponse,
   CommitAsSchema,
   isOrgManager,
+  POST_AS_CAPABILITY,
+  type PostAsPlan,
   RepoIdentityFactSchema,
   streamId,
 } from '@aom/shared';
@@ -13,7 +14,7 @@ import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { forbidden } from '../errors.ts';
+import { conflict, forbidden } from '../errors.ts';
 import { projectScope, userActor } from './common.ts';
 import { loadPostAsPlan, postAsSettings } from './post-as.ts';
 
@@ -53,6 +54,36 @@ export async function identityFields(
 ): Promise<{ commitAs: CommitAs | null; postAs?: PostAsPlan }> {
   const { commitAs, postAs } = await loadIdentityPlan(db, projectId);
   return postAs ? { commitAs, postAs } : { commitAs };
+}
+
+/** Why a command is not sent: an older runner ignores `postAs` and would commit under the owner's identity. */
+export const POST_AS_RUNNER_TOO_OLD_MESSAGE =
+  'This project posts as an app, and the runner on the workstation that would do it is too old to use the app. Update the runner and try again; nothing was committed or pushed under another identity.';
+
+/** Does the workstation's runner honour `postAs` (capability post-as:1)? */
+export async function canPostAs(db: Queryable, workstationId: string | null | undefined): Promise<boolean> {
+  if (!workstationId) return false;
+  const r = await one(
+    db,
+    'SELECT 1 FROM workstation_capabilities WHERE workstation_id=$1 AND $2 = ANY (capabilities)',
+    [workstationId, POST_AS_CAPABILITY],
+  );
+  return !!r;
+}
+
+/**
+ * {@link identityFields} for a command sent to one workstation. With an app selected and a runner without post-as:1 the
+ * command is refused (409 runner_too_old) instead of reaching a runner that would ignore the app (fail closed).
+ */
+export async function identityFieldsFor(
+  db: Queryable,
+  projectId: string | null | undefined,
+  workstationId: string | null | undefined,
+): Promise<{ commitAs: CommitAs | null; postAs?: PostAsPlan }> {
+  const fields = await identityFields(db, projectId);
+  if (fields.postAs && !(await canPostAs(db, workstationId)))
+    throw conflict('runner_too_old', POST_AS_RUNNER_TOO_OLD_MESSAGE);
+  return fields;
 }
 
 /** Adds the project's `commitAs` and `postAs` to a `shift.start` payload (additive; each absent when not set). */

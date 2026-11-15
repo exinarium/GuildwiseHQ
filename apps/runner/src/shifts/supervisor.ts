@@ -38,6 +38,7 @@ import {
   PREP_OUTCOME,
   PREP_TASK_KINDS,
   type PublishRequest,
+  postAsFor,
   type ReadableFolder,
   type RebaseErrorInfo,
   type RepoReport,
@@ -47,7 +48,6 @@ import {
   type ServerToRunnerOf,
   SHIFT_LIMIT_SOURCE_LABEL,
   type ShiftBrief,
-  postAsFor,
   type ShiftCapacity,
   type ShiftLimitSource,
   type ShiftReport,
@@ -1247,18 +1247,26 @@ export class ShiftSupervisor {
       const syncWanted = msg.prepare.syncMain && msg.worktree.mode === 'create' && !s.resumed;
       let sync: SyncMainOutcome | undefined;
       if (syncWanted && msg.prepare.syncMain) {
-        sync = await syncMainIntoWorking({
+        const synced = await syncMainIntoWorking({
           repoPath: repo.localPath,
           ...(msg.prepare.syncMain.mainBranch ? { mainBranch: msg.prepare.syncMain.mainBranch } : {}),
           workingBranch: msg.prepare.syncMain.workingBranch,
           ref: msg.brief.card.ref,
           commitAs: msg.commitAs ?? null,
+          postAs: postAsFor(msg.postAs, msg.worktree.remoteUrlNormalized),
           integrationDir: paths.integration,
           ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
         }).catch((err) => {
+          // A selected app that cannot mint stops the shift: the merge is never made under another identity.
+          if (err instanceof AppIdentityError) return err;
           this.log.warn(`merging the latest main failed for ${msg.brief.card.ref}: ${String(err)}`);
           return undefined;
         });
+        if (synced instanceof AppIdentityError) {
+          this.reject(msg.shiftId, 'internal', appIdentityWire(synced));
+          return;
+        }
+        sync = synced;
       }
       try {
         s.worktree = await ensureWorktree({
@@ -1291,7 +1299,9 @@ export class ShiftSupervisor {
         if (sync && s.worktree.created) await this.finishMainSync(s, sync);
         else await this.resumeMainMerge(s);
       } catch (err) {
-        if (err instanceof RebaseConflictError) {
+        if (err instanceof AppIdentityError) {
+          this.reject(msg.shiftId, 'internal', appIdentityWire(err));
+        } else if (err instanceof RebaseConflictError) {
           this.reject(msg.shiftId, 'rebase_conflict', err.message, err.conflictedFiles);
         } else if (err instanceof RebaseError) {
           // Not a conflict: the existing worktree_failed route (an older server parses it), with git's details.
@@ -2642,6 +2652,7 @@ export class ShiftSupervisor {
       ...(main ? { mainBranch: main } : {}),
       ref: msg.brief.card.ref,
       commitAs: msg.commitAs ?? null,
+      postAs: postAsFor(msg.postAs, msg.worktree?.remoteUrlNormalized),
       ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
     });
     if ('error' in r) {
@@ -2700,6 +2711,7 @@ export class ShiftSupervisor {
       branchName: s.worktree.branchName,
       ...(main ? { mainBranch: main } : {}),
       ref: msg.brief.card.ref,
+      postAs: postAsFor(msg.postAs, msg.worktree?.remoteUrlNormalized),
       ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
       recordMainSha: (sha: string) => {
         if (!s.mainShas.includes(sha)) s.mainShas.push(sha);
@@ -3090,7 +3102,12 @@ export class ShiftSupervisor {
             );
           toSend = { ...toSend, data: { ...toSend.data, proposal: checked.proposal, files: [] } };
         } else {
-          const done = await finishPrepTask(s.prepTask, msg.releasePrep, msg.commitAs);
+          const done = await finishPrepTask(
+            s.prepTask,
+            msg.releasePrep,
+            msg.commitAs,
+            postAsFor(msg.postAs, msg.releasePrep.remoteUrlNormalized),
+          );
           toSend = done.ok
             ? { ...toSend, data: { ...toSend.data, commit: done.commit, files: done.files } }
             : {

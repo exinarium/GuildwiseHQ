@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { POST_AS_CAPABILITY } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { identityFields, loadIdentityPlan } from '../src/commands/commit-as.ts';
+import {
+  canPostAs,
+  identityFields,
+  identityFieldsFor,
+  loadIdentityPlan,
+  POST_AS_RUNNER_TOO_OLD_MESSAGE,
+} from '../src/commands/commit-as.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { addMember } from './helpers/members.ts';
@@ -62,6 +68,8 @@ describe('post-as app selection (GWP-212.2)', () => {
     expect(plan.postAs).toBeNull();
     const fields = await identityFields(db(), w.projectId);
     expect(Object.keys(fields)).toEqual(['commitAs']);
+    // no app: a command goes to any runner, capability or not, exactly as before
+    expect(await identityFieldsFor(db(), w.projectId, randomUUID())).toEqual(fields);
     const res = await ok<any>(owner('GET', `/api/projects/${w.projectId}/commit-as`));
     expect(res.postAs).toMatchObject({ selected: [], canSelect: true, lastChange: null });
     expect(res.repos[0].resolved).toMatchObject({ repoId: w.repoId, source: 'repo' });
@@ -128,6 +136,19 @@ describe('post-as app selection (GWP-212.2)', () => {
       app: { integrationId: appA },
     });
     expect((await identityFields(db(), w.projectId)).postAs).toBeDefined();
+  });
+
+  it('with an app selected, a command for a runner without post-as:1 is refused (never sent to commit as the owner)', async () => {
+    expect(await canPostAs(db(), w.workstationId)).toBe(true);
+    expect(await canPostAs(db(), null)).toBe(false);
+    expect((await identityFieldsFor(db(), w.projectId, w.workstationId)).postAs).toBeDefined();
+    const old = randomUUID();
+    expect(await canPostAs(db(), old)).toBe(false);
+    await expect(identityFieldsFor(db(), w.projectId, old)).rejects.toMatchObject({
+      status: 409,
+      code: 'runner_too_old',
+      message: POST_AS_RUNNER_TOO_OLD_MESSAGE,
+    });
   });
 
   it('a second app of the same provider is rejected with a clear message', async () => {

@@ -12,7 +12,7 @@ import {
   streamId,
 } from '@aom/shared';
 import { projectRole } from '../authz/scope.ts';
-import { identityFields } from '../commands/commit-as.ts';
+import { identityFieldsFor } from '../commands/commit-as.ts';
 import { projectScope, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -133,7 +133,7 @@ async function queue(
   );
   await enqueueRunnerCommand(tx, workstationId, 'release.ship', {
     ...payload,
-    ...(await identityFields(tx, ship.project_id)),
+    ...(await identityFieldsFor(tx, ship.project_id, workstationId)),
   } as never);
 }
 

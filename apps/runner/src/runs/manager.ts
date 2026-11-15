@@ -38,6 +38,7 @@ import picomatch from 'picomatch';
 import { z } from 'zod';
 import type { SandboxMode } from '../adapters/claude-policy.ts';
 import { git } from '../git/git.ts';
+import { AppIdentityError, appIdentityWire } from '../git/identity.ts';
 import { RebaseConflictError, RebaseError, rebaseOntoBase } from '../git/rebase.ts';
 import { withRepoLock } from '../git/repo-lock.ts';
 import { fillSubmodules, redactGitError } from '../git/submodule-fill.ts';
@@ -478,8 +479,15 @@ export class RunManager {
     this.save(env);
     this.report(env);
     try {
-      await rebaseOntoBase(wt, rc.baseBranch, rc.commitAs ?? null);
+      await rebaseOntoBase(
+        wt,
+        rc.baseBranch,
+        rc.commitAs ?? null,
+        rc.postAs?.repos.find((r) => r.repoId === rc.repoId) ?? null,
+      );
     } catch (err) {
+      // A selected app that cannot mint: the rebase is never made under another identity.
+      if (err instanceof AppIdentityError) throw new Error(appIdentityWire(err));
       if (err instanceof RebaseConflictError) {
         env.rebaseConflictFiles = err.conflictedFiles;
         throw new Error(`the card branch conflicts with ${rc.baseBranch}: ${err.conflictedFiles.join(', ')}`);
