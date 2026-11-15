@@ -1,6 +1,5 @@
 import type { GitConnection, MergedChange, OpenChange, RepoRef } from '@aom/shared';
 import { githubApiBase } from '../review/review-poster.ts';
-import { errText, ForgeUnavailableError, isHttps } from './http.ts';
 import { normalizeRemoteUrl } from '@aom/shared';
 import { APP_GIT_MARKER } from './app-repos.ts';
 import { errText, ForgeUnavailableError, isHttps, tokenHelperEnv } from './http.ts';
