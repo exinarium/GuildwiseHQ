@@ -4,6 +4,10 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Fixed
+
+- The Windows installer no longer asks for a restart at "Turning on WSL2" every time it runs. It now checks whether WSL2 works instead of whether one optional Windows feature is on, asks for a restart only when one is really pending and at most twice, and otherwise stops with a message that names what is still off. The restart for Ubuntu is also asked for only once.
+
 ## [1.8.0] - 2026-11-15
 
 Runner 0.1.75.

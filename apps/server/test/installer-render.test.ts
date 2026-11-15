@@ -127,6 +127,45 @@ describe('rendered scripts', () => {
     expect(ps).toContain('$env:USERPROFILE');
   });
 
+  it('Windows step 2 decides by whether WSL2 works and asks for a restart at most twice', () => {
+    const ps = renderPowerShell(win).replace(/\r\n/g, '\n');
+    const step2 = ps.slice(
+      ps.indexOf("Start-Step 'Turning on WSL2"),
+      ps.indexOf("Start-Step 'Installing Ubuntu'"),
+    );
+    // ready = VirtualMachinePlatform on and wsl.exe --status answers; the legacy feature alone decides nothing
+    expect(ps).toContain("$states['VirtualMachinePlatform'] -eq 'Enabled' -and $code -eq 0");
+    expect(ps).toContain('& wsl.exe --status');
+    expect(step2).toContain('wsl.exe --install --no-distribution');
+    expect(step2).not.toMatch(/Microsoft-Windows-Subsystem-Linux.*Request-Restart/s);
+    expect(step2).not.toContain('$missing');
+    expect(ps).toContain('Enable-WindowsOptionalFeature -Online -FeatureName $f -NoRestart -All');
+    // a restart only when one is pending or the features were just enabled, and never a third time
+    expect(step2).toContain('($wsl.Pending -or $changed) -and $wslRestarts -lt 2');
+    expect(step2.match(/Request-Restart/g)).toHaveLength(1);
+    expect(step2).toContain("Set-StateValue 'wslRestarts' ($wslRestarts + 1)");
+    // still not ready: stop with the state of each feature and the last line of wsl.exe --status
+    expect(step2).toContain('Stop-Install "WSL2 is still not ready. $($wsl.Summary)."');
+    expect(ps).toContain('wsl.exe --status said: $last');
+    expect(step2).toContain('BIOS/UEFI');
+    expect(step2).toContain('wsl --install');
+    // the record exists and is cleared when step 2 completes
+    expect(ps).toContain('wslRestarts = 0');
+    expect(step2).toMatch(/\nSet-StateValue 'wslRestarts' 0\n& wsl\.exe --update/);
+  });
+
+  it('Windows step 3 asks for a restart for Ubuntu at most once', () => {
+    const ps = renderPowerShell(win).replace(/\r\n/g, '\n');
+    const step3 = ps.slice(ps.indexOf("Start-Step 'Installing Ubuntu'"), ps.indexOf('# ---- 4.'));
+    expect(ps).toContain('ubuntuRestartRequested = $false');
+    expect(step3).toContain('if ((Get-State).ubuntuRestartRequested)');
+    expect(step3).toContain("Set-StateValue 'ubuntuRestartRequested' $true");
+    expect(step3).toContain('wsl.exe -l -q returned');
+    expect(step3.match(/Request-Restart/g)).toHaveLength(1);
+    expect(step3.indexOf('Stop-Install')).toBeLessThan(step3.indexOf('Request-Restart'));
+    expect(step3).toContain("Set-StateValue 'ubuntuRestartRequested' $false");
+  });
+
   it('one-line commands quote the URL', () => {
     expect(oneLiner('linux', 'https://a/b')).toBe("curl -fsSL 'https://a/b' | bash");
     expect(oneLiner('macos', 'https://a/b')).toBe("curl -fsSL 'https://a/b' | bash");
