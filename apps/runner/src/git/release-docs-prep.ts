@@ -7,10 +7,17 @@ import {
   type ReleaseDocsPrepPayload,
   type ReleaseDocsPrepResult,
   type ReleaseDocsPrepSummary,
+  postAsFor,
 } from '@aom/shared';
 import { detectSignOff } from './dco.ts';
 import { advanceLocalBranch, git, hasRemote, revParse } from './git.ts';
-import { commitEnv, NO_IDENTITY_WIRE, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
+import {
+  commitEnv,
+  identityErrorWire,
+  NO_IDENTITY_WIRE,
+  NoCommitIdentityError,
+  requireCommitIdentity,
+} from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import {
   type DocsPrepExec,
@@ -314,9 +321,9 @@ async function workStart(
   const { payload: p, repoPath } = input;
   let identity: Identity;
   try {
-    identity = await requireCommitIdentity(repoPath, p.commitAs);
+    identity = await requireCommitIdentity(repoPath, p.commitAs, postAsFor(p.postAs, p.remoteUrlNormalized));
   } catch (err) {
-    return { result: failed(err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : errMsg(err)) };
+    return { result: failed(err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errMsg(err))) };
   }
   const kept = await revParse(repoPath, workRef(p.runId));
   const start = kept ?? p.summary?.headSha ?? tip;
@@ -470,9 +477,9 @@ async function commitPrepare(input: ReleaseDocsPrepInput, tip: string): Promise<
     return passed({ notices: ['no changes'] });
   let identity: Awaited<ReturnType<typeof requireCommitIdentity>>;
   try {
-    identity = await requireCommitIdentity(repoPath, p.commitAs);
+    identity = await requireCommitIdentity(repoPath, p.commitAs, postAsFor(p.postAs, p.remoteUrlNormalized));
   } catch (err) {
-    return failed(err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : errMsg(err));
+    return failed(err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errMsg(err)));
   }
   const kept = await revParse(repoPath, commitRef(p.runId));
   if (kept) {

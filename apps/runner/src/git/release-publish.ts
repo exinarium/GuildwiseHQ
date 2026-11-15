@@ -12,6 +12,7 @@ import {
   type ReleasePublishResult,
   type ReleasePublishStep,
   repoTagUrl,
+  postAsFor,
 } from '@aom/shared';
 import { errText, ForgeUnavailableError } from '../forge/http.ts';
 import { forgeForUrl } from '../forge/index.ts';
@@ -19,7 +20,13 @@ import type { ChangeState, ForgeEnv } from '../forge/types.ts';
 import { detectSignOff } from './dco.ts';
 import { isProtectedBranchRejection, type PrCreator } from './gh.ts';
 import { git, hasRemote, revParse } from './git.ts';
-import { commitEnv, NO_IDENTITY_WIRE, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
+import {
+  commitEnv,
+  identityErrorWire,
+  NO_IDENTITY_WIRE,
+  NoCommitIdentityError,
+  requireCommitIdentity,
+} from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import { isAncestor } from './merged.ts';
 import { resolveReleaseBase } from './release-pr.ts';
@@ -152,9 +159,9 @@ async function publishLocked(input: ReleasePublishInput): Promise<ReleasePublish
   if (decision.action === 'create') {
     let identity: Awaited<ReturnType<typeof requireCommitIdentity>>;
     try {
-      identity = await requireCommitIdentity(repoPath, p.commitAs);
+      identity = await requireCommitIdentity(repoPath, p.commitAs, postAsFor(p.postAs, p.remoteUrlNormalized));
     } catch (err) {
-      return failed('tag', err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : errText(err), carry);
+      return failed('tag', err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errText(err)), carry);
     }
     const made = await git(repoPath, ['tag', '-a', p.tag, '-m', p.title, target], {
       env: commitEnv(identity),
@@ -324,9 +331,9 @@ async function landByMerge(
   const R = p.releaseCommitSha;
   let identity: Awaited<ReturnType<typeof requireCommitIdentity>>;
   try {
-    identity = await requireCommitIdentity(repoPath, p.commitAs);
+    identity = await requireCommitIdentity(repoPath, p.commitAs, postAsFor(p.postAs, p.remoteUrlNormalized));
   } catch (err) {
-    return { result: failed('land', err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : errText(err)) };
+    return { result: failed('land', err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errText(err))) };
   }
   const tip = await revParse(repoPath, baseRef);
   if (!tip) return { result: failed('land', `the main branch '${base}' does not exist on origin`) };

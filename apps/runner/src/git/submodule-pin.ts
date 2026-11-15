@@ -4,10 +4,17 @@ import {
   normalizeRemoteUrl,
   type RepoBumpSubmodulePayload,
   type RepoBumpSubmoduleResult,
+  postAsFor,
 } from '@aom/shared';
 import { isProtectedBranchRejection } from './gh.ts';
 import { advanceLocalBranch, git, hasRemote, revParse } from './git.ts';
-import { commitEnv, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
+import {
+  AppIdentityError,
+  appIdentityWire,
+  commitEnv,
+  NoCommitIdentityError,
+  requireCommitIdentity,
+} from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
@@ -123,6 +130,7 @@ export async function bumpSubmodule(input: BumpSubmoduleInput): Promise<RepoBump
     });
   } catch (err) {
     if (err instanceof NoCommitIdentityError) return fail(err.message);
+    if (err instanceof AppIdentityError) return fail(appIdentityWire(err));
     return fail(errMsg(err));
   }
 }
@@ -164,7 +172,7 @@ async function attemptBump(input: BumpSubmoduleInput): Promise<RepoBumpSubmodule
       if (m[1] === p.commit || m[1].startsWith(p.commit))
         return { ok: true, unchanged: true, commit: head, path: found.path };
 
-      const id = await requireCommitIdentity(repoPath, p.commitAs);
+      const id = await requireCommitIdentity(repoPath, p.commitAs, postAsFor(p.postAs, p.remoteUrlNormalized));
       const env = commitEnv(id);
       const set = await git(wt, ['update-index', '--add', '--cacheinfo', `160000,${p.commit},${found.path}`]);
       if (set.exitCode !== 0)

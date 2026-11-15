@@ -14,11 +14,18 @@ import {
   releaseChangelog,
   releaseSectionOf,
   replaceComponentVersion,
+  postAsFor,
 } from '@aom/shared';
 import { detectSignOff } from './dco.ts';
 import { isProtectedBranchRejection } from './gh.ts';
 import { advanceLocalBranch, git, hasRemote, revParse } from './git.ts';
-import { commitEnv, NO_IDENTITY_WIRE, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
+import {
+  commitEnv,
+  identityErrorWire,
+  NO_IDENTITY_WIRE,
+  NoCommitIdentityError,
+  requireCommitIdentity,
+} from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import { componentFactsAt } from './release-facts.ts';
 import { withRepoLock } from './repo-lock.ts';
@@ -157,9 +164,9 @@ async function shipLocked(input: ReleaseShipInput): Promise<ReleaseShipResult> {
   // 4. the commit, in a throwaway worktree
   let identity: Awaited<ReturnType<typeof requireCommitIdentity>>;
   try {
-    identity = await requireCommitIdentity(repoPath, p.commitAs);
+    identity = await requireCommitIdentity(repoPath, p.commitAs, postAsFor(p.postAs, p.remoteUrlNormalized));
   } catch (err) {
-    return fail('commit', err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : errMsg(err));
+    return fail('commit', err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errMsg(err)));
   }
   const dir = join(input.integrationDir, `release-${p.repoId}`);
   const made = await withIntegrationWorktree(

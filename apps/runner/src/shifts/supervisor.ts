@@ -47,6 +47,7 @@ import {
   type ServerToRunnerOf,
   SHIFT_LIMIT_SOURCE_LABEL,
   type ShiftBrief,
+  postAsFor,
   type ShiftCapacity,
   type ShiftLimitSource,
   type ShiftReport,
@@ -105,7 +106,7 @@ import {
 import { computeCardDiff } from '../git/card-diff.ts';
 import { baseRef, computeDiffStats, riskTier } from '../git/diffstat.ts';
 import { git, gitOk, originBranchNames } from '../git/git.ts';
-import { NO_IDENTITY_WIRE, resolveCommitIdentity } from '../git/identity.ts';
+import { AppIdentityError, appIdentityWire, NO_IDENTITY_WIRE, resolveCommitIdentity } from '../git/identity.ts';
 import { finishPrepProposal } from '../git/release-prep-proposal.ts';
 import {
   addPrepTaskWorktree,
@@ -1138,10 +1139,25 @@ export class ShiftSupervisor {
     // "Commit as", else the clone's git config, else the workstation's (backlog #65). With none set a shift that works in
     // a repository is refused, there is no fallback to an agent or product name.
     const identityRepo = msg.worktree ? await this.deps.findRepo(msg.worktree.remoteUrlNormalized) : null;
-    const identity = await resolveCommitIdentity(identityRepo?.localPath ?? paths.root, msg.commitAs);
     // Read-only work never commits: a read-only checkout (planning, design before a dependency lands) and the reviewing
     // roles are not refused for a missing identity (a rebase they need still fails on its own, naming the identity).
     const commits = msg.worktree?.mode !== 'readonly' && !READ_ONLY_ROLES.has(msg.agent.roleKey);
+    // With an app selected for this repository the shift runs as the app or not at all (fail closed).
+    let identity: Awaited<ReturnType<typeof resolveCommitIdentity>>;
+    try {
+      identity = await resolveCommitIdentity(
+        identityRepo?.localPath ?? paths.root,
+        msg.commitAs,
+        postAsFor(msg.postAs, msg.worktree?.remoteUrlNormalized),
+      );
+    } catch (err) {
+      if (!(err instanceof AppIdentityError)) throw err;
+      if (commits) {
+        this.reject(msg.shiftId, 'internal', appIdentityWire(err));
+        return;
+      }
+      identity = null;
+    }
     if (identityRepo && !identity && commits) {
       this.reject(msg.shiftId, 'internal', NO_IDENTITY_WIRE);
       return;
@@ -1260,7 +1276,12 @@ export class ShiftSupervisor {
         });
         if (msg.prepare.rebase && !s.resumed)
           s.rebased = ['rebased', 'merged'].includes(
-            await rebaseOntoBase(s.worktree.path, msg.worktree.baseBranch, msg.commitAs ?? null),
+            await rebaseOntoBase(
+              s.worktree.path,
+              msg.worktree.baseBranch,
+              msg.commitAs ?? null,
+              postAsFor(msg.postAs, msg.worktree.remoteUrlNormalized),
+            ),
           );
         if (sync && s.worktree.created) await this.finishMainSync(s, sync);
         else await this.resumeMainMerge(s);

@@ -44,6 +44,7 @@ import {
   PROVIDER_KEYS_BOUND_CAPABILITY,
   PROVIDER_KEYS_CAPABILITY,
   type ProviderAccountPromoteResult,
+  POST_AS_CAPABILITY,
   QUESTION_CONTINUE_CAPABILITY,
   READONLY_DESIGN_CAPABILITY,
   RELAY_FEATURE,
@@ -98,6 +99,8 @@ import {
 } from './adapters/login-accounts.ts';
 import { buildAdapters } from './adapters/registry.ts';
 import type { RuntimeAdapter } from './adapters/types.ts';
+import { appTokenProbe, checkAppAccess } from './apps/access-check.ts';
+import { setAppTokenProbe } from './git/identity.ts';
 import { AppTokenBroker } from './apps/broker.ts';
 import { AppKeyStore } from './apps/store.ts';
 import { ServerHttp } from './attachments/index.ts';
@@ -1025,12 +1028,17 @@ export class Runner {
 
   /** One token broker per runner process: the app keys stay sealed on disk, the tokens in memory only. */
   private appBroker(): AppTokenBroker {
-    this.appTokens ??= new AppTokenBroker({
-      store: new AppKeyStore(this.paths.secrets, (n) => this.keys.deriveFileKey(n)),
-      fetch: globalThis.fetch,
-      now: Date.now,
-      onChange: () => void this.integrations?.report(true),
-    });
+    if (!this.appTokens) {
+      const broker = new AppTokenBroker({
+        store: new AppKeyStore(this.paths.secrets, (n) => this.keys.deriveFileKey(n)),
+        fetch: globalThis.fetch,
+        now: Date.now,
+        onChange: () => void this.integrations?.report(true),
+      });
+      this.appTokens = broker;
+      // A project that posts as an app commits as its bot only after a scoped token could be minted here.
+      setAppTokenProbe(appTokenProbe(broker));
+    }
     return this.appTokens;
   }
 
@@ -1636,6 +1644,7 @@ export class Runner {
         'ceo:1',
         STORAGE_CAPABILITY,
         APP_INTEGRATIONS_CAPABILITY,
+        POST_AS_CAPABILITY,
         STORAGE_DELETE_CAPABILITY,
         SHIFT_LIMIT_CAPABILITY,
         SHIFT_LIMIT_REPORT_CAPABILITY,
@@ -2592,6 +2601,9 @@ export class Runner {
       ) {
         // Refusals (web turned off, wrong envelope, machine-wide login) are answers: ok:true with a sentence, never a retry.
         done(true, await this.integrations.handle(command, payload));
+      } else if (command === 'app.access_check') {
+        // Which project repositories the app's installation reaches: states and value-free reasons only.
+        done(true, await checkAppAccess(this.appBroker(), payload, globalThis.fetch));
       } else if (command.startsWith('app.')) {
         // Automated apps (Settings > Automated apps): typed refusals are answers, never a retry; never a key or token.
         done(true, await this.integrations.handleApp(command, payload));
