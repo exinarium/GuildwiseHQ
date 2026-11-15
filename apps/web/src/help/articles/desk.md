@@ -90,3 +90,9 @@ When you answer a desk question, **Add to ledger as** decides how it is saved:
 - **Standing order (this project)** or **Standing order (every project)**: an instruction every agent loads at the start of a shift.
 
 The ledger stores it and future agents can search it. See [Ledger and vaults](/help/ledger-and-vaults#ledger).
+
+## Size exceptions {#size-exceptions}
+
+When the CEO asks to let an over-budget pull request stay as one, the item shows its reason and the size against the budget. **Approve** or **Reject** it. If you do not answer within 2 working days it lapses and the pull request goes back to its author to split; you are not reminded.
+
+The size budget is set per project under **Review settings**. See [PR-only repositories](/help/projects#pr-only-repositories).
