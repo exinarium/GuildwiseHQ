@@ -23,9 +23,11 @@ import {
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { afterCommit, type Tx, withAppendTx } from '../db/tx.ts';
+import { HttpError } from '../errors.ts';
 import { reviewSettingsOf } from '../queries/misc.ts';
 import { pickReviewerWorkstation, reviewerGate } from '../review/reviewer-gate.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { postAsFieldFor } from './commit-as.ts';
 import { projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { registerOwnerPending, resolveOwnerPending } from './owner-pending.ts';
 import { requestPrList } from './pr-only.ts';
@@ -566,7 +568,16 @@ async function queueNotice(ctx: Ctx, tx: Tx, noticeId: string, now: Date): Promi
     self: pr.change_id as string,
     noticeId,
   });
+  // With an app selected the notice is posted as the app; a runner that cannot do that is not sent it (it waits).
+  let postAs: Awaited<ReturnType<typeof postAsFieldFor>>;
+  try {
+    postAs = await postAsFieldFor(tx, projectId, pick.id, { write: true, v2Only: true });
+  } catch (err) {
+    if (err instanceof HttpError && err.code === 'runner_too_old') return undefined;
+    throw err;
+  }
   const payload = PrReviewNoticePayloadSchema.parse({
+    ...postAs,
     noticeId,
     projectRepoId: pr.project_repo_id,
     remoteUrlNormalized: pr.remote_url_normalized,

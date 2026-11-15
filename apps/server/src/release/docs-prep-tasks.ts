@@ -26,7 +26,12 @@ import {
 import { publicText } from '../blog/releases.ts';
 import { effectiveAgentSkills } from '../capabilities/agent-skills.ts';
 import { loadRole } from '../catalogue/loader.ts';
-import { canPostAs, loadIdentityPlan, POST_AS_RUNNER_TOO_OLD_MESSAGE } from '../commands/commit-as.ts';
+import {
+  canPostAs,
+  explicitPostAs,
+  loadIdentityPlan,
+  POST_AS_RUNNER_TOO_OLD_MESSAGE,
+} from '../commands/commit-as.ts';
 import { orgScope, projectScope, runnerActor, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -485,7 +490,12 @@ export async function buildReleasePrepShiftStart(
   const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [t.agent_id]);
   const project = await one(ctx.pool, 'SELECT * FROM projects WHERE id=$1', [t.project_id]);
   if (!task.success || !agent || !project) return null;
-  const { postAs } = await loadIdentityPlan(ctx.pool, project.id);
+  // A post-as:2 runner gets the empty plan when no app is selected.
+  const postAs = await explicitPostAs(
+    ctx.pool,
+    (await loadIdentityPlan(ctx.pool, project.id)).postAs,
+    t.workstation_id,
+  );
   const role = await loadRole(ctx.pool, agent.org_id, agent.role_key, agent.role_version);
   if (!role) return null;
   const title = PREP_TASK_KINDS[task.data.kind].title(task.data, t.release_branch);

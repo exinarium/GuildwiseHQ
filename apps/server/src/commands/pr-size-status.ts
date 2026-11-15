@@ -3,6 +3,8 @@ import {
   type ChainCandidate,
   COMMIT_STATUS_CAPABILITY,
   COMMIT_STATUS_MAX_ATTEMPTS,
+  POST_AS_V2_CAPABILITY,
+  postAsFor,
   prSizeVerdict,
   RepoCommitStatusPayloadSchema,
   RepoCommitStatusResultSchema,
@@ -12,8 +14,10 @@ import {
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import { type Tx, withTx } from '../db/tx.ts';
+import { HttpError } from '../errors.ts';
 import { reviewSettingsOf } from '../queries/misc.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { loadIdentityPlan, postAsFieldFor } from './commit-as.ts';
 import { requestPrList } from './pr-only.ts';
 import { sizeExemptionOf } from './size-exemption.ts';
 
@@ -167,10 +171,18 @@ const hostOfRemote = (normalized: string): string => normalized.split('/')[0]?.t
  * the command, holds a status token for the host). `s` is pr_size_statuses, `r` project_repos. Parameter `$8` is the
  * capability.
  */
+/**
+ * The project has a post-as app selected (`projects.post_as`, a non-empty array). Its statuses are posted with the app's
+ * installation token by a post-as:2 runner, so no status token is needed there.
+ */
+const APP_PROJECT_SQL = (p: string): string =>
+  `(jsonb_typeof(${p}.post_as) = 'array' AND jsonb_array_length(${p}.post_as) > 0)`;
+
 const DELIVERABLE_SQL = `EXISTS (SELECT 1 FROM workstation_repos wr JOIN workstations w ON w.id = wr.workstation_id
     JOIN workstation_capabilities wc ON wc.workstation_id = w.id
    WHERE wr.project_repo_id = s.project_repo_id AND w.status='active' AND $8 = ANY (wc.capabilities)
-     AND w.status_tokens ? ('github@' || lower(split_part(r.remote_url_normalized, '/', 1))))`;
+     AND (w.status_tokens ? ('github@' || lower(split_part(r.remote_url_normalized, '/', 1)))
+       OR (${APP_PROJECT_SQL('p')} AND '${POST_AS_V2_CAPABILITY}' = ANY (wc.capabilities))))`;
 
 /**
  * The scheduler pass: statuses that wait to be posted, whose post failed in a way that may pass, or that were queued and
@@ -229,6 +241,20 @@ export async function deliverSizeStatuses(ctx: Ctx, scope: { projectId?: string 
   return sent;
 }
 
+/** Whether the repository's project puts it on a post-as app (its plan entry has `source: 'app'`). */
+export async function repoOnApp(
+  db: Queryable,
+  repoId: string,
+  remoteUrlNormalized: string,
+): Promise<boolean> {
+  const r = await one<{ project_id: string }>(db, 'SELECT project_id FROM project_repos WHERE id=$1', [
+    repoId,
+  ]);
+  if (!r) return false;
+  const { postAs } = await loadIdentityPlan(db, r.project_id);
+  return postAsFor(postAs, remoteUrlNormalized)?.source === 'app';
+}
+
 /** The workstation that can post for a repository: holds the clone, announces the command, holds a token for the host. */
 export async function pickStatusWorkstation(
   db: Queryable,
@@ -238,13 +264,17 @@ export async function pickStatusWorkstation(
   onlyConnected = false,
 ): Promise<string | null> {
   const key = `github@${hostOfRemote(remoteUrlNormalized)}`;
+  // A repository that posts as an app needs no status token: a post-as:2 runner posts with the app's token.
+  const onApp = await repoOnApp(db, repoId, remoteUrlNormalized);
   const ws = await one(
     db,
     `SELECT w.id FROM workstation_repos wr JOIN workstations w ON w.id = wr.workstation_id
        JOIN workstation_capabilities wc ON wc.workstation_id = w.id
-      WHERE wr.project_repo_id=$1 AND w.status='active' AND $2 = ANY (wc.capabilities) AND w.status_tokens ? $3 AND ($5::boolean IS NOT TRUE OR w.connected)
+      WHERE wr.project_repo_id=$1 AND w.status='active' AND $2 = ANY (wc.capabilities)
+        AND (w.status_tokens ? $3 OR ($6::boolean AND $7 = ANY (wc.capabilities)))
+        AND ($5::boolean IS NOT TRUE OR w.connected)
       ORDER BY w.connected DESC, (w.id = $4::uuid) DESC, w.last_seen_at DESC NULLS LAST LIMIT 1`,
-    [repoId, COMMIT_STATUS_CAPABILITY, key, preferred ?? null, onlyConnected],
+    [repoId, COMMIT_STATUS_CAPABILITY, key, preferred ?? null, onlyConnected, onApp, POST_AS_V2_CAPABILITY],
   );
   return (ws?.id as string | undefined) ?? null;
 }
@@ -272,7 +302,7 @@ async function queueStatus(
     return undefined;
   const repo = await one(
     tx,
-    'SELECT remote_url_normalized, forge_kind FROM project_repos WHERE id=$1 AND removed_at IS NULL',
+    'SELECT remote_url_normalized, forge_kind, project_id FROM project_repos WHERE id=$1 AND removed_at IS NULL',
     [repoId],
   );
   if (!repo) return undefined;
@@ -284,7 +314,17 @@ async function queueStatus(
     (poll?.workstation_id as string | null) ?? null,
   );
   if (!wsId) return undefined;
+  // With an app selected the status is posted with the app's token; a runner that cannot do that is not sent the
+  // status (it stays pending), so it is never posted with the owner's status token instead.
+  let postAs: Awaited<ReturnType<typeof postAsFieldFor>>;
+  try {
+    postAs = await postAsFieldFor(tx, repo.project_id as string, wsId, { write: true, v2Only: true });
+  } catch (err) {
+    if (err instanceof HttpError && err.code === 'runner_too_old') return undefined;
+    throw err;
+  }
   const payload = RepoCommitStatusPayloadSchema.parse({
+    ...postAs,
     statusId: s.status_id,
     repoId,
     remoteUrlNormalized: repo.remote_url_normalized,

@@ -64,6 +64,10 @@ export interface DevopsGuardInput {
   shiftKind?: 'devops' | 'release_prep';
   /** Branches the session may not change at all (release prep: the release branch). */
   frozenBranches?: string[];
+  /** Repositories of the plan that post as an app (the guard's `app_repo` rule); absent without an app. */
+  appRepos?: Array<{ remote: string; label: string; botEmail: string }>;
+  /** The commit e-mail of the session's environment. */
+  identityEmail?: string;
 }
 
 /**

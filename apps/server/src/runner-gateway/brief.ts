@@ -879,7 +879,7 @@ export async function devopsCardBrief(
   if (!card) return undefined;
   const project = await one(ctx.pool, 'SELECT key, name FROM projects WHERE id=$1', [card.project_id]);
   const repo = card.repo_id
-    ? await one(ctx.pool, 'SELECT name FROM project_repos WHERE id=$1', [card.repo_id])
+    ? await one(ctx.pool, 'SELECT name, remote_url_normalized FROM project_repos WHERE id=$1', [card.repo_id])
     : undefined;
   const comments = await rows(
     ctx.pool,
@@ -919,6 +919,7 @@ export async function devopsCardBrief(
     fields,
     project: project ? { key: project.key, name: project.name } : undefined,
     repo: repo?.name,
+    ...(repo?.remote_url_normalized ? { remoteUrlNormalized: repo.remote_url_normalized as string } : {}),
     attachments: await briefAttachments(ctx.pool, card.id),
     comments: comments.reverse().map((m) => ({
       authorName: m.user_name ?? m.agent_name ?? 'system',

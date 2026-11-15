@@ -166,6 +166,8 @@ export const DevopsShiftSchema = z.object({
       fields: z.record(z.string(), z.unknown()).optional(),
       project: z.object({ key: z.string(), name: z.string() }).optional(),
       repo: z.string().optional(),
+      /** The card repository's normalized remote: the runner runs a request on an app repository as the app. */
+      remoteUrlNormalized: z.string().max(500).optional(),
       /** Files attached to the card (`aom card attachments` copies them next to the shift). */
       attachments: z.array(BriefAttachmentSchema).optional(),
       /** Latest comments, oldest first. */

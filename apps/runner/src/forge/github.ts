@@ -1,5 +1,6 @@
 import type { GitConnection, MergedChange, OpenChange, RepoRef } from '@aom/shared';
 import { normalizeRemoteUrl } from '@aom/shared';
+import { AppIdentityError, appIdentityWire, inContext } from '../git/identity.ts';
 import { githubApiBase } from '../review/review-poster.ts';
 import { APP_GIT_MARKER } from './app-repos.ts';
 import { errText, ForgeUnavailableError, isHttps, tokenHelperEnv } from './http.ts';
@@ -369,8 +370,22 @@ export class GitHubForge implements Forge {
    * token only ever goes into the Authorization header: no message below contains it.
    */
   async setCommitStatus(repo: RemoteRepo, c: CommitStatusInput): Promise<CommitStatusOutcome> {
-    const token = this.env.statusTokens?.get('github', this.host)?.token;
-    if (!token) return { ok: false, code: 'no_token', error: 'no status token is saved for this host' };
+    // A repository that posts as an app sets its statuses with the app's token, never the status token (fail closed).
+    const actor = this.actor(repo.fullName);
+    let token: string | undefined;
+    if (actor) {
+      try {
+        token = await actor.token();
+      } catch (err) {
+        if (!(err instanceof AppIdentityError)) throw err;
+        const e = inContext(err, { operation: 'commit status', repo: repo.fullName });
+        return { ok: false, code: 'app_identity_failed', error: appIdentityWire(e).slice(0, 400) };
+      }
+    } else {
+      token = this.env.statusTokens?.get('github', this.host)?.token;
+      if (!token) return { ok: false, code: 'no_token', error: 'no status token is saved for this host' };
+    }
+    const tokenName = actor ? 'app token' : 'status token';
     let res: Response;
     try {
       res = await this.env.fetch(`${githubApiBase(this.host)}/repos/${repo.fullName}/statuses/${c.sha}`, {
@@ -395,9 +410,9 @@ export class GitHubForge implements Forge {
     }
     if (res.status === 201 || res.status === 200) return { ok: true };
     if (res.status === 401)
-      return { ok: false, code: 'no_token', error: 'the host does not accept the status token (401)' };
+      return { ok: false, code: 'no_token', error: `the host does not accept the ${tokenName} (401)` };
     if (res.status === 403)
-      return { ok: false, code: 'forbidden', error: 'the status token may not set statuses here (403)' };
+      return { ok: false, code: 'forbidden', error: `the ${tokenName} may not set statuses here (403)` };
     if (res.status === 404)
       return { ok: false, code: 'not_found', error: 'repository or commit not found for this token (404)' };
     if (res.status === 422)

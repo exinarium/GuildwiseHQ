@@ -37,16 +37,46 @@ export interface CommitIdentity {
 }
 
 /** A selected app could not be used: nothing is committed, pushed or posted under another identity. */
+/** Where an app failure happened, for the error text: the project, the operation and the repository (`owner/name`). */
+export interface AppFailureContext {
+  projectKey?: string;
+  operation?: string;
+  repo?: string;
+}
+
+function contextText(ctx: AppFailureContext | undefined): string {
+  if (!ctx) return '';
+  const parts: string[] = [];
+  if (ctx.projectKey) parts.push(`project ${ctx.projectKey}`);
+  const what = [ctx.operation, ctx.repo].filter(Boolean).join(' on ');
+  if (what) parts.push(what);
+  return parts.length > 0 ? ` (${parts.join(', ')})` : '';
+}
+
 export class AppIdentityError extends Error {
   readonly code = APP_IDENTITY_FAILED_CODE;
   constructor(
     readonly app: { label: string; integrationId: string },
     readonly reason: string,
+    readonly ctx?: AppFailureContext,
   ) {
     super(
-      `The app ${app.label} could not be used: ${reason} Nothing was committed or pushed under another identity.`,
+      `The app ${app.label} could not be used: ${reason}${contextText(ctx)} Nothing was committed or pushed under another identity.`,
     );
   }
+}
+
+/** The same failure with the project, operation and repository named (values already set are kept). */
+export function inContext(err: AppIdentityError, ctx: AppFailureContext): AppIdentityError {
+  return new AppIdentityError(err.app, err.reason, { ...ctx, ...stripEmpty(err.ctx) });
+}
+
+function stripEmpty(ctx: AppFailureContext | undefined): AppFailureContext {
+  const out: AppFailureContext = {};
+  if (ctx?.projectKey) out.projectKey = ctx.projectKey;
+  if (ctx?.operation) out.operation = ctx.operation;
+  if (ctx?.repo) out.repo = ctx.repo;
+  return out;
 }
 
 /** `app_identity_failed: <message>`: the form an app failure takes in a rejection or an error string on the wire. */

@@ -221,7 +221,12 @@ export async function baTaskPass(
       started.push({ taskId: t.id, shiftId, agentId: a.id, workstationId: a.ws_id });
       const built = await buildBaTaskShiftStart(ctx, t.id, shiftId);
       if (built)
-        ctx.services.runners.send(a.ws_id, 'shift.start', await withCommitAs(ctx, built), ctx.clock.now());
+        ctx.services.runners.send(
+          a.ws_id,
+          'shift.start',
+          await withCommitAs(ctx, built, a.ws_id),
+          ctx.clock.now(),
+        );
       break;
     }
   }

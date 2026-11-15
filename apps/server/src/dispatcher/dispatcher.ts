@@ -459,7 +459,7 @@ export class Dispatcher {
   async sendShiftStart(c: ClaimResult): Promise<boolean> {
     const built = await buildShiftStart(this.ctx, c);
     if (!built) return false;
-    const withCommit = await withCommitAs(this.ctx, built);
+    const withCommit = await withCommitAs(this.ctx, built, c.workstationId);
     const playbookGrants = await playbookGrantKeys(this.ctx.pool, withCommit.agent.agentId);
     // R3b: delegation is off unless the agent was granted targets (never for the CEO or the DevOps engineer)
     const delegation =

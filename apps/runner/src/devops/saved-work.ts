@@ -92,7 +92,12 @@ const OLD_PREFIX = 'guildwise/saved-work/';
 
 export async function migrateSavedWorkBranches(
   cwd: string,
-  opts: { remote: boolean; log?: (cmd: string) => void },
+  opts: {
+    remote: boolean;
+    log?: (cmd: string) => void;
+    /** The app auth of an app repository for the remote delete (absent = plain git, as without an app). */
+    auth?: { args: string[]; env: Record<string, string> };
+  },
 ): Promise<{ actions: string[]; errors: string[] }> {
   const actions: string[] = [];
   const errors: string[] = [];
@@ -145,7 +150,11 @@ export async function migrateSavedWorkBranches(
       if (!name.startsWith(OLD_PREFIX)) continue;
       if (!(await keep(name, tip, 'from origin'))) continue;
       opts.log?.(`git -C ${cwd} push origin --delete ${name}`);
-      const del = await git(cwd, ['push', 'origin', '--delete', '--', name]);
+      const del = await git(
+        cwd,
+        [...(opts.auth?.args ?? []), 'push', 'origin', '--delete', '--', name],
+        opts.auth ? { env: opts.auth.env } : {},
+      );
       if (del.exitCode === 0) {
         await git(cwd, ['update-ref', '-d', `refs/remotes/origin/${name}`]);
         actions.push(`kept the commits of origin/${name} in a stash and removed that branch from origin`);

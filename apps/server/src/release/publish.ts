@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import {
+  type CommitAs,
   DESK_SUBKIND,
   noReleasePageText,
+  type PostAsPlan,
   RELEASE_PUBLISH_CAPABILITY,
   type ReleasePublishPayload,
   ReleasePublishPayloadSchema,
@@ -11,6 +13,7 @@ import {
 } from '@aom/shared';
 import {
   canPostAs,
+  explicitPostAs,
   identityFields,
   POST_AS_RUNNER_TOO_OLD_MESSAGE,
   postAsFieldFor,
@@ -43,7 +46,11 @@ async function publishWorkstation(db: Queryable, ship: Row): Promise<string | nu
  * The `release.publish` payload of a committed ship. Read again on every send: the release name, the commit identity
  * and the release PR address may have changed since the commit.
  */
-export async function publishPayloadOf(tx: Queryable, ship: Row): Promise<ReleasePublishPayload | null> {
+export async function publishPayloadOf(
+  tx: Queryable,
+  ship: Row,
+  workstationId?: string | null,
+): Promise<ReleasePublishPayload | null> {
   const proposal = await one(tx, 'SELECT notes, notes_source FROM release_proposals WHERE id=$1', [ship.id]);
   const repo = await one(
     tx,
@@ -81,8 +88,19 @@ export async function publishPayloadOf(tx: Queryable, ship: Row): Promise<Releas
         : { mode: 'pr', ...((pr?.url ?? ship.pr_url) ? { prUrl: pr?.url ?? ship.pr_url } : {}) },
     notesSource: proposal?.notes_source === 'commits' ? 'commits' : 'changelog',
     ...(proposal?.notes_source === 'commits' && proposal.notes ? { notes: proposal.notes } : {}),
-    ...(await identityFields(tx, ship.project_id)),
+    ...(await publishIdentity(tx, ship.project_id, workstationId)),
   });
+}
+
+/** `commitAs` and the plan; a post-as:2 runner (`workstationId`) gets the empty plan when no app is selected. */
+async function publishIdentity(
+  tx: Queryable,
+  projectId: string,
+  workstationId: string | null | undefined,
+): Promise<{ commitAs: CommitAs | null; postAs?: PostAsPlan }> {
+  const fields = await identityFields(tx, projectId);
+  const postAs = await explicitPostAs(tx, fields.postAs ?? null, workstationId);
+  return postAs ? { commitAs: fields.commitAs, postAs } : { commitAs: fields.commitAs };
 }
 
 /**
@@ -99,7 +117,7 @@ export async function enqueueReleasePublish(tx: Tx, ship: Row, now: Date): Promi
     ]);
     return null;
   }
-  const payload = await publishPayloadOf(tx, ship);
+  const payload = await publishPayloadOf(tx, ship, workstationId);
   if (!payload) return null;
   // An app is selected: a runner that does not know post-as would publish as the owner, so it waits for an update.
   if (payload.postAs && !(await canPostAs(tx, workstationId))) {

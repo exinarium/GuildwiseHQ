@@ -637,6 +637,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       ...(guard.readOnlyScan ? { readOnlyScan: true } : {}),
       ...(guard.shiftKind ? { shiftKind: guard.shiftKind } : {}),
       frozenBranches: guard.frozenBranches ?? [],
+      ...(guard.appRepos?.length ? { appRepos: guard.appRepos } : {}),
+      ...(guard.identityEmail ? { identityEmail: guard.identityEmail } : {}),
       secretRoots: ['secrets', 'keys', 'config.json'].map((d) => join(this.paths?.root ?? '', d)),
       auditFile: join(this.paths.logs, 'devops-audit.jsonl'),
     };

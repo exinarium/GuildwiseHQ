@@ -169,6 +169,7 @@ export const HygieneProblemKind = z.enum([
   'auth_failed',
   'missing',
   'branch_missing',
+  'app_identity_failed',
   'error',
 ]);
 export type HygieneProblemKind = z.infer<typeof HygieneProblemKind>;
@@ -180,6 +181,7 @@ export const HYGIENE_PROBLEM_LABEL: Record<HygieneProblemKind, string> = {
   auth_failed: 'Authentication failed',
   missing: 'Clone not found',
   branch_missing: 'Working branch not found',
+  app_identity_failed: 'App could not be used',
   error: 'Git error',
 };
 

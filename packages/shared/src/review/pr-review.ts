@@ -291,6 +291,8 @@ export const PrReviewNoticePayloadSchema = z
     prNumber: z.number().int().positive(),
     headSha: Sha40.optional(),
     body: z.string().max(5000),
+    /** The project's "post as" plan; sent only to `post-as:2` runners (an older runner refuses the field). */
+    postAs: PostAsPlanSchema.optional(),
   })
   .strict();
 export type PrReviewNoticePayload = z.infer<typeof PrReviewNoticePayloadSchema>;
@@ -299,7 +301,15 @@ export const PrReviewNoticeResultSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), reviewUrl: z.string().max(500), alreadyPosted: z.boolean() }),
   z.object({
     ok: z.literal(false),
-    code: z.enum(['no_token', 'unsupported', 'unreachable', 'forbidden', 'not_found', 'error']),
+    code: z.enum([
+      'no_token',
+      'unsupported',
+      'unreachable',
+      'forbidden',
+      'not_found',
+      'app_identity_failed',
+      'error',
+    ]),
     error: z.string().max(400),
   }),
 ]);

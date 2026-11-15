@@ -940,13 +940,24 @@ export const RepoCommitStatusPayloadSchema = z.object({
   context: z.string().min(1).max(100),
   description: z.string().max(140),
   targetUrl: z.string().url().max(500).optional(),
+  /** The project's "post as" plan: with an app the status is posted with its token, never the status token. */
+  postAs: PostAsPlanSchema.optional(),
 });
 export type RepoCommitStatusPayload = z.infer<typeof RepoCommitStatusPayloadSchema>;
 export const RepoCommitStatusResultSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true) }),
   z.object({
     ok: z.literal(false),
-    code: z.enum(['no_clone', 'no_token', 'forbidden', 'not_found', 'invalid_sha', 'unsupported', 'error']),
+    code: z.enum([
+      'no_clone',
+      'no_token',
+      'forbidden',
+      'not_found',
+      'invalid_sha',
+      'unsupported',
+      'app_identity_failed',
+      'error',
+    ]),
     error: z.string().max(400),
   }),
 ]);

@@ -1,4 +1,9 @@
-import { type PrReviewNoticePayload, type PrReviewNoticeResult, splitNoticeMarker } from '@aom/shared';
+import {
+  APP_IDENTITY_FAILED_CODE,
+  type PrReviewNoticePayload,
+  type PrReviewNoticeResult,
+  splitNoticeMarker,
+} from '@aom/shared';
 import { type GitHubReviewPoster, ReviewPostError } from './review-poster.ts';
 
 export interface PrNoticeDeps {
@@ -29,6 +34,8 @@ export async function postPrNotice(
   } catch (err) {
     if (err instanceof ReviewPostError) {
       const error = short(err.message);
+      if (err.message.startsWith(`${APP_IDENTITY_FAILED_CODE}:`))
+        return { ok: false, code: 'app_identity_failed', error };
       switch (err.code) {
         case 'reviewer_token_missing':
           return { ok: false, code: 'no_token', error };
