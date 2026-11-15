@@ -298,7 +298,7 @@ describe('push tripwire', () => {
     expect((await git(clone, ['push', 'origin', 'main'])).exitCode).toBe(0);
   });
 
-  it('after the owner deselects the app, a payload without a plan for that repository lets today pushes through', async () => {
+  it('after the owner deselects the app, a payload with the empty plan for that repository lets today pushes through', async () => {
     const root = tmp('post-as-root-');
     const bare = join(root, 'remote.git');
     sh(root, 'git', ['init', '-q', '--bare', bare]);
@@ -333,13 +333,19 @@ describe('push tripwire', () => {
 
     // a payload for another repository without a plan does not touch it
     const other = { remoteUrlNormalized: 'github.com/acme/other' };
-    releaseUncoveredRepos(tripwire, null, payloadRepoUrls(other));
+    releaseUncoveredRepos(tripwire, { repos: [] }, payloadRepoUrls(other));
     actorScope(baseEnv(new FakeExec()), broker, null, tripwire);
     expect((await git(clone, ['push', 'origin', 'main'])).exitCode).toBe(128);
 
-    // the owner deselects the app: the server sends no plan; the next payload for the repository releases it
+    // a payload without any plan releases nothing (a missing plan never means "no app")
+    const noPlan = { projectId: 'p', remoteUrlNormalized: remote };
+    releaseUncoveredRepos(tripwire, undefined, payloadRepoUrls(noPlan));
+    releaseUncoveredRepos(tripwire, null, payloadRepoUrls(noPlan));
+    expect((await git(clone, ['push', 'origin', 'main'])).exitCode).toBe(128);
+
+    // the owner deselects the app: the server sends the empty plan; the next payload for the repository releases it
     const noApp = { projectId: 'p', remoteUrlNormalized: remote };
-    releaseUncoveredRepos(tripwire, undefined, payloadRepoUrls(noApp));
+    releaseUncoveredRepos(tripwire, { repos: [] }, payloadRepoUrls(noApp));
     const scope = actorScope(baseEnv(new FakeExec()), broker, undefined, tripwire);
     const a = await scope.auth(bare);
     expect(a.env.AOM_GIT_APP).toBeUndefined();
@@ -366,20 +372,32 @@ describe('push tripwire', () => {
 });
 
 describe('runner keeps the tripwire in step with each payload', () => {
-  it('a shift.start or command without a plan releases its repository; one with the app keeps it', async () => {
+  it('the empty plan releases a repository; a missing plan on an app repository is refused and keeps the entry', async () => {
     const { Runner } = await import('../src/runner.ts');
     const r = new Runner({ config: makeConfig('ws://127.0.0.1:9'), dataDir: tmp('aom-data-') });
     const seen: string[] = [];
+    const sent: Array<{ type: string; payload: Record<string, unknown> }> = [];
+    const refusedShifts: Array<{ shiftId: string; detail: string }> = [];
     const internals = r as unknown as {
       onMessage(msg: unknown): void;
       runCommand: (...a: unknown[]) => Promise<void>;
-      supervisor: { handleStart: (msg: unknown) => Promise<void> };
+      client: { send: (type: string, payload: Record<string, unknown>) => void };
+      supervisor: {
+        handleStart: (msg: unknown) => Promise<void>;
+        refuseStart: (shiftId: string, detail: string) => void;
+      };
     };
     internals.runCommand = async () => {
       seen.push('command');
     };
+    internals.client.send = (type, payload) => {
+      sent.push({ type, payload });
+    };
     internals.supervisor.handleStart = async () => {
       seen.push('shift');
+    };
+    internals.supervisor.refuseStart = (shiftId, detail) => {
+      refusedShifts.push({ shiftId, detail });
     };
     const remote = 'github.com/acme/web';
     const registered = () => appRepos.find(r.paths.root, remote) !== null;
@@ -394,17 +412,51 @@ describe('runner keeps the tripwire in step with each payload', () => {
       payload: { remoteUrlNormalized: remote, postAs: plan('app', remote) },
     });
     expect(registered()).toBe(true);
+    // no plan at all (an older server, a bug): refused with the app named, never run, never released
     internals.onMessage({
       type: 'command',
       commandId: 'c2',
       command: 'repo.list_prs',
       payload: { remoteUrlNormalized: remote },
     });
+    expect(registered()).toBe(true);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.type).toBe('command.result');
+    expect(sent[0]?.payload.commandId).toBe('c2');
+    expect(sent[0]?.payload.ok).toBe(false);
+    expect(String(sent[0]?.payload.error)).toMatch(
+      /^app_identity_failed: The app Guild Bot could not be used: the request arrived without the app identity\. \(repo\.list_prs on acme\/web\)/,
+    );
+    internals.onMessage({ type: 'shift.start', shiftId: 's0', worktree: { remoteUrlNormalized: remote } });
+    expect(registered()).toBe(true);
+    expect(refusedShifts.map((x) => x.shiftId)).toEqual(['s0']);
+    expect(refusedShifts[0]?.detail).toContain('app_identity_failed: The app Guild Bot could not be used');
+
+    // the empty plan is how the server says "no app": it releases the repository and the command runs
+    internals.onMessage({
+      type: 'command',
+      commandId: 'c2b',
+      command: 'repo.list_prs',
+      payload: { remoteUrlNormalized: remote, postAs: { repos: [] } },
+    });
     expect(registered()).toBe(false);
 
     register();
-    internals.onMessage({ type: 'shift.start', shiftId: 's1', worktree: { remoteUrlNormalized: remote } });
+    internals.onMessage({
+      type: 'shift.start',
+      shiftId: 's1',
+      worktree: { remoteUrlNormalized: remote },
+      postAs: { repos: [] },
+    });
     expect(registered()).toBe(false);
+
+    // nothing registered: a missing plan is today's behaviour (a project without an app)
+    internals.onMessage({
+      type: 'command',
+      commandId: 'c2c',
+      command: 'repo.list_prs',
+      payload: { remoteUrlNormalized: remote },
+    });
 
     // a malformed plan is left to the command's own validation: nothing is released
     register();
@@ -415,7 +467,7 @@ describe('runner keeps the tripwire in step with each payload', () => {
       payload: { remoteUrlNormalized: remote, postAs: { repos: 'x' } },
     });
     expect(registered()).toBe(true);
-    expect(seen).toEqual(['command', 'command', 'shift', 'command']);
+    expect(seen).toEqual(['command', 'command', 'shift', 'command', 'command']);
   });
 
   it('a command that never carries a plan keeps the entry, and a push without the app is still refused', async () => {
@@ -461,7 +513,7 @@ describe('runner keeps the tripwire in step with each payload', () => {
     expect(appRepos.find(root, remote)).not.toBeNull();
 
     // commands whose payloads never carry a plan say nothing about it
-    for (const command of ['repo.commit_status', 'release.ref_cleanup', 'run.start']) {
+    for (const command of ['release.ref_cleanup', 'run.start', 'worktree.remove']) {
       internals.onMessage({
         type: 'command',
         commandId: `c-${command}`,
@@ -485,12 +537,12 @@ describe('runner keeps the tripwire in step with each payload', () => {
     expect(refused.stderr).toContain("posts as the app 'Guild Bot'");
     expect(sh(bare, 'git', ['for-each-ref'])).toBe('');
 
-    // a command that carries plans, sent without one (the owner deselected the app), releases it
+    // a command that carries plans, sent with the empty plan (the owner deselected the app), releases it
     internals.onMessage({
       type: 'command',
       commandId: 'c-open',
       command: 'repo.open_pr',
-      payload: { remoteUrlNormalized: remote },
+      payload: { remoteUrlNormalized: remote, postAs: { repos: [] } },
     });
     expect(appRepos.find(root, remote)).toBeNull();
     expect((await git(clone, ['push', 'origin', 'main'])).exitCode).toBe(0);
@@ -515,10 +567,11 @@ describe('commandCarriesPlan', () => {
       'release.ship',
       'release.publish',
       'release.docs_prep',
+      'repo.commit_status',
+      'pr_review.notice',
     ])
       expect(commandCarriesPlan(command), command).toBe(true);
     for (const command of [
-      'repo.commit_status',
       'release.ref_cleanup',
       'run.start',
       'pr_review.cancel',

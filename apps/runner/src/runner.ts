@@ -37,6 +37,7 @@ import {
   PACK_SCRIPT_GATE_CAPABILITY,
   PACKS_CAPABILITY,
   POST_AS_CAPABILITY,
+  POST_AS_V2_CAPABILITY,
   type PostAsPlan,
   PostAsPlanSchema,
   PR_LIST_CAPABILITY,
@@ -136,6 +137,8 @@ import {
   actorScope,
   appOriginRefusal,
   commandCarriesPlan,
+  devopsRepoUrls,
+  missingPlanRefusal,
   payloadRepoUrls,
   releaseUncoveredRepos,
 } from './forge/app-actor.ts';
@@ -462,6 +465,8 @@ export class Runner {
   constructor(private readonly opts: RunnerOptions) {
     this.log = opts.log ?? nullLogger;
     this.paths = runnerPaths(opts.dataDir);
+    // the app repositories of this root survive a restart: a registry entry only ever refuses a push
+    appRepos.persist(this.paths.root);
     this.relay = new RelayDispatcher({
       integrations: () => [
         ...opts.config.relay.integrations.filter((i) => i.kind !== 'whatsapp_cloud'),
@@ -1720,6 +1725,7 @@ export class Runner {
         STORAGE_CAPABILITY,
         APP_INTEGRATIONS_CAPABILITY,
         POST_AS_CAPABILITY,
+        POST_AS_V2_CAPABILITY,
         TRACKER_POST_AS_CAPABILITY,
         STORAGE_DELETE_CAPABILITY,
         SHIFT_LIMIT_CAPABILITY,
@@ -2133,24 +2139,29 @@ export class Runner {
   }
 
   /**
-   * Keeps the push tripwire in step with the server's current plan: a repository a payload acts on without an app in
-   * its plan (the owner deselected the app, or it is no longer covered) pushes with today's credentials again.
+   * Keeps the push tripwire in step with the server's current plan, with one rule: a payload that carries a plan
+   * (even the empty one, which is how a `post-as:2` server says "no app") releases the repositories it does not put
+   * on an app; a payload that could carry one but does not is refused when it touches a registered app repository, and
+   * otherwise runs as today. Returns the refusal text, or null to go on.
    */
-  private releaseUncovered(payload: unknown, postAs: unknown): void {
-    if (postAs !== undefined && postAs !== null && !PostAsPlanSchema.safeParse(postAs).success) return;
-    releaseUncoveredRepos(
-      appRepos.forRoot(this.paths.root),
-      (postAs ?? null) as PostAsPlan | null,
-      payloadRepoUrls(payload),
-    );
+  private tripwireGate(urls: ReadonlyArray<string>, postAs: unknown, operation: string): string | null {
+    const tripwire = appRepos.forRoot(this.paths.root);
+    if (postAs === undefined || postAs === null) return missingPlanRefusal(tripwire, operation, urls);
+    // a malformed plan is left to the command's own validation: nothing is released
+    if (!PostAsPlanSchema.safeParse(postAs).success) return null;
+    releaseUncoveredRepos(tripwire, postAs as PostAsPlan, urls);
+    return null;
   }
 
   private onMessage(msg: ServerToRunner): void {
     switch (msg.type) {
-      case 'shift.start':
-        this.releaseUncovered(msg, msg.postAs);
-        void this.supervisor.handleStart(msg);
+      case 'shift.start': {
+        const urls = msg.kind === 'devops' ? devopsRepoUrls(msg.postAs) : payloadRepoUrls(msg);
+        const refused = this.tripwireGate(urls, msg.postAs, 'shift start');
+        if (refused) this.supervisor.refuseStart(msg.shiftId, refused);
+        else void this.supervisor.handleStart(msg);
         break;
+      }
       case 'shift.stop':
         void this.supervisor.handleStop(msg.shiftId, msg.reason);
         break;
@@ -2179,13 +2190,20 @@ export class Runner {
       case 'command':
         // Only a command that can carry a plan says anything about it: a missing plan on any other command (commit
         // status, ref cleanup, runs, ...) is not a deselected app and must leave the tripwire alone.
-        if (commandCarriesPlan(msg.command))
-          this.releaseUncovered(
-            msg.payload,
+        if (commandCarriesPlan(msg.command)) {
+          const refused = this.tripwireGate(
+            payloadRepoUrls(msg.payload),
             msg.payload && typeof msg.payload === 'object'
               ? (msg.payload as { postAs?: unknown }).postAs
               : undefined,
+            msg.command,
           );
+          if (refused) {
+            this.log.warn(`command ${msg.command} refused: ${refused}`);
+            this.client.send('command.result', { commandId: msg.commandId, ok: false, error: refused });
+            break;
+          }
+        }
         void this.runCommand(msg.commandId, msg.command, msg.payload);
         break;
       case 'run.follow':
@@ -2488,7 +2506,11 @@ export class Runner {
         done(
           true,
           await this.statusPosts.once(p.statusId, () =>
-            postCommitStatus({ payload: p, remoteUrl: repo?.remoteUrl ?? null, forgeEnv: this.forgeEnv }),
+            postCommitStatus({
+              payload: p,
+              remoteUrl: repo?.remoteUrl ?? null,
+              forgeEnv: this.scopeFor(p.postAs).forgeEnv,
+            }),
           ),
         );
       } else if (command === 'repo.list_merged_prs') {

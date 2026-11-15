@@ -135,21 +135,50 @@ export function commandCarriesPlan(command: string): boolean {
 }
 
 /**
- * Drops the tripwire entry of every repository a payload acts on that its plan does not put on an app: the server
- * sends no plan once the owner deselects the app (or the repository is no longer covered), and from then on the
- * runner pushes there with today's credentials, which the tripwire must let through.
+ * Drops the tripwire entry of every repository a payload acts on that its plan does not put on an app. Only a payload
+ * that carries a plan releases anything: the server sends `post-as:2` runners an explicit plan on every plan-carrying
+ * command (the empty plan when the owner deselected the app), so a missing plan never means "no app".
  */
 export function releaseUncoveredRepos(
   tripwire: AppRepoRoot | null | undefined,
   plan: PostAsPlan | null | undefined,
   urls: ReadonlyArray<string>,
 ): void {
-  if (!tripwire) return;
+  if (!tripwire || !plan) return;
   for (const url of urls) {
     const e = postAsFor(plan, url);
     if (e?.source === 'app' && e.app) continue;
     tripwire.set(url, null);
   }
+}
+
+/** The repositories a DevOps shift acts on: every repository of its plan (it spans the workstation's projects). */
+export function devopsRepoUrls(plan: PostAsPlan | null | undefined): string[] {
+  return [...new Set((plan?.repos ?? []).map((e) => e.remoteUrlNormalized.toLowerCase()))];
+}
+
+/**
+ * The refusal of a plan-carrying command or shift that arrived without `postAs` for a repository registered as an app
+ * repository under this runner root: it is never run as the owner and never releases the entry (an older server, or a
+ * server bug). Null when nothing registered is touched (a project without an app: today's behaviour).
+ */
+export function missingPlanRefusal(
+  tripwire: AppRepoRoot | null | undefined,
+  operation: string,
+  urls: ReadonlyArray<string>,
+): string | null {
+  if (!tripwire) return null;
+  for (const url of urls) {
+    const hit = tripwire.get(url);
+    if (!hit) continue;
+    const err = new AppIdentityError(
+      { label: hit.label, integrationId: hit.integrationId },
+      'the request arrived without the app identity.',
+      { operation, repo: repoNameOf(url) },
+    );
+    return appIdentityWire(err);
+  }
+  return null;
 }
 
 /** An app repository whose remote is not https fails closed (a GitHub App has no ssh identity). */

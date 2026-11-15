@@ -51,7 +51,11 @@ export interface CommitStatusInput {
 }
 export type CommitStatusOutcome =
   | { ok: true }
-  | { ok: false; code: 'no_token' | 'forbidden' | 'not_found' | 'invalid_sha' | 'error'; error: string };
+  | {
+      ok: false;
+      code: 'no_token' | 'forbidden' | 'not_found' | 'invalid_sha' | 'app_identity_failed' | 'error';
+      error: string;
+    };
 
 /** Where a repository is on its forge. */
 export interface RemoteRepo {

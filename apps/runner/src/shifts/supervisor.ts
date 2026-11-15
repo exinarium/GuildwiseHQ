@@ -957,6 +957,11 @@ export class ShiftSupervisor {
     return this.deps.shiftCredentials?.(msg.postAs).auth ?? this.deps.gitAuth;
   }
 
+  /** Refuses a shift before it starts (the runner's post-as gate): nothing is prepared, the reason goes to the server. */
+  refuseStart(shiftId: string, detail: string): void {
+    this.reject(shiftId, 'internal', detail);
+  }
+
   private reject(
     shiftId: string,
     reason:

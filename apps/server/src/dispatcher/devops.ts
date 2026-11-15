@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { streamId } from '@aom/shared';
-import { withCommitAs } from '../commands/commit-as.ts';
+import { devopsPostAs } from '../commands/commit-as.ts';
 import { orgScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, rows } from '../db/sql.ts';
@@ -130,6 +130,10 @@ export async function devopsPass(
     if (!mainUsable(r.runtimes, r.runtime, ctx.clock.now())) continue;
     const conn = ctx.services.runners.get(r.workstation_id);
     if (!conn || !conn.reconciled) continue;
+    // Every app repository on the workstation is worked as its app; a runner that cannot honour that gets no DevOps
+    // shift (the request stays queued until the runner is updated), never one that would act as the owner.
+    const postAs = await devopsPostAs(ctx.pool, r.workstation_id);
+    if ('refused' in postAs) continue;
     const shiftId = randomUUID();
     const ok = await withAppendTx(ctx.pool, async (tx) => {
       const row = await one(tx, `SELECT status FROM devops_requests WHERE id=$1 FOR UPDATE`, [r.id]);
@@ -175,7 +179,8 @@ export async function devopsPass(
       ctx.services.runners.send(
         r.workstation_id,
         'shift.start',
-        await withCommitAs(ctx, built),
+        // No commitAs: DevOps commits on projects without an app keep today's identity.
+        postAs.plan ? { ...built, postAs: postAs.plan } : built,
         ctx.clock.now(),
       );
   }

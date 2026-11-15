@@ -12,8 +12,10 @@ import {
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import { type Tx, withTx } from '../db/tx.ts';
+import { HttpError } from '../errors.ts';
 import { reviewSettingsOf } from '../queries/misc.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { postAsFieldFor } from './commit-as.ts';
 import { requestPrList } from './pr-only.ts';
 import { sizeExemptionOf } from './size-exemption.ts';
 
@@ -272,7 +274,7 @@ async function queueStatus(
     return undefined;
   const repo = await one(
     tx,
-    'SELECT remote_url_normalized, forge_kind FROM project_repos WHERE id=$1 AND removed_at IS NULL',
+    'SELECT remote_url_normalized, forge_kind, project_id FROM project_repos WHERE id=$1 AND removed_at IS NULL',
     [repoId],
   );
   if (!repo) return undefined;
@@ -284,7 +286,17 @@ async function queueStatus(
     (poll?.workstation_id as string | null) ?? null,
   );
   if (!wsId) return undefined;
+  // With an app selected the status is posted with the app's token; a runner that cannot do that is not sent the
+  // status (it stays pending), so it is never posted with the owner's status token instead.
+  let postAs: Awaited<ReturnType<typeof postAsFieldFor>>;
+  try {
+    postAs = await postAsFieldFor(tx, repo.project_id as string, wsId, { write: true, v2Only: true });
+  } catch (err) {
+    if (err instanceof HttpError && err.code === 'runner_too_old') return undefined;
+    throw err;
+  }
   const payload = RepoCommitStatusPayloadSchema.parse({
+    ...postAs,
     statusId: s.status_id,
     repoId,
     remoteUrlNormalized: repo.remote_url_normalized,

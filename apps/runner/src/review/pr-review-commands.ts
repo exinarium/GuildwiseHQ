@@ -16,6 +16,7 @@ import type { RuntimeAdapter } from '../adapters/types.ts';
 import { ForgeUnavailableError } from '../forge/http.ts';
 import { forgeForUrl } from '../forge/index.ts';
 import type { AppActor, ForgeEnv } from '../forge/types.ts';
+import { AppIdentityError, inContext } from '../git/identity.ts';
 import type { GitAuth } from '../git/worktrees.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { wipeAgent } from '../sandbox/sandbox.ts';
@@ -137,8 +138,13 @@ export class PrReviewCommands {
   notice(payload: PrReviewNoticePayload): Promise<PrReviewNoticeResult> {
     const live = this.notices.get(payload.noticeId);
     if (live) return live;
+    // With an app selected the notice is posted with its token only (a failing app never falls back to the reviewer token).
+    const actor = withOperation(
+      this.env.scope?.(payload.postAs).actorFor(payload.remoteUrlNormalized) ?? null,
+      'PR comment',
+    );
     const p = postPrNotice(
-      { poster: new GitHubReviewPoster({ fetch: this.env.fetch, tokens: this.env.tokens }) },
+      { poster: new GitHubReviewPoster({ fetch: this.env.fetch, tokens: this.env.tokens, actor }) },
       payload,
     ).finally(() => this.notices.delete(payload.noticeId));
     this.notices.set(payload.noticeId, p);
@@ -231,4 +237,20 @@ export async function sweepPrReviewAgents(
     removed++;
   }
   return removed;
+}
+
+/** The same actor, whose failures name the operation and the repository. */
+function withOperation(actor: AppActor | null, operation: string): AppActor | null {
+  if (!actor) return null;
+  return {
+    ...actor,
+    token: async () => {
+      try {
+        return await actor.token();
+      } catch (err) {
+        if (err instanceof AppIdentityError) throw inContext(err, { operation, repo: actor.repoName });
+        throw err;
+      }
+    },
+  };
 }

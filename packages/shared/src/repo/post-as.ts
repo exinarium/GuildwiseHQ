@@ -28,6 +28,12 @@ export const POST_AS_CAPABILITY = 'post-as:1';
 /** The capability a runner announces when it posts to and reads GitHub issues as the `trackerApp` it is sent. */
 export const TRACKER_POST_AS_CAPABILITY = 'tracker-post-as:1';
 
+/**
+ * The capability a runner announces when every repository command and DevOps shift honours `postAs`: it is always sent
+ * (an empty plan means no app), and a plan-carrying command without `postAs` for an app repository is refused.
+ */
+export const POST_AS_V2_CAPABILITY = 'post-as:2';
+
 /** The most apps one project may tick. */
 export const MAX_POST_AS_APPS = 8;
 
@@ -68,6 +74,8 @@ export const PostAsRepoSchema = z.object({
   /** Present iff source === 'app'. */
   app: PostAsAppIdentitySchema.optional(),
   fallbackReason: PostAsFallbackReasonSchema.optional(),
+  /** The key of the project the entry belongs to (error texts; a DevOps plan spans several projects). */
+  projectKey: z.string().max(40).optional(),
 });
 export type PostAsRepo = z.infer<typeof PostAsRepoSchema>;
 
@@ -77,6 +85,9 @@ export type PostAsPlan = z.infer<typeof PostAsPlanSchema>;
 
 /** Prefix of a shift rejection / command error when a selected app cannot be used. */
 export const APP_IDENTITY_FAILED_CODE = 'app_identity_failed';
+
+/** The empty plan: sent to `post-as:2` runners when no app is selected. */
+export const noAppPlan = (): PostAsPlan => ({ repos: [] });
 
 export type PostAsAccessState = 'covered' | 'not_covered' | 'error';
 
