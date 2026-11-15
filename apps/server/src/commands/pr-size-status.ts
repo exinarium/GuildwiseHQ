@@ -163,11 +163,23 @@ export async function evaluateSizeStatuses(
 const hostOfRemote = (normalized: string): string => normalized.split('/')[0]?.toLowerCase() ?? '';
 
 /**
+ * The SQL for "a workstation can post this status" (the same rule as `pickStatusWorkstation`: holds the clone, announces
+ * the command, holds a status token for the host). `s` is pr_size_statuses, `r` project_repos. Parameter `$8` is the
+ * capability.
+ */
+const DELIVERABLE_SQL = `EXISTS (SELECT 1 FROM workstation_repos wr JOIN workstations w ON w.id = wr.workstation_id
+    JOIN workstation_capabilities wc ON wc.workstation_id = w.id
+   WHERE wr.project_repo_id = s.project_repo_id AND w.status='active' AND $8 = ANY (wc.capabilities)
+     AND w.status_tokens ? ('github@' || lower(split_part(r.remote_url_normalized, '/', 1))))`;
+
+/**
  * The scheduler pass: statuses that wait to be posted, whose post failed in a way that may pass, or that were queued and
  * never answered are sent to a workstation that holds the clone, can post and holds a status token for the host. With no
- * such workstation the status stays pending (the project settings say why). Returns how many were sent.
+ * such workstation the status stays pending (the project settings say why) and is not selected at all, so statuses
+ * nobody can post never take the place of statuses that can be posted. `projectId` limits the pass to one project.
+ * Returns how many were sent.
  */
-export async function deliverSizeStatuses(ctx: Ctx): Promise<number> {
+export async function deliverSizeStatuses(ctx: Ctx, scope: { projectId?: string } = {}): Promise<number> {
   const now = ctx.clock.now();
   const due = await rows(
     ctx.pool,
@@ -176,6 +188,8 @@ export async function deliverSizeStatuses(ctx: Ctx): Promise<number> {
        JOIN projects p ON p.id = r.project_id
        JOIN organizations o ON o.id = p.org_id
       WHERE r.removed_at IS NULL AND p.status='active' AND NOT COALESCE(o.simulation, false)
+        AND ($7::uuid IS NULL OR p.id = $7::uuid)
+        AND ${DELIVERABLE_SQL}
         AND (s.post_state = 'pending'
           OR (s.post_state = 'failed' AND s.retryable AND s.error_code <> ALL($4::text[])
               AND ((s.error_code = ANY($5::text[]) AND s.queued_at < $3)
@@ -189,6 +203,8 @@ export async function deliverSizeStatuses(ctx: Ctx): Promise<number> {
       FINAL_CODES,
       TOKEN_CODES,
       new Date(now.getTime() - QUEUED_EXPIRY_MS),
+      scope.projectId ?? null,
+      COMMIT_STATUS_CAPABILITY,
     ],
   );
   const targets = new Set<string>();
@@ -246,6 +262,14 @@ async function queueStatus(
     [repoId, changeId],
   );
   if (!s || s.post_state === 'posted') return undefined;
+  // A pass that raced another one (scheduler and a settings refresh) leaves a status queued by the other pass alone:
+  // one POST per status, attempts counted once. A queued status that was never answered is sent again once it expired.
+  if (
+    s.post_state === 'queued' &&
+    s.queued_at &&
+    new Date(s.queued_at as string).getTime() > now.getTime() - QUEUED_EXPIRY_MS
+  )
+    return undefined;
   const repo = await one(
     tx,
     'SELECT remote_url_normalized, forge_kind FROM project_repos WHERE id=$1 AND removed_at IS NULL',
@@ -368,7 +392,7 @@ export async function refreshSizeStatuses(
     const now = ctx.clock.now();
     for (const r of repos)
       await withTx(ctx.pool, (tx) => evaluateSizeStatuses(ctx, tx, at.projectId, r.id as string, now));
-    await deliverSizeStatuses(ctx);
+    await deliverSizeStatuses(ctx, { projectId: at.projectId });
   } catch (err) {
     ctx.log.error({ err, projectId: at.projectId }, 'refreshing the size statuses failed');
   }

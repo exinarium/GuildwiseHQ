@@ -274,6 +274,82 @@ describe('AC5: a project without a budget reports no failing check', () => {
   });
 });
 
+describe('delivery: statuses nobody can post never hold up the others (AC1/AC2 stay reliable)', () => {
+  /**
+   * A repository on another git host that the workstation has cloned, but it holds no status token for that host: its
+   * statuses can never be posted. Removed again after each test.
+   */
+  async function stuckRepo(count: number): Promise<string> {
+    const id = randomUUID();
+    await q().query(
+      `INSERT INTO project_repos (id, project_id, name, remote_url, remote_url_normalized, forge_kind)
+       VALUES ($1,$2,'stuck','https://ghe.example.com/acme/stuck.git','ghe.example.com/acme/stuck','github')`,
+      [id, s.m.w.projectId],
+    );
+    await q().query(
+      `INSERT INTO workstation_repos (workstation_id, project_repo_id, local_path, reported_at)
+       VALUES ($1,$2,'/tmp/stuck',now())`,
+      [s.m.w.workstationId, id],
+    );
+    await q().query(
+      `INSERT INTO pr_size_statuses (project_repo_id, change_id, head_sha, state, reason, description, post_state,
+                                     status_id, updated_at)
+       SELECT $1, g::text, $3, 'failure', 'over', 'Over budget', 'pending', gen_random_uuid(),
+              timestamptz '2000-01-01' + g * interval '1 second'
+         FROM generate_series(1, $2::int) g`,
+      [id, count, sha(1)],
+    );
+    return id;
+  }
+  async function dropRepo(id: string) {
+    await q().query('DELETE FROM pr_size_statuses WHERE project_repo_id=$1', [id]);
+    await q().query('DELETE FROM workstation_repos WHERE project_repo_id=$1', [id]);
+    await q().query('DELETE FROM project_repos WHERE id=$1', [id]);
+  }
+
+  it('more undeliverable pending statuses than one pass takes still let a deliverable one through', async () => {
+    const stuck = await stuckRepo(205);
+    try {
+      await poll([{ n: 12, head: 'feature/a', base: 'main', lines: 700 }]);
+      expect(await deliver()).toBe(1);
+      const cmds = await commands();
+      expect(cmds).toHaveLength(1);
+      expect(cmds[0]?.payload).toMatchObject({ repoId: s.m.w.repoId, sha: sha(12), state: 'failure' });
+      // the stuck statuses stay pending, untouched, for when a token for their host is saved
+      const left = await q().query(
+        `SELECT count(*)::int AS n FROM pr_size_statuses WHERE project_repo_id=$1 AND post_state='pending' AND attempts=0`,
+        [stuck],
+      );
+      expect(left.rows[0]?.n).toBe(205);
+      // once the workstation holds a token for that host, they are delivered too
+      await q().query(
+        `UPDATE workstations SET status_tokens='["github@github.com","github@ghe.example.com"]'::jsonb WHERE id=$1`,
+        [s.m.w.workstationId],
+      );
+      expect(await deliver()).toBe(200);
+    } finally {
+      await dropRepo(stuck);
+    }
+  });
+
+  it('two passes at once queue a status only once', async () => {
+    await poll([{ n: 12, head: 'feature/a', base: 'main', lines: 700 }]);
+    const sent = await Promise.all([deliver(), deliver(), deliver()]);
+    expect(sent.reduce((a, b) => a + b, 0)).toBe(1);
+    expect(await commands()).toHaveLength(1);
+    expect(await statusOf(12)).toMatchObject({ post_state: 'queued', attempts: 1 });
+    // a later pass while the post is still in flight sends nothing again
+    expect(await deliver()).toBe(0);
+    expect(await commands()).toHaveLength(1);
+  });
+
+  it('a pass limited to another project sends nothing for this one', async () => {
+    await poll([{ n: 12, head: 'feature/a', base: 'main', lines: 700 }]);
+    expect(await deliverSizeStatuses(s.m.ctx(), { projectId: randomUUID() })).toBe(0);
+    expect(await deliverSizeStatuses(s.m.ctx(), { projectId: s.m.w.projectId })).toBe(1);
+  });
+});
+
 describe('the poll is widened to repositories with a size check', () => {
   it('lists a repository that is not PR-only when the project has a budget', async () => {
     await q().query(`UPDATE project_repos SET pr_only=false WHERE id=$1`, [s.m.w.repoId]);
