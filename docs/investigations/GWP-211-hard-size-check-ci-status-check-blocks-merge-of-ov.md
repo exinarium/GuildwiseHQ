@@ -17,6 +17,13 @@ corrected where the landed code differs.
 | 4 | A5 | **No** | `pr_only` gates the flow in **two** places beyond the poll query. (a) `requestPrList` only selects `r.pr_only` repositories, so a widened poll would get `skipped`. (b) `applyPrListResult` returns at "Off means off" (`!repo?.pr_only`) **before** `writeOpenChangeSnapshot`, so a non-PR-only repository never gets a snapshot. Also, `setRepoPrOnly` calls `requestPrList` without `force`. Once size-check repositories are polled, that request can be throttled (5 minutes) | 4.4 "Changes to dependency code" now names all three changes and the ordering inside `applyPrListResult` |
 | 5 | A6 | **Yes** | GWP-196 landed a **reviewer-only** store (`apps/runner/src/review/reviewer-tokens.ts`, `FileReviewerTokenStore`, keyed by normalized remote URL on top of `secrets/sealed-file.ts` `SealedFile`). It is not a general purpose-token store | Nothing. `status-tokens.json` stays separate. `review-poster.ts` already exports `githubApiBase(host)` (api.github.com or `<host>/api/v3`): reuse it rather than writing a second one |
 
+**Also landed since the first version (not one of the card's assumptions; no design change):** GWP-214 added a GitHub App
+integration on the runner (`apps/runner/src/apps/github-app.ts`, `packages/shared/src/apps/index.ts`). Its default
+permissions are `contents`, `pull_requests` and `issues` write, without `statuses` or `checks`. It is also the bot identity
+the agents commit and open PRs as. **Do not post the size status with an app installation token:** the identity whose PRs
+are gated must not also write the gate. The token also lacks the permission. The dedicated status token stays. A second
+copy of `githubApiBase` sits in `apps/github-app.ts`. Import one of the two copies, or move it to one shared place.
+
 ## 1. Question
 
 1. Who posts the check: a GitHub status from the runner, or a GitHub Actions workflow in the repository?
