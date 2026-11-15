@@ -3,6 +3,7 @@ import {
   noAppPlan,
   POST_AS_CAPABILITY,
   POST_AS_V2_CAPABILITY,
+  RELEASE_DOCS_PREP_ASSISTANT_PACK_CAPABILITY,
   RELEASE_DOCS_PREP_CAPABILITY,
   RELEASE_DOCS_PREP_GUIDE_PATH_CAPABILITY,
   RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY,
@@ -174,6 +175,7 @@ describe('Release prep (docs and videos) settings', () => {
       'changelog',
       'guide',
       'help',
+      'assistant-pack',
       'videos',
       'commit',
     ]);
@@ -1228,5 +1230,80 @@ describe('the run label and key follow the repositories release branch', () => {
     expect((await approveShip()).status).toBe(409);
     await runToPassed(PREP);
     expect((await approveShip()).status).toBe(200);
+  });
+});
+
+describe("the step 'Regenerate assistant knowledge'", () => {
+  const tag = (c: any) => `${c.payload.step}${c.payload.phase ? `:${c.payload.phase}` : ''}`;
+  const setting = async () =>
+    (await ok<any>(owner('GET', `${base()}/settings`))).steps.find((x: any) => x.id === 'assistant-pack');
+  const packRow = async () =>
+    (
+      await q2(
+        `SELECT state, error FROM release_docs_prep_steps WHERE run_id=(SELECT id FROM release_docs_prep_runs LIMIT 1) AND step='assistant-pack'`,
+      )
+    )[0];
+  /** The Help step finds no Help articles: its check is skipped, so are its later phases, and no writer is needed. */
+  const noHelp = () =>
+    answer({ ok: true, state: 'skipped', error: 'skipped: no Help articles', files: [], notices: [] });
+  const withPackCapability = () =>
+    q(
+      `UPDATE workstation_capabilities SET capabilities = capabilities || $2::text[] WHERE workstation_id=$1`,
+      [w.workstationId, [RELEASE_DOCS_PREP_ASSISTANT_PACK_CAPABILITY]],
+    );
+
+  it('is listed after the Help articles, needs them, and follows their tick in settings saved before it existed', async () => {
+    expect(await setting()).toMatchObject({ enabled: true, requires: ['help'] });
+    // a project that unticked the Help articles before this step existed: its run is not refused for a missing step
+    const saved = (steps: Record<string, boolean>) =>
+      q(`UPDATE projects SET release_docs_prep=$2::jsonb WHERE id=$1`, [
+        w.projectId,
+        JSON.stringify({ enabled: true, steps }),
+      ]);
+    await saved({ analyse: true, changelog: false, guide: false, help: false, videos: false, commit: true });
+    expect((await setting()).enabled).toBe(false);
+    await saved({ analyse: true, changelog: false, guide: false, help: true, videos: false, commit: true });
+    expect((await setting()).enabled).toBe(true);
+    // a save that names it sets it; one that ticks only the Help articles keeps a saved untick
+    await enable({ help: true, 'assistant-pack': false });
+    expect((await setting()).enabled).toBe(false);
+    await enable({ help: true });
+    expect((await setting()).enabled).toBe(false);
+    await enable({ help: true, 'assistant-pack': true });
+    expect((await setting()).enabled).toBe(true);
+    // one that unticks only the Help articles takes it along, so the run is not refused for a missing requirement
+    await enable({ help: false });
+    expect((await setting()).enabled).toBe(false);
+    await owner('PUT', `${base()}/settings`, { enabled: false, steps: {} }); // names neither: keeps the saved tick
+    expect((await setting()).enabled).toBe(false);
+  });
+
+  it('runs on the runner after the Help articles and its files are committed like any content step', async () => {
+    await withPackCapability();
+    await enable({ help: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    await noHelp();
+    expect((await cmds()).map(tag)).toEqual(['analyse', 'help:check', 'assistant-pack']);
+    await answer({
+      ok: true,
+      state: 'passed',
+      files: ['apps/server/src/assistant/pack/topics/desk.md'],
+      notices: [],
+    });
+    expect(await packRow()).toEqual({ state: 'passed', error: null });
+    expect((await cmds()).map(tag)).toEqual(['analyse', 'help:check', 'assistant-pack', 'commit:prepare']);
+  });
+
+  it('is skipped, not failed, on a runner from before the step, and the run goes on', async () => {
+    await enable({ help: true });
+    await owner('POST', `${base()}/runs`);
+    await answer(passedAnalyse);
+    await noHelp();
+    expect(await packRow()).toEqual({ state: 'skipped', error: 'skipped: needs a newer runner' });
+    expect((await cmds()).map(tag)).toEqual(['analyse', 'help:check', 'commit:prepare']);
+    await answer({ ok: true, state: 'passed', files: [], notices: [] });
+    await answer({ ok: true, state: 'passed', files: [], notices: [] });
+    expect((await latest()).status).toBe('passed');
   });
 });

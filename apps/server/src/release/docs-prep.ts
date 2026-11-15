@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
+  ASSISTANT_PACK_RUNNER_TOO_OLD_NOTE,
+  ASSISTANT_PACK_STEP,
   DEFAULT_GUIDE_PATH,
   enabledReleaseDocsPrepSteps,
   isOrgManager,
@@ -8,6 +10,7 @@ import {
   missingReleaseDocsPrepRequirement,
   nextReleaseDocsPrepAction,
   normalizeGuidePath,
+  RELEASE_DOCS_PREP_ASSISTANT_PACK_CAPABILITY,
   RELEASE_DOCS_PREP_CAPABILITY,
   RELEASE_DOCS_PREP_GUIDE_PATH_CAPABILITY,
   RELEASE_DOCS_PREP_WRITER_TASKS_CAPABILITY,
@@ -25,6 +28,7 @@ import {
   releaseDocsPrepGate,
   releaseDocsPrepLink,
   releaseDocsPrepStep,
+  releaseDocsPrepStepOn,
   releaseDocsPrepSteps,
   stepPhaseIndex,
   stepPhases,
@@ -123,7 +127,7 @@ export async function getReleaseDocsPrepSettings(
       id: d.id,
       label: d.label,
       description: d.description,
-      enabled: s.steps[d.id] ?? d.defaultOn,
+      enabled: releaseDocsPrepStepOn(s.steps, d),
       ...(d.requires ? { requires: d.requires } : {}),
     })),
     canEdit: await canManage(ctx.pool, user.id, p),
@@ -170,15 +174,21 @@ export async function setReleaseDocsPrepSettings(
     const samePaths =
       Object.keys(guidePaths).length === Object.keys(before.guidePaths).length &&
       Object.entries(guidePaths).every(([id, v]) => before.guidePaths[id] === v);
+    // A step the request does not name keeps its saved tick, unless the request turns off the step it goes with (a
+    // request that unticks the Help articles also unticks the assistant knowledge; ticking Help keeps a saved untick).
+    const merged = { ...before.steps, ...input.steps };
+    for (const d of releaseDocsPrepSteps())
+      if (input.steps[d.id] === undefined && d.defaultWith && input.steps[d.defaultWith] === false)
+        delete merged[d.id];
     const steps = Object.fromEntries(
-      releaseDocsPrepSteps().map((d) => [d.id, input.steps[d.id] ?? before.steps[d.id] ?? d.defaultOn]),
+      releaseDocsPrepSteps().map((d) => [d.id, releaseDocsPrepStepOn(merged, d)]),
     );
     const autoStart = input.autoStart ?? before.autoStart;
     const same =
       samePaths &&
       before.autoStart === autoStart &&
       before.enabled === input.enabled &&
-      releaseDocsPrepSteps().every((d) => (before.steps[d.id] ?? d.defaultOn) === steps[d.id]);
+      releaseDocsPrepSteps().every((d) => releaseDocsPrepStepOn(before.steps, d) === steps[d.id]);
     if (same) return;
     await ctx.store.append(
       [
@@ -669,6 +679,7 @@ async function dispatchAction(
   const { commitAs, postAs } = await loadIdentityPlan(tx, run.project_id);
   const deliver: string[] = [];
   let failedHere = false;
+  let skippedHere = false;
   for (const repoId of action.repoIds) {
     const repo = await one(
       tx,
@@ -682,6 +693,22 @@ async function dispatchAction(
     if (!(await writerStepGate(ctx, tx, run, repoId, action.step, action.phase ?? ''))) {
       failedHere = true;
       continue;
+    }
+    // A runner from before the step has no handler for it: the step is skipped there (the run goes on), not failed.
+    if (action.step === ASSISTANT_PACK_STEP.id) {
+      const cap = await one(
+        tx,
+        'SELECT 1 FROM workstation_capabilities WHERE workstation_id=$1 AND $2 = ANY (capabilities)',
+        [repo.workstation_id, RELEASE_DOCS_PREP_ASSISTANT_PACK_CAPABILITY],
+      );
+      if (!cap) {
+        await finishInline(ctx, tx, run, repoId, action.step, action.phase ?? '', {
+          state: 'skipped',
+          error: ASSISTANT_PACK_RUNNER_TOO_OLD_NOTE,
+        });
+        skippedHere = true;
+        continue;
+      }
     }
     if (action.step === 'guide' && (action.phase ?? '') === 'check') {
       const configured = await guidePathFor(tx, run.project_id, repoId);
@@ -744,8 +771,9 @@ async function dispatchAction(
       }),
     );
   }
-  // A step that failed before anything was sent finishes the run now (nothing is committed).
-  if (failedHere) deliver.push(...(await advance(ctx, tx, runId)));
+  // A step that failed before anything was sent finishes the run now (nothing is committed); one skipped before anything
+  // was sent lets the run go on.
+  if (failedHere || skippedHere) deliver.push(...(await advance(ctx, tx, runId)));
   return deliver;
 }
 

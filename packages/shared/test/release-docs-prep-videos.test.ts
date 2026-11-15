@@ -57,6 +57,7 @@ describe('Generate videos step registry', () => {
       'changelog',
       'guide',
       'help',
+      'assistant-pack',
       'videos',
       'commit',
     ]);
@@ -65,6 +66,7 @@ describe('Generate videos step registry', () => {
       'changelog',
       'guide',
       'help',
+      'assistant-pack',
       'commit',
     ]);
     expect(enabledReleaseDocsPrepSteps({ steps: { videos: true } }).map((s) => s.id)).toEqual([
@@ -72,6 +74,7 @@ describe('Generate videos step registry', () => {
       'changelog',
       'guide',
       'help',
+      'assistant-pack',
       'videos',
       'commit',
     ]);

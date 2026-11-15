@@ -18,6 +18,8 @@ export interface ReleaseDocsPrepStepDef {
   /** Run order (ascending). Content steps of the sibling cards sit between `analyse` (10) and `commit` (1000). */
   order: number;
   defaultOn: boolean;
+  /** Not in the project's checklist yet (a step added after the settings were saved): on exactly when this step is on. */
+  defaultWith?: string;
   /** True when the step writes files into the repository (they are committed by `commit`). */
   producesFiles: boolean;
   /** Only `commit`: always runs last, and only when every step before it passed in every repo. */
@@ -97,12 +99,33 @@ export const HELP_STEP: ReleaseDocsPrepStepDef = {
   writerPhase: 'write',
 };
 
+/** Where the assistant knowledge pack generator lives; a repository without it has no pack to regenerate. */
+export const ASSISTANT_PACK_GENERATOR_PATH = 'apps/server/scripts/build-assistant-pack.ts';
+/** The generated pack (index.md and topics/<slug>.md): the only files the step may change. */
+export const ASSISTANT_PACK_DIR = 'apps/server/src/assistant/pack';
+export const NO_ASSISTANT_PACK_NOTE = 'skipped: no assistant pack in this repository';
+export const ASSISTANT_PACK_RUNNER_TOO_OLD_NOTE = 'skipped: needs a newer runner';
+
+export const ASSISTANT_PACK_STEP: ReleaseDocsPrepStepDef = {
+  id: 'assistant-pack',
+  label: 'Regenerate assistant knowledge',
+  description:
+    "Regenerates the assistant's knowledge pack from the Help articles and the product facts, so the release ships a pack that matches its Help. Needs Update Help articles.",
+  // right after the Help articles (35), which are its input; before the videos (40)
+  order: 36,
+  defaultOn: true,
+  defaultWith: 'help',
+  producesFiles: true,
+  requires: ['help'],
+};
+
 /** Sibling steps append one import and one entry here; nothing else in this card changes. */
 const STEPS: ReleaseDocsPrepStepDef[] = [
   ANALYSE_STEP,
   CHANGELOG_STEP,
   GUIDE_STEP,
   HELP_STEP,
+  ASSISTANT_PACK_STEP,
   VIDEOS_STEP,
   COMMIT_STEP,
 ];
@@ -146,10 +169,21 @@ export const DEFAULT_RELEASE_DOCS_PREP: ReleaseDocsPrepSettings = {
   autoStart: false,
 };
 
-/** The registered steps that are ticked (an unticked-by-default registry entry follows `defaultOn`). */
+/**
+ * Whether a step is ticked in a project's checklist. A step the checklist does not name follows `defaultWith` (the step
+ * it belongs to) when it has one, else `defaultOn`.
+ */
+export function releaseDocsPrepStepOn(steps: Record<string, boolean>, def: ReleaseDocsPrepStepDef): boolean {
+  const set = steps[def.id];
+  if (set !== undefined) return set;
+  const with_ = def.defaultWith ? releaseDocsPrepStep(def.defaultWith) : undefined;
+  return with_ ? releaseDocsPrepStepOn(steps, with_) : def.defaultOn;
+}
+
+/** The registered steps that are ticked (an entry the checklist does not name follows its default). */
 export const enabledReleaseDocsPrepSteps = (
   settings: Pick<ReleaseDocsPrepSettings, 'steps'>,
-): ReleaseDocsPrepStepDef[] => releaseDocsPrepSteps().filter((s) => settings.steps[s.id] ?? s.defaultOn);
+): ReleaseDocsPrepStepDef[] => releaseDocsPrepSteps().filter((s) => releaseDocsPrepStepOn(settings.steps, s));
 
 /** The first enabled step whose required step is off, with the sentence to show; null when the set is complete. */
 export function missingReleaseDocsPrepRequirement(

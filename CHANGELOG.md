@@ -4,6 +4,10 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Added
+
+- Release prep regenerates the assistant's knowledge. A new step, Regenerate assistant knowledge, runs after Update Help articles (ticked by default when that step is ticked) and rebuilds the assistant's knowledge pack from the Help articles on the workstation, so a release whose Help changed ships matching assistant answers. Repositories without the pack skip it; a workstation whose runner is too old skips it too instead of failing the run. Runner announces `release-docs-prep-assistant-pack:1`.
+
 ## [1.8.0] - 2026-11-15
 
 Runner 0.1.75.
