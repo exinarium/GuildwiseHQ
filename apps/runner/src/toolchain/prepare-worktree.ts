@@ -2,6 +2,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { normalizeProjectPath } from '@aom/shared';
+import { TRUST_LOCKFILE_ENV } from '../checks/offline-env.ts';
 import { type CheckLaunch, capture } from '../checks/run.ts';
 import { git } from '../git/git.ts';
 import { detectStacks, viewOf } from './detect.ts';
@@ -55,6 +56,27 @@ export interface PrepareWorktreeInput {
   stacks?: (dir: string) => Array<{ id: string; steps: DepStep[] }>;
   spawnImpl?: typeof nodeSpawn;
   now?: () => number;
+  /**
+   * Trust the committed lockfile in the offline install (`pnpm_config_trust_lockfile`): pnpm cannot re-verify it against
+   * its supply-chain policies without the registry. Runner config `prepTrustLockfile` (default true). False: a pnpm
+   * install without the verified metadata in the store fails fast, with a plain reason.
+   */
+  trustLockfile?: boolean;
+}
+
+/**
+ * Why an offline install failed, in one plain sentence, when the cause is a package missing from the shared store (the
+ * install runs with no network; see `checks/offline-env.ts`). Null: another failure (the caller shows the output's tail).
+ */
+export function offlineInstallProblem(output: string): string | null {
+  if (!/ERR_PNPM_NO_OFFLINE|ENOTCACHED|offline mode|YN0080|--offline/i.test(output)) return null;
+  const pick =
+    /missing package may be downloaded from \S*\/((?:@[^/\s]+\/)?[^/\s]+)\/-\//i.exec(output)?.[1] ??
+    /Failed to resolve (\S+)/i.exec(output)?.[1] ??
+    /request to \S*\/((?:@[^/\s]+%2f)?[^/\s]+) failed/i.exec(output)?.[1]?.replace(/%2f/i, '/') ??
+    /No matching version found for (\S+)/i.exec(output)?.[1] ??
+    null;
+  return `not in the shared package store${pick ? `: ${pick}` : ''}; the preparation installs offline only. Run the install in your shell (it fills the store), then hand off again`;
 }
 
 /** The project's dependency installs, from the same table the toolchain step uses (D6), in its order. */
@@ -200,7 +222,10 @@ export async function prepareWorktree(i: PrepareWorktreeInput): Promise<PrepResu
         }
         try {
           const c = await capture(
-            { ...l, env: { ...l.env, ...IN_PROJECT_ENV } },
+            {
+              ...l,
+              env: { ...l.env, ...IN_PROJECT_ENV, ...(i.trustLockfile === false ? {} : TRUST_LOCKFILE_ENV) },
+            },
             dir,
             remaining,
             i.signal,
@@ -210,7 +235,11 @@ export async function prepareWorktree(i: PrepareWorktreeInput): Promise<PrepResu
           if (c.aborted) fail('stopped: the shift ended');
           else if (c.spawnError !== undefined) fail(`could not start: ${c.spawnError}`);
           else if (c.timedOut) fail(`timed out: over the ${minutes(budget)} budget`);
-          else if (c.exitCode !== 0) fail(`exit ${c.exitCode ?? '?'}: ${tail(c.output) || 'no output'}`);
+          else if (c.exitCode !== 0)
+            fail(
+              offlineInstallProblem(c.output) ??
+                `exit ${c.exitCode ?? '?'}: ${tail(c.output) || 'no output'}`,
+            );
           else add({ name: step.name, status: 'done', ms: now() - t });
           if (c.exitCode !== 0) break; // later steps of this stack depend on this one
         } finally {
