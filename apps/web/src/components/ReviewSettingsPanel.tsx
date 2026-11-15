@@ -57,6 +57,47 @@ function StatusLine({ label, status, testId }: { label: string; status: FeatureS
   );
 }
 
+const STATUS_COMMAND = 'guildwise-runner status-token github';
+
+/**
+ * One read-only line on the hard size check: whether the status is posted on pull requests, and why it is not when a
+ * workstation cannot post. No inputs; the state is in words, never in colour alone, and the line wraps at 320 px.
+ */
+export function SizeStatusLine({
+  sizeStatus,
+}: {
+  sizeStatus: NonNullable<ProjectDetailResponse['project']['sizeStatus']>;
+}) {
+  const failing =
+    sizeStatus.failing > 0
+      ? ` ${sizeStatus.failing} pull request${sizeStatus.failing === 1 ? ' is' : 's are'} over budget.`
+      : '';
+  return (
+    <p className="mb-4 break-words text-sm text-muted" data-testid="size-status-line" role="status">
+      {sizeStatus.state === 'inactive' ? (
+        <>Hard size check: inactive until a size budget and unit are set.</>
+      ) : sizeStatus.state === 'no_token' ? (
+        <>
+          Hard size check: no workstation has a status token, so no status is posted and a required check
+          keeps pull requests waiting. Run{' '}
+          <code className="inline-block min-h-11 select-all break-all font-mono text-fg">
+            {STATUS_COMMAND}
+          </code>{' '}
+          on a workstation with the clone.
+        </>
+      ) : sizeStatus.state === 'no_runner' ? (
+        <>Hard size check: waiting for a workstation with the clone to come online.</>
+      ) : (
+        <>
+          Hard size check: posts the status{' '}
+          <strong className="font-semibold text-fg">{sizeStatus.context}</strong> on every pull request. To
+          block merging, make it required on the branch (Guide 4.3d).{failing}
+        </>
+      )}
+    </p>
+  );
+}
+
 /**
  * The project's review settings: the size budget, the unit it is measured in and the path-to-risk map. Nothing is set
  * by default, and the checks that need a value say which one is missing. Only the project owner can change them.
@@ -139,6 +180,8 @@ export function ReviewSettingsPanel({
           <StatusLine label="Risk from paths" status={status.risk} testId="review-settings-status-risk" />
         </ul>
       </Callout>
+
+      {project.sizeStatus ? <SizeStatusLine sizeStatus={project.sizeStatus} /> : null}
 
       {!canChange ? (
         <div className="flex flex-col gap-2 text-sm text-fg" data-testid="review-settings-readonly">
