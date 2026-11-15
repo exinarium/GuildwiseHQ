@@ -13,6 +13,7 @@ import {
   PR_TIMED_OUT_TWICE_SUBKIND,
   type ResolveDeskItemRequest,
   type ShipReleaseApproval,
+  SIZE_EXCEPTION_SUBKIND,
   streamId,
   TOPICS_DESK_SUBKIND,
   UNMAPPED_TICKET_SUBKIND,
@@ -60,6 +61,7 @@ import { afterAssignmentDecision, PACK_ASSIGNMENT_SUBKIND, resolvePackAssignment
 import { resolvePhaseDeskItemIn } from './phases.ts';
 import { resolveTimedOutTwice } from './pr-size-check.ts';
 import { resolveRepoCreateIn, retryRepoCreateIn } from './repo-create.ts';
+import { resolveSizeExceptionIn } from './size-exception.ts';
 import { testerLoopAnswered } from './tester-loop.ts';
 import { resolveVaultConflictIn } from './vaults.ts';
 
@@ -398,6 +400,9 @@ async function closeItem(
       if (resolution === 'acknowledged')
         throw badRequest('wrong_resolution', 'a merge approval is approved or rejected');
       workstationToDeliver = (await resolveLargeMergeIn(ctx, tx, user, item, resolution, note)) ?? undefined;
+    } else if (item.kind === 'approval' && item.subkind === SIZE_EXCEPTION_SUBKIND) {
+      // A size exception: approved keeps the over-budget pull request as one, rejected sends it back to its author.
+      await resolveSizeExceptionIn(ctx, tx, user, item, resolution, note);
     } else if (item.kind === 'approval' && PLATFORM_APPROVAL_SUBKINDS.has(item.subkind)) {
       // Platform team (Lean Team v3): deploy and downtime approvals and stop-loss decisions on the platform organisation's
       // desk, a grant request on the client organisation's desk.

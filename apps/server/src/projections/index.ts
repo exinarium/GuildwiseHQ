@@ -62,6 +62,7 @@ import { scheduleProjectors } from './schedules.ts';
 import { sessionProjectors } from './sessions.ts';
 import { sharingProjectors } from './sharing.ts';
 import { shiftProjectors } from './shifts.ts';
+import { sizeExceptionProjectors } from './size-exception.ts';
 import { socialPostProjectors } from './social-posts.ts';
 import { storageProjectors } from './storage.ts';
 import { subworkflowProjectors } from './subworkflows.ts';
@@ -90,6 +91,7 @@ const domains: Array<Record<string, Projector>> = [
   projectProjectors,
   prReviewRunProjectors,
   prSizeCheckProjectors,
+  sizeExceptionProjectors,
   prReplayProjectors,
   projectWorkflowProjectors,
   agentProjectors,
@@ -244,6 +246,7 @@ export const PROJECTION_TABLES = [
   'journey_webhook_calls',
   'journey_hook_triggers',
   'owner_pending_timers',
+  'pr_size_exceptions',
   'card_handoffs',
   'card_transitions',
   'card_activity',

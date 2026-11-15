@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   type ChainCandidate,
+  exemptionCovers,
   isSecondTimeout,
   type OpenChange,
   PR_NOTICE_CAPABILITY,
@@ -28,6 +29,7 @@ import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { registerOwnerPending, resolveOwnerPending } from './owner-pending.ts';
 import { requestPrList } from './pr-only.ts';
+import { sizeExemptionOf, supersedeSizeExemption } from './size-exemption.ts';
 
 /**
  * The PR size check. A pull request (or the chain of pull requests stacked on each other) over the project's size budget
@@ -147,7 +149,7 @@ async function reviewInFlight(db: Queryable, prReviewId: string): Promise<boolea
   return Boolean(r);
 }
 
-interface RecordedPr {
+export interface RecordedPr {
   id: string;
   changeId: string;
   state: string;
@@ -165,7 +167,8 @@ async function lockRecordedPrs(tx: Tx, repoId: string): Promise<RecordedPr[]> {
   ).map((r) => ({ id: r.id as string, changeId: r.change_id as string, state: r.review_state as string }));
 }
 
-async function sendBack(
+/** Marks the pull request `needs_split` and creates the author's notice (one event; the projection does both). */
+export async function sendPrBackToAuthorIn(
   ctx: Ctx,
   tx: Tx,
   at: { projectId: string; orgId: string; repoId: string },
@@ -224,7 +227,13 @@ export async function evaluateRepoSizes(
         .join(',');
       const checkId = checks.get(chainKey) ?? randomUUID();
       checks.set(chainKey, checkId);
-      await sendBack(ctx, tx, at, pr, v, checkId, 'over_budget');
+      const ex = await sizeExemptionOf(tx, pr.id);
+      if (ex) {
+        // an approved size exception covers the pull request up to the approved size: it is not sent back
+        if (exemptionCovers(ex, v.total)) continue;
+        await supersedeSizeExemption(ctx, tx, ex);
+      }
+      await sendPrBackToAuthorIn(ctx, tx, at, pr, v, checkId, 'over_budget');
     } else if ((v.state === 'within' || v.state === 'inactive') && pr.state === 'needs_split') {
       await ctx.store.append(
         [
@@ -249,6 +258,8 @@ export async function evaluateRepoSizes(
 const verdictText = (v: PrSizeVerdict): string => {
   if (v.state === 'within')
     return `within the size budget: ${v.total} of ${v.budget} ${sizeUnitWord(v.unit)}`;
+  if (v.state === 'over')
+    return `over the size budget (${v.total} of ${v.budget} ${sizeUnitWord(v.unit)}) with an approved size exception`;
   if (v.state === 'inactive') return 'the size check is inactive: no size budget is set';
   return 'the size could not be measured';
 };
@@ -281,7 +292,9 @@ export async function onPrReviewTimedOut(ctx: Ctx, tx: Tx, run: Row): Promise<{ 
     trigger: (run.trigger as 'auto' | 'manual' | null) ?? 'auto',
     rerunOfRunId: (run.rerun_of_run_id as string | null) ?? null,
   });
-  const follow = timeoutFollowUp(second, v);
+  // an approved size exception covers the pull request: over budget does not send it back, so only the owner step remains
+  const exempt = v.state === 'over' && exemptionCovers(await sizeExemptionOf(tx, prReviewId), v.total);
+  const follow = exempt ? (second ? 'owner_pending' : 'none') : timeoutFollowUp(second, v);
   if (follow === 'needs_split' && v.state === 'over') {
     const checkId = randomUUID();
     const reason: SplitReason = second ? 'second_timeout_over_budget' : 'timeout_over_budget';
@@ -289,7 +302,7 @@ export async function onPrReviewTimedOut(ctx: Ctx, tx: Tx, run: Row): Promise<{ 
     for (const m of await lockRecordedPrs(tx, repoId)) {
       if (!members.has(m.changeId) || m.state !== 'not_reviewed') continue;
       if (m.id !== prReviewId && (await reviewInFlight(tx, m.id))) continue;
-      await sendBack(
+      await sendPrBackToAuthorIn(
         ctx,
         tx,
         { projectId, orgId, repoId },

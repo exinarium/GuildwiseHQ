@@ -12,9 +12,15 @@ import { ReviewerRunSpecSchema, ReviewFindingSchema } from './reviewer-run.ts';
 
 /**
  * Review states of a recorded pull request. `not_reviewed` until a reviewer run completes; `needs_split`: over the size
- * budget, sent back to its author, and not reviewed until it is within the budget again.
+ * budget, sent back to its author, and not reviewed until it is within the budget again; `size_exception_pending`: a size
+ * exception was asked for and waits for the owner.
  */
-export const PR_REVIEW_STATES = ['not_reviewed', 'reviewed', 'needs_split'] as const;
+export const PR_REVIEW_STATES = [
+  'not_reviewed',
+  'reviewed',
+  'needs_split',
+  'size_exception_pending',
+] as const;
 export const PrReviewStateSchema = z.enum(PR_REVIEW_STATES);
 export type PrReviewState = z.infer<typeof PrReviewStateSchema>;
 
@@ -350,6 +356,16 @@ export const PrReviewDtoSchema = z.object({
           error: z.string().nullable(),
         })
         .nullable(),
+    })
+    .nullable()
+    .optional(),
+  /** A size exception: asked for and waiting for the owner, or approved (the pull request is reviewed over budget). */
+  sizeException: z
+    .object({
+      id: z.uuid(),
+      state: z.enum(['pending', 'approved']),
+      dueAt: z.string(),
+      size: z.number(),
     })
     .nullable()
     .optional(),

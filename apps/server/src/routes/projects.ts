@@ -35,6 +35,7 @@ import {
   SetStopLossRequestSchema,
   SetTestServicesRequestSchema,
   SetWorkingBranchRequestSchema,
+  SizeExceptionsQuerySchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -87,6 +88,7 @@ import {
 } from '../commands/projects.ts';
 import { requestReleasePr } from '../commands/release-pr.ts';
 import { setRepoAccessMethod } from '../commands/repo-access.ts';
+import { listSizeExceptions } from '../commands/size-exception.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import { gone, notFound } from '../errors.ts';
@@ -139,6 +141,21 @@ export function projectRoutes(ctx: Ctx) {
         }),
       };
     });
+
+    /** The size exception requests of the project (reason and outcome), newest first; the same visibility as the list. */
+    app.get(
+      '/api/projects/:id/size-exceptions',
+      { schema: { params: IdParamsSchema, querystring: SizeExceptionsQuerySchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await loadVisibleProject(ctx.pool, s.user.id, req.params.id);
+        return {
+          sizeExceptions: await listSizeExceptions(ctx.pool, req.params.id, {
+            ...(req.query.state ? { state: req.query.state } : {}),
+          }),
+        };
+      },
+    );
 
     /** Today's used count and the queue of waiting pull requests in run order. */
     app.get('/api/projects/:id/pull-requests/queue', { schema: { params: IdParamsSchema } }, async (req) => {

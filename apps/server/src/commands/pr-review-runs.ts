@@ -898,6 +898,27 @@ export async function listPrReviews(
       const t = await ownerPendingOf(db, 'second_timeout', l.id as string);
       if (t?.status === 'open') reminders.set(l.id as string, { dueAt: t.dueAt, remindedAt: t.remindedAt });
     }
+  // the size exception that is open or approved, per pull request (as the pull request or a member of its chain)
+  const exceptions = await rows(
+    db,
+    `SELECT id, state, due_at, size, pr_review_id, chain_pr_review_ids FROM pr_size_exceptions
+      WHERE project_id=$1 AND state IN ('pending','approved') ORDER BY requested_at`,
+    [projectId],
+  );
+  const exceptionOf = (prId: string): PrReviewDto['sizeException'] => {
+    const e = exceptions.filter(
+      (x) => x.pr_review_id === prId || (x.chain_pr_review_ids as string[]).includes(prId),
+    );
+    const last = e.at(-1);
+    return last
+      ? {
+          id: last.id as string,
+          state: last.state as 'pending' | 'approved',
+          dueAt: new Date(last.due_at as string).toISOString(),
+          size: Number(last.size),
+        }
+      : null;
+  };
   const sizeOf = (l: Record<string, unknown>): PrReviewDto['size'] => {
     const ctx2 = sizes.get(l.project_repo_id as string);
     if (!ctx2 || l.closed_at || l.review_state === 'reviewed') return null;
@@ -939,6 +960,7 @@ export async function listPrReviews(
       state: l.review_state as PrReviewState,
       reviewedAt: iso(l.reviewed_at),
       size: sizeOf(l),
+      sizeException: exceptionOf(l.id as string),
       split:
         l.review_state === 'needs_split'
           ? {

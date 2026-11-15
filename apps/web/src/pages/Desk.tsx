@@ -3,6 +3,7 @@ import {
   type DeskItemDto,
   isPhaseDeskSubkind,
   NEEDS_SPLIT_DESK_SUBKIND,
+  SIZE_EXCEPTION_SUBKIND,
   WORKING_BRANCH_SUBKIND,
 } from '@aom/shared';
 import {
@@ -35,6 +36,7 @@ import {
 } from '../components/ceo/DeskCeo.tsx';
 import { DigestRating } from '../components/DigestRating.tsx';
 import { FormOfflineLinkBlock } from '../components/desk/FormOfflineLinkBlock.tsx';
+import { SizeExceptionDeskItem } from '../components/desk/SizeExceptionDeskItem.tsx';
 import { AskDevOpsButton } from '../components/devops/AskDevOps.tsx';
 import { EscalationTrail } from '../components/EscalationTrail.tsx';
 import { AgentAvatar, UserAvatar } from '../components/Face.tsx';
@@ -489,7 +491,7 @@ export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?:
         <span className="tnum ml-auto text-xs text-subtle" title={formatDateTime(item.createdAt)}>
           asked {ageLabel(item.createdAt, now)} ago
         </span>
-        <SnoozeSelect item={item} />
+        {item.subkind !== SIZE_EXCEPTION_SUBKIND && <SnoozeSelect item={item} />}
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
@@ -630,6 +632,8 @@ export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?:
         <PhaseDeskItem item={item} />
       ) : item.subkind === 'unmapped_ticket' ? (
         <MappingForm item={item} />
+      ) : item.kind === 'approval' && item.subkind === SIZE_EXCEPTION_SUBKIND ? (
+        <SizeExceptionDeskItem item={item} />
       ) : item.kind === 'approval' && item.subkind === 'outbound' ? (
         <OutboundApproval item={item} />
       ) : item.kind === 'approval' && item.subkind === 'ship_release' ? (

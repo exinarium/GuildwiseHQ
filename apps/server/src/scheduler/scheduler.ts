@@ -22,6 +22,7 @@ import { expireRuns } from '../commands/runs.ts';
 import { deliverDue } from '../commands/schedule-delivery.ts';
 import { sweepEventTriggers } from '../commands/schedule-triggers.ts';
 import { fireDueSchedules } from '../commands/schedules.ts';
+import { sizeExceptionSweep } from '../commands/size-exception.ts';
 import { socialTick } from '../commands/social.ts';
 import { pruneStorage } from '../commands/storage-connections.ts';
 import { sweepSubworkflows } from '../commands/subworkflows.ts';
@@ -197,6 +198,10 @@ export class Scheduler {
       // Owner-pending items: the owner is reminded once after 2 working days without acting (the item's state is kept).
       await ownerPendingSweep(this.ctx).catch((err) =>
         this.ctx.log.error({ err }, 'owner-pending reminders failed'),
+      );
+      // Size exception requests: no owner answer within 2 working days sends the pull request back to its author. No reminder.
+      await sizeExceptionSweep(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'size exception sweep failed'),
       );
       return fired;
     });
