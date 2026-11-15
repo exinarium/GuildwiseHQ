@@ -2,7 +2,7 @@ import { basename, join } from 'node:path';
 import { type CommitAs, isSafeGitRef } from '@aom/shared';
 import { isProtectedBranchRejection } from './gh.ts';
 import { ambiguousMainMessage, git, gitOk, hasRemote, resolveDefaultBranch, revParse } from './git.ts';
-import { commitEnv, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
+import { type BoundPostAs, commitEnv, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
@@ -27,6 +27,8 @@ export interface SyncMainInput {
   auth?: GitAuth;
   /** The project's "Commit as" setting; absent: the repository's or the workstation's git identity. */
   commitAs?: CommitAs | null;
+  /** This repository's entry of the project's post-as plan: with an app it is the app or nothing (fail closed). */
+  postAs?: BoundPostAs | null;
 }
 
 export type SyncMainOutcome =
@@ -68,7 +70,7 @@ export async function syncMainIntoWorking(input: SyncMainInput): Promise<SyncMai
     // Unset: the remote's own default (never a guess between main and master; with two candidates nothing is merged).
     const main = input.mainBranch ?? (await resolveDefaultBranch(repoPath, { auth: input.auth })).branch;
     if (!main || main === working || !isSafeGitRef(main)) return { kind: 'nothing' };
-    const env = commitEnv(await requireCommitIdentity(repoPath, input.commitAs));
+    const env = commitEnv(await requireCommitIdentity(repoPath, input.commitAs, input.postAs));
     const message = `Merge ${main} into ${working}`;
 
     const attempt = async (): Promise<SyncMainOutcome | 'retry'> => {
@@ -139,7 +141,13 @@ export type CardMergeOutcome =
  */
 export async function mergeMainIntoCard(
   worktree: string,
-  opts: { mainBranch?: string; ref: string; commitAs?: CommitAs | null; auth?: GitAuth },
+  opts: {
+    mainBranch?: string;
+    ref: string;
+    commitAs?: CommitAs | null;
+    postAs?: BoundPostAs | null;
+    auth?: GitAuth;
+  },
 ): Promise<CardMergeOutcome | { error: string }> {
   let main = opts.mainBranch;
   if (!main) {
@@ -155,8 +163,10 @@ export async function mergeMainIntoCard(
   if (!mainSha) return { error: `the main branch '${main}' does not exist in this repository` };
   if ((await git(worktree, ['merge-base', '--is-ancestor', target, 'HEAD'])).exitCode === 0)
     return { result: 'up_to_date', main: mainSha };
+  // Resolved before git runs: a selected app that cannot mint throws AppIdentityError and nothing is merged.
+  const env = commitEnv(await requireCommitIdentity(worktree, opts.commitAs, opts.postAs));
   const m = await git(worktree, ['merge', '--no-ff', '-m', `Merge ${main} into the card branch`, target], {
-    env: commitEnv(await requireCommitIdentity(worktree, opts.commitAs)),
+    env,
   });
   if (m.exitCode === 0)
     return {

@@ -3,6 +3,8 @@ import {
   type CommitAsResponse,
   CommitAsSchema,
   isOrgManager,
+  POST_AS_CAPABILITY,
+  type PostAsPlan,
   RepoIdentityFactSchema,
   streamId,
 } from '@aom/shared';
@@ -12,8 +14,9 @@ import { loadVisibleProject } from '../authz/scope.ts';
 import type { Ctx } from '../context.ts';
 import { one, type Queryable, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { forbidden } from '../errors.ts';
+import { conflict, forbidden } from '../errors.ts';
 import { projectScope, userActor } from './common.ts';
+import { loadPostAsPlan, postAsSettings } from './post-as.ts';
 
 /**
  * "Commit as" (backlog #65): the name and e-mail every commit of a project carries. The runner resolves the identity
@@ -32,13 +35,64 @@ export async function loadCommitAs(
   return parsed.success ? parsed.data : null;
 }
 
-/** Adds the project's `commitAs` to a `shift.start` payload (additive; absent when the project sets none). */
+/**
+ * The project's identity plan: the Commit as setting and the post-as plan per repository. `postAs` is `null` when no app
+ * is selected, so callers spread it only when set and the payloads stay exactly as before.
+ */
+export async function loadIdentityPlan(
+  db: Queryable,
+  projectId: string | null | undefined,
+): Promise<{ commitAs: CommitAs | null; postAs: PostAsPlan | null }> {
+  const commitAs = await loadCommitAs(db, projectId);
+  return { commitAs, postAs: await loadPostAsPlan(db, projectId, commitAs) };
+}
+
+/** `{ commitAs }` exactly as before (null when unset) plus `postAs` only when an app is selected. */
+export async function identityFields(
+  db: Queryable,
+  projectId: string | null | undefined,
+): Promise<{ commitAs: CommitAs | null; postAs?: PostAsPlan }> {
+  const { commitAs, postAs } = await loadIdentityPlan(db, projectId);
+  return postAs ? { commitAs, postAs } : { commitAs };
+}
+
+/** Why a command is not sent: an older runner ignores `postAs` and would commit under the owner's identity. */
+export const POST_AS_RUNNER_TOO_OLD_MESSAGE =
+  'This project posts as an app, and the runner on the workstation that would do it is too old to use the app. Update the runner and try again; nothing was committed or pushed under another identity.';
+
+/** Does the workstation's runner honour `postAs` (capability post-as:1)? */
+export async function canPostAs(db: Queryable, workstationId: string | null | undefined): Promise<boolean> {
+  if (!workstationId) return false;
+  const r = await one(
+    db,
+    'SELECT 1 FROM workstation_capabilities WHERE workstation_id=$1 AND $2 = ANY (capabilities)',
+    [workstationId, POST_AS_CAPABILITY],
+  );
+  return !!r;
+}
+
+/**
+ * {@link identityFields} for a command sent to one workstation. With an app selected and a runner without post-as:1 the
+ * command is refused (409 runner_too_old) instead of reaching a runner that would ignore the app (fail closed).
+ */
+export async function identityFieldsFor(
+  db: Queryable,
+  projectId: string | null | undefined,
+  workstationId: string | null | undefined,
+): Promise<{ commitAs: CommitAs | null; postAs?: PostAsPlan }> {
+  const fields = await identityFields(db, projectId);
+  if (fields.postAs && !(await canPostAs(db, workstationId)))
+    throw conflict('runner_too_old', POST_AS_RUNNER_TOO_OLD_MESSAGE);
+  return fields;
+}
+
+/** Adds the project's `commitAs` and `postAs` to a `shift.start` payload (additive; each absent when not set). */
 export async function withCommitAs<T extends { brief: { project: { id: string } } }>(
   ctx: Ctx,
   payload: T,
-): Promise<T & { commitAs?: CommitAs }> {
-  const commitAs = await loadCommitAs(ctx.pool, payload.brief.project.id);
-  return commitAs ? { ...payload, commitAs } : payload;
+): Promise<T & { commitAs?: CommitAs; postAs?: PostAsPlan }> {
+  const { commitAs, postAs } = await loadIdentityPlan(ctx.pool, payload.brief.project.id);
+  return { ...payload, ...(commitAs ? { commitAs } : {}), ...(postAs ? { postAs } : {}) };
 }
 
 export async function getCommitAs(
@@ -57,8 +111,17 @@ export async function getCommitAs(
     [projectId],
   );
   const parsed = CommitAsSchema.safeParse(p.commit_as ?? null);
+  const commitAs = parsed.success ? parsed.data : null;
+  const { postAs, repos } = await postAsSettings(
+    ctx.pool,
+    user,
+    p as Parameters<typeof postAsSettings>[2],
+    commitAs,
+  );
   return {
-    commitAs: parsed.success ? parsed.data : null,
+    commitAs,
+    postAs,
+    repos,
     clones: clones.map((c) => {
       const id = RepoIdentityFactSchema.safeParse(c.git_identity ?? null);
       return {

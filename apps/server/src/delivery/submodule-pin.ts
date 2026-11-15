@@ -4,7 +4,7 @@ import {
   runnerAtLeast,
   type Trigger,
 } from '@aom/shared';
-import { loadCommitAs } from '../commands/commit-as.ts';
+import { canPostAs, loadIdentityPlan, POST_AS_RUNNER_TOO_OLD_MESSAGE } from '../commands/commit-as.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
@@ -92,7 +92,20 @@ export async function requestSubmodulePin(
     return 'unsupported';
   }
 
-  const commitAs = await loadCommitAs(ctx.pool, p.projectId);
+  const { commitAs, postAs } = await loadIdentityPlan(ctx.pool, p.projectId);
+  // An app is selected: a runner that does not know post-as would commit the pin as the owner, so the pin stays.
+  if (postAs && !(await canPostAs(ctx.pool, ws.id))) {
+    await raiseDeskNotice(ctx, {
+      orgId: project.org_id,
+      projectId: p.projectId,
+      subkind: 'submodule_pin',
+      subjectKey: pinSubject(p.projectId, p.deployRepo.id),
+      title: `${project.key}: the ${source.name} pin in ${p.deployRepo.name} was not updated`,
+      body: `A card merged into ${source.name}. ${p.deployRepo.name} was deployed as it is. ${POST_AS_RUNNER_TOO_OLD_MESSAGE}`,
+      data: { projectId: p.projectId, repoId: p.deployRepo.id, sourceRepoId: source.id },
+    });
+    return 'unsupported';
+  }
   const payload: RepoBumpSubmodulePayload = {
     projectId: p.projectId,
     repoId: p.deployRepo.id,
@@ -102,6 +115,7 @@ export async function requestSubmodulePin(
     submoduleRemoteUrlNormalized: source.remote_url_normalized,
     commit: merge.commit,
     ...(commitAs ? { commitAs } : {}),
+    ...(postAs ? { postAs } : {}),
     ...(p.deployRepo.forge_kind
       ? { forge: p.deployRepo.forge_kind as RepoBumpSubmodulePayload['forge'] }
       : {}),

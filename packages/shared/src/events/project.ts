@@ -6,6 +6,7 @@ import { ProjectKeySchema } from '../ids.ts';
 import { SizeUnitSchema, StoredRiskMapSchema } from '../projects/review-settings.ts';
 import { LocalTestServicesSchema } from '../projects/test-services.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
+import { PostAsAppRefSchema } from '../repo/post-as.ts';
 import { ComponentRulesSchema } from '../repo/component-rules.ts';
 import { FindingDispositionSchema } from '../review/findings.ts';
 import { FindingMarkSchema } from '../review/marks.ts';
@@ -155,6 +156,16 @@ export const projectEvents = [
   defineEvent(
     'ProjectCommitAsSet',
     z.object({ projectId: Id, commitAs: CommitAsSchema.nullable(), setBy: Id.optional() }),
+  ),
+  /** The apps the project posts as changed (references only, never a key or token). Empty `apps` = none. */
+  defineEvent(
+    'ProjectPostAsAppsSet',
+    z.object({
+      projectId: Id,
+      apps: z.array(PostAsAppRefSchema).max(8),
+      previous: z.array(PostAsAppRefSchema).max(8),
+      setBy: Id,
+    }),
   ),
   /** The runner found the working branch missing in the repository and created it from `from` (pushed when `pushed`). */
   defineEvent(

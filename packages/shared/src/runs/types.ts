@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PostAsPlanSchema } from '../repo/post-as.ts';
 import { CommitAsSchema } from '../repo/commit-identity.ts';
 import { RebaseErrorInfoSchema } from '../repo/rebase-error.ts';
 import { RunPlanSchema, RunSettingsSchema } from './plan.ts';
@@ -134,6 +135,8 @@ export const RunStartPayloadSchema = z.object({
       cardWorktreePath: z.string().min(1),
       baseBranch: z.string().min(1).max(250),
       commitAs: CommitAsSchema.nullable().optional(),
+      /** The project's post-as plan per repository; absent when the project has no app selected. */
+      postAs: PostAsPlanSchema.optional(),
     })
     .optional(),
   /**

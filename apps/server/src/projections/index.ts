@@ -14,6 +14,7 @@ import { ceoTopicProjectors } from './ceo-topics.ts';
 import { chatProjectors } from './chats.ts';
 import { codeV6Projectors } from './code-v6.ts';
 import { commitAsProjectors } from './commit-as.ts';
+import { postAsProjectors } from './post-as.ts';
 import { costProjectors } from './costs.ts';
 import { deliveryProjectors } from './delivery.ts';
 import { designGateProjectors } from './design-gate.ts';
@@ -132,6 +133,7 @@ const domains: Array<Record<string, Projector>> = [
   interestRunProjectors,
   runProjectors,
   commitAsProjectors,
+  postAsProjectors,
   ceoProjectors,
   ceoFrontDoorProjectors,
   deliveryProjectors,

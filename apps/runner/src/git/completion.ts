@@ -10,7 +10,15 @@ import { statusLinesWithoutStubs } from '../adapters/sandbox-placeholders.ts';
 import type { BranchRules } from '../forge/types.ts';
 import { isProtectedBranchRejection, type PrCreator } from './gh.ts';
 import { advanceLocalBranch, git, gitOk, hasRemote, revParse } from './git.ts';
-import { commitEnv, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
+import {
+  AppIdentityError,
+  type AppTokenProbe,
+  appIdentityWire,
+  boundPostAsFor,
+  commitEnv,
+  NoCommitIdentityError,
+  requireCommitIdentity,
+} from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import { commitsWithInternalRef, describeCommits } from './internal-ref.ts';
 import { baseTarget, RebaseConflictError, RebaseError, rebaseOntoBase } from './rebase.ts';
@@ -18,6 +26,8 @@ import { withRepoLock } from './repo-lock.ts';
 import { ensureWorktree } from './worktrees.ts';
 
 export interface CompletionInput {
+  /** This runner's app token probe: a selected app is checked against this runner's own key store (none: fails closed). */
+  appProbe?: AppTokenProbe | null;
   payload: FinalizeExecutePayload;
   /** Local clone of the card's repository. */
   repoPath: string;
@@ -141,19 +151,26 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
   if (refused) return refused;
 
   try {
-    await rebaseOntoBase(wt, p.baseBranch, p.commitAs);
+    await rebaseOntoBase(
+      wt,
+      p.baseBranch,
+      p.commitAs,
+      boundPostAsFor(p.postAs, p.remoteUrlNormalized, input.appProbe),
+    );
   } catch (err) {
     if (err instanceof RebaseConflictError)
       return { ok: false, action, conflict: true, conflictedFiles: err.conflictedFiles, error: err.message };
     // Not a conflict: a workstation problem with git's own message; never `conflict`.
     if (err instanceof RebaseError) return { ok: false, action, error: err.message, rebaseError: err.info };
     if (err instanceof NoCommitIdentityError) return fail(action, err.message);
+    if (err instanceof AppIdentityError) return fail(action, appIdentityWire(err));
     return fail(action, `rebase failed: ${errMsg(err)}`);
   }
 
   if (action === 'merge')
     return merge(input, wt).catch((err) => {
       if (err instanceof NoCommitIdentityError) return fail(action, err.message);
+      if (err instanceof AppIdentityError) return fail(action, appIdentityWire(err));
       throw err;
     });
   const remote = await hasRemote(wt);
@@ -278,7 +295,13 @@ async function mergeLocked(input: CompletionInput, wt: string): Promise<Finalize
   if (merged.exitCode === 0)
     return { ok: true, action: 'merge', mergeCommit: (await revParse(repoPath, startPoint)) ?? undefined };
 
-  const env = commitEnv(await requireCommitIdentity(repoPath, p.commitAs));
+  const env = commitEnv(
+    await requireCommitIdentity(
+      repoPath,
+      p.commitAs,
+      boundPostAsFor(p.postAs, p.remoteUrlNormalized, input.appProbe),
+    ),
+  );
   const integration = join(input.integrationDir, p.ref);
   const tempBranch = integrationBranchName(p.ref.toLowerCase());
   const result = await withIntegrationWorktree(

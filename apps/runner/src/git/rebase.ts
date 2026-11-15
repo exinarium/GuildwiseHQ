@@ -4,7 +4,7 @@ import type { CommitAs, RebaseErrorInfo } from '@aom/shared';
 import { isSafeGitRef, REBASE_ERROR_STDERR_MAX } from '@aom/shared';
 import { redactSecrets } from '../secrets/redact.ts';
 import { type GitResult, git, hasRemote, revParse } from './git.ts';
-import { committerEnv, requireCommitIdentity } from './identity.ts';
+import { type BoundPostAs, committerEnv, requireCommitIdentity } from './identity.ts';
 
 /**
  * Rebasing rewrites commits, which needs a committer; the author of each commit is kept. The committer is the resolved
@@ -14,8 +14,9 @@ import { committerEnv, requireCommitIdentity } from './identity.ts';
 export async function rebaseEnv(
   worktree: string,
   commitAs?: CommitAs | null,
+  postAs?: BoundPostAs | null,
 ): Promise<Record<string, string>> {
-  return committerEnv(await requireCommitIdentity(worktree, commitAs));
+  return committerEnv(await requireCommitIdentity(worktree, commitAs, postAs));
 }
 
 /** A merge commit needs an author too: the same identity as the committer of a rebase. */
@@ -134,6 +135,7 @@ export async function rebaseOntoBase(
   worktree: string,
   baseBranch: string,
   commitAs?: CommitAs | null,
+  postAs?: BoundPostAs | null,
 ): Promise<'up_to_date' | 'rebased' | 'merged'> {
   if (!isSafeGitRef(baseBranch)) throw new Error(`refusing unsafe base branch ${JSON.stringify(baseBranch)}`);
   // Best effort: a failed fetch leaves the last fetched origin/<base>, which is still a valid base.
@@ -152,7 +154,7 @@ export async function rebaseOntoBase(
   const anc = await git(worktree, ancestorArgs);
   if (anc.exitCode === 0) return 'up_to_date';
   if (anc.exitCode !== 1) throw rebaseError(target, ancestorArgs, anc);
-  const renv = await rebaseEnv(worktree, commitAs);
+  const renv = await rebaseEnv(worktree, commitAs, postAs);
   // A card branch with merge commits of its own is brought up to date with a merge: a plain rebase would drop those
   // merges and replay the card's commits, hitting the conflicts their resolution already settled.
   const mergeBase = (await git(worktree, ['merge-base', target, 'HEAD'])).stdout.trim();

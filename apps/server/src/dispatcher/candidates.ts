@@ -1,4 +1,4 @@
-import { READONLY_DESIGN_CAPABILITY } from '@aom/shared';
+import { POST_AS_CAPABILITY, READONLY_DESIGN_CAPABILITY } from '@aom/shared';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { platformPausedSql } from '../platform-team/pause.ts';
 import { landedSql } from './dependencies.ts';
@@ -239,6 +239,9 @@ WHERE c.status = 'queued'
                     AND c.repo_id IS NOT NULL AND c.worktree_path IS NULL AND c.worktree_card_id IS NULL
                     AND EXISTS (SELECT 1 FROM workstation_capabilities wc
                                  WHERE wc.workstation_id = $6 AND '${READONLY_DESIGN_CAPABILITY}' = ANY (wc.capabilities))))
+  -- A project that posts as an app goes only to runners that understand post-as (an older one would commit as the owner).
+  AND (p.post_as IS NULL OR EXISTS (SELECT 1 FROM workstation_capabilities wc
+                                     WHERE wc.workstation_id = $6 AND '${POST_AS_CAPABILITY}' = ANY (wc.capabilities)))
   -- A design held until its dependencies land (assumption review pending) waits for all of them.
   AND NOT (COALESCE(c.design_review->>'state', '') = 'waiting' AND EXISTS (
         SELECT 1 FROM card_dependencies d JOIN cards dc ON dc.id = d.depends_on_card_id

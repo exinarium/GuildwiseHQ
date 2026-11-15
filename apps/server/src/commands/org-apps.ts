@@ -104,7 +104,7 @@ async function activeApp(db: Queryable, orgId: string, id: string): Promise<AppR
 const instanceOf = (a: Pick<AppRow, 'app_id' | 'installation_id'>) =>
   appInstance(a.app_id, a.installation_id);
 
-function stateOf(status: { state?: string } | null): OrgAppWorkstationDto['state'] {
+export function stateOf(status: { state?: string } | null): OrgAppWorkstationDto['state'] {
   if (!status?.state) return 'pending';
   if (status.state === 'connected') return 'connected';
   if (status.state === 'refused' || status.state === 'unreachable' || status.state === 'unavailable')

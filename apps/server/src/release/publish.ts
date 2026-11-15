@@ -9,7 +9,7 @@ import {
   releaseTitle,
   streamId,
 } from '@aom/shared';
-import { loadCommitAs } from '../commands/commit-as.ts';
+import { canPostAs, identityFields, POST_AS_RUNNER_TOO_OLD_MESSAGE } from '../commands/commit-as.ts';
 import { projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -76,7 +76,7 @@ export async function publishPayloadOf(tx: Queryable, ship: Row): Promise<Releas
         : { mode: 'pr', ...((pr?.url ?? ship.pr_url) ? { prUrl: pr?.url ?? ship.pr_url } : {}) },
     notesSource: proposal?.notes_source === 'commits' ? 'commits' : 'changelog',
     ...(proposal?.notes_source === 'commits' && proposal.notes ? { notes: proposal.notes } : {}),
-    commitAs: await loadCommitAs(tx, ship.project_id),
+    ...(await identityFields(tx, ship.project_id)),
   });
 }
 
@@ -96,6 +96,15 @@ export async function enqueueReleasePublish(tx: Tx, ship: Row, now: Date): Promi
   }
   const payload = await publishPayloadOf(tx, ship);
   if (!payload) return null;
+  // An app is selected: a runner that does not know post-as would publish as the owner, so it waits for an update.
+  if (payload.postAs && !(await canPostAs(tx, workstationId))) {
+    await exec(tx, `UPDATE release_ships SET step_message=$2, publish_checked_at=$3 WHERE id=$1`, [
+      ship.id,
+      POST_AS_RUNNER_TOO_OLD_MESSAGE,
+      now,
+    ]);
+    return null;
+  }
   await enqueueRunnerCommand(tx, workstationId, 'release.publish', payload as never);
   await exec(tx, `UPDATE release_ships SET publish_checked_at=$2 WHERE id=$1`, [ship.id, now]);
   return workstationId;

@@ -7,12 +7,22 @@ import {
 } from '@aom/shared';
 import { isProtectedBranchRejection } from './gh.ts';
 import { advanceLocalBranch, git, hasRemote, revParse } from './git.ts';
-import { commitEnv, NoCommitIdentityError, requireCommitIdentity } from './identity.ts';
+import {
+  AppIdentityError,
+  type AppTokenProbe,
+  appIdentityWire,
+  boundPostAsFor,
+  commitEnv,
+  NoCommitIdentityError,
+  requireCommitIdentity,
+} from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
 
 export interface BumpSubmoduleInput {
+  /** This runner's app token probe: a selected app is checked against this runner's own key store (none: fails closed). */
+  appProbe?: AppTokenProbe | null;
   payload: RepoBumpSubmodulePayload;
   /** Local clone of the deploy repository (D). */
   repoPath: string;
@@ -123,6 +133,7 @@ export async function bumpSubmodule(input: BumpSubmoduleInput): Promise<RepoBump
     });
   } catch (err) {
     if (err instanceof NoCommitIdentityError) return fail(err.message);
+    if (err instanceof AppIdentityError) return fail(appIdentityWire(err));
     return fail(errMsg(err));
   }
 }
@@ -164,7 +175,11 @@ async function attemptBump(input: BumpSubmoduleInput): Promise<RepoBumpSubmodule
       if (m[1] === p.commit || m[1].startsWith(p.commit))
         return { ok: true, unchanged: true, commit: head, path: found.path };
 
-      const id = await requireCommitIdentity(repoPath, p.commitAs);
+      const id = await requireCommitIdentity(
+        repoPath,
+        p.commitAs,
+        boundPostAsFor(p.postAs, p.remoteUrlNormalized, input.appProbe),
+      );
       const env = commitEnv(id);
       const set = await git(wt, ['update-index', '--add', '--cacheinfo', `160000,${p.commit},${found.path}`]);
       if (set.exitCode !== 0)

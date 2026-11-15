@@ -105,7 +105,14 @@ import {
 import { computeCardDiff } from '../git/card-diff.ts';
 import { baseRef, computeDiffStats, riskTier } from '../git/diffstat.ts';
 import { git, gitOk, originBranchNames } from '../git/git.ts';
-import { NO_IDENTITY_WIRE, resolveCommitIdentity } from '../git/identity.ts';
+import {
+  AppIdentityError,
+  type AppTokenProbe,
+  appIdentityWire,
+  boundPostAsFor,
+  NO_IDENTITY_WIRE,
+  resolveCommitIdentity,
+} from '../git/identity.ts';
 import { finishPrepProposal } from '../git/release-prep-proposal.ts';
 import {
   addPrepTaskWorktree,
@@ -290,6 +297,8 @@ export interface SupervisorDeps {
   log?: Logger;
   /** Finds the local clone for a normalized remote URL. */
   findRepo: (remoteUrlNormalized: string) => Promise<RepoReport | undefined>;
+  /** This runner's app token probe (its own key store and broker); none: a shift for a selected app fails closed. */
+  appProbe?: AppTokenProbe | null;
   /** This workstation's clone by catalog key (path relative to a repoRoot): reference repositories picked on this workstation. */
   findLocal?: (localKey: string) => Promise<{ localPath: string } | undefined>;
   /** The runner's HTTP calls to the server (attachment bytes). Absent: attachments are not copied. */
@@ -1138,10 +1147,25 @@ export class ShiftSupervisor {
     // "Commit as", else the clone's git config, else the workstation's (backlog #65). With none set a shift that works in
     // a repository is refused, there is no fallback to an agent or product name.
     const identityRepo = msg.worktree ? await this.deps.findRepo(msg.worktree.remoteUrlNormalized) : null;
-    const identity = await resolveCommitIdentity(identityRepo?.localPath ?? paths.root, msg.commitAs);
     // Read-only work never commits: a read-only checkout (planning, design before a dependency lands) and the reviewing
     // roles are not refused for a missing identity (a rebase they need still fails on its own, naming the identity).
     const commits = msg.worktree?.mode !== 'readonly' && !READ_ONLY_ROLES.has(msg.agent.roleKey);
+    // With an app selected for this repository the shift runs as the app or not at all (fail closed).
+    let identity: Awaited<ReturnType<typeof resolveCommitIdentity>>;
+    try {
+      identity = await resolveCommitIdentity(
+        identityRepo?.localPath ?? paths.root,
+        msg.commitAs,
+        boundPostAsFor(msg.postAs, msg.worktree?.remoteUrlNormalized, this.deps.appProbe),
+      );
+    } catch (err) {
+      if (!(err instanceof AppIdentityError)) throw err;
+      if (commits) {
+        this.reject(msg.shiftId, 'internal', appIdentityWire(err));
+        return;
+      }
+      identity = null;
+    }
     if (identityRepo && !identity && commits) {
       this.reject(msg.shiftId, 'internal', NO_IDENTITY_WIRE);
       return;
@@ -1226,18 +1250,26 @@ export class ShiftSupervisor {
       const syncWanted = msg.prepare.syncMain && msg.worktree.mode === 'create' && !s.resumed;
       let sync: SyncMainOutcome | undefined;
       if (syncWanted && msg.prepare.syncMain) {
-        sync = await syncMainIntoWorking({
+        const synced = await syncMainIntoWorking({
           repoPath: repo.localPath,
           ...(msg.prepare.syncMain.mainBranch ? { mainBranch: msg.prepare.syncMain.mainBranch } : {}),
           workingBranch: msg.prepare.syncMain.workingBranch,
           ref: msg.brief.card.ref,
           commitAs: msg.commitAs ?? null,
+          postAs: boundPostAsFor(msg.postAs, msg.worktree.remoteUrlNormalized, this.deps.appProbe),
           integrationDir: paths.integration,
           ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
         }).catch((err) => {
+          // A selected app that cannot mint stops the shift: the merge is never made under another identity.
+          if (err instanceof AppIdentityError) return err;
           this.log.warn(`merging the latest main failed for ${msg.brief.card.ref}: ${String(err)}`);
           return undefined;
         });
+        if (synced instanceof AppIdentityError) {
+          this.reject(msg.shiftId, 'internal', appIdentityWire(synced));
+          return;
+        }
+        sync = synced;
       }
       try {
         s.worktree = await ensureWorktree({
@@ -1260,12 +1292,19 @@ export class ShiftSupervisor {
         });
         if (msg.prepare.rebase && !s.resumed)
           s.rebased = ['rebased', 'merged'].includes(
-            await rebaseOntoBase(s.worktree.path, msg.worktree.baseBranch, msg.commitAs ?? null),
+            await rebaseOntoBase(
+              s.worktree.path,
+              msg.worktree.baseBranch,
+              msg.commitAs ?? null,
+              boundPostAsFor(msg.postAs, msg.worktree.remoteUrlNormalized, this.deps.appProbe),
+            ),
           );
         if (sync && s.worktree.created) await this.finishMainSync(s, sync);
         else await this.resumeMainMerge(s);
       } catch (err) {
-        if (err instanceof RebaseConflictError) {
+        if (err instanceof AppIdentityError) {
+          this.reject(msg.shiftId, 'internal', appIdentityWire(err));
+        } else if (err instanceof RebaseConflictError) {
           this.reject(msg.shiftId, 'rebase_conflict', err.message, err.conflictedFiles);
         } else if (err instanceof RebaseError) {
           // Not a conflict: the existing worktree_failed route (an older server parses it), with git's details.
@@ -2616,6 +2655,7 @@ export class ShiftSupervisor {
       ...(main ? { mainBranch: main } : {}),
       ref: msg.brief.card.ref,
       commitAs: msg.commitAs ?? null,
+      postAs: boundPostAsFor(msg.postAs, msg.worktree?.remoteUrlNormalized, this.deps.appProbe),
       ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
     });
     if ('error' in r) {
@@ -2674,6 +2714,7 @@ export class ShiftSupervisor {
       branchName: s.worktree.branchName,
       ...(main ? { mainBranch: main } : {}),
       ref: msg.brief.card.ref,
+      postAs: boundPostAsFor(msg.postAs, msg.worktree?.remoteUrlNormalized, this.deps.appProbe),
       ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
       recordMainSha: (sha: string) => {
         if (!s.mainShas.includes(sha)) s.mainShas.push(sha);
@@ -3064,7 +3105,12 @@ export class ShiftSupervisor {
             );
           toSend = { ...toSend, data: { ...toSend.data, proposal: checked.proposal, files: [] } };
         } else {
-          const done = await finishPrepTask(s.prepTask, msg.releasePrep, msg.commitAs);
+          const done = await finishPrepTask(
+            s.prepTask,
+            msg.releasePrep,
+            msg.commitAs,
+            boundPostAsFor(msg.postAs, msg.releasePrep.remoteUrlNormalized, this.deps.appProbe),
+          );
           toSend = done.ok
             ? { ...toSend, data: { ...toSend.data, commit: done.commit, files: done.files } }
             : {
