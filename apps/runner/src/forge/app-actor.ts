@@ -104,6 +104,46 @@ export function actorScope(
   };
 }
 
+/**
+ * The repositories a payload acts on (every `remoteUrlNormalized` string in it, a few levels deep). Used only to keep
+ * the push tripwire in step with the server's current plan.
+ */
+export function payloadRepoUrls(payload: unknown, depth = 4): string[] {
+  const out = new Set<string>();
+  const walk = (v: unknown, d: number): void => {
+    if (d < 0 || v === null || typeof v !== 'object') return;
+    if (Array.isArray(v)) {
+      for (const x of v) walk(x, d - 1);
+      return;
+    }
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+      if (k === 'postAs') continue;
+      if (k === 'remoteUrlNormalized' && typeof x === 'string' && x) out.add(x.toLowerCase());
+      else walk(x, d - 1);
+    }
+  };
+  walk(payload, depth);
+  return [...out];
+}
+
+/**
+ * Drops the tripwire entry of every repository a payload acts on that its plan does not put on an app: the server
+ * sends no plan once the owner deselects the app (or the repository is no longer covered), and from then on the
+ * runner pushes there with today's credentials, which the tripwire must let through.
+ */
+export function releaseUncoveredRepos(
+  tripwire: AppRepoRoot | null | undefined,
+  plan: PostAsPlan | null | undefined,
+  urls: ReadonlyArray<string>,
+): void {
+  if (!tripwire) return;
+  for (const url of urls) {
+    const e = postAsFor(plan, url);
+    if (e?.source === 'app' && e.app) continue;
+    tripwire.set(url, null);
+  }
+}
+
 /** An app repository whose remote is not https fails closed (a GitHub App has no ssh identity). */
 export function assertAppTransport(actor: AppActor | null, url: string): void {
   if (!actor || isHttps(url)) return;

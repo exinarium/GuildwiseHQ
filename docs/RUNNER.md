@@ -1638,6 +1638,11 @@ Without a plan, or for a repository whose plan entry is not `source: 'app'`, it 
 - **Fail closed:** a mint failure is `AppIdentityError` (`app_identity_failed: <app>: <reason>`), never a fallback to the
   owner's login. An `ssh` origin on an app repository fails at shift or command start, before any bot commit. A push
   tripwire (per runner root, `forge/app-repos.ts`) refuses a push to an app repository that carries no app credential.
+  It follows the server's current plan: every `shift.start` and command that acts on a repository (any
+  `remoteUrlNormalized` in its payload) without an app entry for it in its plan, including a payload with no plan once
+  the owner deselects the app, releases that repository, so its pushes go out with today's credentials again. Pushes
+  that have no app path (DevOps hygiene, saved work, branch cleanup) are refused for an app repository: they fail
+  closed rather than push as the owner.
 - **Branch protection:** a refused push is described by `describePushRejection` (`git/gh.ts`): the rule and the bypass or
   permission the bot needs.
 - **Agents** stay credential-free: their sandbox has the bot identity for commits and no token; the runner pushes. A

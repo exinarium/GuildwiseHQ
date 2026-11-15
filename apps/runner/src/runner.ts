@@ -38,6 +38,7 @@ import {
   PACKS_CAPABILITY,
   POST_AS_CAPABILITY,
   type PostAsPlan,
+  PostAsPlanSchema,
   PR_LIST_CAPABILITY,
   PR_NOTICE_CAPABILITY,
   PR_REVIEW_CAPABILITY,
@@ -130,7 +131,13 @@ import { ExternalAdapters } from './external/index.ts';
 import { JiraCredentialStore, jiraFile, resolveJira } from './external/jira-store.ts';
 import { OutboundExecutor } from './external/outbound.ts';
 import { AgentGit } from './forge/agent-git.ts';
-import { type ActorScope, actorScope, appOriginRefusal } from './forge/app-actor.ts';
+import {
+  type ActorScope,
+  actorScope,
+  appOriginRefusal,
+  payloadRepoUrls,
+  releaseUncoveredRepos,
+} from './forge/app-actor.ts';
 import { appRepos } from './forge/app-repos.ts';
 import { LiveOnce, postCommitStatus } from './forge/commit-status.ts';
 import { recheckFile, touchRecheck } from './forge/connect.ts';
@@ -2124,9 +2131,23 @@ export class Runner {
     });
   }
 
+  /**
+   * Keeps the push tripwire in step with the server's current plan: a repository a payload acts on without an app in
+   * its plan (the owner deselected the app, or it is no longer covered) pushes with today's credentials again.
+   */
+  private releaseUncovered(payload: unknown, postAs: unknown): void {
+    if (postAs !== undefined && postAs !== null && !PostAsPlanSchema.safeParse(postAs).success) return;
+    releaseUncoveredRepos(
+      appRepos.forRoot(this.paths.root),
+      (postAs ?? null) as PostAsPlan | null,
+      payloadRepoUrls(payload),
+    );
+  }
+
   private onMessage(msg: ServerToRunner): void {
     switch (msg.type) {
       case 'shift.start':
+        this.releaseUncovered(msg, msg.postAs);
         void this.supervisor.handleStart(msg);
         break;
       case 'shift.stop':
@@ -2155,6 +2176,12 @@ export class Runner {
         break;
       }
       case 'command':
+        this.releaseUncovered(
+          msg.payload,
+          msg.payload && typeof msg.payload === 'object'
+            ? (msg.payload as { postAs?: unknown }).postAs
+            : undefined,
+        );
         void this.runCommand(msg.commandId, msg.command, msg.payload);
         break;
       case 'run.follow':

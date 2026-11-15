@@ -4,7 +4,12 @@ import type { PostAsPlan } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AppTokenBroker } from '../src/apps/broker.ts';
 import { type AppProviderFactory, AppTokenError } from '../src/apps/types.ts';
-import { actorScope, appOriginRefusal } from '../src/forge/app-actor.ts';
+import {
+  actorScope,
+  appOriginRefusal,
+  payloadRepoUrls,
+  releaseUncoveredRepos,
+} from '../src/forge/app-actor.ts';
 import { appRepos } from '../src/forge/app-repos.ts';
 import { forgePrCreator, GitHubForge, MemoryTokenStore } from '../src/forge/index.ts';
 import type { ForgeEnv } from '../src/forge/types.ts';
@@ -12,7 +17,7 @@ import { describePushRejection } from '../src/git/gh.ts';
 import { git } from '../src/git/git.ts';
 import { AppIdentityError } from '../src/git/identity.ts';
 import type { ExecOptions, ExecResult, Executor } from '../src/toolchain/exec.ts';
-import { cleanupTmp, sh, tmp } from './helpers.ts';
+import { cleanupTmp, makeConfig, sh, tmp } from './helpers.ts';
 
 cleanupTmp();
 afterEach(() => appRepos.clear());
@@ -290,6 +295,142 @@ describe('push tripwire', () => {
       appRepos.forRoot(root),
     );
     expect((await git(clone, ['push', 'origin', 'main'])).exitCode).toBe(0);
+  });
+
+  it('after the owner deselects the app, a payload without a plan for that repository lets today pushes through', async () => {
+    const root = tmp('post-as-root-');
+    const bare = join(root, 'remote.git');
+    sh(root, 'git', ['init', '-q', '--bare', bare]);
+    const clone = join(root, 'clone');
+    sh(root, 'git', ['init', '-q', '-b', 'main', clone]);
+    sh(clone, 'git', [
+      '-c',
+      'user.name=t',
+      '-c',
+      'user.email=t@e',
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      'x',
+    ]);
+    sh(clone, 'git', ['remote', 'add', 'origin', bare]);
+    const { normalizeRemoteUrl } = await import('@aom/shared');
+    const remote = normalizeRemoteUrl(bare);
+    const { broker } = realBroker({ t: T0 });
+    const tripwire = appRepos.forRoot(root);
+
+    // a shift with the app selected registers the repository
+    const appShift = {
+      shiftId: 's1',
+      postAs: plan('app', remote),
+      worktree: { remoteUrlNormalized: remote },
+    };
+    releaseUncoveredRepos(tripwire, appShift.postAs, payloadRepoUrls(appShift));
+    actorScope(baseEnv(new FakeExec()), broker, appShift.postAs, tripwire);
+    expect((await git(clone, ['push', 'origin', 'main'])).exitCode).toBe(128);
+
+    // a payload for another repository without a plan does not touch it
+    const other = { remoteUrlNormalized: 'github.com/acme/other' };
+    releaseUncoveredRepos(tripwire, null, payloadRepoUrls(other));
+    actorScope(baseEnv(new FakeExec()), broker, null, tripwire);
+    expect((await git(clone, ['push', 'origin', 'main'])).exitCode).toBe(128);
+
+    // the owner deselects the app: the server sends no plan; the next payload for the repository releases it
+    const noApp = { projectId: 'p', remoteUrlNormalized: remote };
+    releaseUncoveredRepos(tripwire, undefined, payloadRepoUrls(noApp));
+    const scope = actorScope(baseEnv(new FakeExec()), broker, undefined, tripwire);
+    const a = await scope.auth(bare);
+    expect(a.env.AOM_GIT_APP).toBeUndefined();
+    const pushed = await git(clone, [...a.args, 'push', 'origin', 'main'], { env: a.env });
+    expect(pushed.stderr).not.toContain('posts as the app');
+    expect(pushed.exitCode).toBe(0);
+    expect(sh(bare, 'git', ['for-each-ref', '--format=%(refname)'])).toBe('refs/heads/main');
+
+    // selecting it again registers it again
+    releaseUncoveredRepos(tripwire, appShift.postAs, payloadRepoUrls(appShift));
+    actorScope(baseEnv(new FakeExec()), broker, appShift.postAs, tripwire);
+    expect((await git(clone, ['push', 'origin', 'main'])).exitCode).toBe(128);
+  });
+
+  it('a plan that no longer lists the repository releases it too', async () => {
+    const root = tmp('post-as-root-');
+    const { broker } = realBroker({ t: T0 });
+    const tripwire = appRepos.forRoot(root);
+    actorScope(baseEnv(new FakeExec()), broker, plan('app', 'github.com/acme/web'), tripwire);
+    expect(appRepos.find(root, 'github.com/acme/web')).not.toBeNull();
+    releaseUncoveredRepos(tripwire, plan('app', 'github.com/acme/api'), ['github.com/acme/web']);
+    expect(appRepos.find(root, 'github.com/acme/web')).toBeNull();
+  });
+});
+
+describe('runner keeps the tripwire in step with each payload', () => {
+  it('a shift.start or command without a plan releases its repository; one with the app keeps it', async () => {
+    const { Runner } = await import('../src/runner.ts');
+    const r = new Runner({ config: makeConfig('ws://127.0.0.1:9'), dataDir: tmp('aom-data-') });
+    const seen: string[] = [];
+    const internals = r as unknown as {
+      onMessage(msg: unknown): void;
+      runCommand: (...a: unknown[]) => Promise<void>;
+      supervisor: { handleStart: (msg: unknown) => Promise<void> };
+    };
+    internals.runCommand = async () => {
+      seen.push('command');
+    };
+    internals.supervisor.handleStart = async () => {
+      seen.push('shift');
+    };
+    const remote = 'github.com/acme/web';
+    const registered = () => appRepos.find(r.paths.root, remote) !== null;
+    const tripwire = appRepos.forRoot(r.paths.root);
+    const register = () => tripwire.set(remote, { integrationId: INTEGRATION, label: APP.label });
+
+    register();
+    internals.onMessage({
+      type: 'command',
+      commandId: 'c1',
+      command: 'repo.list_prs',
+      payload: { remoteUrlNormalized: remote, postAs: plan('app', remote) },
+    });
+    expect(registered()).toBe(true);
+    internals.onMessage({
+      type: 'command',
+      commandId: 'c2',
+      command: 'repo.list_prs',
+      payload: { remoteUrlNormalized: remote },
+    });
+    expect(registered()).toBe(false);
+
+    register();
+    internals.onMessage({ type: 'shift.start', shiftId: 's1', worktree: { remoteUrlNormalized: remote } });
+    expect(registered()).toBe(false);
+
+    // a malformed plan is left to the command's own validation: nothing is released
+    register();
+    internals.onMessage({
+      type: 'command',
+      commandId: 'c3',
+      command: 'repo.list_prs',
+      payload: { remoteUrlNormalized: remote, postAs: { repos: 'x' } },
+    });
+    expect(registered()).toBe(true);
+    expect(seen).toEqual(['command', 'command', 'shift', 'command']);
+  });
+});
+
+describe('payloadRepoUrls', () => {
+  it('collects every remoteUrlNormalized a few levels deep, lowercased, ignoring the plan itself', () => {
+    expect(
+      payloadRepoUrls({
+        remoteUrlNormalized: 'GitHub.com/Acme/Web',
+        worktree: { remoteUrlNormalized: 'github.com/acme/web' },
+        releasePrep: { remoteUrlNormalized: 'github.com/acme/api' },
+        repos: [{ remoteUrlNormalized: 'github.com/acme/docs' }],
+        postAs: plan('app', 'github.com/acme/planned'),
+      }).sort(),
+    ).toEqual(['github.com/acme/api', 'github.com/acme/docs', 'github.com/acme/web']);
+    expect(payloadRepoUrls(null)).toEqual([]);
+    expect(payloadRepoUrls({ remoteUrlNormalized: '' })).toEqual([]);
   });
 });
 

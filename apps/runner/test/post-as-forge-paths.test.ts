@@ -3,6 +3,7 @@ import { CommandPayloadSchemas, normalizeRemoteUrl, type PostAsPlan } from '@aom
 import { afterEach, describe, expect, it } from 'vitest';
 import { appRepos } from '../src/forge/app-repos.ts';
 import type { AppActor } from '../src/forge/types.ts';
+import { fetchBase } from '../src/git/completion.ts';
 import { appOfPlan, withPushReport } from '../src/git/gh.ts';
 import { AppIdentityError } from '../src/git/identity.ts';
 import { checkBranchMerged } from '../src/git/merged.ts';
@@ -258,6 +259,51 @@ describe('rebase fetch with the app credential', () => {
     });
     expect(r).toBe('up_to_date');
     expect(urls).toEqual([bare]);
+  });
+});
+
+describe('completion base fetch', () => {
+  const input = (postAs: PostAsPlan | undefined, urls: string[]) =>
+    ({
+      payload: { forge: 'github', ...(postAs ? { postAs } : {}) },
+      auth: async (url: string) => {
+        urls.push(url);
+        return { args: [], env: { AOM_GIT_APP: APP.integrationId } };
+      },
+    }) as unknown as Parameters<typeof fetchBase>[0];
+
+  it('without a plan is the plain fetch of today: auth is not asked', async () => {
+    const { bare, clone } = repoWithMergedBranch();
+    commit(clone, 'ahead');
+    sh(clone, 'git', ['push', '-q', 'origin', 'main']);
+    sh(clone, 'git', ['update-ref', 'refs/remotes/origin/main', 'HEAD~1']);
+    const urls: string[] = [];
+    await fetchBase(input(undefined, urls), clone, 'main');
+    expect(urls).toEqual([]);
+    expect(sh(clone, 'git', ['rev-parse', 'origin/main'])).toBe(sh(bare, 'git', ['rev-parse', 'main']));
+  });
+
+  it('with a plan it fetches with the credential auth gives for origin', async () => {
+    const { bare, clone } = repoWithMergedBranch();
+    const urls: string[] = [];
+    await fetchBase(input(plan(normalizeRemoteUrl(bare)), urls), clone, 'main');
+    expect(urls).toEqual([bare]);
+  });
+
+  it('with a plan and an app that cannot mint nothing is fetched (the push fails closed later)', async () => {
+    const { bare, clone } = repoWithMergedBranch();
+    commit(clone, 'ahead');
+    sh(clone, 'git', ['push', '-q', 'origin', 'main']);
+    sh(clone, 'git', ['update-ref', 'refs/remotes/origin/main', 'HEAD~1']);
+    const before = sh(clone, 'git', ['rev-parse', 'origin/main']);
+    const failing = {
+      payload: { forge: 'github', postAs: plan(normalizeRemoteUrl(bare)) },
+      auth: async () => {
+        throw new AppIdentityError(APP, 'gone');
+      },
+    } as unknown as Parameters<typeof fetchBase>[0];
+    await fetchBase(failing, clone, 'main');
+    expect(sh(clone, 'git', ['rev-parse', 'origin/main'])).toBe(before);
   });
 });
 

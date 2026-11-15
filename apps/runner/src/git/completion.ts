@@ -92,11 +92,12 @@ const pushFailure = (p: FinalizeExecutePayload, what: string, why: string): stri
 
 /**
  * Fetches `base` from origin with the host's credentials. When those cannot be had (a selected app that cannot mint)
- * nothing is fetched: the local view is used, and the push that follows fails closed with the reason.
+ * nothing is fetched: the local view is used, and the push that follows fails closed with the reason. Without a plan
+ * this is today's plain fetch (no credential arguments), like the rebase.
  */
-async function fetchBase(input: CompletionInput, cwd: string, base: string): Promise<void> {
+export async function fetchBase(input: CompletionInput, cwd: string, base: string): Promise<void> {
   let a: { args: string[]; env: Record<string, string> } = { args: [], env: {} };
-  if (input.auth) {
+  if (input.auth && input.payload.postAs) {
     const url = (await git(cwd, ['remote', 'get-url', 'origin'])).stdout.trim();
     try {
       if (url) a = await input.auth(url, input.payload.forge);
