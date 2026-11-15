@@ -1264,11 +1264,14 @@ describe("the step 'Regenerate assistant knowledge'", () => {
     expect((await setting()).enabled).toBe(false);
     await saved({ analyse: true, changelog: false, guide: false, help: true, videos: false, commit: true });
     expect((await setting()).enabled).toBe(true);
-    // a save that names it sets it; one that names only the Help articles takes it along
+    // a save that names it sets it; one that ticks only the Help articles keeps a saved untick
     await enable({ help: true, 'assistant-pack': false });
     expect((await setting()).enabled).toBe(false);
     await enable({ help: true });
+    expect((await setting()).enabled).toBe(false);
+    await enable({ help: true, 'assistant-pack': true });
     expect((await setting()).enabled).toBe(true);
+    // one that unticks only the Help articles takes it along, so the run is not refused for a missing requirement
     await enable({ help: false });
     expect((await setting()).enabled).toBe(false);
     await owner('PUT', `${base()}/settings`, { enabled: false, steps: {} }); // names neither: keeps the saved tick

@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import type { ReleaseDocsPrepPayload } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { runReleaseDocsPrep } from '../src/git/release-docs-prep.ts';
+import { changedPaths } from '../src/git/release-docs-prep-assistant-pack.ts';
 import type { DocsPrepExec } from '../src/git/release-docs-prep-steps.ts';
 import { cleanupTmp, makeRepo, sh, tmp } from './helpers.ts';
 
@@ -124,6 +125,23 @@ describe("release prep step 'assistant-pack'", () => {
     );
     expect(r.state).toBe('failed');
     expect(r.error).toContain('changed apps/server/src/other.ts');
+  });
+
+  it('reads changed paths by their real name, not the quoted form git status prints', async () => {
+    const s = setup();
+    const odd = 'apps/server/src/assistant/pack/topics/a b é.md';
+    write(s.repo.clone, odd, 'x\n');
+    sh(s.repo.clone, 'git', ['mv', PACK, 'apps/server/src/assistant/pack/topics/de sk.md']);
+    expect((await changedPaths(s.repo.clone)).sort()).toEqual(
+      ['apps/server/src/assistant/pack/topics/de sk.md', odd].sort(),
+    );
+    // a foreign file whose name git quotes is still caught as outside the pack
+    const bad = await run(
+      setup(),
+      fakeExec((wt) => write(wt, 'apps/server/src/my "pack".md', 'x\n')),
+    );
+    expect(bad.state).toBe('failed');
+    expect(bad.error).toContain('changed apps/server/src/my "pack".md');
   });
 
   it('fails with the output tail when the generator fails', async () => {

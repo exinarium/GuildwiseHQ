@@ -174,11 +174,11 @@ export async function setReleaseDocsPrepSettings(
     const samePaths =
       Object.keys(guidePaths).length === Object.keys(before.guidePaths).length &&
       Object.entries(guidePaths).every(([id, v]) => before.guidePaths[id] === v);
-    // A step the request does not name keeps its saved tick, unless the request names the step it goes with (then it
-    // follows that one: a request that unticks the Help articles also unticks the assistant knowledge).
+    // A step the request does not name keeps its saved tick, unless the request turns off the step it goes with (a
+    // request that unticks the Help articles also unticks the assistant knowledge; ticking Help keeps a saved untick).
     const merged = { ...before.steps, ...input.steps };
     for (const d of releaseDocsPrepSteps())
-      if (input.steps[d.id] === undefined && d.defaultWith && input.steps[d.defaultWith] !== undefined)
+      if (input.steps[d.id] === undefined && d.defaultWith && input.steps[d.defaultWith] === false)
         delete merged[d.id];
     const steps = Object.fromEntries(
       releaseDocsPrepSteps().map((d) => [d.id, releaseDocsPrepStepOn(merged, d)]),
