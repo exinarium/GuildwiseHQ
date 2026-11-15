@@ -8,6 +8,7 @@ import { withAppendTx } from '../db/tx.ts';
 import { forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
+import { evaluateRepoSizes, resolveTimedOutTwice, writeOpenChangeSnapshot } from './pr-size-check.ts';
 
 /**
  * PR-only review. The owner marks a project repository PR-only: its open pull requests are recorded for review (state
@@ -66,13 +67,13 @@ export type RequestPrListOutcome =
 
 /**
  * Asks a workstation that holds the clone of a PR-only repository for its open pull requests (`repo.list_prs`,
- * read-only). Throttled: never while a request is pending (2 min) nor within 5 minutes of the last answer. Without a
+ * read-only). Throttled: never while a request is pending (2 min) nor within 5 minutes of the last answer (`force`: the size check after a timeout reads the list again at once, a pending request is still honoured). Without a
  * capable workstation the reason is stored, so the owner sees why nothing is read.
  */
 export async function requestPrList(
   ctx: Ctx,
   repoId: string,
-  opts: { userId?: string } = {},
+  opts: { userId?: string; force?: boolean } = {},
 ): Promise<RequestPrListOutcome> {
   const now = ctx.clock.now();
   const repo = await one(
@@ -93,7 +94,7 @@ export async function requestPrList(
   );
   if (prior?.state === 'pending' && now.getTime() - new Date(prior.requested_at).getTime() < PENDING_MS)
     return { queued: false, reason: 'throttled' };
-  if (prior?.checked_at && now.getTime() - new Date(prior.checked_at).getTime() < PR_POLL_MS)
+  if (!opts.force && prior?.checked_at && now.getTime() - new Date(prior.checked_at).getTime() < PR_POLL_MS)
     return { queued: false, reason: 'throttled' };
 
   const ws = await one(
@@ -302,6 +303,13 @@ export async function applyPrListResult(
       }
     }
     if (events.length) await ctx.store.append(events, { tx });
+    // The size check, after the pull requests are recorded and in the same transaction: the open list is stored as the
+    // chain's source, a closed pull request stops waiting for the owner, and over-budget chains are sent back.
+    await writeOpenChangeSnapshot(tx, repoId, r.changes, r.complete, now);
+    for (const e of events)
+      if (e.event.type === 'PrReviewClosed')
+        await resolveTimedOutTwice(ctx, tx, e.event.payload.prReviewId, 'closed');
+    await evaluateRepoSizes(ctx, tx, projectId, repo.org_id as string, repoId);
   });
 }
 

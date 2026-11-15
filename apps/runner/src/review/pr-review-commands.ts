@@ -3,6 +3,8 @@ import { dirname } from 'node:path';
 import type {
   PrReviewCancelPayload,
   PrReviewCancelResult,
+  PrReviewNoticePayload,
+  PrReviewNoticeResult,
   PrReviewPostPayload,
   PrReviewPostResult,
   PrReviewRunPayload,
@@ -16,6 +18,7 @@ import type { ForgeEnv } from '../forge/types.ts';
 import type { GitAuth } from '../git/worktrees.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { wipeAgent } from '../sandbox/sandbox.ts';
+import { postPrNotice } from './notice.ts';
 import { postPrReview } from './post.ts';
 import { resolveReplayBase } from './replay-base.ts';
 import { GitHubReviewPoster } from './review-poster.ts';
@@ -52,6 +55,7 @@ export class PrReviewCommands {
   private readonly aborts = new Map<string, AbortController>();
   /** Run ids cancelled before their run command arrived (run id -> when), kept for CANCEL_MEMORY_MS. */
   private readonly cancelled = new Map<string, number>();
+  private readonly notices = new Map<string, Promise<PrReviewNoticeResult>>();
 
   constructor(private readonly env: PrReviewCommandsEnv) {}
 
@@ -115,6 +119,18 @@ export class PrReviewCommands {
       payload,
     ).finally(() => this.posts.delete(payload.runId));
     this.posts.set(payload.runId, p);
+    return p;
+  }
+
+  /** `pr_review.notice`: one answer per notice id while it is live (a resent command never posts twice). */
+  notice(payload: PrReviewNoticePayload): Promise<PrReviewNoticeResult> {
+    const live = this.notices.get(payload.noticeId);
+    if (live) return live;
+    const p = postPrNotice(
+      { poster: new GitHubReviewPoster({ fetch: this.env.fetch, tokens: this.env.tokens }) },
+      payload,
+    ).finally(() => this.notices.delete(payload.noticeId));
+    this.notices.set(payload.noticeId, p);
     return p;
   }
 

@@ -1,6 +1,5 @@
 import { parseRemote, type ReviewerRunSpec, type ReviewFinding } from '@aom/shared';
 import { redactSecrets } from '../secrets/redact.ts';
-import type { ReviewerRun } from './reviewer-sandbox.ts';
 import type { ReviewerTokenStore } from './reviewer-tokens.ts';
 
 /** Why a review could not be posted. `message` never holds the token. */
@@ -14,9 +13,12 @@ export class ReviewPostError extends Error {
   }
 }
 
+/** What posting needs of a pull request. `headSha` absent: the review goes on the head as the host sees it. */
+export type PostTarget = Pick<ReviewerRunSpec, 'remoteUrlNormalized' | 'prNumber'> & { headSha?: string };
+
 export interface ReviewPoster {
   post(
-    run: Pick<ReviewerRun, 'spec'>,
+    run: { spec: PostTarget },
     findings: ReviewFinding[],
     summary: string,
   ): Promise<{ reviewId: string; url: string }>;
@@ -39,7 +41,7 @@ const whereOf = (f: ReviewFinding): string => (f.path ? `\`${f.path}${f.line ? `
 export class GitHubReviewPoster implements ReviewPoster {
   constructor(private readonly env: { fetch: typeof fetch; tokens: ReviewerTokenStore }) {}
 
-  async post(run: Pick<ReviewerRun, 'spec'>, findings: ReviewFinding[], summary: string) {
+  async post(run: { spec: PostTarget }, findings: ReviewFinding[], summary: string) {
     const { spec } = run;
     const token = this.env.tokens.get(spec.remoteUrlNormalized)?.token;
     if (!token)
@@ -50,7 +52,7 @@ export class GitHubReviewPoster implements ReviewPoster {
     const url = `${githubApiBase(remote.host)}/repos/${remote.namespace.join('/')}/${remote.name.replace(/\.git$/i, '')}/pulls/${spec.prNumber}/reviews`;
 
     const withLines = {
-      commit_id: spec.headSha,
+      ...(spec.headSha ? { commit_id: spec.headSha } : {}),
       event: 'COMMENT' as const,
       body: summary,
       comments: findings
@@ -73,7 +75,7 @@ export class GitHubReviewPoster implements ReviewPoster {
     if (res.status === 422 && withLines.comments.length > 0) {
       // a line outside the diff makes the host refuse the whole review: post the same findings in the body, once
       const inBody = {
-        commit_id: spec.headSha,
+        ...(spec.headSha ? { commit_id: spec.headSha } : {}),
         event: 'COMMENT' as const,
         body: [summary, ...findings.map((f) => `- ${whereOf(f)}${findingText(f)}`)]
           .filter(Boolean)
@@ -98,7 +100,7 @@ export class GitHubReviewPoster implements ReviewPoster {
    * The `html_url` of the first review on the pull request whose body holds `marker`, or null. Lets a repeated post
    * command see that its review already exists. Same token, headers and redaction as `post`.
    */
-  async findByMarker(spec: ReviewerRunSpec, marker: string): Promise<string | null> {
+  async findByMarker(spec: PostTarget, marker: string): Promise<string | null> {
     const token = this.env.tokens.get(spec.remoteUrlNormalized)?.token;
     if (!token)
       throw new ReviewPostError('reviewer_token_missing', 'no reviewer token is saved for this repository');

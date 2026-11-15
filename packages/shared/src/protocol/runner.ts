@@ -125,6 +125,7 @@ import {
 import { RebaseErrorInfoSchema } from '../repo/rebase-error.ts';
 import {
   PrReviewCancelPayloadSchema,
+  PrReviewNoticePayloadSchema,
   PrReviewPostPayloadSchema,
   PrReviewRunPayloadSchema,
 } from '../review/pr-review.ts';
@@ -1314,6 +1315,7 @@ export const RunnerCommandNameSchema = z.enum([
   'pr_review.run',
   'pr_review.cancel',
   'pr_review.post',
+  'pr_review.notice',
   'release.ship',
   'release.ref_cleanup',
   'release.docs_prep',
@@ -1438,6 +1440,7 @@ export const CommandPayloadSchemas = {
   'pr_review.run': PrReviewRunPayloadSchema,
   'pr_review.cancel': PrReviewCancelPayloadSchema,
   'pr_review.post': PrReviewPostPayloadSchema,
+  'pr_review.notice': PrReviewNoticePayloadSchema,
   'release.ship': ReleaseShipPayloadSchema,
   'release.ref_cleanup': ReleaseRefCleanupPayloadSchema,
   'release.docs_prep': ReleaseDocsPrepPayloadSchema,
