@@ -49,7 +49,6 @@ import {
 import { investigationRecordRpc } from '../commands/investigation.ts';
 import { applyMcpServersReport, mcpCallsIn, mergeMcpCalls } from '../commands/mcp-servers.ts';
 import { applyAppCommandResult, sendAppSync } from '../commands/org-apps.ts';
-import { applyAppAccessCheckResult } from '../commands/post-as.ts';
 import { applyOrgFolderResult, applyOrgFoldersReport } from '../commands/org-folders.ts';
 import { dispatchOrgGraph } from '../commands/org-graph.ts';
 import { applyResealResult } from '../commands/org-provider-keys.ts';
@@ -64,6 +63,7 @@ import { applyPersonaReadResult } from '../commands/pack-hire.ts';
 import { applyPackCredentialResult } from '../commands/pack-holders.ts';
 import { applyPacksReport, applyProjectCapabilitiesReport, queuePacksSync } from '../commands/packs.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
+import { applyAppAccessCheckResult } from '../commands/post-as.ts';
 import { applyPrListResult } from '../commands/pr-only.ts';
 import { applyMergedPrList } from '../commands/pr-replays.ts';
 import { applyPrReviewPostResult, applyPrReviewRunResult } from '../commands/pr-review-runs.ts';
