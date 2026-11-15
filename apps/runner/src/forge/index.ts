@@ -25,6 +25,12 @@ export { GitHubForge } from './github.ts';
 export { GitLabForge } from './gitlab.ts';
 export { ForgeHttpError, ForgeUnavailableError } from './http.ts';
 export { PlainGitForge } from './plain.ts';
+export {
+  FileStatusTokenStore,
+  MemoryStatusTokenStore,
+  type StatusTokenStore,
+  type StoredStatusToken,
+} from './status-tokens.ts';
 export { FileTokenStore, MemoryTokenStore, type StoredToken, type TokenStore } from './tokens.ts';
 export type { BranchRules, Forge, ForgeEnv, GitAuth, RemoteRepo } from './types.ts';
 

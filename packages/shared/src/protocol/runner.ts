@@ -1672,7 +1672,11 @@ export const RuntimesReportSchema = msg('runtimes.report', { runtimes: z.array(R
  * Which git providers this workstation is connected to (facts only, never a token). Sent after `hello`, after
  * `aom-runner git-connect` and on the `git.status` command.
  */
-export const GitReportSchema = msg('git.report', { connections: GitConnectionsSchema });
+export const GitReportSchema = msg('git.report', {
+  connections: GitConnectionsSchema,
+  /** Keys (`github@github.com`) of the size check status tokens this workstation holds; never a token. */
+  statusTokens: z.array(z.string().max(200)).max(50).optional(),
+});
 /**
  * Jira on this workstation (docs/RUNNER.md "Jira on the runner"): facts only, never the token. `connected`: the saved
  * credentials were accepted; `refused`: Jira said no (wrong or expired token); `not_connected`: none saved.
