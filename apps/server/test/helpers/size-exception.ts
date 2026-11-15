@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { type MockInstance, vi } from 'vitest';
 import { PR_NOTICE_CAPABILITY } from '@aom/shared';
-import { requestSizeExceptionIn } from '../../src/commands/size-exception.ts';
+import { type MockInstance, vi } from 'vitest';
 import { applyPrListResult } from '../../src/commands/pr-only.ts';
+import { requestSizeExceptionIn } from '../../src/commands/size-exception.ts';
 import { withAppendTx } from '../../src/db/tx.ts';
 import { manualWorld } from './pr-review-manual.ts';
 
@@ -38,7 +38,9 @@ export async function sizeExceptionWorld() {
     await db().query(`DELETE FROM org_follow_up WHERE org_id=$1`, [orgId]);
     await db().query(`DELETE FROM desk_items WHERE project_id=$1`, [m.w.projectId]);
     await db().query('UPDATE users SET timezone=NULL WHERE id=$1', [m.w.owner.id]);
-    await db().query(`UPDATE projects SET size_budget=600, size_unit='changed_lines' WHERE id=$1`, [m.w.projectId]);
+    await db().query(`UPDATE projects SET size_budget=600, size_unit='changed_lines' WHERE id=$1`, [
+      m.w.projectId,
+    ]);
     unpin();
     m.w.t.clock.setOffset(0);
   };
@@ -102,9 +104,27 @@ export async function sizeExceptionWorld() {
   const deskItem = async (id: string) =>
     (await db().query('SELECT * FROM desk_items WHERE id=$1', [id])).rows[0];
   const resolve = (deskItemId: string, resolution: string, note?: string, cookie = m.w.owner.cookie) =>
-    m.w.t.req('POST', `/api/desk/${deskItemId}/resolve`, { cookie, body: { resolution, ...(note ? { note } : {}) } });
+    m.w.t.req('POST', `/api/desk/${deskItemId}/resolve`, {
+      cookie,
+      body: { resolution, ...(note ? { note } : {}) },
+    });
   const notices = async () => (await db().query('SELECT * FROM pr_split_notices')).rows;
   const events = async (type: string) =>
     (await db().query(`SELECT * FROM events WHERE type=$1`, [type])).rows;
-  return { m, orgId, pin, unpin, clean, poll, prOf, overBudgetPr, request, row, deskItem, resolve, notices, events };
+  return {
+    m,
+    orgId,
+    pin,
+    unpin,
+    clean,
+    poll,
+    prOf,
+    overBudgetPr,
+    request,
+    row,
+    deskItem,
+    resolve,
+    notices,
+    events,
+  };
 }

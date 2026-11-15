@@ -655,6 +655,15 @@ A second, deeper reviewer (Opus) can review each pull request together with the 
 - **A timeout alone never sends a pull request back:** when a review times out, the size check decides. Over the budget: **Needs split**. Within the budget, after the first timeout: it stays **Not reviewed** and nothing else happens.
 - **Timed out twice:** when your **Re-run review** times out again and the pull request is within the budget (or the size check is inactive), it stays **Not reviewed**, you get a **timed out twice** item on your Desk, and the pull request says **Timed out twice**. You decide: re-run the review, or leave it. If you do nothing for 2 working days you get one reminder; nothing changes by itself. Re-running, or closing the Desk item, ends the wait. If it is over the budget when the second timeout happens, it goes to **Needs split** straight away.
 
+#### Size exceptions
+
+- **Johnny asks, with a reason:** for a pull request that is over the budget and has been sent back (**Needs split**), Johnny (the CEO agent) can ask you to let it stay as one pull request. A request without a reason of at least 20 characters is refused. Johnny keeps its own audit note apart; the reason you read is the one he gives you.
+- **You decide on the Desk:** the item shows the reason, the size against the budget (for example *1,240 of 800 changed lines, 155%*), a link to the pull request, and **Approve** or **Reject** with an optional note. There is no Dismiss and no Snooze. The pull request shows **Size exception pending**.
+- **Approved:** the pull request is an approved exception. It is reviewed as usual and the size check lets it pass up to the approved size. If it grows past that size, the exception no longer covers it and it goes to **Needs split** like any other.
+- **Rejected:** the pull request goes back to **Needs split** and its author is told on the pull request.
+- **No answer lapses it:** if you do not answer within **2 working days** (Monday to Friday in your time zone, the same days as the other reminders), the request lapses, the pull request goes to **Needs split**, and the author is told. **You are not reminded**, and Johnny cannot approve it.
+- **History:** the **Size exceptions** list on the Pull requests page keeps every request with its reason and outcome (approved, rejected, lapsed, withdrawn when the pull request closed), so you can review what you accepted.
+
 #### 20-PR replay and ending the rollout
 
 Before the second, deeper reviewer (Opus) reviews live pull requests, you measure both reviewers offline. On the **Pull requests** tab choose **20-PR replay**, pick a PR-only repository and select **Start replay**. The 20 most recently merged pull requests are taken (pull requests from cards are left out; the repository needs at least 20), and your workstation reviews each one with Sonnet and with Opus: 40 reviews, each with the usual 10-minute limit, one after the other, after any live reviews. **Nothing is posted** to the pull requests and no reviewer token is needed.

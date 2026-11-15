@@ -1,7 +1,7 @@
-import { type CeoActionName, SizeExceptionParamsSchema, type SizeExceptionParams } from '@aom/shared';
-import { withAppendTx } from '../db/tx.ts';
+import { type CeoActionName, type SizeExceptionParams, SizeExceptionParamsSchema } from '@aom/shared';
 import { requestSizeExceptionIn } from '../commands/size-exception.ts';
 import { one } from '../db/sql.ts';
+import { withAppendTx } from '../db/tx.ts';
 import { ceoBy, refuse, truncate } from './actions.ts';
 import type { ActionDef } from './types.ts';
 
@@ -27,7 +27,11 @@ const sizeException: ActionDef<SizeExceptionParams> = {
       [env.orgId, p.pr],
     );
     if (!pr) return refuse(`pull request ${p.pr} not found in this organization`);
-    const base = { subjectKind: 'pull_request', subjectId: pr.id as string, subjectLabel: `PR #${pr.change_id}` };
+    const base = {
+      subjectKind: 'pull_request',
+      subjectId: pr.id as string,
+      subjectLabel: `PR #${pr.change_id}`,
+    };
     if (pr.closed_at) return { ...base, refuse: 'the pull request is closed' };
     if (pr.review_state === 'size_exception_pending')
       return { ...base, refuse: 'a size exception request for this pull request is already open' };

@@ -3,7 +3,6 @@ import {
   type AnswerDeskItemRequest,
   BATCH_QUESTION_SUBKIND,
   CEO_PERMISSION_SUBKIND,
-  SIZE_EXCEPTION_SUBKIND,
   type DeskActor,
   type DeskResolution,
   GATE_DESK_SUBKIND,
@@ -14,6 +13,7 @@ import {
   PR_TIMED_OUT_TWICE_SUBKIND,
   type ResolveDeskItemRequest,
   type ShipReleaseApproval,
+  SIZE_EXCEPTION_SUBKIND,
   streamId,
   TOPICS_DESK_SUBKIND,
   UNMAPPED_TICKET_SUBKIND,
@@ -49,7 +49,6 @@ import { resolveDefinitionIn } from './designer.ts';
 import { resolveDevOpsApprovalIn } from './devops.ts';
 import { mergedAnswerNotes } from './escalation.ts';
 import { resolveLargeMergeIn } from './finalize.ts';
-import { resolveSizeExceptionIn } from './size-exception.ts';
 import { runHygieneForConfirmedRepo, workingBranchAnsweredEvents } from './hygiene.ts';
 import { continueIntake, mappingAnsweredEvents } from './intake.ts';
 import { batchAnsweredEvents, batchDismissedEvents } from './intake-batch.ts';
@@ -62,6 +61,7 @@ import { afterAssignmentDecision, PACK_ASSIGNMENT_SUBKIND, resolvePackAssignment
 import { resolvePhaseDeskItemIn } from './phases.ts';
 import { resolveTimedOutTwice } from './pr-size-check.ts';
 import { resolveRepoCreateIn, retryRepoCreateIn } from './repo-create.ts';
+import { resolveSizeExceptionIn } from './size-exception.ts';
 import { testerLoopAnswered } from './tester-loop.ts';
 import { resolveVaultConflictIn } from './vaults.ts';
 

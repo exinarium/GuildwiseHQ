@@ -17,9 +17,9 @@ import type { Ctx } from '../context.ts';
 import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, notFound } from '../errors.ts';
+import { agentActor, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { userTimezone } from './owner-pending.ts';
 import { loadSizeContext, sendPrBackToAuthorIn, verdictOf } from './pr-size-check.ts';
-import { agentActor, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 
 /**
  * Size exception requests. The CEO agent asks, with a reason, to let an over-budget pull request stay as one; the owner
@@ -30,7 +30,13 @@ import { agentActor, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 
 export { sizeExemptionOf } from './size-exemption.ts';
 
-const ev = (orgId: string, projectId: string, type: string, payload: Record<string, unknown>, actor: object) => ({
+const ev = (
+  orgId: string,
+  projectId: string,
+  type: string,
+  payload: Record<string, unknown>,
+  actor: object,
+) => ({
   streamId: streamId.project(projectId),
   event: { type, payload } as never,
   actor: actor as never,
@@ -90,7 +96,8 @@ export async function requestSizeExceptionIn(
     `SELECT id FROM pr_size_exceptions WHERE state='pending' AND (pr_review_id = ANY($1::uuid[]) OR chain_pr_review_ids && $1::uuid[]) LIMIT 1`,
     [chain],
   );
-  if (open) throw conflict('already_pending', 'a size exception request for this pull request is already open');
+  if (open)
+    throw conflict('already_pending', 'a size exception request for this pull request is already open');
   const decided = await one(
     tx,
     `SELECT id FROM pr_size_exceptions
@@ -98,7 +105,10 @@ export async function requestSizeExceptionIn(
     [chain, v.total],
   );
   if (decided)
-    throw conflict('already_decided', 'a size exception for this pull request was already refused at this size');
+    throw conflict(
+      'already_decided',
+      'a size exception for this pull request was already refused at this size',
+    );
   const owner = await one(
     tx,
     `SELECT user_id FROM project_members WHERE project_id=$1 AND role='owner' ORDER BY (status='active') DESC LIMIT 1`,
@@ -276,7 +286,13 @@ export async function resolveSizeExceptionIn(
   if (pr?.closed_at) {
     await ctx.store.append(
       [
-        ev(orgId, projectId, 'SizeExceptionWithdrawn', { sizeExceptionId: id, cause: 'pr_closed', at }, SYSTEM_ACTOR),
+        ev(
+          orgId,
+          projectId,
+          'SizeExceptionWithdrawn',
+          { sizeExceptionId: id, cause: 'pr_closed', at },
+          SYSTEM_ACTOR,
+        ),
       ],
       { tx },
     );
@@ -349,7 +365,11 @@ export async function sizeExceptionSweep(ctx: Ctx): Promise<{ lapsed: number; wi
       if (!row) return null;
       const pr = await one(tx, 'SELECT closed_at FROM pr_reviews WHERE id=$1', [row.pr_review_id]);
       const action = sizeExceptionDue(
-        { state: row.state as string, dueAt: new Date(row.due_at as string), prClosed: Boolean(pr?.closed_at) },
+        {
+          state: row.state as string,
+          dueAt: new Date(row.due_at as string),
+          prClosed: Boolean(pr?.closed_at),
+        },
         ctx.clock.now(),
       );
       if (!action) return null;
@@ -358,7 +378,15 @@ export async function sizeExceptionSweep(ctx: Ctx): Promise<{ lapsed: number; wi
       const projectId = row.project_id as string;
       if (action === 'withdraw') {
         await ctx.store.append(
-          [ev(orgId, projectId, 'SizeExceptionWithdrawn', { sizeExceptionId: row.id, cause: 'pr_closed', at }, SYSTEM_ACTOR)],
+          [
+            ev(
+              orgId,
+              projectId,
+              'SizeExceptionWithdrawn',
+              { sizeExceptionId: row.id, cause: 'pr_closed', at },
+              SYSTEM_ACTOR,
+            ),
+          ],
           { tx },
         );
         await closeDeskItem(ctx, tx, row, 'The pull request was closed');

@@ -32,7 +32,12 @@ describe('AC1: the owner sees a desk item with the reason and the size against t
     expect(item.body).toContain(REASON);
     expect(item.data).toMatchObject({ reason: REASON, size: 900, budget: 600, unit: 'changed_lines' });
     expect((await s.prOf(301)).review_state).toBe('size_exception_pending');
-    expect(await s.row(r.sizeExceptionId)).toMatchObject({ state: 'pending', size: 900, budget: 600, reason: REASON });
+    expect(await s.row(r.sizeExceptionId)).toMatchObject({
+      state: 'pending',
+      size: 900,
+      budget: 600,
+      reason: REASON,
+    });
     // a poll leaves a pending request alone
     await s.poll([{ n: 301, head: 'big/301', base: 'main', lines: 900 }]);
     expect((await s.prOf(301)).review_state).toBe('size_exception_pending');
@@ -61,7 +66,11 @@ describe('AC1: the owner sees a desk item with the reason and the size against t
       cookie: s.m.w.owner.cookie,
     });
     expect(res.status).toBe(200);
-    expect((res.body as any).sizeExceptions[0]).toMatchObject({ id: r.sizeExceptionId, reason: REASON, state: 'pending' });
+    expect((res.body as any).sizeExceptions[0]).toMatchObject({
+      id: r.sizeExceptionId,
+      reason: REASON,
+      state: 'pending',
+    });
   });
 
   it('the request can be found by the PR address', async () => {
@@ -72,17 +81,18 @@ describe('AC1: the owner sees a desk item with the reason and the size against t
 });
 
 describe('AC5: a request without a reason is refused', () => {
-  it.each([['empty', ''], ['blank', '                      '], ['too short', 'too big, sorry']])(
-    'refuses a reason that is %s: nothing is written',
-    async (_n, reason) => {
-      const prId = await s.overBudgetPr(341, 900);
-      const events = (await s.events('SizeExceptionRequested')).length;
-      await expect(s.request(prId, reason)).rejects.toMatchObject({ status: 400 });
-      expect((await s.prOf(341)).review_state).toBe('needs_split');
-      expect((await s.events('SizeExceptionRequested')).length).toBe(events);
-      expect((await q().query(`SELECT 1 FROM desk_items WHERE subkind='size_exception'`)).rowCount).toBe(0);
-    },
-  );
+  it.each([
+    ['empty', ''],
+    ['blank', '                      '],
+    ['too short', 'too big, sorry'],
+  ])('refuses a reason that is %s: nothing is written', async (_n, reason) => {
+    const prId = await s.overBudgetPr(341, 900);
+    const events = (await s.events('SizeExceptionRequested')).length;
+    await expect(s.request(prId, reason)).rejects.toMatchObject({ status: 400 });
+    expect((await s.prOf(341)).review_state).toBe('needs_split');
+    expect((await s.events('SizeExceptionRequested')).length).toBe(events);
+    expect((await q().query(`SELECT 1 FROM desk_items WHERE subkind='size_exception'`)).rowCount).toBe(0);
+  });
 
   it('the CEO action refuses it in its schema', () => {
     const def = ACTIONS['size-exception'];
@@ -95,7 +105,10 @@ describe('AC5: a request without a reason is refused', () => {
 describe('what may be asked for', () => {
   it('refuses a PR that is not sent back for its size, a second open request and an unknown PR', async () => {
     await s.poll([{ n: 351, head: 'small', base: 'main', lines: 100 }]);
-    await expect(s.request((await s.prOf(351)).id)).rejects.toMatchObject({ status: 409, code: 'not_over_budget' });
+    await expect(s.request((await s.prOf(351)).id)).rejects.toMatchObject({
+      status: 409,
+      code: 'not_over_budget',
+    });
     const prId = await s.overBudgetPr(352, 900);
     await s.request(prId);
     await expect(s.request(prId)).rejects.toMatchObject({ status: 409, code: 'already_pending' });

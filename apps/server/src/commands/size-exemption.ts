@@ -1,6 +1,6 @@
 import { exemptionCovers, streamId } from '@aom/shared';
-import { one, type Queryable } from '../db/sql.ts';
 import type { Ctx } from '../context.ts';
+import { one, type Queryable } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import { projectScope, SYSTEM_ACTOR } from './common.ts';
 

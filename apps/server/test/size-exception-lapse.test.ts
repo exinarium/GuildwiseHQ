@@ -47,7 +47,10 @@ describe('AC4: lapses after 2 working days, the author is told, the owner is not
     s.pin('2030-03-05T15:00:00Z');
     expect(await sweep()).toEqual({ lapsed: 1, withdrawn: 0 });
     expect((await s.row(r.sizeExceptionId)).state).toBe('lapsed');
-    expect(await s.prOf(501)).toMatchObject({ review_state: 'needs_split', split_reason: 'size_exception_lapsed' });
+    expect(await s.prOf(501)).toMatchObject({
+      review_state: 'needs_split',
+      split_reason: 'size_exception_lapsed',
+    });
     expect((await s.notices()).at(-1)).toMatchObject({ state: 'pending' });
     expect((await s.deskItem(r.deskItemId)).status).not.toBe('open');
     // a second pass does nothing, and an answer after the lapse is refused
@@ -105,8 +108,12 @@ describe('AC4: lapses after 2 working days, the author is told, the owner is not
     expect(await s.events('DeskItemNudged')).toHaveLength(0);
     expect(await s.events('OwnerPendingReminded')).toHaveLength(0);
     expect((await q().query('SELECT 1 FROM owner_pending_timers')).rowCount).toBe(0);
-    expect((await q().query(`SELECT 1 FROM desk_items WHERE subkind='owner_pending_reminder'`)).rowCount).toBe(0);
-    expect((await q().query('SELECT 1 FROM desk_follow_ups WHERE desk_item_id=$1', [r.deskItemId])).rowCount).toBe(0);
+    expect(
+      (await q().query(`SELECT 1 FROM desk_items WHERE subkind='owner_pending_reminder'`)).rowCount,
+    ).toBe(0);
+    expect(
+      (await q().query('SELECT 1 FROM desk_follow_ups WHERE desk_item_id=$1', [r.deskItemId])).rowCount,
+    ).toBe(0);
     expect(push).not.toHaveBeenCalled();
     expect((await s.row(r.sizeExceptionId)).state).toBe('lapsed');
   });

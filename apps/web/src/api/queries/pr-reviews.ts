@@ -7,6 +7,8 @@ import type {
   PrReviewDto,
   PrReviewQueueDto,
   ReviewerPrecisionResponse,
+  SizeExceptionDto,
+  SizeExceptionState,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { get, post, put } from '../client.ts';
@@ -126,5 +128,17 @@ export function usePrReviewMarks(projectId: string | undefined, enabled = false)
     queryKey: ['pr-review-marks', projectId],
     enabled: enabled && !!projectId,
     queryFn: () => get<FindingMarkReplayResponse>(`/projects/${projectId}/pr-review-marks`),
+  });
+}
+
+/** The size exception requests of a project (reason and outcome), newest first; optionally one state. */
+export function useSizeExceptions(projectId: string | undefined, state?: SizeExceptionState) {
+  return useQuery({
+    queryKey: ['size-exceptions', projectId, state ?? 'all'],
+    enabled: !!projectId,
+    queryFn: () =>
+      get<{ sizeExceptions: SizeExceptionDto[] }>(
+        `/projects/${projectId}/size-exceptions${state ? `?state=${state}` : ''}`,
+      ),
   });
 }

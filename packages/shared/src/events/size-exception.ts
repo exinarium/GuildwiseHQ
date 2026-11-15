@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import { SizeExceptionReason } from '../review/size-exception.ts';
 import { SizeUnitSchema } from '../projects/review-settings.ts';
-import { DeskActorSchema } from './desk.ts';
+import { SizeExceptionReason } from '../review/size-exception.ts';
 import { defineEvent, Id, IsoDate } from './define.ts';
+import { DeskActorSchema } from './desk.ts';
 
 /** Size exception requests (appended to the project stream; the projection keeps `pr_size_exceptions`). */
 export const sizeExceptionEvents = [

@@ -308,8 +308,7 @@ export async function applyPrListResult(
     // chain's source, a closed pull request stops waiting for the owner, and over-budget chains are sent back.
     await writeOpenChangeSnapshot(tx, repoId, r.changes, r.complete, now);
     for (const e of events)
-      if (e.event.type === 'PrReviewClosed')
-      {
+      if (e.event.type === 'PrReviewClosed') {
         await resolveTimedOutTwice(ctx, tx, e.event.payload.prReviewId, 'closed');
         await withdrawSizeExceptionOnClose(ctx, tx, e.event.payload.prReviewId);
       }

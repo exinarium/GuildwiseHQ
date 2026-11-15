@@ -12,7 +12,6 @@ import {
   PatchRepoRequestSchema,
   PauseProjectRequestSchema,
   ProjectsQuerySchema,
-  SizeExceptionsQuerySchema,
   PrReviewTriggerRequestSchema,
   RankProjectsRequestSchema,
   RepoParamsSchema,
@@ -36,6 +35,7 @@ import {
   SetStopLossRequestSchema,
   SetTestServicesRequestSchema,
   SetWorkingBranchRequestSchema,
+  SizeExceptionsQuerySchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -60,7 +60,6 @@ import {
 } from '../commands/pr-review-marks.ts';
 import { setSecondReviewer } from '../commands/pr-review-rounds.ts';
 import { heldBackFindings, listPrReviews, triggerPrReview } from '../commands/pr-review-runs.ts';
-import { listSizeExceptions } from '../commands/size-exception.ts';
 import { pauseProject, resumeProject } from '../commands/project-pause.ts';
 import {
   addRepo,
@@ -89,6 +88,7 @@ import {
 } from '../commands/projects.ts';
 import { requestReleasePr } from '../commands/release-pr.ts';
 import { setRepoAccessMethod } from '../commands/repo-access.ts';
+import { listSizeExceptions } from '../commands/size-exception.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import { gone, notFound } from '../errors.ts';

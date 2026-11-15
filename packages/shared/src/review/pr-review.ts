@@ -15,7 +15,12 @@ import { ReviewerRunSpecSchema, ReviewFindingSchema } from './reviewer-run.ts';
  * budget, sent back to its author, and not reviewed until it is within the budget again; `size_exception_pending`: a size
  * exception was asked for and waits for the owner.
  */
-export const PR_REVIEW_STATES = ['not_reviewed', 'reviewed', 'needs_split', 'size_exception_pending'] as const;
+export const PR_REVIEW_STATES = [
+  'not_reviewed',
+  'reviewed',
+  'needs_split',
+  'size_exception_pending',
+] as const;
 export const PrReviewStateSchema = z.enum(PR_REVIEW_STATES);
 export type PrReviewState = z.infer<typeof PrReviewStateSchema>;
 

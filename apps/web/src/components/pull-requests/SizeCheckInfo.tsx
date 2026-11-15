@@ -42,12 +42,29 @@ export function SizeCheckInfo({ pr }: { pr: PrReviewDto }) {
   const split = pr.state === 'needs_split' ? pr.split : null;
   return (
     <div className="space-y-1" data-testid={`pr-size-${pr.changeId}`}>
+      {pr.state === 'size_exception_pending' && pr.sizeException && (
+        <p data-testid={`pr-size-exception-pending-${pr.changeId}`}>
+          Size exception pending: the owner answers by {new Date(pr.sizeException.dueAt).toLocaleDateString()}
+          .
+          {size?.state === 'over' && size.unit
+            ? ` ${size.total} of ${size.budget} ${sizeUnitWord(size.unit)}.`
+            : ''}
+        </p>
+      )}
+      {pr.state !== 'size_exception_pending' && pr.sizeException?.state === 'approved' && size?.unit && (
+        <p data-testid={`pr-size-exception-approved-${pr.changeId}`}>
+          Over budget, approved exception (up to {pr.sizeException.size} {sizeUnitWord(size.unit)}).
+        </p>
+      )}
       {split && (
         <>
           <p data-testid={`pr-split-detail-${pr.changeId}`}>
             Over the size budget: {split.total ?? '?'} of {split.budget ?? '?'}{' '}
             {split.unit ? sizeUnitWord(split.unit) : 'changed lines'}
             {chainText(pr)}. Sent back to the author to split.
+            {split.reason === 'size_exception_rejected' && ' Size exception not approved.'}
+            {split.reason === 'size_exception_lapsed' &&
+              ' Size exception lapsed: no answer in 2 working days.'}
           </p>
           <NoticeLine pr={pr} />
         </>

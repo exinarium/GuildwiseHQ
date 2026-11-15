@@ -89,14 +89,25 @@ describe('AC3: rejected, the PR is needs-split and its author is notified', () =
     const oldNotices = (await s.notices()).length;
     await ok(s.resolve(r.deskItemId, 'rejected', 'please split it'));
     expect(await s.row(r.sizeExceptionId)).toMatchObject({ state: 'rejected', note: 'please split it' });
-    expect(await s.prOf(441)).toMatchObject({ review_state: 'needs_split', split_reason: 'size_exception_rejected' });
+    expect(await s.prOf(441)).toMatchObject({
+      review_state: 'needs_split',
+      split_reason: 'size_exception_rejected',
+    });
     const notices = await s.notices();
     expect(notices.length).toBe(oldNotices + 1);
     expect(notices.at(-1)).toMatchObject({ state: 'pending', pr_review_id: prId });
     // the notice body says why
     const { splitNoticeBody } = await import('@aom/shared');
     expect(
-      splitNoticeBody({ unit: 'changed_lines', budget: 600, total: 900, members: [], self: '441', noticeId: 'n', reason: 'size_exception_rejected' }),
+      splitNoticeBody({
+        unit: 'changed_lines',
+        budget: 600,
+        total: 900,
+        members: [],
+        self: '441',
+        noticeId: 'n',
+        reason: 'size_exception_rejected',
+      }),
     ).toContain('size exception');
     // and it cannot be answered twice
     expect((await s.resolve(r.deskItemId, 'approved')).status).toBe(409);
@@ -128,7 +139,14 @@ describe('AC3: rejected, the PR is needs-split and its author is notified', () =
     const prId = await s.overBudgetPr(471, 900);
     const r = await s.request(prId);
     expect((await s.resolve(r.deskItemId, 'acknowledged')).status).toBe(400);
-    expect((await s.m.w.t.req('POST', `/api/desk/${r.deskItemId}/dismiss`, { cookie: s.m.w.owner.cookie, body: {} })).status).toBeGreaterThanOrEqual(400);
+    expect(
+      (
+        await s.m.w.t.req('POST', `/api/desk/${r.deskItemId}/dismiss`, {
+          cookie: s.m.w.owner.cookie,
+          body: {},
+        })
+      ).status,
+    ).toBeGreaterThanOrEqual(400);
     expect((await s.row(r.sizeExceptionId)).state).toBe('pending');
   });
 });
@@ -147,10 +165,22 @@ describe('closing the PR, and the history', () => {
     await ok(s.resolve(a.deskItemId, 'approved'));
     const b = await s.request(await s.overBudgetPr(492, 900));
     await ok(s.resolve(b.deskItemId, 'rejected'));
-    const all = (await ok<any>(s.m.w.t.req('GET', `/api/projects/${s.m.w.projectId}/size-exceptions`, { cookie: s.m.w.owner.cookie }))).sizeExceptions;
+    const all = (
+      await ok<any>(
+        s.m.w.t.req('GET', `/api/projects/${s.m.w.projectId}/size-exceptions`, {
+          cookie: s.m.w.owner.cookie,
+        }),
+      )
+    ).sizeExceptions;
     expect(all.map((e: any) => e.state)).toEqual(['rejected', 'approved']);
     expect(all.every((e: any) => e.reason === REASON)).toBe(true);
-    const only = (await ok<any>(s.m.w.t.req('GET', `/api/projects/${s.m.w.projectId}/size-exceptions?state=approved`, { cookie: s.m.w.owner.cookie }))).sizeExceptions;
+    const only = (
+      await ok<any>(
+        s.m.w.t.req('GET', `/api/projects/${s.m.w.projectId}/size-exceptions?state=approved`, {
+          cookie: s.m.w.owner.cookie,
+        }),
+      )
+    ).sizeExceptions;
     expect(only).toHaveLength(1);
   });
 });

@@ -25,6 +25,7 @@ import { PostedFindings } from './PostedFindings.tsx';
 import { PrReviewTriggerButton } from './PrReviewTriggerButton.tsx';
 import { ReviewerPrecisionPanel } from './ReviewerPrecisionPanel.tsx';
 import { SizeCheckInfo } from './SizeCheckInfo.tsx';
+import { SizeExceptionHistory } from './SizeExceptionHistory.tsx';
 
 /** "3 min 12 s", "45 s". */
 export function fmtRunTime(ms: number): string {
@@ -143,10 +144,22 @@ function Row({ pr, projectId }: { pr: PrReviewDto; projectId: string }) {
           {pr.title}
         </a>
         <Badge
-          tone={pr.state === 'reviewed' ? 'green' : pr.state === 'needs_split' ? 'amber' : 'neutral'}
+          tone={
+            pr.state === 'reviewed'
+              ? 'green'
+              : pr.state === 'needs_split' || pr.state === 'size_exception_pending'
+                ? 'amber'
+                : 'neutral'
+          }
           data-testid={`pr-review-state-${pr.changeId}`}
         >
-          {pr.state === 'reviewed' ? 'Reviewed' : pr.state === 'needs_split' ? 'Needs split' : 'Not reviewed'}
+          {pr.state === 'reviewed'
+            ? 'Reviewed'
+            : pr.state === 'needs_split'
+              ? 'Needs split'
+              : pr.state === 'size_exception_pending'
+                ? 'Size exception pending'
+                : 'Not reviewed'}
         </Badge>
         {attention && <Badge tone="amber">Needs attention</Badge>}
       </div>
@@ -155,7 +168,7 @@ function Row({ pr, projectId }: { pr: PrReviewDto; projectId: string }) {
         {pr.author ? ` · ${pr.author}` : ''} · opened {when(pr.openedAt)}
       </p>
       <div className="text-xs text-muted">
-        {pr.state !== 'needs_split' && <Detail pr={pr} />}
+        {pr.state !== 'needs_split' && pr.state !== 'size_exception_pending' && <Detail pr={pr} />}
         <SizeCheckInfo pr={pr} />
         {pr.lastRun?.trigger === 'manual' && (
           <p data-testid={`pr-review-by-hand-${pr.changeId}`}>Started by hand</p>
@@ -332,6 +345,7 @@ export function PullRequests() {
       {queue.data?.items && (
         <Queue q={queue.data} projectId={project.id} isOwner={project.myRole === 'owner'} />
       )}
+      <SizeExceptionHistory projectId={project.id} />
       {list.isPending ? (
         <ListSkeleton />
       ) : list.isError ? (

@@ -906,7 +906,9 @@ export async function listPrReviews(
     [projectId],
   );
   const exceptionOf = (prId: string): PrReviewDto['sizeException'] => {
-    const e = exceptions.filter((x) => x.pr_review_id === prId || (x.chain_pr_review_ids as string[]).includes(prId));
+    const e = exceptions.filter(
+      (x) => x.pr_review_id === prId || (x.chain_pr_review_ids as string[]).includes(prId),
+    );
     const last = e.at(-1);
     return last
       ? {
