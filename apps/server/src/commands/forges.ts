@@ -26,7 +26,12 @@ import { projectScope, userActor } from './common.ts';
  */
 
 /** `git.report` from the runner: stored as is (validated), shown on the Workstations page and in repository settings. */
-export async function applyGitReport(ctx: Ctx, workstationId: string, connections: unknown): Promise<void> {
+export async function applyGitReport(
+  ctx: Ctx,
+  workstationId: string,
+  connections: unknown,
+  statusTokens?: readonly string[],
+): Promise<void> {
   const parsed = GitConnectionsSchema.safeParse(connections);
   if (!parsed.success) return;
   await exec(ctx.pool, 'UPDATE workstations SET git_connections=$2, git_checked_at=$3 WHERE id=$1', [
@@ -34,6 +39,13 @@ export async function applyGitReport(ctx: Ctx, workstationId: string, connection
     JSON.stringify(parsed.data),
     ctx.clock.now(),
   ]);
+  // The keys (`github@github.com`) of the size check status tokens this workstation holds; never a token. A runner that
+  // does not report them leaves the stored keys as they are.
+  if (statusTokens)
+    await exec(ctx.pool, 'UPDATE workstations SET status_tokens=$2::jsonb WHERE id=$1', [
+      workstationId,
+      JSON.stringify(statusTokens.map((k) => k.toLowerCase())),
+    ]);
 }
 
 /** `jira.report`: whether the runner holds Jira credentials and whether Jira accepts them (facts only, never the token). */

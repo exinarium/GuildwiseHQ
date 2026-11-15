@@ -43,6 +43,7 @@ import { queueAccountEnsure, resyncAccountNotices } from './claude-accounts.ts';
 import { assertRemoteUrl, cardMessage, orgScope, projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { cancelConversionEvents } from './convert.ts';
 import { cancelPhasesEvents } from './phases.ts';
+import { refreshSizeStatuses } from './pr-size-status.ts';
 import { ensureProjectVaultIn } from './vaults.ts';
 import {
   deliver,
@@ -235,14 +236,14 @@ export async function setReviewSettings(
     settings.riskMap && settings.riskMap.length > 0
       ? settings.riskMap.map((e) => ({ pattern: e.pattern, risk: e.risk }))
       : null;
-  await withAppendTx(ctx.pool, async (tx) => {
+  const changed = await withAppendTx(ctx.pool, async (tx) => {
     const p = await ownedProject(tx, user.id, projectId);
     const unchanged =
       (p.size_budget ?? null) === sizeBudget &&
       (p.size_unit ?? null) === sizeUnit &&
       // compared entry by entry: the stored jsonb does not keep the key order
       sameRiskMap(p.risk_map, riskMap);
-    if (unchanged) return;
+    if (unchanged) return false;
     await ctx.store.append(
       [
         {
@@ -257,7 +258,12 @@ export async function setReviewSettings(
       ],
       { tx },
     );
+    return true;
   });
+  // the hard size check follows the new budget and unit: ask for the open pull requests again and re-evaluate the stored ones
+  if (changed) {
+    await refreshSizeStatuses(ctx, { projectId, poll: true });
+  }
 }
 
 /**

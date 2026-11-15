@@ -8,6 +8,7 @@ import { withAppendTx } from '../db/tx.ts';
 import { forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
+import { evaluateSizeStatuses, SIZE_POLL_SQL } from './pr-size-status.ts';
 import { evaluateRepoSizes, resolveTimedOutTwice, writeOpenChangeSnapshot } from './pr-size-check.ts';
 import { withdrawSizeExceptionOnClose } from './size-exception.ts';
 
@@ -59,7 +60,9 @@ export async function setRepoPrOnly(
     );
     return true;
   });
-  if (changed && prOnly) await requestPrList(ctx, repoId, { userId: user.id }).catch(() => undefined);
+  // the repository may have been listed for the size check a moment ago: the owner should not wait for the first recording
+  if (changed && prOnly)
+    await requestPrList(ctx, repoId, { userId: user.id, force: true }).catch(() => undefined);
 }
 
 export type RequestPrListOutcome =
@@ -81,7 +84,7 @@ export async function requestPrList(
     ctx.pool,
     `SELECT r.id, r.project_id, r.remote_url_normalized, r.forge_kind, p.org_id
        FROM project_repos r JOIN projects p ON p.id = r.project_id
-      WHERE r.id=$1 AND r.removed_at IS NULL AND r.pr_only AND p.status='active'`,
+      WHERE r.id=$1 AND r.removed_at IS NULL AND (r.pr_only OR ${SIZE_POLL_SQL}) AND p.status='active'`,
     [repoId],
   );
   if (!repo) return { queued: false, reason: 'skipped' };
@@ -162,7 +165,7 @@ export async function pollPrOnlyRepos(ctx: Ctx): Promise<void> {
     `SELECT r.id,
             (SELECT m.user_id FROM project_members m WHERE m.project_id = p.id AND m.role='owner' LIMIT 1) AS owner_id
        FROM project_repos r JOIN projects p ON p.id = r.project_id
-      WHERE r.pr_only AND r.removed_at IS NULL AND p.status='active'`,
+      WHERE (r.pr_only OR ${SIZE_POLL_SQL}) AND r.removed_at IS NULL AND p.status='active'`,
   );
   for (const r of repos) {
     await requestPrList(ctx, r.id as string, { userId: (r.owner_id as string | null) ?? undefined }).catch(
@@ -224,9 +227,15 @@ export async function applyPrListResult(
         WHERE r.id=$1 AND r.removed_at IS NULL FOR UPDATE OF r`,
       [repoId],
     );
-    // Off means off: an answer that arrives after the switch was turned off records nothing.
-    if (!repo?.pr_only || !repo.pr_only_since) return;
+    if (!repo) return;
     const projectId = repo.project_id as string;
+    // Off means off: an answer that arrives after PR-only was turned off records no pull request for review. The open
+    // list and the hard size check still follow (they need no PR-only switch).
+    if (!repo.pr_only || !repo.pr_only_since) {
+      await writeOpenChangeSnapshot(tx, repoId, r.changes, r.complete, now);
+      await evaluateSizeStatuses(ctx, tx, projectId, repoId, now);
+      return;
+    }
     const since = new Date(repo.pr_only_since).getTime();
     const cardBranches = new Set(
       (
@@ -313,6 +322,8 @@ export async function applyPrListResult(
         await withdrawSizeExceptionOnClose(ctx, tx, e.event.payload.prReviewId);
       }
     await evaluateRepoSizes(ctx, tx, projectId, repo.org_id as string, repoId);
+    // The hard size check last, so an exception withdrawn above is seen.
+    await evaluateSizeStatuses(ctx, tx, projectId, repoId, now);
   });
 }
 

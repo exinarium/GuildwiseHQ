@@ -68,6 +68,7 @@ import { applyPrListResult } from '../commands/pr-only.ts';
 import { applyMergedPrList } from '../commands/pr-replays.ts';
 import { applyPrReviewPostResult, applyPrReviewRunResult } from '../commands/pr-review-runs.ts';
 import { applySplitNoticeResult } from '../commands/pr-size-check.ts';
+import { applyCommitStatusResult } from '../commands/pr-size-status.ts';
 import { syncProviderAccountNotices } from '../commands/provider-account-notices.ts';
 import { applyPromoteResult, applyProviderKeyResult } from '../commands/provider-keys.ts';
 import { questionStatus } from '../commands/question-flow.ts';
@@ -281,7 +282,7 @@ export class RunnerHandlers {
         ]);
         return;
       case 'git.report':
-        await applyGitReport(this.ctx, conn.workstationId, msg.connections);
+        await applyGitReport(this.ctx, conn.workstationId, msg.connections, msg.statusTokens);
         return;
       case 'integrations.report':
         await applyIntegrationsReport(this.ctx, conn.workstationId, msg);
@@ -620,6 +621,10 @@ export class RunnerHandlers {
       // Terminal: the open pull requests of a PR-only repository (or why not) are recorded; the next poll asks again.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyPrListResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'repo.commit_status') {
+      // Terminal: the status is on the commit, or why not (retried by the scheduler; never redelivered by the queue).
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyCommitStatusResult(this.ctx, cmd.payload, msg.ok, msg.result, msg.error);
     } else if (cmd?.type === 'repo.list_merged_prs') {
       // Terminal: the merged pull requests the replay takes its 20 from (or why not).
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

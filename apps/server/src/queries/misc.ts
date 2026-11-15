@@ -26,6 +26,7 @@ import {
 import type { z } from 'zod';
 import { orgRoleOf, orgSuspended } from '../auth/org-context.ts';
 import { pendingConversionOf } from '../commands/convert.ts';
+import { sizeStatusDtoOf } from '../commands/pr-size-status.ts';
 import { hygieneDtos } from '../commands/hygiene.ts';
 import { mcpServerCandidates } from '../commands/mcp-servers.ts';
 import { loadPrReviewStatus } from '../commands/pr-only.ts';
@@ -390,6 +391,7 @@ export async function getProjectDetail(
     project: {
       ...toProjectDto(p, p.my_role),
       secondReviewer: await secondReviewerDto(ctx, p),
+      sizeStatus: await sizeStatusDtoOf(ctx.pool, p.id),
       pendingConversion: await pendingConversionOf(ctx.pool, p),
       budget: (await budgetsFor(ctx, userId, [p])).get(p.id) as BudgetDto,
       ...(limit ? { usageLimit: limit } : {}),

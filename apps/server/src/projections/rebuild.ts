@@ -34,6 +34,10 @@ export const SAVED: Array<{ table: string; restoreWhere: string }> = [
   { table: 'pr_review_polls', restoreWhere: 'project_repo_id IN (SELECT id FROM project_repos)' },
   // the open pull requests of a PR-only repository as last listed (migration 2970): operational, refreshed by polling
   { table: 'pr_open_changes', restoreWhere: 'project_repo_id IN (SELECT id FROM project_repos)' },
+  // The hard size check (migration 2990): the commit status wanted and posted per open pull request, and the repositories
+  // that ever had one: operational, refreshed by polling.
+  { table: 'pr_size_statuses', restoreWhere: 'project_repo_id IN (SELECT id FROM project_repos)' },
+  { table: 'pr_size_status_repos', restoreWhere: 'project_repo_id IN (SELECT id FROM project_repos)' },
   // Two-factor secrets and recovery codes are operational (they never enter the event log).
   // Which relay integrations a runner serves (migration 2751): operational, references a projection table.
   { table: 'relay_presence', restoreWhere: 'integration_id IN (SELECT id FROM relay_integrations)' },
