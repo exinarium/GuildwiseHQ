@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import {
+  type AppCommandResult,
   CommandPayloadSchemas,
   checkIntegrationRequest,
   INTEGRATIONS_REGISTRY_VERSION,
@@ -18,10 +19,12 @@ import {
   type RunnerCommandName,
   type SealedPlaintext,
 } from '@aom/shared';
+import { AppCommands } from '../apps/commands.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import { EnvelopeError, type RunnerKeys } from '../secrets/keys.ts';
 import { redact, registerSecret, unregisterSecret } from '../secrets/redact.ts';
 import { type AuditEntry, AuditLog } from './audit-log.ts';
+import { AutomatedAppIntegration } from './automated-app.ts';
 import { ClaudeCodeIntegration } from './claude-code.ts';
 import { AzureDevOpsIntegration, BitbucketIntegration, GitLabIntegration } from './forge-tokens.ts';
 import { GitHubIntegration } from './github.ts';
@@ -66,6 +69,7 @@ export function buildIntegrationAdapters(
     new McpIntegration(env),
     new WhatsappIntegration(env),
     new GoogleSheetsIntegration(env),
+    new AutomatedAppIntegration('github-app', env),
   ];
   return new Map(list.map((a) => [a.kind, a]));
 }
@@ -228,6 +232,27 @@ export class IntegrationService {
       };
     }
   }
+
+  /** Handles one `app.*` command (Settings > Automated apps); the answer is facts only, never a key or a token. */
+  async handleApp(command: RunnerCommandName, payload: Record<string, unknown>): Promise<AppCommandResult> {
+    return this.appCommands.handle(command, payload);
+  }
+
+  private readonly appCommands = new AppCommands({
+    adapter: (provider) => {
+      const a = this.adapters.get(provider as IntegrationKindId);
+      return a instanceof AutomatedAppIntegration ? a : undefined;
+    },
+    open: (envelope, outer) => {
+      const r = this.open(envelope, outer);
+      if (!r.ok) return { ok: false, code: r.result.code ?? 'failed', message: r.result.error ?? 'refused' };
+      const plain = r.plain;
+      return { ok: true, fields: plain.fields, forget: () => this.forget(plain) };
+    },
+    allowWeb: () => this.policy().allowWeb,
+    audit: (e) => this.audit.write(e),
+    report: () => void this.report(true),
+  });
 
   private adapterFor(kind: IntegrationKindId): IntegrationAdapter | undefined {
     return this.adapters.get(kind);

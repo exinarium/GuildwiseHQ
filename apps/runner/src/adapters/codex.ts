@@ -20,7 +20,7 @@ import type { ProviderStore } from '../direct/store.ts';
 import { protectedGitPaths } from '../git/harden.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { proxyEnv } from '../sandbox/harness-sandbox.ts';
-import { DOTNET_SHM_DIR, userNugetPackages } from '../sandbox/sandbox.ts';
+import { DOTNET_SHM_DIR, usablePnpmLockDirs, userNugetPackages } from '../sandbox/sandbox.ts';
 import { registerSecret } from '../secrets/redact.ts';
 import { selfCommand } from '../shims.ts';
 import {
@@ -212,6 +212,8 @@ export interface CodexProfileInput {
   codexReadPaths: string[];
   nugetFallbackDir?: string;
   dotnetShmDir?: string;
+  /** pnpm 12's fixed lock folders under /tmp that passed `usablePnpmLockDirs` (Linux); writable. */
+  pnpmLockDirs?: string[];
 }
 
 /** `<repo>/.git/worktrees/<name>` of a linked worktree (read from its `.git` file), if `cwd` is one. */
@@ -251,6 +253,7 @@ export function codexFilesystem(i: CodexProfileInput): Record<string, unknown> {
   for (const p of [...i.addDirs, ...i.readDirs]) set(p, 'read');
   if (i.nugetFallbackDir) set(i.nugetFallbackDir, 'read');
   if (i.dotnetShmDir) set(i.dotnetShmDir, 'write');
+  for (const p of i.pnpmLockDirs ?? []) set(p, 'write');
   // No socket here: the aom CLI is excluded from the sandbox by an execpolicy `allow` rule (see `codexRules`), because a Unix
   // socket cannot be connected from inside Codex's network-restricted sandbox (connect() fails with EPERM, verified on 0.163.0).
   // Reference repositories keep their secret files unreadable (the same names as read-only-dirs.ts). Matches are fixed when
@@ -1050,7 +1053,9 @@ export class CodexAdapter implements RuntimeAdapter {
       aomReadPaths: [this.paths?.bin ?? join(root, 'bin'), ...(script ? [dirname(script)] : [])],
       codexReadPaths: this.installPaths(),
       ...(nuget ? { nugetFallbackDir: nuget } : {}),
-      ...((this.host.platform ?? process.platform) === 'linux' ? { dotnetShmDir: DOTNET_SHM_DIR } : {}),
+      ...((this.host.platform ?? process.platform) === 'linux'
+        ? { dotnetShmDir: DOTNET_SHM_DIR, pnpmLockDirs: usablePnpmLockDirs() }
+        : {}),
     };
   }
 
@@ -1206,7 +1211,9 @@ export class CodexAdapter implements RuntimeAdapter {
       mayCommit,
       ...(input.env.AOM_IPC_SOCKET ? { ipcSocket: input.env.AOM_IPC_SOCKET } : {}),
       ...(nuget ? { nugetFallbackDir: nuget } : {}),
-      ...(process.platform === 'linux' ? { dotnetShmDir: DOTNET_SHM_DIR } : {}),
+      ...(process.platform === 'linux'
+        ? { dotnetShmDir: DOTNET_SHM_DIR, pnpmLockDirs: usablePnpmLockDirs() }
+        : {}),
     };
   }
 

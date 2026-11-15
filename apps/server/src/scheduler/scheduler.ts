@@ -9,6 +9,7 @@ import { fireDueHygiene } from '../commands/hygiene.ts';
 import { sweepIntegrations } from '../commands/integrations.ts';
 import { deliverDueInterests, fireDueInterests } from '../commands/interest-runs.ts';
 import { sweepJourneys } from '../commands/journey-runtime.ts';
+import { pruneAppRequests } from '../commands/org-apps.ts';
 import { evaluateAllProviderCaps } from '../commands/org-provider-keys.ts';
 import { ownerPendingSweep } from '../commands/owner-pending.ts';
 import { auditMailTick } from '../commands/platform-notify.ts';
@@ -231,6 +232,7 @@ export class Scheduler {
       this.ctx.log.error({ err }, 'offline form links failed'),
     );
     await pruneStorage(this.ctx).catch((err) => this.ctx.log.error({ err }, 'storage prune failed'));
+    await pruneAppRequests(this.ctx).catch((err) => this.ctx.log.error({ err }, 'app request prune failed'));
     await pruneFormSubmissions(this.ctx).catch((err) =>
       this.ctx.log.error({ err }, 'form submission prune failed'),
     );

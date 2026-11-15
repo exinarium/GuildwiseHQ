@@ -19,7 +19,7 @@ import { materializeSkills } from '../capabilities/materialize.ts';
 import type { GeminiRuntimeConfig } from '../config.ts';
 import type { ProviderStore } from '../direct/store.ts';
 import type { RunnerPaths } from '../paths.ts';
-import { DOTNET_SHM_DIR, userNugetPackages } from '../sandbox/sandbox.ts';
+import { DOTNET_SHM_DIR, usablePnpmLockDirs, userNugetPackages } from '../sandbox/sandbox.ts';
 import { registerSecret } from '../secrets/redact.ts';
 import { selfCommand } from '../shims.ts';
 import { agentEnv, toolchainReadPaths } from './claude-policy.ts';
@@ -927,7 +927,9 @@ export class GeminiAdapter implements RuntimeAdapter {
       mayCommit,
       ...(input.env.AOM_IPC_SOCKET ? { ipcSocket: input.env.AOM_IPC_SOCKET } : {}),
       ...(nuget ? { nugetFallbackDir: nuget } : {}),
-      ...(process.platform === 'linux' ? { dotnetShmDir: DOTNET_SHM_DIR } : {}),
+      ...(process.platform === 'linux'
+        ? { dotnetShmDir: DOTNET_SHM_DIR, pnpmLockDirs: usablePnpmLockDirs() }
+        : {}),
     };
   }
 

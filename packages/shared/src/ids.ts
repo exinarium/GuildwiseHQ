@@ -46,6 +46,7 @@ export const streamId = {
   schedule: (id: string) => `schedule-${id}`,
   relayIntegration: (id: string) => `relay-${id}`,
   storageConnection: (id: string) => `storage-${id}`,
+  appIntegration: (id: string) => `app-integration-${id}`,
   form: (id: string) => `form-${id}`,
   interest: (id: string) => `interest-${id}`,
   phase: (id: string) => `phase-${id}`,

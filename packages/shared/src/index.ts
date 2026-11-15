@@ -1,6 +1,7 @@
 export * from './accounts/provider-accounts.ts';
 export * from './agent-ux/index.ts';
 export * from './api/index.ts';
+export * from './apps/index.ts';
 export * from './attachments/index.ts';
 export * from './authz/index.ts';
 export * from './avatars/index.ts';

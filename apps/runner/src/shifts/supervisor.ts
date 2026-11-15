@@ -1153,6 +1153,7 @@ export class ShiftSupervisor {
       msg.agent.name,
       identity,
       accountKey === 'main' ? undefined : accountKey,
+      { log: this.log },
     );
     s.sandbox = sandbox;
     // The DevOps engineer's directory carries a marker, so an unpair can clear it (see unpaired.ts).

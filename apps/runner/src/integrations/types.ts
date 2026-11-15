@@ -9,6 +9,7 @@ import type {
 import type { ClaudeAccountRegistry } from '../adapters/claude-accounts.ts';
 import type { ProbeResult } from '../adapters/claude-auth.ts';
 import type { LoginRuntime } from '../adapters/login-accounts.ts';
+import type { AppTokenBroker } from '../apps/broker.ts';
 import type { RunnerConfig } from '../config.ts';
 import type { ForgeEnv } from '../forge/types.ts';
 import type { Logger } from '../log.ts';
@@ -71,6 +72,8 @@ export interface AdapterEnv {
   sessionCwd: string;
   /** The key of one encrypted secrets file (`secrets/sealed-file.ts`), derived from this runner's private key. */
   sealKey?(fileName: string): Buffer;
+  /** The automated app token broker of this runner; absent: the adapter builds one from `sealKey`. */
+  apps?: AppTokenBroker;
   /** Marks that git/jira state changed, so the legacy reports go out soon. */
   touchRecheck(): void;
 }

@@ -99,6 +99,8 @@ export interface ClaudePolicyContext {
   nugetFallbackDir?: string;
   /** `/tmp/.dotnet` (Linux): .NET's named-mutex files; without write access every `dotnet build` fails. */
   dotnetShmDir?: string;
+  /** pnpm 12's fixed lock folders under /tmp that passed `usablePnpmLockDirs` (Linux); writable. */
+  pnpmLockDirs?: string[];
   /** OS user id (default: the runner's), for `/run/user/<uid>`. Injectable for tests. */
   uid?: number;
   /** Names in `/tmp` (default: read from the disk), to mask ssh-agent directories. Injectable for tests. */
@@ -468,6 +470,7 @@ function sandboxBlock(
         ...ctx.gitDirs,
         ...(ctx.sharedCacheDir ? [ctx.sharedCacheDir] : []),
         ...(ctx.dotnetShmDir ? [ctx.dotnetShmDir] : []),
+        ...(ctx.pnpmLockDirs ?? []),
       ],
       // never the repository's hooks or config (they run outside the sandbox when the user next uses git), the
       // vault, or the runner's private state
