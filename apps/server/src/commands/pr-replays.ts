@@ -34,6 +34,7 @@ import { conflict, forbidden, notFound } from '../errors.ts';
 import { getReplayDto, replayFindingStep } from '../queries/pr-replays.ts';
 import { listReviewablePrs } from '../review/reviewer-gate.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { postAsFieldFor } from './commit-as.ts';
 import { projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { mayStart } from './pr-review-runs.ts';
 
@@ -137,6 +138,7 @@ export async function startReplay(
         remoteUrlNormalized: repo.remote_url_normalized,
         ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
         limit: REPLAY_LIST_LIMIT,
+        ...(await postAsFieldFor(tx, projectId, ws.id as string, { write: false })),
       },
       new Date(ctx.clock.now().getTime() + LIST_WAIT_MS),
     );
@@ -385,7 +387,7 @@ async function dispatchOne(ctx: Ctx, replayId: string): Promise<boolean> {
       tx,
       ws.id as string,
       'pr_review.run',
-      payload,
+      { ...payload, ...(await postAsFieldFor(tx, projectId, ws.id as string, { write: false })) },
       new Date(now.getTime() + PR_REVIEW_TIMEOUT_MS + RUN_GRACE_MS),
     );
     target = ws.id as string;

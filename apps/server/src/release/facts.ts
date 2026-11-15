@@ -6,6 +6,7 @@ import {
   ReleaseFactsSchema,
   RepoReleaseFactsResultSchema,
 } from '@aom/shared';
+import { postAsFieldFor } from '../commands/commit-as.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable } from '../db/sql.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
@@ -117,6 +118,7 @@ export async function requestReleaseFacts(
     ...(repo.main_branch ? { base: repo.main_branch } : {}),
     ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
     components: rules,
+    ...(await postAsFieldFor(ctx.pool, repo.project_id, ws.id, { write: false })),
   });
   void Promise.resolve(ctx.services.gateway.deliverPending(ws.id)).catch(() => undefined);
   return { queued: true, requestId };

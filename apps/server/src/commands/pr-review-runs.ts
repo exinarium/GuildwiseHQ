@@ -29,6 +29,7 @@ import { manualReviewAction } from '../review/manual-action.ts';
 import { mayStart } from '../review/may-start.ts';
 import { reviewerTokenStates } from '../review/reviewer-gate.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { postAsFieldFor } from './commit-as.ts';
 import { projectScope, SYSTEM_ACTOR } from './common.ts';
 import { ownerPendingOf } from './owner-pending.ts';
 import { applyReplayRunResult, timeOutReplayRun } from './pr-replays.ts';
@@ -231,7 +232,8 @@ export async function enqueueReviewPost(
   expiresAt: Date,
 ): Promise<void> {
   if (run.replay_id) throw new Error('replay runs are never posted');
-  await enqueueRunnerCommand(tx, workstationId, 'pr_review.post', post, expiresAt);
+  const postAs = await postAsFieldFor(tx, post.spec.projectId, workstationId, { write: false });
+  await enqueueRunnerCommand(tx, workstationId, 'pr_review.post', { ...post, ...postAs }, expiresAt);
 }
 
 type Emit = (type: string, payload: Record<string, unknown>) => Promise<unknown>;

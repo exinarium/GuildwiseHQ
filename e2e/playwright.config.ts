@@ -43,6 +43,8 @@ const config = defineConfig({
     { name: 'core-loop', testMatch: 'core-loop.spec.ts', dependencies: ['pairing'] },
     { name: 'desk', testMatch: 'desk.spec.ts', dependencies: ['core-loop'] },
     { name: 'chat', testMatch: 'chat.spec.ts', dependencies: ['desk'] },
+    // No "post as" app on TOY: the builder commits keep today's identity and no credential lands in git config or logs.
+    { name: 'post-as-fallback', testMatch: 'post-as-fallback.spec.ts', dependencies: ['core-loop'] },
     { name: 'ceo-chat', testMatch: 'ceo-chat.spec.ts', dependencies: ['chat'] },
     { name: 'devops', testMatch: 'devops.spec.ts', dependencies: ['chat'] },
     { name: 'sharing', testMatch: 'sharing.spec.ts', dependencies: ['devops'] },

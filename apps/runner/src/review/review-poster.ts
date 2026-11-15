@@ -1,4 +1,6 @@
 import { parseRemote, type ReviewerRunSpec, type ReviewFinding } from '@aom/shared';
+import type { AppActor } from '../forge/types.ts';
+import { AppIdentityError, appIdentityWire } from '../git/identity.ts';
 import { redactSecrets } from '../secrets/redact.ts';
 import type { ReviewerTokenStore } from './reviewer-tokens.ts';
 
@@ -39,13 +41,39 @@ const whereOf = (f: ReviewFinding): string => (f.path ? `\`${f.path}${f.line ? `
  * goes into one HTTPS header. There is no fallback to `gh`, to the owner's git login or to any environment variable.
  */
 export class GitHubReviewPoster implements ReviewPoster {
-  constructor(private readonly env: { fetch: typeof fetch; tokens: ReviewerTokenStore }) {}
+  constructor(
+    private readonly env: {
+      fetch: typeof fetch;
+      tokens: ReviewerTokenStore;
+      /** The repository posts as this app: its installation token is used instead of the saved reviewer token. */
+      actor?: AppActor | null;
+    },
+  ) {}
 
-  async post(run: { spec: PostTarget }, findings: ReviewFinding[], summary: string) {
-    const { spec } = run;
+  /**
+   * The token for one request: the app's current installation token when the repository posts as an app (a failing
+   * app never falls back to the reviewer token), else the saved reviewer token.
+   */
+  private async tokenFor(spec: PostTarget): Promise<string> {
+    const actor = this.env.actor;
+    if (actor) {
+      try {
+        return await actor.token();
+      } catch (err) {
+        if (err instanceof AppIdentityError)
+          throw new ReviewPostError('reviewer_token_missing', appIdentityWire(err));
+        throw err;
+      }
+    }
     const token = this.env.tokens.get(spec.remoteUrlNormalized)?.token;
     if (!token)
       throw new ReviewPostError('reviewer_token_missing', 'no reviewer token is saved for this repository');
+    return token;
+  }
+
+  async post(run: { spec: PostTarget }, findings: ReviewFinding[], summary: string) {
+    const { spec } = run;
+    const token = await this.tokenFor(spec);
     const remote = parseRemote(spec.remoteUrlNormalized);
     if (!remote || remote.kind !== 'github')
       throw new ReviewPostError('unsupported_host', 'reviews can only be posted to GitHub');
@@ -101,9 +129,7 @@ export class GitHubReviewPoster implements ReviewPoster {
    * command see that its review already exists. Same token, headers and redaction as `post`.
    */
   async findByMarker(spec: PostTarget, marker: string): Promise<string | null> {
-    const token = this.env.tokens.get(spec.remoteUrlNormalized)?.token;
-    if (!token)
-      throw new ReviewPostError('reviewer_token_missing', 'no reviewer token is saved for this repository');
+    const token = await this.tokenFor(spec);
     const remote = parseRemote(spec.remoteUrlNormalized);
     if (!remote || remote.kind !== 'github')
       throw new ReviewPostError('unsupported_host', 'reviews can only be posted to GitHub');

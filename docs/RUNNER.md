@@ -1619,6 +1619,37 @@ The runner reports the identity each clone would use (`identity: {name, email, s
 web app shows it in Project settings. Tests set `GIT_CONFIG_GLOBAL` to a temporary file (`test/setup-git.ts`); nothing reads
 the real `~/.gitconfig`.
 
+### Acting as the project's app (push, fetch, `gh`)
+
+A project that posts as a GitHub App sends its post-as plan (`postAs`) with `shift.start`, `finalize.execute`,
+`repo.create` and the forge commands (`repo.open_pr`, `repo.release_facts`, `repo.list_prs`, `repo.list_merged_prs`,
+`repo.clone`, `repo.access`, `pr_review.run`, `pr_review.post`, `branch.check_merged`, `repo.sync`). The commit identity
+of an app repository is the bot (`<slug>[bot]`, from `postAs`), ahead of every step above. The credentials come from `forge/app-actor.ts`:
+`actorScope(forgeEnv, broker, plan, tripwire)` returns the forge env, the git `auth` and `actorFor(url)` for one payload.
+Without a plan, or for a repository whose plan entry is not `source: 'app'`, it is exactly today's env and `gitAuthFor`.
+
+- **git:** `GitHubForge.gitAuth` gives an app repository a credential helper env with `x-access-token` and a token minted
+  for that one git process (plus `AOM_GIT_APP`). The token is never in a remote URL, a git config file or a long-lived
+  env var. Every push and fetch (completion, rebase, sync-main, merged-branch checks, release ship/publish/docs prep,
+  submodule pins, `repo.create`) asks for its auth right before the git command, so a push hours later gets a token
+  that is valid then (the broker refreshes it before expiry).
+- **`gh`:** each call gets `GH_TOKEN` (`GH_ENTERPRISE_TOKEN` on GHES) freshly fetched for that call. The review poster
+  posts with the app token for app repositories.
+- **Fail closed:** a mint failure is `AppIdentityError` (`app_identity_failed: <app>: <reason>`), never a fallback to the
+  owner's login. An `ssh` origin on an app repository fails at shift or command start, before any bot commit. A push
+  tripwire (per runner root, `forge/app-repos.ts`) refuses a push to an app repository that carries no app credential.
+  It follows the server's current plan: a `shift.start`, or a command whose payload schema has a `postAs` field, that
+  acts on a repository (the payload's own `remoteUrlNormalized` or its worktree's; reference repositories do not count)
+  without an app entry for it in its plan, including a payload with no plan once the owner deselects the app, releases
+  that repository, so its pushes go out with today's credentials again. A command that never carries a plan
+  (`repo.commit_status`, `release.ref_cleanup`, runs, DevOps environments, ...) releases nothing. Pushes
+  that have no app path (DevOps hygiene, saved work, branch cleanup) are refused for an app repository: they fail
+  closed rather than push as the owner.
+- **Branch protection:** a refused push is described by `describePushRejection` (`git/gh.ts`): the rule and the bypass or
+  permission the bot needs.
+- **Agents** stay credential-free: their sandbox has the bot identity for commits and no token; the runner pushes. A
+  delegate that works in its caller's worktree commits with the caller shift's identity.
+
 ### `repo.release_facts` (read-only)
 
 Read for the "Ship release" proposal. For a repository the runner fetches the main branch, the working branch and the

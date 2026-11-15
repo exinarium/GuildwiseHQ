@@ -8,7 +8,7 @@ import {
 } from '@aom/shared';
 import { type AppTokenProbe, appReason } from '../git/identity.ts';
 import type { AppKeyStore } from './store.ts';
-import { AppTokenError, type AppAccessScope } from './types.ts';
+import { type AppAccessScope, AppTokenError } from './types.ts';
 
 /** The part of the token broker the check needs. */
 export interface AccessCheckBroker {
@@ -97,15 +97,40 @@ export async function checkAppAccess(
  */
 export function appTokenProbe(broker: AccessCheckBroker): AppTokenProbe {
   return {
-    ensure: async ({ instance, integrationId }, repoName) => {
-      const stored = broker.store.get(instance);
-      if (!stored)
-        throw new AppTokenError('installation_not_found', 'This app is not connected on this workstation.');
-      if (!stored.refs.some((r) => r.integrationId === integrationId))
-        throw new AppTokenError('app_mismatch', APP_ERROR_TEXT.app_mismatch);
-      // GitHub scopes an installation token by repository name (without the owner).
-      const name = repoName.split('/').pop() ?? repoName;
-      await broker.getAccessToken(instance, { repositories: [name] });
+    ensure: async (app, repoName) => {
+      await scopedMint(broker, app, repoName);
     },
   };
+}
+
+/** The stored-copy checks, then the broker's (cached) token for one repository, as the broker returned it. */
+async function scopedMint(
+  broker: AccessCheckBroker,
+  { instance, integrationId }: { instance: string; integrationId: string },
+  repoName: string,
+): Promise<unknown> {
+  const stored = broker.store.get(instance);
+  if (!stored)
+    throw new AppTokenError('installation_not_found', 'This app is not connected on this workstation.');
+  if (!stored.refs.some((r) => r.integrationId === integrationId))
+    throw new AppTokenError('app_mismatch', APP_ERROR_TEXT.app_mismatch);
+  // GitHub scopes an installation token by repository name (without the owner).
+  const name = repoName.split('/').pop() ?? repoName;
+  return broker.getAccessToken(instance, { repositories: [name] });
+}
+
+/**
+ * A current installation token for one repository (`owner/name`), for one git or gh process. Same checks and the same
+ * broker scope as {@link appTokenProbe}, so a commit-time probe and the push after it share one cached token. Throws
+ * `AppTokenError` on any failure; never falls back to another credential.
+ */
+export async function appAccessToken(
+  broker: AccessCheckBroker,
+  app: { instance: string; integrationId: string },
+  repoName: string,
+): Promise<string> {
+  const got = (await scopedMint(broker, app, repoName)) as { token?: unknown } | null;
+  if (!got || typeof got.token !== 'string' || !got.token)
+    throw new AppTokenError('unexpected', 'The broker returned no token.');
+  return got.token;
 }

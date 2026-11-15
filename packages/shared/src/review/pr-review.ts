@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { nextDay, zonedDayStart } from '../costs/index.ts';
 import { Usage } from '../events/define.ts';
+import { PostAsPlanSchema } from '../repo/post-as.ts';
 import { localParts } from '../reporter/index.ts';
 import { GitRefSchema } from '../safe.ts';
 import { ReviewerRunSpecSchema, ReviewFindingSchema } from './reviewer-run.ts';
@@ -189,6 +190,8 @@ export const PrReviewRunPayloadSchema = z
     /** Offline run (20-PR replay): nothing is posted and no reviewer token is needed. `prReviewId` is the replay PR id. */
     offline: z.literal(true).optional(),
     replay: ReplayRunBlockSchema.optional(),
+    /** The project's "post as" plan (absent: no app selected, today's credentials). */
+    postAs: PostAsPlanSchema.optional(),
   })
   .strict()
   .refine((p) => !p.replay || p.offline === true, { message: 'replay requires offline' });
@@ -245,6 +248,8 @@ export const PrReviewPostPayloadSchema = z
     /** Ends with the run marker (`prReviewMarker`), which makes a repeated post harmless. */
     summary: z.string().max(60_000),
     findings: z.array(z.object({ findingId: z.uuid(), finding: ReviewFindingSchema })).max(50),
+    /** The project's "post as" plan (absent: no app selected, today's credentials). */
+    postAs: PostAsPlanSchema.optional(),
   })
   .strict();
 export type PrReviewPostPayload = z.infer<typeof PrReviewPostPayloadSchema>;

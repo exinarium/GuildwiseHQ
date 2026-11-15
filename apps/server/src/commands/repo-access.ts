@@ -6,6 +6,7 @@ import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { postAsFieldFor } from './commit-as.ts';
 import { projectScope, userActor } from './common.ts';
 
 /**
@@ -60,6 +61,7 @@ export async function setRepoAccessMethod(
         remoteUrl: r.remote_url,
         ...(accessMethod ? { accessMethod } : {}),
         ...(r.forge_kind ? { forge: r.forge_kind } : {}),
+        ...(await postAsFieldFor(tx, projectId, w.id as string, { write: false })),
       });
       workstations.push(w.id as string);
     }

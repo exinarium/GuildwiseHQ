@@ -20,6 +20,7 @@ import { mayStart } from '../review/may-start.ts';
 import { pickReviewerWorkstation, reviewerGate } from '../review/reviewer-gate.ts';
 import { reviewersFor } from '../review/reviewers-for.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { postAsFieldFor } from './commit-as.ts';
 import { projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { requireSpendOwner } from './pr-review-cap.ts';
 
@@ -256,12 +257,13 @@ export async function startPrReviewRound(
     })),
     { tx },
   );
+  const postAs = await postAsFieldFor(tx, input.projectId, pick.id, { write: false });
   for (const r of runs)
     await enqueueRunnerCommand(
       tx,
       pick.id,
       'pr_review.run',
-      r.payload,
+      { ...r.payload, ...postAs },
       new Date(now.getTime() + PR_REVIEW_TIMEOUT_MS + RUN_GRACE_MS),
     );
   return { started: true, target: pick.id, roundId, runIds: runs.map((r) => r.runId) };

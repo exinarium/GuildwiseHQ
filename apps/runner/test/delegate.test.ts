@@ -1407,3 +1407,53 @@ describe('the callers: chats, session turns and shifts', () => {
     expect((await handlerOf('card', agent(), granted()).rpc(req('delegate.cost', {}))).ok).toBe(false);
   });
 });
+
+describe('the commit identity of a child', () => {
+  const work = { cwd: '/work/card-1', readDirs: [], env: { AOM_WORKDIR: '/work/card-1' } };
+  const BOT = { name: 'guild-bot[bot]', email: '99+guild-bot[bot]@users.noreply.github.com' };
+
+  /** The `.gitconfig` each child's sandbox had when the child started. */
+  function capturing() {
+    const a = scripted();
+    const configs: string[] = [];
+    const start = a.start.bind(a);
+    a.start = async (input: ShiftStartInput) => {
+      configs.push(readFileSync(join(input.sandbox.home, '.gitconfig'), 'utf8'));
+      return start(input);
+    };
+    const startChat = (a.startChat as NonNullable<typeof a.startChat>).bind(a);
+    a.startChat = async (input: ChatStartInput) => {
+      configs.push(readFileSync(join(input.sandbox.home, '.gitconfig'), 'utf8'));
+      return startChat(input);
+    };
+    return { a, configs };
+  }
+
+  it("commits with its caller's identity (the app bot) when it works in the caller's worktree", async () => {
+    const { a, configs } = capturing();
+    const s = setup([a]);
+    s.capabilities.setPacks(packPersona('coder', 'tools: [Read, Edit, Bash]\n'));
+    const caller: DelegateCaller = {
+      ...CALLER,
+      permissions: SHELL,
+      delegation: granted(target('pk:coder')),
+      work,
+      identity: BOT,
+    };
+    const r = await run(s, { target: 'pk:coder', task: 'Fix it.' }, caller);
+    expect(r.ok).toBe(true);
+    expect(configs[0]).toContain(`name = ${BOT.name}`);
+    expect(configs[0]).toContain(`email = ${BOT.email}`);
+  });
+
+  it("keeps the workstation's identity without a caller identity, or when the child has no worktree", async () => {
+    const { a, configs } = capturing();
+    const s = setup([a]);
+    s.capabilities.setPacks(packPersona('coder', 'tools: [Read, Edit, Bash]\n'));
+    const base = { ...CALLER, permissions: SHELL, delegation: granted(target('pk:coder')) };
+    expect((await run(s, { target: 'pk:coder', task: 'x' }, { ...base, work })).ok).toBe(true);
+    expect((await run(s, { target: 'pk:coder', task: 'x' }, { ...base, identity: BOT })).ok).toBe(true);
+    expect(configs).toHaveLength(2);
+    for (const c of configs) expect(c).not.toContain(BOT.name);
+  });
+});

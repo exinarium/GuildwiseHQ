@@ -9,7 +9,12 @@ import {
   releaseTitle,
   streamId,
 } from '@aom/shared';
-import { canPostAs, identityFields, POST_AS_RUNNER_TOO_OLD_MESSAGE } from '../commands/commit-as.ts';
+import {
+  canPostAs,
+  identityFields,
+  POST_AS_RUNNER_TOO_OLD_MESSAGE,
+  postAsFieldFor,
+} from '../commands/commit-as.ts';
 import { projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -178,6 +183,7 @@ async function requestReleasePrForShip(ctx: Ctx, tx: Tx, ship: Row): Promise<voi
     title: `Release ${ship.version}: merge ${head} into ${repo.main_branch ?? 'the main branch'}`,
     body: `Brings the work integrated on ${head}, with the release commit for ${ship.version}, into ${repo.main_branch ?? 'the main branch'}.`,
     ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
+    ...(await postAsFieldFor(tx, ship.project_id, ship.workstation_id, { write: false })),
   } as never);
 }
 

@@ -3,15 +3,25 @@ import { join, relative, resolve, sep } from 'node:path';
 import {
   cloneUrlFor,
   NO_COMMIT_IDENTITY_MESSAGE,
+  normalizeRemoteUrl,
+  type PostAsPlan,
   type RepoCreatePayload,
   type RepoCreateResult,
   repoNameError,
 } from '@aom/shared';
 import { execa } from 'execa';
+import { type ActorScope, assertAppTransport } from '../forge/app-actor.ts';
 import { forgeOfKind } from '../forge/index.ts';
 import type { ForgeEnv } from '../forge/types.ts';
 import { GIT_HARDEN_ENV, hardenedGitArgs } from '../git/harden.ts';
-import { resolveCommitIdentity } from '../git/identity.ts';
+import {
+  AppIdentityError,
+  type AppTokenProbe,
+  appIdentityWire,
+  boundPostAsFor,
+  commitEnv,
+  resolveCommitIdentity,
+} from '../git/identity.ts';
 
 /**
  * Executes the `repo.create` command (approved repository setup). The server sends it only to the project owner's own
@@ -42,8 +52,21 @@ export class RepoCreator {
       ghBin?: string;
       /** The machine seam of the forge adapters (GitLab, Azure DevOps, Bitbucket). GitHub keeps using `gh` directly. */
       forge?: () => ForgeEnv;
+      /** This runner's app probe: the initial commit of a repository the project posts to as an app is the bot's. */
+      appProbe?: AppTokenProbe;
+      /** This runner's credentials for a post-as plan: the initial push of an app repository uses the app's token. */
+      scopeFor?: (plan?: PostAsPlan | null) => ActorScope;
     },
   ) {}
+
+  /** The identity of the initial commit: the app bot when the plan posts to `remoteUrl` as an app, else today's. */
+  private identityFor(p: RepoCreatePayload, target: string, remoteUrl: string) {
+    return resolveCommitIdentity(
+      target,
+      p.commitAs,
+      boundPostAsFor(p.postAs, normalizeRemoteUrl(remoteUrl), this.deps.appProbe),
+    );
+  }
 
   private file(id: string): string {
     return join(this.deps.dir, `repo-${id}.json`);
@@ -62,7 +85,15 @@ export class RepoCreator {
     if (running) return running;
     const p = this.create(payload)
       .catch(
-        (err): RepoCreateResult => ({ ok: false, error: err instanceof Error ? err.message : String(err) }),
+        (err): RepoCreateResult => ({
+          ok: false,
+          error:
+            err instanceof AppIdentityError
+              ? appIdentityWire(err)
+              : err instanceof Error
+                ? err.message
+                : String(err),
+        }),
       )
       .finally(() => this.inFlight.delete(payload.requestId));
     this.inFlight.set(payload.requestId, p);
@@ -171,6 +202,9 @@ export class RepoCreator {
       : /^https?:\/\//.test(url) && !url.endsWith('.git')
         ? `${url}.git`
         : url;
+    // A repository the project posts to as an app is pushed with the app's token, over https only (fail closed).
+    const actor = this.deps.scopeFor?.(p.postAs).actorFor(remoteUrl) ?? null;
+    assertAppTransport(actor, remoteUrl);
     const auth =
       useSsh || !host
         ? []
@@ -209,21 +243,28 @@ export class RepoCreator {
       const readme = join(target, 'README.md');
       if (!existsSync(readme)) writeFileSync(readme, `# ${p.projectName}\n`);
       await this.git(target, ['add', 'README.md']);
-      const who = await resolveCommitIdentity(target, p.commitAs);
+      const who = await this.identityFor(p, target, remoteUrl);
       if (!who) return { ok: false, error: NO_COMMIT_IDENTITY_MESSAGE };
-      const commit = await this.git(target, [
-        '-c',
-        `user.name=${who.name}`,
-        '-c',
-        `user.email=${who.email}`,
-        'commit',
-        '-m',
-        'Initial commit',
-        '--allow-empty',
-      ]);
+      const commit = await this.git(
+        target,
+        [
+          '-c',
+          `user.name=${who.name}`,
+          '-c',
+          `user.email=${who.email}`,
+          'commit',
+          '-m',
+          'Initial commit',
+          '--allow-empty',
+        ],
+        commitEnv(who),
+      );
       if (commit.exitCode !== 0)
         return { ok: false, error: `git commit failed: ${String(commit.stderr || commit.stdout).trim()}` };
-      const push = await this.git(target, [...auth, 'push', '-u', 'origin', p.branch]);
+      const appAuth = actor && this.deps.scopeFor ? await this.deps.scopeFor(p.postAs).auth(remoteUrl) : null;
+      const push = appAuth
+        ? await this.git(target, [...appAuth.args, 'push', '-u', 'origin', p.branch], appAuth.env)
+        : await this.git(target, [...auth, 'push', '-u', 'origin', p.branch]);
       if (push.exitCode !== 0)
         return { ok: false, error: `git push failed: ${String(push.stderr || push.stdout).trim()}` };
     }
@@ -327,18 +368,22 @@ export class RepoCreator {
       const readme = join(target, 'README.md');
       if (!existsSync(readme)) writeFileSync(readme, `# ${p.projectName}\n`);
       await this.git(target, ['add', 'README.md']);
-      const who = await resolveCommitIdentity(target, p.commitAs);
+      const who = await this.identityFor(p, target, remoteUrl);
       if (!who) return { ok: false, error: NO_COMMIT_IDENTITY_MESSAGE };
-      const commit = await this.git(target, [
-        '-c',
-        `user.name=${who.name}`,
-        '-c',
-        `user.email=${who.email}`,
-        'commit',
-        '-m',
-        'Initial commit',
-        '--allow-empty',
-      ]);
+      const commit = await this.git(
+        target,
+        [
+          '-c',
+          `user.name=${who.name}`,
+          '-c',
+          `user.email=${who.email}`,
+          'commit',
+          '-m',
+          'Initial commit',
+          '--allow-empty',
+        ],
+        commitEnv(who),
+      );
       if (commit.exitCode !== 0)
         return { ok: false, error: `git commit failed: ${String(commit.stderr || commit.stdout).trim()}` };
       const push = await this.git(target, [...gitAuth.args, 'push', '-u', 'origin', p.branch], gitAuth.env);

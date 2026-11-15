@@ -1,5 +1,7 @@
 import { isAbsolute, resolve } from 'node:path';
+import { normalizeRemoteUrl } from '@aom/shared';
 import { execa } from 'execa';
+import { APP_GIT_MARKER, appRepos, tripwireMessage } from '../forge/app-repos.ts';
 import { clearLockStub } from './config-lock.ts';
 import { GIT_HARDEN_ENV, gitlinkExcludes, gitPointerProblem, hardenedGitArgs } from './harden.ts';
 
@@ -122,6 +124,39 @@ async function withSubmoduleGuards(
   return { args: rest.includes('--') ? [...args, ...excludes] : [...args, '--', ...excludes] };
 }
 
+/**
+ * The refusal for a `push` without the app credential to a repository a runner root registered as posting as an app
+ * (`forge/app-repos.ts`), or null. The push target is the first non-option word after `push` (a url, or a remote
+ * name read with `git remote get-url`), `origin` when there is none.
+ */
+async function pushTripwire(
+  cwd: string,
+  args: string[],
+  env: Record<string, string> | undefined,
+): Promise<string | null> {
+  const at = subcommandIndex(args);
+  if (at < 0 || args[at] !== 'push' || env?.[APP_GIT_MARKER]) return null;
+  if (!appRepos.watches(cwd)) return null;
+  const rest = args.slice(at + 1);
+  const words = rest.includes('--') ? rest.filter((a) => a !== '--') : rest.filter((a) => !a.startsWith('-'));
+  const target = words[0] ?? 'origin';
+  let url = target;
+  if (!/[:/]/.test(target)) {
+    const r = await execa('git', hardenedGitArgs(['remote', 'get-url', target]), {
+      cwd,
+      reject: false,
+      stdin: 'ignore',
+      env: { ...GIT_HARDEN_ENV },
+      extendEnv: true,
+    });
+    url = String(r.stdout ?? '').trim();
+    if (r.exitCode !== 0 || !url) return null;
+  }
+  const normalized = normalizeRemoteUrl(url);
+  const hit = appRepos.find(cwd, normalized);
+  return hit ? tripwireMessage(normalized, hit.label) : null;
+}
+
 /** Pauses (ms) between the retries of a command that hit a lock error; tests shorten them. */
 export const lockRetry = { delaysMs: [100, 250, 500, 1000, 2000] };
 
@@ -138,6 +173,9 @@ export async function git(cwd: string, args: string[], opts: GitOptions = {}): P
   if ('refused' in guarded)
     return { stdout: '', stderr: `refusing to run git: ${guarded.refused}`, exitCode: 128 };
   args = guarded.args;
+  // a push to a repository that posts as an app must carry the app credential (fail closed, never another identity)
+  const tripped = await pushTripwire(cwd, args, opts.env);
+  if (tripped) return { stdout: '', stderr: tripped, exitCode: 128 };
   for (let attempt = 0; ; attempt++) {
     const r = await execa('git', hardenedGitArgs(args), {
       cwd,
@@ -235,6 +273,20 @@ export async function remoteDefaultBranch(cwd: string, auth?: RemoteAuth): Promi
   return /^ref:\s+refs\/heads\/(\S+)\s+HEAD$/m.exec(r.stdout)?.[1] ?? null;
 }
 
+/** The credentials for origin (none without `auth`); null when `auth` refused (an app that cannot mint). */
+export async function originAuth(
+  cwd: string,
+  auth?: RemoteAuth,
+): Promise<{ args: string[]; env: Record<string, string> } | null> {
+  if (!auth) return { args: [], env: {} };
+  const url = (await git(cwd, ['remote', 'get-url', 'origin'])).stdout.trim();
+  try {
+    return url ? await auth(url) : { args: [], env: {} };
+  } catch {
+    return null;
+  }
+}
+
 export interface DefaultBranch {
   branch: string | null;
   /** `remote`: the host said so; `local`: the clone's `origin/HEAD`; `only`: the one branch there is; `convention`: the one conventional name present. */
@@ -260,7 +312,8 @@ export async function resolveDefaultBranch(
       const set = await git(cwd, ['remote', 'set-head', 'origin', fromRemote]);
       if (set.exitCode !== 0) {
         // The remote-tracking branch is not fetched yet; fetch it and point origin/HEAD at it.
-        await git(cwd, ['fetch', '--', 'origin', fromRemote]);
+        const a = await originAuth(cwd, opts.auth);
+        if (a) await git(cwd, [...a.args, 'fetch', '--', 'origin', fromRemote], { env: a.env });
         await git(cwd, ['remote', 'set-head', 'origin', fromRemote]);
       }
       return { branch: fromRemote, source: 'remote', ambiguous: [] };

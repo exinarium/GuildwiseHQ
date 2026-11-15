@@ -35,6 +35,7 @@ import {
   normalizeUrl,
   type OrgGraphScope,
   outcomeDataSchema,
+  type PostAsPlan,
   PREP_OUTCOME,
   PREP_TASK_KINDS,
   type PublishRequest,
@@ -352,6 +353,15 @@ export interface SupervisorDeps {
   external?: () => ExternalAdapters | undefined;
   /** Credentials for pushing a working branch the runner creates (absent: the user's own git setup). */
   gitAuth?: GitAuth;
+  /**
+   * Credentials for one shift from its post-as plan: repositories that post as an app push and fetch with this runner's
+   * installation tokens, every other repository with `gitAuth`. `originRefusal` is the fail-closed check of a clone's
+   * origin (an app pushes over https only), as a wire error. Absent: `gitAuth` for every shift, as before.
+   */
+  shiftCredentials?: (plan: PostAsPlan | null | undefined) => {
+    auth: GitAuth;
+    originRefusal(url: string | null | undefined): string | null;
+  };
   /** The organization source folder of an organization (the architect reads every repository under it, read-only). */
   orgSourceFolder?: (orgId: string) => string | undefined;
   /** Brings the local working branch of a repository up to date after a fetch (runs under the clone's lock). */
@@ -942,6 +952,11 @@ export class ShiftSupervisor {
 
   // ------------------------------------------------------------------ internals
 
+  /** The git credentials of a shift: its post-as plan's (app repositories), else this workstation's. */
+  private shiftAuth(msg: { postAs?: PostAsPlan | null | undefined }): GitAuth | undefined {
+    return this.deps.shiftCredentials?.(msg.postAs).auth ?? this.deps.gitAuth;
+  }
+
   private reject(
     shiftId: string,
     reason:
@@ -1233,7 +1248,7 @@ export class ShiftSupervisor {
           baseBranch: msg.worktree.baseBranch,
           path,
           roots: [paths.worktrees],
-          auth: this.deps.gitAuth,
+          auth: this.shiftAuth(msg),
         });
         s.readOnlyCheckout = { path: co.path, repoPath: repo.localPath, baseBranch: msg.worktree.baseBranch };
       } catch (err) {
@@ -1244,6 +1259,13 @@ export class ShiftSupervisor {
       const repo = await this.deps.findRepo(msg.worktree.remoteUrlNormalized);
       if (!repo) {
         this.reject(msg.shiftId, 'repo_missing', `no local clone for ${msg.worktree.remoteUrlNormalized}`);
+        return;
+      }
+      // An app pushes over https only: an ssh origin is refused now, before any commit is made as the bot.
+      const sshRefusal =
+        this.deps.shiftCredentials?.(msg.postAs).originRefusal(repo.remoteUrl ?? null) ?? null;
+      if (sshRefusal) {
+        this.reject(msg.shiftId, 'internal', sshRefusal);
         return;
       }
       // Merge the latest main first: into the working branch before the card branch is cut from it (never for a resumed shift).
@@ -1258,7 +1280,7 @@ export class ShiftSupervisor {
           commitAs: msg.commitAs ?? null,
           postAs: boundPostAsFor(msg.postAs, msg.worktree.remoteUrlNormalized, this.deps.appProbe),
           integrationDir: paths.integration,
-          ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
+          ...(this.shiftAuth(msg) ? { auth: this.shiftAuth(msg) } : {}),
         }).catch((err) => {
           // A selected app that cannot mint stops the shift: the merge is never made under another identity.
           if (err instanceof AppIdentityError) return err;
@@ -1277,7 +1299,7 @@ export class ShiftSupervisor {
           spec: msg.worktree,
           defaultPath: paths.worktreePath(msg.brief.project.key, msg.brief.card.ref, msg.brief.project.id),
           roots: [paths.worktrees],
-          auth: this.deps.gitAuth,
+          auth: this.shiftAuth(msg),
           // Bring the local working branch up to date with the fetch just made (only the project's own working branch).
           ...(this.deps.syncAfterFetch && msg.worktree.baseBranch === msg.brief.project.workingBranch
             ? {
@@ -1297,6 +1319,8 @@ export class ShiftSupervisor {
               msg.worktree.baseBranch,
               msg.commitAs ?? null,
               boundPostAsFor(msg.postAs, msg.worktree.remoteUrlNormalized, this.deps.appProbe),
+              // the fetch before the rebase goes with the app's token when the project posts as one
+              msg.postAs ? this.shiftAuth(msg) : undefined,
             ),
           );
         if (sync && s.worktree.created) await this.finishMainSync(s, sync);
@@ -2119,7 +2143,7 @@ export class ShiftSupervisor {
     try {
       fills = await fill(wt.path, {
         findRepo: this.deps.findRepo,
-        ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
+        ...(this.shiftAuth(s.msg) ? { auth: this.shiftAuth(s.msg) } : {}),
       });
     } catch (err) {
       fills = [{ name: '', path: '', status: 'failed', detail: redactGitError(String(err)) }];
@@ -2255,6 +2279,7 @@ export class ShiftSupervisor {
                 ...(s.env?.PATH ? { PATH: s.env.PATH } : {}),
               },
             },
+            ...(s.identity ? { identity: { name: s.identity.name, email: s.identity.email } } : {}),
           }
         : {}),
     };
@@ -2654,6 +2679,8 @@ export class ShiftSupervisor {
       return;
     }
     if (sync.kind !== 'needs_card_merge') return;
+    // what the host refused and the bypass or permission the app needs, for the owner to grant
+    if (sync.report) this.log.warn(`${msg.brief.card.ref}: ${sync.report}`);
     const wt = s.worktree.path;
     const main = msg.prepare.syncMain?.mainBranch ?? msg.worktree?.mainBranch;
     const r = await mergeMainIntoCard(wt, {
@@ -2661,7 +2688,7 @@ export class ShiftSupervisor {
       ref: msg.brief.card.ref,
       commitAs: msg.commitAs ?? null,
       postAs: boundPostAsFor(msg.postAs, msg.worktree?.remoteUrlNormalized, this.deps.appProbe),
-      ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
+      ...(this.shiftAuth(msg) ? { auth: this.shiftAuth(msg) } : {}),
     });
     if ('error' in r) {
       this.log.warn(`merging the latest main into ${msg.brief.card.ref} failed: ${r.error}`);
@@ -2720,7 +2747,7 @@ export class ShiftSupervisor {
       ...(main ? { mainBranch: main } : {}),
       ref: msg.brief.card.ref,
       postAs: boundPostAsFor(msg.postAs, msg.worktree?.remoteUrlNormalized, this.deps.appProbe),
-      ...(this.deps.gitAuth ? { auth: this.deps.gitAuth } : {}),
+      ...(this.shiftAuth(msg) ? { auth: this.shiftAuth(msg) } : {}),
       recordMainSha: (sha: string) => {
         if (!s.mainShas.includes(sha)) s.mainShas.push(sha);
         this.persist(s);

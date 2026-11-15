@@ -842,6 +842,8 @@ export const RepoOpenPrPayloadSchema = z.object({
   title: z.string().max(300),
   body: z.string().max(5000),
   forge: ForgeKindSchema.optional(),
+  /** The project's "post as" plan (absent: no app selected, today's credentials). */
+  postAs: PostAsPlanSchema.optional(),
 });
 export type RepoOpenPrPayload = z.infer<typeof RepoOpenPrPayloadSchema>;
 
@@ -870,6 +872,8 @@ export const RepoReleaseFactsPayloadSchema = z.object({
   base: z.string().min(1).optional(),
   forge: ForgeKindSchema.optional(),
   components: ComponentRulesSchema.default([]),
+  /** The project's "post as" plan (absent: no app selected, today's credentials). */
+  postAs: PostAsPlanSchema.optional(),
 });
 export type RepoReleaseFactsPayload = z.infer<typeof RepoReleaseFactsPayloadSchema>;
 
@@ -914,6 +918,8 @@ export const RepoListPrsPayloadSchema = z.object({
   repoId: z.uuid(),
   remoteUrlNormalized: z.string(),
   forge: ForgeKindSchema.optional(),
+  /** The project's "post as" plan (absent: no app selected, today's credentials). */
+  postAs: PostAsPlanSchema.optional(),
 });
 export type RepoListPrsPayload = z.infer<typeof RepoListPrsPayloadSchema>;
 
@@ -957,6 +963,8 @@ export const RepoListMergedPrsPayloadSchema = z.object({
   remoteUrlNormalized: z.string(),
   forge: ForgeKindSchema.optional(),
   limit: z.number().int().positive().max(100),
+  /** The project's "post as" plan (absent: no app selected, today's credentials). */
+  postAs: PostAsPlanSchema.optional(),
 });
 export type RepoListMergedPrsPayload = z.infer<typeof RepoListMergedPrsPayloadSchema>;
 
@@ -1204,8 +1212,16 @@ export const RepoSyncPayloadSchema = z.object({
   repoId: z.uuid(),
   remoteUrlNormalized: z.string().min(1).max(500),
   workingBranch: z.string().min(1).max(200),
+  /** The project's "post as" plan (absent: no app selected, today's credentials). */
+  postAs: PostAsPlanSchema.optional(),
 });
 export type RepoSyncPayload = z.infer<typeof RepoSyncPayloadSchema>;
+
+/** `repo.access` as sent to a runner: the access change plus the project's "post as" plan, when the project has one. */
+export const RepoAccessCommandPayloadSchema = RepoAccessPayloadSchema.extend({
+  postAs: PostAsPlanSchema.optional(),
+});
+export type RepoAccessCommandPayload = z.infer<typeof RepoAccessCommandPayloadSchema>;
 export const RepoSyncStateSchema = z.enum([
   'synced',
   'updated',
@@ -1469,7 +1485,7 @@ export const CommandPayloadSchemas = {
   'git.status': z.object({}),
   'forge.repos': ForgeReposPayloadSchema,
   'git.ssh': GitSshPayloadSchema,
-  'repo.access': RepoAccessPayloadSchema,
+  'repo.access': RepoAccessCommandPayloadSchema,
   'repo.open_pr': RepoOpenPrPayloadSchema,
   'repo.release_facts': RepoReleaseFactsPayloadSchema,
   'repo.list_prs': RepoListPrsPayloadSchema,

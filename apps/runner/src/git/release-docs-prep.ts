@@ -9,6 +9,7 @@ import {
   type ReleaseDocsPrepSummary,
 } from '@aom/shared';
 import { detectSignOff } from './dco.ts';
+import { appOfPlan } from './gh.ts';
 import { advanceLocalBranch, git, hasRemote, revParse } from './git.ts';
 import {
   type AppTokenProbe,
@@ -579,8 +580,15 @@ async function commitPush(
     return failed(`${p.releaseBranch} moved since the prepared commit was made: run prep again`, {
       commit: sha,
     });
-  const pushed = await pushFastForward(repoPath, sha, p.releaseBranch, a);
-  if (!pushed.ok) return failed(pushed.error, { commit: sha });
+  const pushed = await pushFastForward(
+    repoPath,
+    sha,
+    p.releaseBranch,
+    a,
+    appOfPlan(p.postAs, p.remoteUrlNormalized),
+  );
+  if (!pushed.ok)
+    return failed(pushed.report ? `${pushed.error}\n${pushed.report}` : pushed.error, { commit: sha });
   await cleanup(repoPath, p.runId);
   await advanceLocalBranch(repoPath, p.releaseBranch, sha);
   return passed({ commit: sha, pushed: true });

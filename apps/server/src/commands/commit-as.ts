@@ -87,6 +87,25 @@ export async function identityFieldsFor(
   return fields;
 }
 
+/**
+ * `{ postAs }` for a forge command (pull requests, reviews, fetches, branch deletes) sent to one workstation, or `{}`
+ * when the project has no app selected, so the payload stays exactly as before. A runner without post-as:1 would act
+ * with the owner's credentials: a command that writes to the forge (`write: true`) is refused (409 runner_too_old); a
+ * read-only one is sent without the plan, as today.
+ */
+export async function postAsFieldFor(
+  db: Queryable,
+  projectId: string | null | undefined,
+  workstationId: string | null | undefined,
+  opts: { write: boolean },
+): Promise<{ postAs?: PostAsPlan }> {
+  const { postAs } = await loadIdentityPlan(db, projectId);
+  if (!postAs) return {};
+  if (await canPostAs(db, workstationId)) return { postAs };
+  if (opts.write) throw conflict('runner_too_old', POST_AS_RUNNER_TOO_OLD_MESSAGE);
+  return {};
+}
+
 /** Adds the project's `commitAs` and `postAs` to a `shift.start` payload (additive; each absent when not set). */
 export async function withCommitAs<T extends { brief: { project: { id: string } } }>(
   ctx: Ctx,

@@ -1,5 +1,5 @@
 import { type BranchCheckMergedPayload, type BranchCheckMergedResult, isSafeGitRef } from '@aom/shared';
-import { git, hasRemote, revParse } from './git.ts';
+import { git, hasRemote, originAuth, type RemoteAuth, revParse } from './git.ts';
 import { baseTarget } from './rebase.ts';
 
 /** Is `a` an ancestor of (or the same commit as) `b`? Pure git; deletes nothing. */
@@ -15,6 +15,8 @@ export async function isAncestor(repoPath: string, a: string, b: string): Promis
 export async function checkBranchMerged(input: {
   repoPath: string;
   payload: BranchCheckMergedPayload;
+  /** The host's credentials for origin (the project's app when it posts as one); absent: git's own. */
+  auth?: RemoteAuth;
 }): Promise<BranchCheckMergedResult> {
   const { repoPath, payload: p } = input;
   const result = (
@@ -30,10 +32,12 @@ export async function checkBranchMerged(input: {
     if (!isSafeGitRef(ref))
       return result(false, { reason: `refusing unsafe branch name ${JSON.stringify(ref)}` });
   const remote = await hasRemote(repoPath);
-  if (remote) {
+  // null: the credentials could not be had (an app that cannot mint); nothing goes to the remote then.
+  const a = remote ? await originAuth(repoPath, input.auth) : null;
+  if (a) {
     // Best effort: the working branch is the one that matters; the card branch may only exist locally or be gone.
-    await git(repoPath, ['fetch', '--prune', '--', 'origin', p.workingBranch]);
-    await git(repoPath, ['fetch', '--', 'origin', p.branchName]);
+    await git(repoPath, [...a.args, 'fetch', '--prune', '--', 'origin', p.workingBranch], { env: a.env });
+    await git(repoPath, [...a.args, 'fetch', '--', 'origin', p.branchName], { env: a.env });
   }
   const target = await baseTarget(repoPath, p.workingBranch);
   if (!(await revParse(repoPath, target)))
@@ -60,9 +64,10 @@ export async function checkBranchMerged(input: {
     if (current !== p.branchName)
       branchDeleted = (await git(repoPath, ['branch', '-D', '--', p.branchName])).exitCode === 0;
   }
-  if (remote && hasRemoteRef && p.action === 'push_branch') {
+  if (a && hasRemoteRef && p.action === 'push_branch') {
     remoteBranchDeleted =
-      (await git(repoPath, ['push', 'origin', '--delete', '--', p.branchName])).exitCode === 0;
+      (await git(repoPath, [...a.args, 'push', 'origin', '--delete', '--', p.branchName], { env: a.env }))
+        .exitCode === 0;
   }
   return result(true, { branchDeleted, remoteBranchDeleted });
 }

@@ -8,6 +8,7 @@ import { withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
 import { requestReleaseFacts } from '../release/facts.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { postAsFieldFor } from './commit-as.ts';
 
 /**
  * "Open a pull request from the working branch to the main branch" (project settings, owner only). The pull request
@@ -67,6 +68,7 @@ export async function requestReleasePr(
       title: `Merge ${head} into ${repo.main_branch ?? 'the main branch'}`,
       body: `Brings the work integrated on ${head} into ${repo.main_branch ?? 'the main branch'}.`,
       ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
+      ...(await postAsFieldFor(tx, projectId, ws.id, { write: true })),
     });
     return { requestId, workstationId: ws.id as string };
   });

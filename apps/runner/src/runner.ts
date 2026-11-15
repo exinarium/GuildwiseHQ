@@ -37,6 +37,8 @@ import {
   PACK_SCRIPT_GATE_CAPABILITY,
   PACKS_CAPABILITY,
   POST_AS_CAPABILITY,
+  type PostAsPlan,
+  PostAsPlanSchema,
   PR_LIST_CAPABILITY,
   PR_NOTICE_CAPABILITY,
   PR_REVIEW_CAPABILITY,
@@ -58,6 +60,8 @@ import {
   RELEASE_REF_CLEANUP_CAPABILITY,
   RELEASE_SHIP_CAPABILITY,
   REPLAY_CAPABILITY,
+  type RepoOpenPrPayload,
+  type RepoOpenPrResult,
   type RepoReport,
   RUN_USAGE_FEATURE,
   RUNNER_PIN_CAPABILITY,
@@ -127,6 +131,15 @@ import { ExternalAdapters } from './external/index.ts';
 import { JiraCredentialStore, jiraFile, resolveJira } from './external/jira-store.ts';
 import { OutboundExecutor } from './external/outbound.ts';
 import { AgentGit } from './forge/agent-git.ts';
+import {
+  type ActorScope,
+  actorScope,
+  appOriginRefusal,
+  commandCarriesPlan,
+  payloadRepoUrls,
+  releaseUncoveredRepos,
+} from './forge/app-actor.ts';
+import { appRepos } from './forge/app-repos.ts';
 import { LiveOnce, postCommitStatus } from './forge/commit-status.ts';
 import { recheckFile, touchRecheck } from './forge/connect.ts';
 import {
@@ -143,7 +156,7 @@ import { runSshAction, SshSettingsStore } from './forge/ssh.ts';
 import type { ForgeEnv } from './forge/types.ts';
 import { type CompletionInput, executeCompletion } from './git/completion.ts';
 import type { PrCreator } from './git/gh.ts';
-import type { AppTokenProbe } from './git/identity.ts';
+import { AppIdentityError, type AppTokenProbe, appIdentityWire } from './git/identity.ts';
 import { checkBranchMerged } from './git/merged.ts';
 import { runReleaseDocsPrep } from './git/release-docs-prep.ts';
 import { readReleaseFacts } from './git/release-facts.ts';
@@ -608,6 +621,7 @@ export class Runner {
         return r ? { localPath: r.localPath, remoteUrl: r.remoteUrl } : undefined;
       },
       gitAuth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+      scope: (plan) => this.scopeFor(plan),
       sandboxState: (a) =>
         a instanceof ClaudeCodeAdapter
           ? a.sandboxStatus()
@@ -815,6 +829,10 @@ export class Runner {
       targetSecrets: this.targetSecrets,
       orgSourceFolder: (orgId) => this.orgSourceFolder(orgId),
       gitAuth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+      shiftCredentials: (plan) => {
+        const scope = this.scopeFor(plan);
+        return { auth: scope.auth, originRefusal: (url) => appOriginRefusal(scope, url) };
+      },
       syncAfterFetch: (t) => this.sync.sync(t, { fetch: false, locked: true }).then(() => undefined),
       mcpSignInNote: (granted) => this.mcpSignInNote(granted),
       external: () => this.external,
@@ -870,6 +888,8 @@ export class Runner {
       dir: this.paths.outbound,
       repoRoots: () => this.opts.config.repoRoots,
       forge: () => this.forgeEnv,
+      appProbe: this.appProbe,
+      scopeFor: (plan) => this.scopeFor(plan),
       ...(process.env.AOM_GH_BIN ? { ghBin: process.env.AOM_GH_BIN } : {}),
     });
     this.graph = new GraphService({
@@ -1067,6 +1087,35 @@ export class Runner {
 
   /** This runner's token source for GitHub issue traffic as a project's GitHub App (per runner, like `appProbe`). */
   private readonly appTokenSource: AppTokenSource = brokerTokenSource(() => this.appBroker());
+
+  /**
+   * The credentials one payload acts with: without a plan (or with no repository on an app) exactly today's forge env
+   * and git auth; repositories that post as an app push, fetch and call gh with this runner's installation tokens.
+   */
+  private scopeFor(plan?: PostAsPlan | null): ActorScope {
+    return actorScope(this.forgeEnv, this.appBroker(), plan, appRepos.forRoot(this.paths.root));
+  }
+
+  /** `repo.open_pr` as the project's app when it has one (an ssh origin or a mint failure is the answer, not a crash). */
+  private async openPrAs(
+    p: RepoOpenPrPayload,
+    repo: { localPath: string; remoteUrl: string },
+  ): Promise<RepoOpenPrResult> {
+    const scope = this.scopeFor(p.postAs);
+    const refusal = appOriginRefusal(scope, repo.remoteUrl);
+    if (refusal) return { ok: false, error: refusal };
+    try {
+      return await openReleasePr({
+        payload: p,
+        repoPath: repo.localPath,
+        pr: this.opts.prCreator ?? forgePrCreator(scope.forgeEnv),
+        auth: scope.auth,
+      });
+    } catch (err) {
+      if (err instanceof AppIdentityError) return { ok: false, error: appIdentityWire(err) };
+      throw err;
+    }
+  }
 
   /** Hosts of the GitHub and GitLab repositories on this workstation (instances of those integrations). */
   private repoHosts(): Partial<Record<'github' | 'gitlab', string[]>> {
@@ -2083,9 +2132,23 @@ export class Runner {
     });
   }
 
+  /**
+   * Keeps the push tripwire in step with the server's current plan: a repository a payload acts on without an app in
+   * its plan (the owner deselected the app, or it is no longer covered) pushes with today's credentials again.
+   */
+  private releaseUncovered(payload: unknown, postAs: unknown): void {
+    if (postAs !== undefined && postAs !== null && !PostAsPlanSchema.safeParse(postAs).success) return;
+    releaseUncoveredRepos(
+      appRepos.forRoot(this.paths.root),
+      (postAs ?? null) as PostAsPlan | null,
+      payloadRepoUrls(payload),
+    );
+  }
+
   private onMessage(msg: ServerToRunner): void {
     switch (msg.type) {
       case 'shift.start':
+        this.releaseUncovered(msg, msg.postAs);
         void this.supervisor.handleStart(msg);
         break;
       case 'shift.stop':
@@ -2114,6 +2177,15 @@ export class Runner {
         break;
       }
       case 'command':
+        // Only a command that can carry a plan says anything about it: a missing plan on any other command (commit
+        // status, ref cleanup, runs, ...) is not a deselected app and must leave the tripwire alone.
+        if (commandCarriesPlan(msg.command))
+          this.releaseUncovered(
+            msg.payload,
+            msg.payload && typeof msg.payload === 'object'
+              ? (msg.payload as { postAs?: unknown }).postAs
+              : undefined,
+          );
         void this.runCommand(msg.commandId, msg.command, msg.payload);
         break;
       case 'run.follow':
@@ -2346,19 +2418,23 @@ export class Runner {
         if (!repo) {
           done(true, { ok: false, action: p.action, error: `no local clone for ${p.remoteUrlNormalized}` });
         } else {
-          const completion = await executeCompletion({
-            payload: p,
-            repoPath: repo.localPath,
-            appProbe: this.appProbe,
-            worktreePath: this.paths.worktreePath(p.projectKey, p.ref, p.projectId),
-            worktreesDir: this.paths.worktrees,
-            integrationDir: this.paths.integration,
-            pr: this.opts.prCreator ?? forgePrCreator(this.forgeEnv),
-            auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
-            rules:
-              this.opts.branchRules ??
-              ((cwd, branch, forge) => branchRulesFor(this.forgeEnv, cwd, branch, forge)),
-          });
+          const scope = this.scopeFor(p.postAs);
+          const sshRefusal = appOriginRefusal(scope, repo.remoteUrl);
+          const completion = sshRefusal
+            ? { ok: false, action: p.action, error: sshRefusal }
+            : await executeCompletion({
+                payload: p,
+                repoPath: repo.localPath,
+                appProbe: this.appProbe,
+                worktreePath: this.paths.worktreePath(p.projectKey, p.ref, p.projectId),
+                worktreesDir: this.paths.worktrees,
+                integrationDir: this.paths.integration,
+                pr: this.opts.prCreator ?? forgePrCreator(scope.forgeEnv),
+                auth: scope.auth,
+                rules:
+                  this.opts.branchRules ??
+                  ((cwd, branch, forge) => branchRulesFor(scope.forgeEnv, cwd, branch, forge)),
+              });
           done(true, completion);
           // The working branch on origin may have moved (a merge, or a pull request merged since): bring the local one along.
           if (completion.ok && (p.action === 'pr' || p.action === 'merge'))
@@ -2375,12 +2451,7 @@ export class Runner {
         done(
           true,
           repo
-            ? await openReleasePr({
-                payload: p,
-                repoPath: repo.localPath,
-                pr: this.opts.prCreator ?? forgePrCreator(this.forgeEnv),
-                auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
-              })
+            ? await this.openPrAs(p, repo)
             : { ok: false, error: `no local clone for ${p.remoteUrlNormalized}` },
         );
       } else if (command === 'repo.release_facts') {
@@ -2393,7 +2464,7 @@ export class Runner {
             ? await readReleaseFacts({
                 payload: p,
                 repoPath: repo.localPath,
-                auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+                auth: this.scopeFor(p.postAs).auth,
               })
             : { ok: false, error: `no local clone for ${p.remoteUrlNormalized}` },
         );
@@ -2403,7 +2474,11 @@ export class Runner {
         const repo = await this.findRepo(p.remoteUrlNormalized);
         done(
           true,
-          await listOpenPrs({ payload: p, remoteUrl: repo?.remoteUrl ?? null, forgeEnv: this.forgeEnv }),
+          await listOpenPrs({
+            payload: p,
+            remoteUrl: repo?.remoteUrl ?? null,
+            forgeEnv: this.scopeFor(p.postAs).forgeEnv,
+          }),
         );
       } else if (command === 'repo.commit_status') {
         // Sets one commit status with the size check status token. A resent command for a post that is still live
@@ -2422,7 +2497,11 @@ export class Runner {
         const repo = await this.findRepo(p.remoteUrlNormalized);
         done(
           true,
-          await listMergedPrs({ payload: p, remoteUrl: repo?.remoteUrl ?? null, forgeEnv: this.forgeEnv }),
+          await listMergedPrs({
+            payload: p,
+            remoteUrl: repo?.remoteUrl ?? null,
+            forgeEnv: this.scopeFor(p.postAs).forgeEnv,
+          }),
         );
       } else if (command === 'pr_review.run') {
         // The run never posts: it answers with its findings, a timeout or a failure. A resent command for a live run
@@ -2449,7 +2528,7 @@ export class Runner {
               repoPath: repo.localPath,
               appProbe: this.appProbe,
               integrationDir: this.paths.integration,
-              auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+              auth: this.scopeFor(p.postAs).auth,
             })
           : {
               ok: false,
@@ -2484,7 +2563,7 @@ export class Runner {
               appProbe: this.appProbe,
               integrationDir: this.paths.integration,
               dataDir: this.paths.root,
-              auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+              auth: this.scopeFor(p.postAs).auth,
               // The repository's own build scripts (the PDF guide), with the toolchain PATH; output is redacted.
               exec: async (cmd, args, o) => {
                 const tc = this.toolchains.resolve();
@@ -2520,9 +2599,9 @@ export class Runner {
               repoPath: repo.localPath,
               appProbe: this.appProbe,
               integrationDir: this.paths.integration,
-              forgeEnv: this.forgeEnv,
-              auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
-              pr: this.opts.prCreator ?? forgePrCreator(this.forgeEnv),
+              forgeEnv: this.scopeFor(p.postAs).forgeEnv,
+              auth: this.scopeFor(p.postAs).auth,
+              pr: this.opts.prCreator ?? forgePrCreator(this.scopeFor(p.postAs).forgeEnv),
             })
           : {
               ok: false,
@@ -2549,7 +2628,7 @@ export class Runner {
                 repoPath: repo.localPath,
                 appProbe: this.appProbe,
                 integrationDir: this.paths.integration,
-                auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
+                auth: this.scopeFor(p.postAs).auth,
               })
             : { ok: false, error: `no local clone for ${p.remoteUrlNormalized}` },
         );
@@ -2563,7 +2642,12 @@ export class Runner {
         done(
           true,
           repo
-            ? await checkBranchMerged({ repoPath: repo.localPath, payload: p })
+            ? await checkBranchMerged({
+                repoPath: repo.localPath,
+                payload: p,
+                // without a plan: git's own credentials, exactly as before
+                ...(p.postAs ? { auth: (url: string) => this.scopeFor(p.postAs).auth(url) } : {}),
+              })
             : { merged: false, reason: `no local clone for ${p.remoteUrlNormalized}` },
         );
       } else if (command === 'integration.run') {

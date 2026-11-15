@@ -7,6 +7,7 @@ import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { postAsFieldFor } from './commit-as.ts';
 import { projectScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { evaluateRepoSizes, resolveTimedOutTwice, writeOpenChangeSnapshot } from './pr-size-check.ts';
 import { evaluateSizeStatuses, SIZE_POLL_SQL } from './pr-size-status.ts';
@@ -151,6 +152,7 @@ export async function requestPrList(
       repoId,
       remoteUrlNormalized: repo.remote_url_normalized,
       ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
+      ...(await postAsFieldFor(ctx.pool, repo.project_id, ws.id, { write: false })),
     },
     new Date(now.getTime() + PENDING_MS),
   );
