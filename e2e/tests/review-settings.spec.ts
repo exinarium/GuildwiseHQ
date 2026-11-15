@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { apiAs, inviteAndAccept } from '../support/api.ts';
 import { q } from '../support/db.ts';
-import { ADMIN, OTHER, paths } from '../support/env.ts';
+import { ADMIN, paths, REVMGR } from '../support/env.ts';
 
 // Per-project review settings: the owner sets a size budget, a unit and a path-to-risk map; nothing is set by default;
 // the UI names what is missing; only the owner may change them.
@@ -129,13 +129,13 @@ test('AC5: a manager sees a read-only panel and the PUT is refused; the owner ca
   browser,
 }) => {
   const admin = await apiAs(ADMIN.email, ADMIN.password);
-  await inviteAndAccept(admin, OTHER).catch(() => undefined); // the account may exist already
+  await inviteAndAccept(admin, REVMGR).catch(() => undefined); // the account may exist already
   await q(
     `INSERT INTO project_members (project_id, user_id, role, status, joined_at)
      SELECT $1, id, 'manager', 'active', now() FROM users WHERE email=$2`,
-    [projectId, OTHER.email],
+    [projectId, REVMGR.email],
   );
-  const other = await apiAs(OTHER.email, OTHER.password);
+  const other = await apiAs(REVMGR.email, REVMGR.password);
   const before = await events();
   const denied = await other.put(url(), { data: { sizeBudget: 1, sizeUnit: 'changed_files', riskMap: null } });
   expect(denied.status()).toBe(403);
