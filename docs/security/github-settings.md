@@ -28,6 +28,8 @@ order:
 - [ ] **Secret scanning** on.
 - [ ] **Push protection** on.
 - [ ] Private vulnerability reporting is already on (see [SECURITY.md](../../SECURITY.md)).
+- [ ] Optional: if the project that builds this repository has a size budget, add `size-budget` as a required status check
+      on `main` (see section 4.3d of the [user guide](../USER-GUIDE.md)).
 
 ## Known interactions
 

@@ -672,6 +672,38 @@ When all reviews are done, mark each finding **Useful** or **Noise**, one at a t
 
 When the last finding is marked the replay is finished and shows, per reviewer, the precision (useful ÷ findings that would have been posted) and your marking time: in total, per pull request, and as an estimate in hours per week. Use these figures to type your **targets** for reviewer precision and baseline review effort (hours per week), and select **Save**. The fields start empty: the targets are yours, not computed. Saving the targets ends the rollout. You can change the targets later.
 
+
+### 4.3d Hard size check on pull requests
+
+The hard size check puts a status named `size-budget` on every open pull request of the project's GitHub repositories, as soon as the project has a size budget and a size unit. Make that status required on the branch and GitHub will not merge an over-budget pull request. It is separate from PR-only review: it covers every open pull request, including the ones your cards open.
+
+- **What the status says:** the size, the budget and the unit, every time.
+  - Over the budget: failed, "Over budget: 700 changed lines, budget 600 changed lines".
+  - Within the budget: passed, "Within budget: 420 changed lines, budget 600 changed lines".
+  - Over the budget with an approved size exception: passed, "Passed by owner exception: 700 changed lines, budget 600 changed lines".
+  - Not measured yet: pending, "Size not measured yet".
+- **Stacked pull requests are one:** a pull request whose base branch is the branch of another open pull request is measured together with it, each counting its own changes. When the stack is over the budget in total, every pull request in it fails, with the same numbers and the stack in the message, for example "(stack #12 #13)".
+- **No budget, no check:** a project without a size budget and unit posts nothing, so nothing fails or blocks.
+- **How fresh it is:** the status follows the pull request within about 5 minutes of a push, and at once after you save new review settings or answer a size exception.
+
+**Owner setup, in this order:**
+
+1. Set the **size budget** and **size unit** in **Project settings**, **Review settings**. The line "Hard size check" under them tells you whether the status is being posted and, if not, why.
+2. On GitHub, create a fine-grained personal access token: **Resource owner** is the owner of the repositories, **Repository access** is only the project's repositories, **Repository permissions** is **Commit statuses: Read and write** and nothing else. Write down its expiry date.
+3. On a workstation that has the clone, run `guildwise-runner status-token github` (add `--host <host>` for GitHub Enterprise Server). The token is read from a hidden prompt, kept encrypted on that workstation and never sent to the server. `--status` shows which hosts have one and `--remove` deletes it. This is not your git login and not the reviewer token.
+4. Wait until an open pull request shows the `size-budget` status (about 5 minutes at most).
+5. On GitHub, open **Settings**, **Rules**, **Rulesets** (or the branch protection rule) for the working branch, turn on **Require status checks to pass** and add `size-budget`. GuildWise never changes branch protection for you.
+6. Recommended: under **Settings**, **Actions**, **General**, set **Workflow permissions** to **Read repository contents**, so a workflow cannot write the same status.
+
+**Once it is required:**
+
+- Cards of that repository land as pull requests and get the status too. A card pull request that is over the budget has to be split.
+- An over-budget pull request cannot be merged until it is split, or until you approve a size exception for it (see "Size exceptions"). Exceptions are available for reviewed (PR-only) pull requests, and an approval holds up to the approved size: a pull request that grows past it fails again.
+- If no workstation with the clone and the token is online, GitHub shows the status as "Expected" and the pull request waits. This fails closed on purpose.
+- When the token expires, no new status is posted. Create a new token and run the command again.
+
+**Removing the budget:** pull requests of a repository that had the check get a passing "Size check inactive: no size budget set" status, so a rule you forgot to remove does not block merging. Remove the required status on GitHub as well.
+
 ### 4.4 Agents, hiring and allow-lists
 
 Agents belong to the organization, not to a single project. For each agent you decide where it may work: its **allow-list**. The agent is only offered cards from those projects.

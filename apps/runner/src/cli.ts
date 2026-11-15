@@ -42,6 +42,12 @@ import { JiraCredentialStore, jiraFile } from './external/jira-store.ts';
 import { connectSteps, describeConnection, sshUploadHelp, touchRecheck } from './forge/connect.ts';
 import { AzureDevOpsForge, defaultHost, FileTokenStore, gitConnections } from './forge/index.ts';
 import { runSshAction, SshSettingsStore } from './forge/ssh.ts';
+import {
+  STATUS_TOKEN_SETTINGS_LINES,
+  saveStatusToken,
+  statusTokenStatusLines,
+} from './forge/status-token-cli.ts';
+import { FileStatusTokenStore } from './forge/status-tokens.ts';
 import { gitVersion } from './git/git.ts';
 import { scanRepos } from './git/repo-scan.ts';
 import { installErrorHandlers } from './health/runner-error.ts';
@@ -68,8 +74,6 @@ import { resolveDataDir, runnerPaths } from './paths.ts';
 import { addRelayIntegration, removeRelayIntegration } from './relay/config.ts';
 import { WhatsAppSecretStore } from './relay/whatsapp/store.ts';
 import { reviewerTokenStatusLines, setReviewerToken } from './review/reviewer-token-cli.ts';
-import { FileStatusTokenStore } from './forge/status-tokens.ts';
-import { saveStatusToken, STATUS_TOKEN_SETTINGS_LINES, statusTokenStatusLines } from './forge/status-token-cli.ts';
 import { FileReviewerTokenStore } from './review/reviewer-tokens.ts';
 import type { TestServicesSeen } from './sandbox/test-services.ts';
 import { fileKeyOf, RunnerKeys } from './secrets/keys.ts';
@@ -947,7 +951,8 @@ async function statusTokenCommand(
   provider: string,
   opts: { dataDir?: string; pairing?: string; host?: string; status?: boolean; remove?: boolean },
 ): Promise<void> {
-  if (provider !== 'github') throw new Error('the size check status is supported for GitHub only: `status-token github`');
+  if (provider !== 'github')
+    throw new Error('the size check status is supported for GitHub only: `status-token github`');
   const host = (opts.host ?? 'github.com').toLowerCase();
   const { root, entries } = selectPairings(opts);
   const stores = entries.map((e) => {
@@ -978,7 +983,9 @@ async function statusTokenCommand(
     }
   }
   for (const s of stores) touchRecheck(s.paths.secrets);
-  console.log('Saved on this machine only (encrypted, mode 0600). A running runner reports it within a minute.');
+  console.log(
+    'Saved on this machine only (encrypted, mode 0600). A running runner reports it within a minute.',
+  );
 }
 
 interface GitConnectOpts {

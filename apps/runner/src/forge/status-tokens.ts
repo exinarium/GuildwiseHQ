@@ -136,7 +136,12 @@ export class MemoryStatusTokenStore implements StatusTokenStore {
     return this.m.delete(statusTokenKey(provider, host));
   }
   list() {
-    return [...this.m.entries()].map(([key, v]) => ({ key, provider: v.provider, host: v.host, savedAt: v.savedAt }));
+    return [...this.m.entries()].map(([key, v]) => ({
+      key,
+      provider: v.provider,
+      host: v.host,
+      savedAt: v.savedAt,
+    }));
   }
   problem() {
     return this.problemText;

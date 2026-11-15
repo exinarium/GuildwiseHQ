@@ -13,10 +13,15 @@ export async function postCommitStatus(input: {
   forgeEnv: ForgeEnv;
 }): Promise<RepoCommitStatusResult> {
   const { payload, remoteUrl } = input;
-  if (!remoteUrl) return { ok: false, code: 'no_clone', error: 'this workstation has no clone of the repository' };
+  if (!remoteUrl)
+    return { ok: false, code: 'no_clone', error: 'this workstation has no clone of the repository' };
   const hit = forgeForUrl(input.forgeEnv, remoteUrl, payload.forge);
   if (!hit?.forge.setCommitStatus)
-    return { ok: false, code: 'unsupported', error: 'this git host cannot receive a commit status from here' };
+    return {
+      ok: false,
+      code: 'unsupported',
+      error: 'this git host cannot receive a commit status from here',
+    };
   try {
     const r = await hit.forge.setCommitStatus(hit.repo, {
       sha: payload.sha,
@@ -27,7 +32,11 @@ export async function postCommitStatus(input: {
     });
     return r.ok ? { ok: true } : { ok: false, code: r.code, error: r.error.slice(0, 400) };
   } catch (err) {
-    return { ok: false, code: 'error', error: (err instanceof Error ? err.message : String(err)).slice(0, 400) };
+    return {
+      ok: false,
+      code: 'error',
+      error: (err instanceof Error ? err.message : String(err)).slice(0, 400),
+    };
   }
 }
 

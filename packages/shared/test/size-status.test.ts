@@ -93,7 +93,8 @@ describe('size status (GWP-211)', () => {
 
   it('stays within 140 characters with a long stack, keeping size, budget and unit', () => {
     const open: ChainCandidate[] = [];
-    for (let i = 0; i < 30; i++) open.push(cand(String(1000 + i), `h${i}`, i === 0 ? 'main' : `h${i - 1}`, 100));
+    for (let i = 0; i < 30; i++)
+      open.push(cand(String(1000 + i), `h${i}`, i === 0 ? 'main' : `h${i - 1}`, 100));
     const s = statusOf('1000', open, { settings: { sizeBudget: 600, sizeUnit: 'changed_lines' } });
     expect(s?.state).toBe('failure');
     expect(s?.description.length).toBeLessThanOrEqual(COMMIT_STATUS_DESCRIPTION_MAX);
@@ -107,7 +108,9 @@ describe('size status (GWP-211)', () => {
 
   it('AC5: without a budget nothing is posted', () => {
     expect(statusOf('1', [cand('1', 'a', 'main', 9999)], { settings: {} })).toBeNull();
-    expect(statusOf('1', [cand('1', 'a', 'main', 9999)], { settings: { sizeUnit: 'changed_lines' } })).toBeNull();
+    expect(
+      statusOf('1', [cand('1', 'a', 'main', 9999)], { settings: { sizeUnit: 'changed_lines' } }),
+    ).toBeNull();
   });
 
   it('AC5: after the budget is removed a repository that had the check gets a passing inactive status', () => {

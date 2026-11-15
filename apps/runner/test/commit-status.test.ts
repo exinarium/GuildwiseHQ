@@ -3,10 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { LiveOnce, postCommitStatus } from '../src/forge/commit-status.ts';
+import { MemoryTokenStore } from '../src/forge/index.ts';
 import { saveStatusToken, statusTokenStatusLines } from '../src/forge/status-token-cli.ts';
 import { FileStatusTokenStore, MemoryStatusTokenStore } from '../src/forge/status-tokens.ts';
 import type { ForgeEnv } from '../src/forge/types.ts';
-import { MemoryTokenStore } from '../src/forge/index.ts';
 
 const TOKEN = 'github_pat_FAKE_status_0123456789';
 const SHA = 'a'.repeat(40);
@@ -41,7 +41,9 @@ function env(f: typeof fetch, withToken = true, host = 'github.com'): ForgeEnv {
   const statusTokens = new MemoryStatusTokenStore();
   if (withToken) statusTokens.set('github', host, TOKEN);
   return {
-    exec: { run: async () => ({ exitCode: 1, stdout: '', stderr: 'the gh login must not be used' }) } as never,
+    exec: {
+      run: async () => ({ exitCode: 1, stdout: '', stderr: 'the gh login must not be used' }),
+    } as never,
     fetch: f,
     tokens: new MemoryTokenStore(),
     statusTokens,
@@ -69,7 +71,11 @@ describe('commit status (GWP-211)', () => {
 
   it('keeps the token in the Authorization header only', async () => {
     const g = github();
-    await postCommitStatus({ payload: payload(), remoteUrl: 'https://github.com/o/r.git', forgeEnv: env(g.f) });
+    await postCommitStatus({
+      payload: payload(),
+      remoteUrl: 'https://github.com/o/r.git',
+      forgeEnv: env(g.f),
+    });
     const call = g.calls[0] as Call;
     expect((call.init.headers as Record<string, string>).Authorization).toBe(`Bearer ${TOKEN}`);
     expect(call.url).not.toContain(TOKEN);
@@ -95,7 +101,11 @@ describe('commit status (GWP-211)', () => {
     [500, 'error'],
   ])('maps a %i answer to %s without the token in the error', async (status, code) => {
     const g = github(status);
-    const r = await postCommitStatus({ payload: payload(), remoteUrl: 'https://github.com/o/r.git', forgeEnv: env(g.f) });
+    const r = await postCommitStatus({
+      payload: payload(),
+      remoteUrl: 'https://github.com/o/r.git',
+      forgeEnv: env(g.f),
+    });
     expect(r).toMatchObject({ ok: false, code });
     expect(JSON.stringify(r)).not.toContain(TOKEN);
   });
@@ -104,7 +114,11 @@ describe('commit status (GWP-211)', () => {
     const f = (async () => {
       throw new Error(`connect failed ${TOKEN}`);
     }) as unknown as typeof fetch;
-    const r = await postCommitStatus({ payload: payload(), remoteUrl: 'https://github.com/o/r.git', forgeEnv: env(f) });
+    const r = await postCommitStatus({
+      payload: payload(),
+      remoteUrl: 'https://github.com/o/r.git',
+      forgeEnv: env(f),
+    });
     expect(r).toMatchObject({ ok: false, code: 'error' });
     expect(JSON.stringify(r)).not.toContain(TOKEN);
   });
@@ -122,10 +136,12 @@ describe('commit status (GWP-211)', () => {
 
   it('answers no_clone without a clone and unsupported for a host without statuses', async () => {
     const g = github();
-    expect(await postCommitStatus({ payload: payload(), remoteUrl: null, forgeEnv: env(g.f) })).toMatchObject({
-      ok: false,
-      code: 'no_clone',
-    });
+    expect(await postCommitStatus({ payload: payload(), remoteUrl: null, forgeEnv: env(g.f) })).toMatchObject(
+      {
+        ok: false,
+        code: 'no_clone',
+      },
+    );
     expect(
       await postCommitStatus({
         payload: payload({ remoteUrlNormalized: 'gitlab.com/o/r' }),

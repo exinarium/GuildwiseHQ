@@ -23,10 +23,10 @@ beforeAll(async () => {
   s = await sizeExceptionWorld();
   await s.m
     .db()
-    .query(`UPDATE workstation_capabilities SET capabilities = capabilities || $2::text[] WHERE workstation_id=$1`, [
-      s.m.w.workstationId,
-      [COMMIT_STATUS_CAPABILITY],
-    ]);
+    .query(
+      `UPDATE workstation_capabilities SET capabilities = capabilities || $2::text[] WHERE workstation_id=$1`,
+      [s.m.w.workstationId, [COMMIT_STATUS_CAPABILITY]],
+    );
 });
 afterAll(async () => {
   s.m.w.t.clock.setOffset(0);
@@ -97,7 +97,9 @@ const statuses = async () =>
 const statusOf = async (n: number) => (await statuses()).find((r) => r.change_id === String(n));
 const commands = async () =>
   (
-    await q().query(`SELECT payload, status FROM runner_commands WHERE type='repo.commit_status' ORDER BY created_at`)
+    await q().query(
+      `SELECT payload, status FROM runner_commands WHERE type='repo.commit_status' ORDER BY created_at`,
+    )
   ).rows as Array<{ payload: Record<string, any>; status: string }>;
 /** An over-budget PR the size check already sent back, with its head commit. */
 async function overBudgetPr(n: number, lines: number) {
@@ -142,7 +144,9 @@ describe('AC1: an over-budget PR fails with size, budget and unit', () => {
     await poll([{ n: 12, head: 'feature/a', base: 'main', lines: 700 }]);
     const first = (await statusOf(12))?.status_id;
     await poll([{ n: 12, head: 'feature/a', base: 'main', lines: 650 }]);
-    expect((await statusOf(12))?.description).toBe('Over budget: 650 changed lines, budget 600 changed lines');
+    expect((await statusOf(12))?.description).toBe(
+      'Over budget: 650 changed lines, budget 600 changed lines',
+    );
     expect((await statusOf(12))?.status_id).not.toBe(first);
   });
 
@@ -150,7 +154,13 @@ describe('AC1: an over-budget PR fails with size, budget and unit', () => {
     await poll([{ n: 12, head: 'feature/a', base: 'main', lines: 700 }]);
     await deliver();
     const payload = (await commands())[0]?.payload ?? {};
-    await applyCommitStatusResult(s.m.ctx(), payload, true, { ok: false, code: 'forbidden', error: 'no' }, undefined);
+    await applyCommitStatusResult(
+      s.m.ctx(),
+      payload,
+      true,
+      { ok: false, code: 'forbidden', error: 'no' },
+      undefined,
+    );
     expect(await statusOf(12)).toMatchObject({ post_state: 'failed', error_code: 'forbidden' });
     await applyCommitStatusResult(s.m.ctx(), { statusId: randomUUID() }, true, { ok: true }, undefined);
     expect((await statusOf(12))?.post_state).toBe('failed');
@@ -245,7 +255,13 @@ describe('AC5: a project without a budget reports no failing check', () => {
   it('after a budget is removed, a repository that had the check gets a passing inactive status', async () => {
     await poll([{ n: 12, head: 'feature/a', base: 'main', lines: 700 }]);
     await deliver();
-    await applyCommitStatusResult(s.m.ctx(), (await commands())[0]?.payload ?? {}, true, { ok: true }, undefined);
+    await applyCommitStatusResult(
+      s.m.ctx(),
+      (await commands())[0]?.payload ?? {},
+      true,
+      { ok: true },
+      undefined,
+    );
     await q().query(`UPDATE projects SET size_budget=NULL, size_unit=NULL WHERE id=$1`, [s.m.w.projectId]);
     await refreshSizeStatuses(s.m.ctx(), { projectId: s.m.w.projectId });
     expect(await statusOf(12)).toMatchObject({

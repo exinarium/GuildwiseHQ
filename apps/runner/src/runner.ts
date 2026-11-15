@@ -12,6 +12,7 @@ import {
   CHECKS_CAPABILITY,
   CLAUDE_ACCOUNTS_CAPABILITY,
   CLAUDE_MAIN_SWAP_CAPABILITY,
+  COMMIT_STATUS_CAPABILITY,
   CommandPayloadSchemas,
   DELEGATE_GRANTS_FEATURE,
   DELIVERY_CAPABILITY,
@@ -36,7 +37,6 @@ import {
   PACK_SCRIPT_GATE_CAPABILITY,
   PACKS_CAPABILITY,
   POST_AS_CAPABILITY,
-  COMMIT_STATUS_CAPABILITY,
   PR_LIST_CAPABILITY,
   PR_NOTICE_CAPABILITY,
   PR_REVIEW_CAPABILITY,
@@ -127,6 +127,7 @@ import { ExternalAdapters } from './external/index.ts';
 import { JiraCredentialStore, jiraFile, resolveJira } from './external/jira-store.ts';
 import { OutboundExecutor } from './external/outbound.ts';
 import { AgentGit } from './forge/agent-git.ts';
+import { LiveOnce, postCommitStatus } from './forge/commit-status.ts';
 import { recheckFile, touchRecheck } from './forge/connect.ts';
 import {
   branchRulesFor,
@@ -137,7 +138,6 @@ import {
   gitAuthFor,
   gitConnections,
 } from './forge/index.ts';
-import { LiveOnce, postCommitStatus } from './forge/commit-status.ts';
 import { listMergedPrs, listOpenPrs } from './forge/list-prs.ts';
 import { runSshAction, SshSettingsStore } from './forge/ssh.ts';
 import type { ForgeEnv } from './forge/types.ts';

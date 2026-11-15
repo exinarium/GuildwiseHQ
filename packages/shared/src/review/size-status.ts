@@ -65,7 +65,12 @@ export function sizeStatusFor(i: {
         ? ` (stack ${ids.join(' ')})`
         : ` (stack of ${v.members.length} PRs)`
       : '';
-  const common = { total: v.total, budget: v.budget, unit: v.unit, members: v.members.map((m) => m.changeId) };
+  const common = {
+    total: v.total,
+    budget: v.budget,
+    unit: v.unit,
+    members: v.members.map((m) => m.changeId),
+  };
   if (v.state === 'over') {
     if (i.excepted) {
       return {
@@ -77,5 +82,10 @@ export function sizeStatusFor(i: {
     }
     return { state: 'failure', reason: 'over', description: fit(`Over budget: ${sizes}`, suffix), ...common };
   }
-  return { state: 'success', reason: 'within', description: fit(`Within budget: ${sizes}`, suffix), ...common };
+  return {
+    state: 'success',
+    reason: 'within',
+    description: fit(`Within budget: ${sizes}`, suffix),
+    ...common,
+  };
 }

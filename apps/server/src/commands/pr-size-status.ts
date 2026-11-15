@@ -69,7 +69,9 @@ export async function evaluateSizeStatuses(
   const project = await one(tx, 'SELECT * FROM projects WHERE id=$1', [projectId]);
   if (!project) return;
   const settings = reviewSettingsOf(project);
-  const hadStatus = Boolean(await one(tx, 'SELECT 1 FROM pr_size_status_repos WHERE project_repo_id=$1', [repoId]));
+  const hadStatus = Boolean(
+    await one(tx, 'SELECT 1 FROM pr_size_status_repos WHERE project_repo_id=$1', [repoId]),
+  );
   const list = await rows(
     tx,
     `SELECT change_id, head_branch, base_branch, cross_repo, head_sha, changed_lines, changed_files
@@ -115,7 +117,11 @@ export async function evaluateSizeStatuses(
     const want = sizeStatusFor({ verdict, excepted, hadStatus });
     const have = existing.get(changeId);
     if (!want) {
-      if (have) await exec(tx, 'DELETE FROM pr_size_statuses WHERE project_repo_id=$1 AND change_id=$2', [repoId, changeId]);
+      if (have)
+        await exec(tx, 'DELETE FROM pr_size_statuses WHERE project_repo_id=$1 AND change_id=$2', [
+          repoId,
+          changeId,
+        ]);
       continue;
     }
     if (have && have.head_sha === sha && have.state === want.state && have.description === want.description)
@@ -191,7 +197,10 @@ export async function deliverSizeStatuses(ctx: Ctx): Promise<number> {
     const target = await withTx(ctx.pool, (tx) =>
       queueStatus(ctx, tx, d.project_repo_id as string, d.change_id as string, now),
     ).catch((err) => {
-      ctx.log.error({ err, repoId: d.project_repo_id, changeId: d.change_id }, 'queueing a size status failed');
+      ctx.log.error(
+        { err, repoId: d.project_repo_id, changeId: d.change_id },
+        'queueing a size status failed',
+      );
       return undefined;
     });
     if (target) {
@@ -199,7 +208,8 @@ export async function deliverSizeStatuses(ctx: Ctx): Promise<number> {
       sent++;
     }
   }
-  for (const t of targets) void Promise.resolve(ctx.services.gateway.deliverPending(t)).catch(() => undefined);
+  for (const t of targets)
+    void Promise.resolve(ctx.services.gateway.deliverPending(t)).catch(() => undefined);
   return sent;
 }
 
@@ -266,7 +276,13 @@ async function queueStatus(
       WHERE project_repo_id=$1 AND change_id=$2`,
     [repoId, changeId, now, wsId],
   );
-  await enqueueRunnerCommand(tx, wsId, 'repo.commit_status', payload, new Date(now.getTime() + QUEUED_EXPIRY_MS));
+  await enqueueRunnerCommand(
+    tx,
+    wsId,
+    'repo.commit_status',
+    payload,
+    new Date(now.getTime() + QUEUED_EXPIRY_MS),
+  );
   return wsId;
 }
 
@@ -284,9 +300,11 @@ export async function applyCommitStatusResult(
   const r = ok && parsed.success ? parsed.data : undefined;
   const now = ctx.clock.now();
   await withTx(ctx.pool, async (tx) => {
-    const s = await one(tx, 'SELECT project_repo_id, change_id FROM pr_size_statuses WHERE status_id=$1 FOR UPDATE', [
-      statusId,
-    ]);
+    const s = await one(
+      tx,
+      'SELECT project_repo_id, change_id FROM pr_size_statuses WHERE status_id=$1 FOR UPDATE',
+      [statusId],
+    );
     if (!s) return; // the pull request changed or closed since: a newer status replaced this one
     if (r?.ok) {
       await exec(
@@ -401,7 +419,10 @@ export async function sizeStatusDtoOf(
       [r.id, COMMIT_STATUS_CAPABILITY],
     );
     if (online) anyOnline = true;
-    if (online && (await pickStatusWorkstation(db, r.id as string, r.remote_url_normalized as string, null, true)))
+    if (
+      online &&
+      (await pickStatusWorkstation(db, r.id as string, r.remote_url_normalized as string, null, true))
+    )
       return { ...out, state: 'active' };
   }
   return { ...out, state: anyOnline ? 'no_token' : 'no_runner' };

@@ -347,7 +347,8 @@ export class GitHubForge implements Forge {
       return { ok: false, code: 'forbidden', error: 'the status token may not set statuses here (403)' };
     if (res.status === 404)
       return { ok: false, code: 'not_found', error: 'repository or commit not found for this token (404)' };
-    if (res.status === 422) return { ok: false, code: 'invalid_sha', error: 'the host refused the commit (422)' };
+    if (res.status === 422)
+      return { ok: false, code: 'invalid_sha', error: 'the host refused the commit (422)' };
     return { ok: false, code: 'error', error: `the host answered ${res.status}` };
   }
 
