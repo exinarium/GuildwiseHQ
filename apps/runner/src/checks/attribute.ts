@@ -55,6 +55,11 @@ const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007]*\u0007/g;
 const TOKEN = /(?:[A-Za-z]:)?[\w@.+\-/\\[\]()]+\.[A-Za-z0-9]{1,8}(?=[:(\s]|$)/g;
 /** A diagnostic location: `<name>.<ext>:<line>[:<col>]` or `<name>.<ext>(<line>,<col>)`. */
 const LOCATION = /\S\.[A-Za-z0-9]{1,8}(?::\d+(?::\d+)?\b|\(\d+,\d+\))/;
+/**
+ * A source code frame line under a diagnostic (Biome and friends: `> 12 │ code`, `13 │ code`, `│   ^^^`): it shows code, so
+ * a URL with a port or a `foo.ts:12` comment in it is not a diagnostic location.
+ */
+const CODE_FRAME = /^(?:>\s*)?\d*\s*[│|]/;
 const PNPM_PREFIX = /^(\S+) [\w:-]+: /;
 
 export const stripAnsi = (s: string): string => s.replace(ANSI, '');
@@ -102,7 +107,7 @@ export function attribute(output: string, o: AttributeOptions): Attribution {
     const shown = line.slice(0, LINE_MAX);
     if (hitIntroduced) introduced.add(shown);
     else if (hitElsewhere) elsewhere.add(shown);
-    if (!hitIntroduced && !hitElsewhere && LOCATION.test(line)) unattributed++;
+    if (!hitIntroduced && !hitElsewhere && !CODE_FRAME.test(line) && LOCATION.test(line)) unattributed++;
     if ((hitIntroduced || hitElsewhere) && !findings.has(shown))
       findings.set(shown, { line: shown, paths: [...paths], changed: hitIntroduced });
   }
