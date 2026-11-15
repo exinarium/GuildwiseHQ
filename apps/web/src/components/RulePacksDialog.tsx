@@ -1,4 +1,4 @@
-import { ENFORCED_BY_EXPLAIN, type EnforcedBy, type RulePackPreview } from '@aom/shared';
+import { ENFORCED_BY_EXPLAIN, type EnforcedBy } from '@aom/shared';
 import { useState } from 'react';
 import {
   useInstallRulePack,
@@ -7,29 +7,10 @@ import {
   useRulePacks,
 } from '../api/queries/ledger.ts';
 import { useCanManageOrg } from '../lib/orgRole.ts';
+import { plural, statusLine } from '../lib/rulePackStatus.ts';
 import { useOrgTerms } from '../lib/terms.ts';
 import { EnforcedByBadge } from './EnforcedByBadge.tsx';
 import { Badge, Button, ConfirmDialog, Dialog, ErrorBox, ListSkeleton, useToast } from './ui.tsx';
-
-type PreviewRule = RulePackPreview['rules'][number];
-
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-
-function statusLine(r: PreviewRule): string | null {
-  const first = r.existing[0]?.title ?? '';
-  switch (r.status) {
-    case 'installed':
-      return 'Already installed';
-    case 'edited':
-      return 'You edited this rule';
-    case 'covered':
-      return `Covered by your rule "${first}" (not added)`;
-    case 'may_conflict':
-      return `May contradict "${r.existing.map((x) => x.title).join('", "')}"`;
-    default:
-      return null;
-  }
-}
 
 function PackPreview({ packId, onBack }: { packId: string; onBack: () => void }) {
   const t = useOrgTerms();

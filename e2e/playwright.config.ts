@@ -71,6 +71,7 @@ const config = defineConfig({
     { name: 'run-steps', testMatch: 'run-steps.spec.ts', dependencies: ['auth'] },
     // Business mode: its own user and paired mock workstation (no runner process); needs only the shared stack.
     { name: 'business-mode', testMatch: 'business-mode.spec.ts', dependencies: ['auth'] },
+    { name: 'industry-bundles', testMatch: 'industry-bundles.spec.ts', dependencies: ['auth'] },
     // Business card types (enquiry, quote, ...): its own user and mock runner, an organization with no repository.
     { name: 'business-card-types', testMatch: 'business-card-types.spec.ts', dependencies: ['auth'] },
     // Business mode wording (Knowledge, Rules & decisions): its own user and organization; needs only the shared stack.
