@@ -164,7 +164,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     AOM_DEFAULT_WORKFLOW: 'code',
     // ...and the lean team flow (code v6: cards wait in Planning for a planner or architect) is not registered, as in the server
     // suites (createTestApp without `lean`): the flows below are the classic ones, where the builder starts at once.
-    AOM_NO_LEAN_TEAM: 'true',
+    // The help videos record the flow production runs, so their defaults set AOM_E2E_LEAN=1 (e2e/video/defaults.ts).
+    AOM_NO_LEAN_TEAM: process.env.AOM_E2E_LEAN === '1' ? 'false' : 'true',
     // the first-login tour is off for every user (the tour spec switches it on for its own); it would cover the page under test
     AOM_TOUR_AUTOSTART: 'false',
     // phases: re-check a finalized pull request / pushed branch against the working branch every few seconds
