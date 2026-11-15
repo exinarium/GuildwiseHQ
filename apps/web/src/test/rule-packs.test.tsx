@@ -200,6 +200,7 @@ describe('Rules & decisions page', () => {
     await screen.findAllByTestId('ledger-entry');
     expect((await screen.findAllByTestId('enforced-by')).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Rule packs' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Industry bundles' })).toBeTruthy();
   });
 });
 
