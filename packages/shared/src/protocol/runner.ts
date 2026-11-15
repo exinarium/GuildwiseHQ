@@ -1574,6 +1574,12 @@ export const RunnerShiftOutcomeSchema = z.enum(['reported', 'no_report', 'stoppe
 
 // ----------------------------------------------------------------- runner -> server
 
+/**
+ * Upper bound of `hello.capabilities`. Runners announce one entry per feature and the list only grows, so the bound sits
+ * well above today's count: a runner whose hello fails this check gets no welcome and never connects.
+ */
+export const MAX_HELLO_CAPABILITIES = 200;
+
 export const HelloSchema = msg('hello', {
   runnerVersion: z.string(),
   protocol: z.literal(PROTOCOL_VERSION),
@@ -1600,7 +1606,7 @@ export const HelloSchema = msg('hello', {
   /** The key the manager's browser encrypts the sudo password with (the private half never leaves the runner). */
   sudoKey: SudoKeySchema.optional(),
   /** Features this runner has (additive): `runs:1` = it can run a branch (`run.start`); the web app hides the buttons otherwise. */
-  capabilities: z.array(z.string().max(40)).max(50).optional(),
+  capabilities: z.array(z.string().max(40)).max(MAX_HELLO_CAPABILITIES).optional(),
   /** The runner's cap on run environments held at once (default 2 when absent). */
   maxRunEnvironments: z.number().int().positive().optional(),
   /** The runner supports connecting integrations from the web (docs/design/integrations-page.md). Absent from older runners. */
