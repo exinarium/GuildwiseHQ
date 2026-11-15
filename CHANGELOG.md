@@ -4,6 +4,10 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-11-15
+
+Runner 0.1.75.
+
 ### Added
 
 - Automated apps. An organization Owner can add a GitHub App under Settings > Automated apps so agents can later act as its bot user. The private key is encrypted in the browser for each chosen workstation and stored there only after GitHub accepted it; the server keeps no key. Workstations mint and refresh short-lived installation tokens by themselves and keep them in memory only. Headless workstations use `guildwise-runner apps connect github`. Update workstations to runner 0.1.75.
