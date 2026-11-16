@@ -176,3 +176,57 @@ test('an invitee starts an organization with the Business view as default: deliv
   expect((await pack.json().catch(() => ({})))?.error?.code).not.toBe('business_mode');
   await ctx.close();
 });
+
+async function beatWorker(role: 'render' | 'publish', version: string | null): Promise<void> {
+  // far in the future: the server clock may be ahead of this machine's (the test clock other specs advance), and a
+  // beat older than the stale limit would show the worker offline instead of outdated
+  const value = JSON.stringify({ at: '2099-01-01T00:00:00.000Z', version });
+  await q(
+    `INSERT INTO platform_settings (key, value, updated_at) VALUES ($1, $2::jsonb, now())
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [`video_worker_${role}`, value],
+  );
+}
+
+test('the Videos tab shows each video worker version and flags an older or unversioned worker as outdated', async ({
+  page,
+}) => {
+  const server = (
+    await q<{ v: string | null }>(
+      `SELECT value->>'version' AS v FROM platform_settings WHERE key='server_version'`,
+    )
+  )[0]?.v;
+  expect(server, 'the server records its version at boot').toBeTruthy();
+  await page.goto('/login');
+  await page.getByLabel('Email').fill(SUPER.email);
+  await page.getByLabel('Password').fill(SUPER.password);
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.getByTestId('login-code').fill(await freshTotp(secret));
+  await page.getByRole('button', { name: 'Verify' }).click();
+  await expect(page).toHaveURL(/\/platform/);
+
+  try {
+    // older render worker, publish worker without a version (a build from before version reporting)
+    await beatWorker('render', '0.0.1');
+    await beatWorker('publish', null);
+    await page.goto('/platform/blog?tab=videos');
+    const strip = page.getByTestId('video-strip');
+    await expect(strip.getByTestId('strip-worker-outdated')).toHaveCount(2);
+    await expect(strip.getByTestId('strip-worker-version')).toContainText('v0.0.1');
+    await expect(strip.getByTestId('strip-worker-outdated').first()).toContainText(`server v${server}`);
+    const callout = page.getByTestId('video-worker-outdated');
+    await expect(callout).toBeVisible();
+    await expect(callout).toContainText('0.0.1');
+    await expect(callout).toContainText(server as string);
+
+    // an equal and a newer worker: no flag
+    await beatWorker('render', server as string);
+    await beatWorker('publish', '999.0.0');
+    await page.reload();
+    await expect(strip.getByTestId('strip-worker-version').first()).toBeVisible();
+    await expect(strip.getByTestId('strip-worker-outdated')).toHaveCount(0);
+    await expect(page.getByTestId('video-worker-outdated')).toHaveCount(0);
+  } finally {
+    await q(`DELETE FROM platform_settings WHERE key IN ('video_worker_render','video_worker_publish')`);
+  }
+});

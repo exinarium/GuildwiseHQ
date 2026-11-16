@@ -4,6 +4,7 @@ import {
   type BlogContent,
   buildDescription,
   buildHashtags,
+  cleanWorkerVersion,
   DEFAULT_VIDEO_SETTINGS,
   type EditVideoPostRequest,
   fitCaption,
@@ -53,7 +54,9 @@ import {
   type VideoTopicList,
   type VideoUpload,
   videoScriptIssues,
+  workerOutdated,
 } from '@aom/shared';
+import { appVersion } from '../app-version.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { hashtagPools } from '../blog/hashtag-pools.ts';
 import { loadReleases } from '../blog/releases.ts';
@@ -190,22 +193,55 @@ export async function videoActive(ctx: Ctx): Promise<boolean> {
 
 // ---- worker heartbeat
 
+const SERVER_VERSION_KEY = 'server_version';
+
+/**
+ * The app records its application version at boot (start.ts only: the video worker also calls createApp), so workers
+ * on other machines compare against the server's version and not their own. Written even when null, so a build without
+ * a changelog does not leave an older record behind.
+ */
+export async function publishServerVersion(ctx: Ctx, version: string | null = appVersion()): Promise<void> {
+  await putSetting(ctx, null, SERVER_VERSION_KEY, { version, at: ctx.clock.now().toISOString() });
+}
+
+/** The server's application version: the recorded one; before any server recorded one, this build's own. */
+export async function serverVersion(ctx: Ctx): Promise<string | null> {
+  const r = await one(ctx.pool, 'SELECT value FROM platform_settings WHERE key=$1', [SERVER_VERSION_KEY]);
+  if (!r) return appVersion();
+  return cleanWorkerVersion((r.value as { version?: unknown } | null)?.version);
+}
+
+/**
+ * Every heartbeat carries the worker's application version. The keep-alive beats replace the whole value, so the
+ * version defaults to this build's own: a beat that left it out would flip a current worker to "outdated".
+ */
 export async function beatHeartbeat(
   ctx: Ctx,
   role: VideoWorkerRole,
-  info: Record<string, unknown> = {},
+  info: { busy?: string; version?: string | null } = {},
 ): Promise<void> {
-  await putSetting(ctx, null, heartbeatKey(role), { at: ctx.clock.now().toISOString(), ...info });
+  const version = 'version' in info ? (info.version ?? null) : appVersion();
+  await putSetting(ctx, null, heartbeatKey(role), { at: ctx.clock.now().toISOString(), ...info, version });
 }
+
+/**
+ * A role's last heartbeat. `outdated`: the worker beat (lastSeen set) with a version older than the server's, or with
+ * none (a build from before version reporting). A role that never beat is offline, not outdated. `server`: the
+ * reference version when the caller already read it.
+ */
 export async function workerHeartbeat(
   ctx: Ctx,
   role: VideoWorkerRole,
-): Promise<{ running: boolean; lastSeen: string | null }> {
+  server?: string | null,
+): Promise<{ running: boolean; lastSeen: string | null; version: string | null; outdated: boolean }> {
   const r = await one(ctx.pool, 'SELECT value FROM platform_settings WHERE key=$1', [heartbeatKey(role)]);
-  const at = (r?.value as { at?: string } | undefined)?.at ?? null;
+  const value = (r?.value ?? undefined) as { at?: string; version?: unknown } | undefined;
+  const at = value?.at ?? null;
   const running =
     !!at && ctx.clock.now().getTime() - Date.parse(at) <= VIDEO_POST_LIMITS.heartbeatStaleSeconds * 1000;
-  return { running, lastSeen: at };
+  const version = cleanWorkerVersion(value?.version);
+  const ref = server === undefined ? await serverVersion(ctx) : server;
+  return { running, lastSeen: at, version, outdated: !!at && workerOutdated(version, ref) };
 }
 
 // ---- slots
@@ -537,12 +573,13 @@ export async function offScheduleCount(ctx: Ctx): Promise<number> {
 }
 
 export async function videoStatus(ctx: Ctx): Promise<VideoStatus> {
+  const server = await serverVersion(ctx);
   const [settings, channel, renderBeat, publishBeat, capacity, long, short, pending, locked, used, off] =
     await Promise.all([
       videoSettings(ctx),
       youtubeChannel(ctx),
-      workerHeartbeat(ctx, 'render'),
-      workerHeartbeat(ctx, 'publish'),
+      workerHeartbeat(ctx, 'render', server),
+      workerHeartbeat(ctx, 'publish', server),
       videoCapacity(ctx),
       nextFreeSlotOf(ctx, 'long'),
       nextFreeSlotOf(ctx, 'short'),
@@ -570,6 +607,7 @@ export async function videoStatus(ctx: Ctx): Promise<VideoStatus> {
     },
     render: renderBeat,
     publish: publishBeat,
+    serverVersion: server,
     capacity,
     nextSlot: { long: long?.toISOString() ?? null, short: short?.toISOString() ?? null },
     storage: { usedBytes: used, maxBytes: ctx.config.videoMaxBytes },

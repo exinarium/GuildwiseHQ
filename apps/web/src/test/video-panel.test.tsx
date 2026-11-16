@@ -775,6 +775,64 @@ describe('status strip', () => {
     expect(screen.getByTestId('strip-next').textContent).toContain('video');
   });
 
+  it('shows each worker version; an outdated worker gets a badge and a Problems callout with both versions', async () => {
+    st = status({
+      render: { running: true, lastSeen: null, version: '1.5.0', outdated: true },
+      publish: { running: true, lastSeen: null, version: '2.1.0', outdated: false },
+      serverVersion: '2.0.0',
+    });
+    wrap(<PlatformVideo />);
+    const strip = await screen.findByTestId('video-strip');
+    const versions = within(strip)
+      .getAllByTestId('strip-worker-version')
+      .map((e) => e.textContent);
+    expect(versions).toEqual(['v1.5.0', 'v2.1.0']);
+    const badges = within(strip).getAllByTestId('strip-worker-outdated');
+    expect(badges).toHaveLength(1); // the newer publish worker is not flagged
+    expect(badges[0]?.textContent).toContain('outdated');
+    expect(badges[0]?.textContent).toContain('server v2.0.0');
+    const callout = screen.getByTestId('video-worker-outdated');
+    expect(callout.textContent).toContain('Render worker 1.5.0 is older than the server 2.0.0.');
+    expect(callout.textContent).toContain('the server refuses its files');
+    expect(callout.textContent).toContain('Update the worker image to 2.0.0 or newer');
+    expect(callout.textContent).not.toContain('Publish worker');
+    expect(screen.queryByTestId('video-worker-down')).toBeNull();
+  });
+
+  it('a worker with no version is outdated; an offline one keeps only its offline line', async () => {
+    st = status({
+      render: { running: true, lastSeen: null, version: null, outdated: true },
+      publish: { running: false, lastSeen: null, version: '1.0.0', outdated: true },
+      serverVersion: '2.0.0',
+    });
+    wrap(<PlatformVideo />);
+    const callout = await screen.findByTestId('video-worker-outdated');
+    expect(callout.textContent).toContain('Render worker reports no version');
+    expect(callout.textContent).toContain('older than the server 2.0.0');
+    expect(callout.textContent).not.toContain('Publish worker');
+    expect(screen.getByTestId('video-worker-down').textContent).toContain('Publish worker is offline');
+    const badges = within(screen.getByTestId('video-strip')).getAllByTestId('strip-worker-outdated');
+    expect(badges).toHaveLength(1);
+    expect(badges[0]?.textContent).toContain('no version');
+  });
+
+  it('equal versions, or a server without versions, show no outdated state', async () => {
+    st = status({
+      render: { running: true, lastSeen: null, version: '2.0.0', outdated: false },
+      publish: { running: true, lastSeen: null },
+      serverVersion: '2.0.0',
+    });
+    wrap(<PlatformVideo />);
+    const strip = await screen.findByTestId('video-strip');
+    expect(
+      within(strip)
+        .getAllByTestId('strip-worker-version')
+        .map((e) => e.textContent),
+    ).toEqual(['v2.0.0']);
+    expect(within(strip).queryByTestId('strip-worker-outdated')).toBeNull();
+    expect(screen.queryByTestId('video-worker-outdated')).toBeNull();
+  });
+
   it('alerts for a slipped video and one waiting on its file', async () => {
     posts = [
       video({

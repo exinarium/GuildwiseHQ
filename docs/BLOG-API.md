@@ -608,7 +608,7 @@ Routes (all `/api/platform/video`, session cookie, platform accounts only):
 
 | Call | Does |
 |---|---|
-| `GET /` `?status=` | posts with their render, upload, slot and phase, plus the status (worker heartbeat, channel, capacity with backlog, next slot per format, storage, locked count) |
+| `GET /` `?status=` | posts with their render, upload, slot and phase, plus the status (worker heartbeat and worker versions against `serverVersion`, channel, capacity with backlog, next slot per format, storage, locked count) |
 | `GET /status`, `GET/PATCH /settings` | the status; the `videoPosts` setting |
 | `POST /posts` `{ kind, format, ref, script, parentId? }` | add a script by hand (`201`; `200` and the existing post when there is one) |
 | `GET /posts/{id}`, `PATCH /posts/{id}` | one post; edit `{ script?, meta?, privacy? }` |

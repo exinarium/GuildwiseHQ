@@ -308,6 +308,17 @@ export const VideoCapacitySchema = z.object({
 });
 export type VideoCapacity = z.infer<typeof VideoCapacitySchema>;
 
+/** One worker role's heartbeat as the status reports it. */
+export const VideoWorkerBeatSchema = z.object({
+  running: z.boolean(),
+  lastSeen: IsoTime.nullable(),
+  /** The application version the worker reported with its last heartbeat (null: a build that does not report one). */
+  version: z.string().nullable().optional(),
+  /** The worker reported a version older than the server's, or none. */
+  outdated: z.boolean().optional(),
+});
+export type VideoWorkerBeat = z.infer<typeof VideoWorkerBeatSchema>;
+
 export const VideoStatusSchema = z.object({
   settings: VideoSettingsSchema,
   /** A YouTube channel is connected and healthy. */
@@ -321,8 +332,10 @@ export const VideoStatusSchema = z.object({
   /** Both halves of the worker are running (the combined view; see `render` and `publish`). */
   worker: z.object({ running: z.boolean(), lastSeen: IsoTime.nullable() }),
   /** The render worker (AOM_VIDEO_ROLE=render) and the publish worker (AOM_VIDEO_ROLE=publish), each with its heartbeat. */
-  render: z.object({ running: z.boolean(), lastSeen: IsoTime.nullable() }).optional(),
-  publish: z.object({ running: z.boolean(), lastSeen: IsoTime.nullable() }).optional(),
+  render: VideoWorkerBeatSchema.optional(),
+  publish: VideoWorkerBeatSchema.optional(),
+  /** This server's application version (newest release in its CHANGELOG), the reference for `outdated`. */
+  serverVersion: z.string().nullable().optional(),
   capacity: VideoCapacitySchema,
   /** The next free slot per format (null while the schedule has no days). */
   nextSlot: z.object({ long: IsoTime.nullable(), short: IsoTime.nullable() }),

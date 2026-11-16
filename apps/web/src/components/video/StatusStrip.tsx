@@ -3,26 +3,55 @@ import { formatDateTime } from '../../lib/time.ts';
 import { slotLabel } from '../../lib/video-schedule.ts';
 import { Badge, Callout } from '../ui.tsx';
 
-interface WorkerState {
+export interface WorkerState {
   label: string;
   running: boolean;
   lastSeen: string | null;
+  /** The application version the worker reported (null: none, or a server that does not report versions). */
+  version: string | null;
+  /** The worker is older than the server (or reports no version); always false on a server without versions. */
+  outdated: boolean;
+  /** The server's version, the reference for `outdated` (from the status, never the browser's own build). */
+  serverVersion: string | null;
 }
 /**
  * One state per worker role: the render worker (renders shortly before a slot) and the publish worker (uploads, posts at
  * the slot, cleans up), from `status.render` / `status.publish`; the combined `status.worker` for a server that has one heartbeat.
  */
-export function workerStates(status: Pick<VideoStatus, 'worker' | 'render' | 'publish'>): WorkerState[] {
+export function workerStates(
+  status: Pick<VideoStatus, 'worker' | 'render' | 'publish'> & Partial<Pick<VideoStatus, 'serverVersion'>>,
+): WorkerState[] {
   const w = (status.render || status.publish
     ? { render: status.render, publish: status.publish }
     : status.worker) as unknown as Record<string, unknown>;
+  const serverVersion = status.serverVersion ?? null;
   const one = (label: string, v: unknown): WorkerState => {
-    const x = (v ?? {}) as { running?: boolean; lastSeen?: string | null };
-    return { label, running: !!x.running, lastSeen: x.lastSeen ?? null };
+    const x = (v ?? {}) as {
+      running?: boolean;
+      lastSeen?: string | null;
+      version?: string | null;
+      outdated?: boolean;
+    };
+    return {
+      label,
+      running: !!x.running,
+      lastSeen: x.lastSeen ?? null,
+      version: x.version ?? null,
+      outdated: !!x.outdated,
+      serverVersion,
+    };
   };
   if ('render' in w || 'publish' in w)
     return [one('Render worker', w.render), one('Publish worker', w.publish)];
   return [one('Video worker', w)];
+}
+
+/** "Render worker 1.5.0 is older than the server 1.9.0." (or "reports no version"), for the badge and the Problems list. */
+export function outdatedText(w: WorkerState): string {
+  const server = w.serverVersion ?? 'unknown';
+  return w.version
+    ? `${w.label} ${w.version} is older than the server ${server}.`
+    : `${w.label} reports no version (a build from before version reporting) and is older than the server ${server}.`;
 }
 
 /** Derived alerts: what needs the owner's eye, from the posts the page already has. */
@@ -67,6 +96,15 @@ export function StatusStrip({ status, posts }: { status: VideoStatus; posts: Vid
           >
             {w.label}
             <Badge tone={w.running ? 'success' : 'danger'}>{w.running ? 'online' : 'offline'}</Badge>
+            {w.version && <span data-testid="strip-worker-version">v{w.version}</span>}
+            {w.running && w.outdated && (
+              // visible text, not a tooltip: a touch screen never shows a title
+              <span className="flex items-center gap-1.5" data-testid="strip-worker-outdated">
+                <Badge tone="warning">outdated</Badge>
+                {!w.version && <span>no version</span>}
+                {w.serverVersion && <span>(server v{w.serverVersion})</span>}
+              </span>
+            )}
           </span>
         ))}
         <span data-testid="strip-next">
