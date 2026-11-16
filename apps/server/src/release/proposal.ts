@@ -5,6 +5,7 @@ import {
   type ComponentRule,
   componentBumps,
   composeReleaseSection,
+  isReleaseMachineryCommit,
   notesFromCommits,
   type ReleaseFacts,
   type ReleaseProposalView,
@@ -63,7 +64,7 @@ export function buildProposal(
   const body = fromChangelog ? unreleased.body : '';
   const notes = fromChangelog
     ? [intro, body].filter((x) => x !== '').join('\n\n')
-    : notesFromCommits(facts.commits);
+    : notesFromCommits(facts.commits.filter((c) => !isReleaseMachineryCommit(c.subject)));
   return {
     base,
     recommended: { version: rec.version, level: rec.level, reason: rec.reason },
