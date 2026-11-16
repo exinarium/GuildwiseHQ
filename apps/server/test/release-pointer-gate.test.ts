@@ -53,6 +53,7 @@ const facts = (submodules?: ReleaseSubmoduleFacts[]): ReleaseFacts =>
     ahead: 3,
     lastTag: { name: 'v1.3.0', sha: 'b'.repeat(40) },
     existingTags: ['v1.3.0'],
+    commits: [{ sha: 'd'.repeat(40), subject: 'feat: one', breakingFooter: false }],
     changedTotal: 4,
     components: [
       { name: 'runner', changedCount: 17, contentAtHead: file('0.1.62'), contentAtTag: file('0.1.62') },
