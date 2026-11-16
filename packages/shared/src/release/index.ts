@@ -9,6 +9,7 @@ export * from './docs-prep-task.ts';
 export * from './docs-prep-videos.ts';
 export * from './dto.ts';
 export * from './help-articles.ts';
+export * from './machinery.ts';
 export * from './publish.ts';
 export * from './readiness.ts';
 export * from './recommend.ts';

@@ -3,10 +3,12 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import {
   componentRuleApplies,
+  isReleaseCommit,
   isSafeGitRef,
   type ReleaseDocsPrepPayload,
   type ReleaseDocsPrepResult,
   type ReleaseDocsPrepSummary,
+  releasePrepCommitSubject,
 } from '@aom/shared';
 import { detectSignOff } from './dco.ts';
 import { appOfPlan } from './gh.ts';
@@ -500,6 +502,16 @@ const treeOf = async (repoPath: string, ref: string): Promise<string | null> => 
   return r.exitCode === 0 ? r.stdout.trim() : null;
 };
 
+/** Whether a release commit (`chore(release): X.Y.Z`) landed in `from..tip`. */
+export async function releasedSince(repoPath: string, from: string, tip: string): Promise<boolean> {
+  if (!from || from === tip) return false;
+  const r = await git(repoPath, ['log', '--format=%s', `${from}..${tip}`]);
+  return r.exitCode === 0 && r.stdout.split('\n').some((s) => s.trim() !== '' && isReleaseCommit(s));
+}
+
+const releasedWhilePreparing = (branch: string): string =>
+  `${branch} got a release commit while prep was running: nothing was committed. Run prep again for the next release.`;
+
 async function commitPrepare(input: ReleaseDocsPrepInput, tip: string): Promise<ReleaseDocsPrepResult> {
   const { payload: p, repoPath } = input;
   // The commit the work chain was built on. The release branch may have moved since; the newer commits are carried
@@ -509,6 +521,8 @@ async function commitPrepare(input: ReleaseDocsPrepInput, tip: string): Promise<
   // Nothing produced a change: no commit (the repository is left as it is).
   if (!work || (await treeOf(repoPath, work)) === (await treeOf(repoPath, analysed)))
     return passed({ notices: ['no changes'] });
+  // A release shipped since the analysis: the prepared docs belong to it, never carry them over onto the release.
+  if (await releasedSince(repoPath, analysed, tip)) return failed(releasedWhilePreparing(p.releaseBranch));
   let identity: Awaited<ReturnType<typeof requireCommitIdentity>>;
   try {
     identity = await requireCommitIdentity(
@@ -528,7 +542,7 @@ async function commitPrepare(input: ReleaseDocsPrepInput, tip: string): Promise<
   }
   const sign =
     p.signOff === undefined ? await detectSignOff(repoPath) : { required: p.signOff, reason: 'requested' };
-  const subject = p.message ?? `docs(release): prepare the release documentation for ${p.releaseBranch}`;
+  const subject = p.message ?? releasePrepCommitSubject(p.releaseBranch);
   const message = sign.required
     ? `${subject}\n\nSigned-off-by: ${identity.name} <${identity.email}>\n`
     : `${subject}\n`;
@@ -598,6 +612,9 @@ async function commitPush(
   }
   const parent = (await git(repoPath, ['rev-parse', '--verify', '--quiet', `${sha}^`])).stdout.trim();
   const tip = await revParse(repoPath, `refs/remotes/origin/${p.releaseBranch}`);
+  // Never push prepared docs over a release commit that landed after the analysed head.
+  if (tip && (await releasedSince(repoPath, parent === tip ? (p.summary?.headSha ?? parent) : parent, tip)))
+    return failed(releasedWhilePreparing(p.releaseBranch), { commit: sha });
   if (parent !== tip)
     return failed(`${p.releaseBranch} moved since the prepared commit was made: run prep again`, {
       commit: sha,

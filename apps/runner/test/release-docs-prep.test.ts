@@ -225,6 +225,58 @@ describe('release.docs_prep commit', () => {
     expect(sh(s.repo.origin, 'git', ['show', 'release/1.4.0:docs/USER-GUIDE.md'])).toBe('# Guide');
   });
 
+  it('commit/prepare refuses when the release branch got a release commit since the analysed head', async () => {
+    const s = setup();
+    const a = await run(s);
+    const common = { summary: a.summary, base: { sha: a.baseSha as string, tag: a.baseTag ?? null } };
+    await run(s, { ...common, step: 'guide' });
+    // the release ships in between
+    commit(s.repo.clone, 'CHANGELOG.md', '## [1.4.0]\n', 'chore(release): 1.4.0');
+    sh(s.repo.clone, 'git', ['push', 'origin', 'release/1.4.0']);
+    const head = originHead(s.repo.origin);
+    const prep = await run(s, { ...common, step: 'commit', phase: 'prepare' });
+    expect(prep.state).toBe('failed');
+    expect(prep.error).toContain('got a release commit while prep was running');
+    const push = await run(s, { ...common, step: 'commit', phase: 'push' });
+    expect(push.commit).toBeUndefined();
+    expect(originHead(s.repo.origin)).toBe(head);
+  });
+
+  it('commit/push refuses when a release commit landed after the prepared commit was made', async () => {
+    const s = setup();
+    const a = await run(s);
+    const common = { summary: a.summary, base: { sha: a.baseSha as string, tag: a.baseTag ?? null } };
+    await run(s, { ...common, step: 'guide' });
+    const prep = await run(s, { ...common, step: 'commit', phase: 'prepare' });
+    expect(prep.state).toBe('passed');
+    commit(s.repo.clone, 'CHANGELOG.md', '## [1.4.0]\n', 'chore(release): 1.4.0');
+    sh(s.repo.clone, 'git', ['push', 'origin', 'release/1.4.0']);
+    sh(s.repo.clone, 'git', ['fetch', 'origin']);
+    const head = originHead(s.repo.origin);
+    const push = await run(s, { ...common, step: 'commit', phase: 'push' });
+    expect(push.state).toBe('failed');
+    expect(push.error).toContain('got a release commit while prep was running');
+    expect(originHead(s.repo.origin)).toBe(head);
+  });
+
+  it('analyses from a release whose tag is on main once its release commit is on the release branch', async () => {
+    const s = setup();
+    commit(s.repo.clone, 'CHANGELOG.md', '## [1.4.0]\n', 'chore(release): 1.4.0');
+    sh(s.repo.clone, 'git', ['push', 'origin', 'release/1.4.0']);
+    const release = sh(s.repo.clone, 'git', ['rev-parse', 'HEAD']).trim();
+    sh(s.repo.clone, 'git', ['checkout', 'main']);
+    sh(s.repo.clone, 'git', ['merge', '--no-ff', '-m', 'Merge for release 1.4.0', 'release/1.4.0']);
+    sh(s.repo.clone, 'git', ['tag', '-a', 'v1.4.0', '-m', '1.4.0']);
+    sh(s.repo.clone, 'git', ['push', 'origin', 'main', '--tags']);
+    sh(s.repo.clone, 'git', ['checkout', 'release/1.4.0']);
+    commit(s.repo.clone, 'apps/server/c.ts', 'c', 'feat: c');
+    sh(s.repo.clone, 'git', ['push', 'origin', 'release/1.4.0']);
+    const r = await run(s);
+    expect(r.baseTag).toBe('v1.4.0');
+    expect(r.baseSha).toBe(release);
+    expect(r.summary?.commits.map((c) => c.subject)).toEqual(['feat: c']);
+  });
+
   it('with Analyse changes unticked, keeps commits pushed to the release branch after a content step', async () => {
     const s = setup();
     const guide = await run(s, { step: 'guide' });
