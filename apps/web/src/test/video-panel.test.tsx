@@ -195,7 +195,7 @@ beforeEach(() => {
         return json(
           init?.method === 'PATCH' ? { ...st.settings, ...JSON.parse(String(init.body)) } : st.settings,
         );
-      if (/\/(move|unschedule|retry-upload|retry-render|shares\/[a-z]+\/retry)$/.test(url))
+      if (/\/(move|unschedule|retry-upload|retry-render|rerender|shares\/[a-z]+\/retry)$/.test(url))
         return json(video({ status: 'approved', slotAt: SLOTS[1] as string, phase: 'scheduled' }));
       if (url.endsWith('/swap')) return json({ a: video(), b: video() });
       if (url.startsWith('/api/platform/video')) return json({ posts, status: st });
@@ -863,6 +863,104 @@ describe('Core 5: destinations', () => {
         calls.some(
           (c) => c.method === 'POST' && c.url === `/api/platform/video/posts/${id}/shares/facebook/retry`,
         ),
+      ).toBe(true),
+    );
+  });
+
+  it('an Instagram destination that needs a re-render shows the reasons and a Re-render action, not a retry', async () => {
+    const id = '77777777-7777-4777-8777-777777777777';
+    const sch = defaultSchedule(0, 7);
+    st = status({ settings: { ...st.settings, schedule: sch } });
+    posts = [
+      video({
+        id,
+        format: 'short',
+        title: 'A Short',
+        status: 'approved',
+        slotAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+        publishMode: 'slot',
+        destinations: ['youtube', 'instagram'],
+        phase: 'partial',
+        shares: [
+          {
+            network: 'instagram',
+            status: 'failed',
+            url: null,
+            error: 'Instagram could not process the video; it needs a new render',
+            fileRejection: 'needs_rerender',
+            reelsCheck: {
+              passed: false,
+              checkedAt: '2026-11-16T10:00:00.000Z',
+              failed: [
+                { rule: 'edit_list', message: 'edit list present (vide)', measured: 'vide', limit: 'none' },
+                { rule: 'faststart', message: 'moov not at start', measured: 'moov after mdat', limit: 'x' },
+              ],
+              warnings: [],
+              measured: {},
+            },
+          },
+        ],
+      }),
+    ];
+    wrap(<PlatformVideo />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('video-tab-queue'));
+    const card = await screen.findByTestId(`queue-post-${id}`);
+    expect(within(card).getByText('Instagram needs a new render')).toBeTruthy();
+    expect(within(card).getByText('edit list present (vide)')).toBeTruthy();
+    expect(within(card).getByText('moov not at start')).toBeTruthy();
+    expect(within(card).queryByTestId('retry-instagram')).toBeNull();
+    await user.click(within(card).getByTestId('rerender-instagram'));
+    await waitFor(() =>
+      expect(
+        calls.some((c) => c.method === 'POST' && c.url === `/api/platform/video/posts/${id}/rerender`),
+      ).toBe(true),
+    );
+  });
+
+  it('an Instagram destination that needs a re-render whose file could not be checked shows Re-render, not a retry', async () => {
+    const id = '88888888-8888-4888-8888-888888888888';
+    const sch = defaultSchedule(0, 7);
+    st = status({ settings: { ...st.settings, schedule: sch } });
+    posts = [
+      video({
+        id,
+        format: 'short',
+        title: 'A Short',
+        status: 'approved',
+        slotAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+        publishMode: 'slot',
+        destinations: ['youtube', 'instagram'],
+        phase: 'partial',
+        shares: [
+          {
+            network: 'instagram',
+            status: 'failed',
+            url: null,
+            error: 'Instagram could not process the video; it needs a new render',
+            fileRejection: 'check_failed',
+            reelsCheck: {
+              passed: true,
+              checkedAt: '2026-11-16T10:00:00.000Z',
+              failed: [],
+              warnings: [],
+              measured: {},
+            },
+          },
+        ],
+      }),
+    ];
+    wrap(<PlatformVideo />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('video-tab-queue'));
+    const card = await screen.findByTestId(`queue-post-${id}`);
+    expect(within(card).getByText('Instagram needs a new render')).toBeTruthy();
+    expect(within(card).getByText(/could not be checked/)).toBeTruthy();
+    expect(within(card).queryByTestId('retry-instagram')).toBeNull();
+    await user.click(within(card).getByTestId('rerender-instagram'));
+    await waitFor(() =>
+      expect(
+        calls.some((c) => c.method === 'POST' && c.url === `/api/platform/video/posts/${id}/rerender`),
       ).toBe(true),
     );
   });

@@ -21,6 +21,7 @@ import {
   TextInput,
   useToast,
 } from '../ui.tsx';
+import { needsRerender, RerenderNotice } from './RerenderNotice.tsx';
 import { ScheduleStep } from './ScheduleStep.tsx';
 
 const STATUS_LABEL = {
@@ -164,6 +165,7 @@ export function VideoReview({
       | 'reject'
       | 'retry-render'
       | 'retry-upload'
+      | 'rerender'
       | 'resolve-locked'
       | 'crosspost',
     done: string,
@@ -416,8 +418,17 @@ export function VideoReview({
         <ul className="text-sm text-muted" data-testid="video-shares">
           {post.shares.map((s) => (
             <li key={s.network}>
-              {s.network}: {s.status}
-              {s.error ? ` (${s.error})` : ''}
+              {s.network}: {needsRerender(s) ? 'needs re-render' : s.status}
+              {s.error && !needsRerender(s) ? ` (${s.error})` : ''}
+              {needsRerender(s) && (
+                <div className="mt-1">
+                  <RerenderNotice
+                    share={s}
+                    loading={act.isPending}
+                    onRerender={() => run('rerender', 'Queued: the video renders again')}
+                  />
+                </div>
+              )}
               {safeHref(s.url) && (
                 <>
                   {' '}

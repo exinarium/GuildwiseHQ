@@ -14,7 +14,11 @@ import { GRAPH_VERSION, LINKEDIN_VERSION } from '../blog/social-client.ts';
  * worker calls again later.
  */
 
-export type DestinationErrorKind = 'auth' | 'retry' | 'final';
+/**
+ * `file`: the network refused this very file while processing it (Instagram `ProcessingFailedError`); sending the same bytes
+ * again cannot help, only a new file does. Only Instagram produces it.
+ */
+export type DestinationErrorKind = 'auth' | 'retry' | 'final' | 'file';
 export class DestinationError extends Error {
   constructor(
     readonly kind: DestinationErrorKind,
@@ -284,16 +288,15 @@ async function postToFacebook(p: DestinationPayload, io: DestinationIO): Promise
 
 /**
  * Attempts in all (the first and three retries, with the worker's back-off of 1, 5 and 30 minutes) for a failure Instagram
- * reports while it takes in the video, before the share is marked failed.
+ * reports before it has a file (the container call: Graph error 100, `is_transient`), before the share is marked failed.
  */
 export const IG_PROCESSING_ATTEMPTS = 4;
 
 /**
  * Instagram's own way of failing: the resumable upload answers `400 {"debug_info":{"type":"ProcessingFailedError"}}` (no
- * `error.code`), and the container call sometimes answers Graph error 100 "Unsupported post request. Object with ID ...
- * does not exist" for an account id that works the rest of the time; Graph also flags some errors `is_transient`. In
- * production these were one-off failures of files Instagram accepted at other times, so they are retried (bounded by
- * `IG_PROCESSING_ATTEMPTS`). Everything else keeps the general rules: the token and permissions are `auth`, other refusals
+ * `error.code`): that is the file being refused, kind `file`, never sent again unchanged. The container call sometimes answers Graph error 100 "Unsupported post request. Object with ID ...
+ * does not exist" for an account id that works the rest of the time; Graph also flags some errors `is_transient`. These come
+ * before any file is sent, so they are retried (bounded by `IG_PROCESSING_ATTEMPTS`). Everything else keeps the general rules: the token and permissions are `auth`, other refusals
  * (invalid media by spec included) stay `final`.
  */
 function instagramError(r: Res, what: string): DestinationError {
@@ -309,7 +312,11 @@ function instagramError(r: Res, what: string): DestinationError {
   const processing = (msg: string, code: string) =>
     new DestinationError('retry', msg, code, IG_PROCESSING_ATTEMPTS);
   if (body?.debug_info?.type === 'ProcessingFailedError')
-    return processing(`${what}: HTTP ${r.status}: ${r.body.slice(0, 300)}`, 'ig_processing');
+    return new DestinationError(
+      'file',
+      `${what}: HTTP ${r.status}: ${r.body.slice(0, 300)}`,
+      'ig_processing_failed',
+    );
   const e = body?.error;
   const general = graphError(r, what);
   // the token, permissions, rate limits and 5xx keep their own handling; only what would be final is looked at again

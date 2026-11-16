@@ -7,6 +7,7 @@ import {
   defaultVideoCaption,
   HASHTAG_POOLS,
   type HashtagPools,
+  type ReelsCheck,
   SCHEDULE_DEFAULTS,
   TikTokOptionsSchema,
   VIDEO_CAPTION_LIMITS,
@@ -42,6 +43,13 @@ import type { Ctx } from '../context.ts';
 import { exec, one, type Row, rows } from '../db/sql.ts';
 import { videoAlertMail, videoLockedMail } from '../mail/blog-mail.ts';
 import { DestinationError, type DestinationPayload, type ShortDestination } from './destinations.ts';
+import {
+  type FileRejection,
+  isoOrNull,
+  readFileRejection,
+  rejectionReasons,
+  sameArtifact,
+} from './file-rejection.ts';
 import { libraryCatalog } from './library.ts';
 import { signedMediaUrl } from './media-url.ts';
 import { type PushDeps, pushArtifacts } from './push-client.ts';
@@ -92,7 +100,17 @@ export interface SweepDeps {
   push?: PushDeps;
   /** Overrides `AOM_VIDEO_ROLE`. */
   role?: 'render' | 'publish' | 'all';
+  /** Checks a rendered MP4 against the Reels rules. Defaults to `checkReelsFile` of @aom/video (loaded on first use). */
+  reelsCheck?: (file: string) => Promise<ReelsCheck>;
 }
+
+const defaultReelsCheck = async (file: string): Promise<ReelsCheck> => {
+  const { checkReelsFile } = await import('@aom/video');
+  return checkReelsFile(file);
+};
+
+/** A second try, after Instagram refused a file that meets every Reels rule (the one bounded extra attempt). */
+const FILE_RETRY_MS = 5 * 60_000;
 
 const defaultRender: RenderFn = async (script, opts) => {
   const { renderScript } = await import('./renders.ts');
@@ -766,7 +784,7 @@ export function destinationCaption(
   return composeCaption(network, text, c.tags, '', VIDEO_CAPTION_LIMITS[network]);
 }
 
-async function runDestination(ctx: Ctx, share: Row): Promise<void> {
+async function runDestination(ctx: Ctx, share: Row, deps: SweepDeps = {}): Promise<void> {
   const now = ctx.clock.now();
   const network = share.network as ShortDestination;
   const post = await one(ctx.pool, 'SELECT * FROM video_posts WHERE id=$1', [share.post_id]);
@@ -805,8 +823,13 @@ async function runDestination(ctx: Ctx, share: Row): Promise<void> {
     detail.dest = state;
     await setShare(`detail=$4::jsonb`, [JSON.stringify(detail)]);
   };
-  const fail = async (message: string, alert: boolean) => {
-    await setShare(`status='failed', error=$4, next_attempt_at=NULL, attempts=attempts+1`, [message]);
+  const fail = async (message: string, alert: boolean, rejection?: FileRejection) => {
+    if (rejection)
+      await setShare(
+        `status='failed', error=$4, next_attempt_at=NULL, attempts=attempts+1, detail=$5::jsonb`,
+        [message, JSON.stringify({ ...detail, dest: state, fileRejection: rejection })],
+      );
+    else await setShare(`status='failed', error=$4, next_attempt_at=NULL, attempts=attempts+1`, [message]);
     await ctx.store.append([
       {
         streamId: stream,
@@ -820,6 +843,37 @@ async function runDestination(ctx: Ctx, share: Row): Promise<void> {
     ]);
     if (alert) await alertOnce(ctx, network, `A video failed for good: ${message}`, true);
   };
+  const reelsCheck = deps.reelsCheck ?? defaultReelsCheck;
+  const checked = (
+    renderId: string,
+    outcome: 'needs_rerender' | 'one_more_attempt' | 'check_failed' | 'preflight_ok',
+    check: ReelsCheck | null,
+    note?: string,
+  ) =>
+    ctx.store.append([
+      {
+        streamId: stream,
+        event: {
+          type: 'VideoFileChecked',
+          payload: {
+            postId: post.id,
+            network: 'instagram',
+            renderId,
+            passed: check?.passed ?? false,
+            failed: (
+              check?.failed.map((f) => ({ rule: f.rule, message: f.message })) ?? [
+                { rule: 'check', message: note ?? 'the check could not run' },
+              ]
+            ).slice(0, 20),
+            outcome,
+          },
+        },
+        actor: SYSTEM_ACTOR,
+        scope: adminScope,
+      },
+    ]);
+  // what the Instagram branch of the catch needs to know about the file that was sent
+  let ig: { file: string; fp: FileRejection['artifact']; rej: FileRejection | undefined } | undefined;
   try {
     if (Object.keys(state).length === 0 && now.getTime() > deadline)
       return void (await fail(
@@ -839,6 +893,49 @@ async function runDestination(ctx: Ctx, share: Row): Promise<void> {
         return;
       }
       return void (await fail('the video file was not found (the video volume)', true));
+    }
+    if (network === 'instagram') {
+      const fp = {
+        renderId: render.id as string,
+        finishedAt: isoOrNull(render.finished_at),
+        bytes: statSync(file).size,
+      };
+      const rej = readFileRejection(detail);
+      ig = { file, fp, rej };
+      if (rej && sameArtifact(rej.artifact, fp)) {
+        // the same file Instagram refused: it is never sent again, however the share got back to pending
+        if (rej.kind !== 'rejected_compliant' || rej.rejections >= 2)
+          return void (await fail(
+            `Instagram refused this video file and it is not sent again; it needs a new render: ${rejectionReasons(rej)}`.slice(
+              0,
+              480,
+            ),
+            false,
+          ));
+      } else if (rej) {
+        // a new file after a rejection: check it before it is sent
+        const check = await reelsCheck(file).catch((e: unknown) => {
+          ctx.log.warn({ postId: post.id, err: e }, 'the Reels check could not run before posting');
+          return null;
+        });
+        if (check && !check.passed) {
+          const message =
+            `The new video file does not meet the Instagram Reels rules; it needs a new render: ${check.failed.map((f) => f.message).join('; ')}`.slice(
+              0,
+              480,
+            );
+          await checked(render.id, 'needs_rerender', check);
+          return void (await fail(message, true, {
+            kind: 'needs_rerender',
+            artifact: fp,
+            rejections: 0,
+            at: now.toISOString(),
+            error: message,
+            check,
+          }));
+        }
+        if (check) await checked(render.id, 'preflight_ok', check);
+      }
     }
     const settings = await videoSettings(ctx);
     const meta = post.meta as VideoPostMeta;
@@ -915,6 +1012,76 @@ async function runDestination(ctx: Ctx, share: Row): Promise<void> {
       await alertOnce(ctx, network, message, true);
       return;
     }
+    if (kind === 'file' && ig) {
+      // the network refused this very file: the same bytes are never sent again for the same reason
+      const { fp, rej } = ig;
+      const base = { artifact: fp, at: now.toISOString(), error: message };
+      if (rej && sameArtifact(rej.artifact, fp)) {
+        // refused a second time although it meets every rule: the end of the bounded extra attempt
+        const second: FileRejection = { ...rej, ...base, rejections: rej.rejections + 1 };
+        return void (await fail(
+          `Instagram refused this file again although it meets the Reels rules; it is not sent again: ${message}`.slice(
+            0,
+            480,
+          ),
+          true,
+          second,
+        ));
+      }
+      let check: ReelsCheck | null = null;
+      let checkError = '';
+      try {
+        check = await reelsCheck(ig.file);
+      } catch (e) {
+        checkError = (e instanceof Error ? e.message : String(e)).slice(0, 200);
+      }
+      if (!check) {
+        await checked(fp.renderId, 'check_failed', null, checkError);
+        const text =
+          `Instagram refused the video and the file could not be checked against the Reels rules (${checkError}): ${message}`.slice(
+            0,
+            480,
+          );
+        return void (await fail(text, true, {
+          kind: 'check_failed',
+          ...base,
+          rejections: 1,
+          error: text,
+          check: null,
+        }));
+      }
+      if (!check.passed) {
+        const text =
+          `Instagram could not process the video; it needs a new render: ${check.failed.map((f) => f.message).join('; ')}`.slice(
+            0,
+            480,
+          );
+        await checked(fp.renderId, 'needs_rerender', check);
+        return void (await fail(text, true, {
+          kind: 'needs_rerender',
+          ...base,
+          rejections: 1,
+          error: text,
+          check,
+        }));
+      }
+      const rec: FileRejection = { kind: 'rejected_compliant', ...base, rejections: 1, check };
+      await checked(fp.renderId, 'one_more_attempt', check);
+      ctx.log.warn(
+        { postId: post.id, check },
+        'Instagram rejected a file that meets the Reels rules; one more attempt',
+      );
+      if (now.getTime() + FILE_RETRY_MS > deadline)
+        return void (await fail(`gave up 6 hours after the slot: ${message}`, true, rec));
+      const { dest: _dropped, ...rest } = detail;
+      await setShare(`status='pending', attempts=$4, error=$5, next_attempt_at=$6, detail=$7::jsonb`, [
+        (share.attempts as number) + 1,
+        message,
+        new Date(now.getTime() + FILE_RETRY_MS),
+        JSON.stringify({ ...rest, fileRejection: rec }),
+      ]);
+      return;
+    }
     const attempts = (share.attempts as number) + 1;
     const wait = DEST_BACKOFF_MS[Math.min(attempts - 1, DEST_BACKOFF_MS.length - 1)] as number;
     // a retry the destination bounds itself (Instagram's processing failures) stops after its number of attempts
@@ -941,7 +1108,7 @@ async function runDestination(ctx: Ctx, share: Row): Promise<void> {
 }
 
 /** Claims and posts one due destination share (a slot that has come, a retry that is due). Returns true when it did something. */
-export async function postNextDestination(ctx: Ctx): Promise<boolean> {
+export async function postNextDestination(ctx: Ctx, deps: SweepDeps = {}): Promise<boolean> {
   const now = ctx.clock.now();
   const claimed = await one(
     ctx.pool,
@@ -957,7 +1124,7 @@ export async function postNextDestination(ctx: Ctx): Promise<boolean> {
     [now],
   );
   if (!claimed) return false;
-  await runDestination(ctx, claimed);
+  await runDestination(ctx, claimed, deps);
   return true;
 }
 
@@ -1359,7 +1526,7 @@ export async function videoTick(
   if (doPublish) {
     uploaded = await uploadNext(ctx);
     // the slots that have come: up to a handful of destinations per pass (each can take minutes)
-    for (let i = 0; i < 5 && (await postNextDestination(ctx)); i++) uploaded = true;
+    for (let i = 0; i < 5 && (await postNextDestination(ctx, deps)); i++) uploaded = true;
     await recheckPublished(ctx).catch((err) => ctx.log.error({ err }, 'video re-check failed'));
     cleaned = await cleanupVideos(ctx).catch((err) => {
       ctx.log.error({ err }, 'video cleanup failed');
