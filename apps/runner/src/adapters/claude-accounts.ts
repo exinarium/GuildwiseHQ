@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { type ClaudeAccountInfo, MAIN_ACCOUNT } from '@aom/shared';
 import type { ClaudeAccountConfig } from '../config.ts';
+import { displayDir, expandHome } from '../home-path.ts';
 import { ClaudeCredentialStore, claudeAccountFile } from '../integrations/claude-store.ts';
 import { ClaudeAuthMonitor, type CredentialPaths, readCredentials } from './claude-auth.ts';
 import { ClaudeUsageMonitor, formatLimitTime } from './claude-usage-limit.ts';
@@ -22,23 +23,7 @@ export interface AccountCredential {
   apiKey?: string;
 }
 
-/** `~/x` or `$HOME/x` to an absolute path (a relative path is taken from the home). */
-export function expandHome(p: string, home: string): string {
-  let q = p.trim();
-  if (q === '~') return home;
-  if (q.startsWith('~/') || q.startsWith('~\\')) q = join(home, q.slice(2));
-  else if (q === '$HOME') q = home;
-  else if (q.startsWith('$HOME/') || q.startsWith('${HOME}/')) q = join(home, q.slice(q.indexOf('/') + 1));
-  return isAbsolute(q) ? resolve(q) : resolve(home, q);
-}
-
-/** A path inside the home as `~/x`, for display and the server (the real home path never leaves the machine). */
-export function displayDir(abs: string, home: string): string {
-  const a = resolve(abs);
-  const h = resolve(home);
-  if (a === h) return '~';
-  return a.startsWith(`${h}/`) || a.startsWith(`${h}\\`) ? `~${a.slice(h.length).replaceAll('\\', '/')}` : a;
-}
+export { displayDir, expandHome } from '../home-path.ts';
 
 export const defaultAccountDir = (key: string, home: string): string => join(home, `.claude-gw-${key}`);
 

@@ -172,7 +172,7 @@ import { deleteKeptReleaseRef, shipReleaseCommit } from './git/release-ship.ts';
 import { type ScannedRepo, scanAllRepos, withRemote } from './git/repo-scan.ts';
 import { bumpSubmodule } from './git/submodule-pin.ts';
 import { sweepWorktrees } from './git/sweep.ts';
-import { SyncService } from './git/sync-service.ts';
+import { SyncService, toRepoSyncStatus } from './git/sync-service.ts';
 import { removeWorktree } from './git/worktrees.ts';
 import { GraphService } from './graph/service.ts';
 import { runRoleSmoke } from './health/role-smoke.ts';
@@ -558,20 +558,7 @@ export class Runner {
       busyWorktrees: () => this.supervisor.worktreePaths(),
       auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
       send: (r) =>
-        void this.client.send('repo.sync_status', {
-          status: {
-            repoId: r.repoId,
-            workingBranch: r.workingBranch,
-            state: r.state,
-            ahead: r.ahead,
-            behind: r.behind,
-            dirty: r.dirty,
-            onBranch: r.onBranch,
-            checkedOutBranch: r.checkedOutBranch,
-            ...(r.detail ? { detail: r.detail.slice(0, 400) } : {}),
-            checkedAt: r.checkedAt,
-          },
-        }),
+        void this.client.send('repo.sync_status', { status: toRepoSyncStatus(r) }),
       log: this.log,
     });
     this.claudeStore = new ClaudeCredentialStore(claudeFile(this.paths.secrets));
@@ -2359,18 +2346,7 @@ export class Runner {
           remoteUrlNormalized: p.remoteUrlNormalized,
           workingBranch: p.workingBranch,
         });
-        done(true, {
-          repoId: r.repoId,
-          workingBranch: r.workingBranch,
-          state: r.state,
-          ahead: r.ahead,
-          behind: r.behind,
-          dirty: r.dirty,
-          onBranch: r.onBranch,
-          checkedOutBranch: r.checkedOutBranch,
-          ...(r.detail ? { detail: r.detail.slice(0, 400) } : {}),
-          checkedAt: r.checkedAt,
-        });
+        done(true, toRepoSyncStatus(r));
       } else if (command === 'run.start') {
         // A refusal (cap, no clone, unknown branch) is an answer: the server ends the environment as failed.
         done(true, await this.runs.startEnv(CommandPayloadSchemas['run.start'].parse(payload)));
