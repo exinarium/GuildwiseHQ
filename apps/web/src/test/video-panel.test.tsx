@@ -195,7 +195,12 @@ beforeEach(() => {
         return json(
           init?.method === 'PATCH' ? { ...st.settings, ...JSON.parse(String(init.body)) } : st.settings,
         );
-      if (/\/(move|unschedule|retry-upload|retry-render|shares\/[a-z]+\/retry)$/.test(url))
+      if (url.endsWith('/shares/linkedin/rerender'))
+        return json(
+          { error: { code: 'render_in_progress', message: 'this video is being rendered already' } },
+          409,
+        );
+      if (/\/(move|unschedule|retry-upload|retry-render|shares\/[a-z]+\/(retry|rerender))$/.test(url))
         return json(video({ status: 'approved', slotAt: SLOTS[1] as string, phase: 'scheduled' }));
       if (url.endsWith('/swap')) return json({ a: video(), b: video() });
       if (url.startsWith('/api/platform/video')) return json({ posts, status: st });
@@ -865,6 +870,131 @@ describe('Core 5: destinations', () => {
         ),
       ).toBe(true),
     );
+  });
+
+  it('the Queue offers Render again and retry only for failed destinations and starts it', async () => {
+    const id = '77777777-7777-4777-8777-777777777777';
+    st = status({ settings: { ...st.settings, schedule: defaultSchedule(0, 7) } });
+    posts = [
+      video({
+        id,
+        format: 'short',
+        title: 'A Short',
+        status: 'approved',
+        slotAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+        publishMode: 'slot',
+        destinations: ['youtube', 'facebook', 'x', 'instagram'],
+        phase: 'partial',
+        shares: [
+          { network: 'facebook', status: 'failed', url: null, error: 'HTTP 400' },
+          { network: 'x', status: 'sent', url: 'https://x.com/i/web/status/1', error: null },
+          { network: 'instagram', status: 'pending', url: null, error: null },
+        ],
+      }),
+    ];
+    wrap(<PlatformVideo />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('video-tab-queue'));
+    const card = await screen.findByTestId(`queue-post-${id}`);
+    expect(within(card).queryByTestId('rerender-x')).toBeNull();
+    expect(within(card).queryByTestId('rerender-instagram')).toBeNull();
+    expect(within(card).queryByTestId('rerender-youtube')).toBeNull();
+    await user.click(within(card).getByTestId('rerender-facebook'));
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) => c.method === 'POST' && c.url === `/api/platform/video/posts/${id}/shares/facebook/rerender`,
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it('the Queue shows the progress of a render made again, and a new render that failed', async () => {
+    const id = '88888888-8888-4888-8888-888888888888';
+    st = status({ settings: { ...st.settings, schedule: defaultSchedule(0, 7) } });
+    const marker = { revision: 2, requestedAt: new Date().toISOString() };
+    const base = {
+      id,
+      format: 'short' as const,
+      title: 'A Short',
+      status: 'approved' as const,
+      slotAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+      publishMode: 'slot' as const,
+      destinations: ['youtube', 'facebook'] as never,
+      phase: 'partial' as const,
+    };
+    posts = [
+      video({
+        ...base,
+        render: { ...video().render, status: 'rendering' } as never,
+        shares: [{ network: 'facebook', status: 'failed', url: null, error: 'HTTP 400', rerender: marker }],
+      }),
+    ];
+    wrap(<PlatformVideo />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('video-tab-queue'));
+    const card = await screen.findByTestId(`queue-post-${id}`);
+    expect(within(card).getByTestId('rerender-progress-facebook')).toBeTruthy();
+    expect(within(card).queryByTestId('rerender-facebook')).toBeNull();
+    expect(within(card).queryByTestId('retry-facebook')).toBeNull();
+  });
+
+  it('the Queue shows a failed new render with its reason and Retry render', async () => {
+    const id = '99999999-9999-4999-8999-999999999999';
+    st = status({ settings: { ...st.settings, schedule: defaultSchedule(0, 7) } });
+    posts = [
+      video({
+        id,
+        format: 'short',
+        title: 'A Short',
+        status: 'approved',
+        slotAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+        publishMode: 'slot',
+        destinations: ['youtube', 'facebook'],
+        phase: 'failed',
+        render: { ...video().render, status: 'failed' } as never,
+        shares: [
+          {
+            network: 'facebook',
+            status: 'failed',
+            url: null,
+            error: 'the new render failed: the encoder crashed',
+            rerender: { revision: 2, requestedAt: new Date().toISOString() },
+          },
+        ],
+      }),
+    ];
+    wrap(<PlatformVideo />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('video-tab-queue'));
+    const card = await screen.findByTestId(`queue-post-${id}`);
+    expect(within(card).getByTestId('rerender-failed-facebook')).toBeTruthy();
+    expect(within(card).getByText(/the encoder crashed/)).toBeTruthy();
+    expect(within(card).getByText('Retry render')).toBeTruthy();
+  });
+
+  it('a refused Render again and retry shows the error', async () => {
+    const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    st = status({ settings: { ...st.settings, schedule: defaultSchedule(0, 7) } });
+    posts = [
+      video({
+        id,
+        format: 'short',
+        title: 'A Short',
+        status: 'approved',
+        slotAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+        publishMode: 'slot',
+        destinations: ['youtube', 'linkedin'],
+        phase: 'partial',
+        shares: [{ network: 'linkedin', status: 'failed', url: null, error: 'HTTP 400' }],
+      }),
+    ];
+    wrap(<PlatformVideo />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('video-tab-queue'));
+    const card = await screen.findByTestId(`queue-post-${id}`);
+    await user.click(within(card).getByTestId('rerender-linkedin'));
+    expect(await within(card).findByText(/being rendered already/)).toBeTruthy();
   });
 
   it('share links are shown only for https addresses', async () => {

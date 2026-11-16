@@ -76,7 +76,15 @@ export const videoEvents = [
   /** The owner asked for a render or an upload to be tried again, or said a locked upload was dealt with. */
   defineEvent(
     'VideoRetryRequested',
-    z.object({ postId: Id, what: z.enum(['render', 'upload', 'resolve-locked']), by: Id }),
+    z.object({
+      postId: Id,
+      what: z.enum(['render', 'upload', 'resolve-locked', 'render-again']),
+      by: Id,
+      /** render-again: the destination that is retried once the new render is done. */
+      network: z.enum(VIDEO_DESTINATIONS).optional(),
+      /** render-again: the new revision of the approved post (its render is the new file). */
+      revision: z.number().int().min(2).optional(),
+    }),
   ),
   defineEvent(
     'VideoSettingsChanged',

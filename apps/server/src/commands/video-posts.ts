@@ -23,6 +23,7 @@ import {
   type SocialNetwork,
   type SubmitVideoPostRequest,
   slotsFrom,
+  VIDEO_DESTINATIONS,
   VIDEO_LIBRARY_PREFIX,
   VIDEO_LIMITS,
   VIDEO_POST_LIMITS,
@@ -59,6 +60,7 @@ import { hashtagPools } from '../blog/hashtag-pools.ts';
 import { loadReleases } from '../blog/releases.ts';
 import type { Ctx } from '../context.ts';
 import { exec, iso, one, type Row, rows } from '../db/sql.ts';
+import { withTx } from '../db/tx.ts';
 import { badRequest, conflict, HttpError, notFound } from '../errors.ts';
 import { YOUTUBE_AUDIT_FORM_URL } from '../mail/blog-mail.ts';
 import { LIBRARY_MARKER, type LibraryEntry, libraryCatalog, libraryFile } from '../video/library.ts';
@@ -345,6 +347,13 @@ export function phaseOf(
   return 'scheduled';
 }
 
+function rerenderOf(d: Record<string, any>): { revision: number; requestedAt: string } | null {
+  const m = d.rerender;
+  return m && typeof m.revision === 'number'
+    ? { revision: m.revision, requestedAt: String(m.requestedAt) }
+    : null;
+}
+
 function uploadDto(r: Row): VideoUpload {
   const d = (r.detail ?? {}) as Record<string, any>;
   return {
@@ -357,6 +366,7 @@ function uploadDto(r: Row): VideoUpload {
     publishAt: d.publishAt ?? null,
     privacy: d.privacy ?? null,
     warnings: Array.isArray(d.warnings) ? d.warnings : [],
+    rerender: rerenderOf(d),
   };
 }
 
@@ -387,6 +397,7 @@ async function toDtos(ctx: Ctx, ps: Row[]): Promise<VideoPost[]> {
         status: s.status,
         url: s.url ?? null,
         error: s.error ?? null,
+        rerender: rerenderOf((s.detail ?? {}) as Record<string, any>),
       }));
     const cp = crossPosts.find((c) => c.ref === p.id);
     const crossPost: VideoCrossPost | null = cp
@@ -1415,6 +1426,106 @@ export async function retryShare(
   );
   await auditRetry(ctx, postId, 'upload', by);
   return getVideoPost(ctx, postId);
+}
+
+/**
+ * A destination the network refused (failed) gets a NEW file: the approved post moves to a new revision, that revision is
+ * rendered through the normal worker path, and only once it is rendered is this destination tried again with it (the
+ * sweep's resumeRerenders). The old render and its file stay until then. Destinations already sent are never touched;
+ * pending ones follow the current revision as always.
+ * 404 unknown post or destination; 409 not_scheduled, library_video, not_failed, already_uploaded, render_in_progress,
+ * share_in_progress.
+ */
+export function renderAgainAndRetry(
+  ctx: Ctx,
+  by: string,
+  postId: string,
+  network: string,
+): Promise<VideoPost> {
+  return withLock(ctx, `video-post-edit:${postId}`, async () => {
+    const p = await one(ctx.pool, 'SELECT id, status, revision, script FROM video_posts WHERE id=$1', [
+      postId,
+    ]);
+    if (!p) throw notFound('video post not found', 'video_post_not_found');
+    const dest = (VIDEO_DESTINATIONS as readonly string[]).includes(network)
+      ? (network as VideoDestination)
+      : null;
+    const share = dest
+      ? await one(
+          ctx.pool,
+          `SELECT status, error, detail FROM social_shares WHERE post_id=$1 AND network=$2 AND source='video'`,
+          [postId, dest],
+        )
+      : null;
+    if (!dest || !share) throw notFound('this video has no such destination', 'share_not_found');
+    if (p.status !== 'approved') throw conflict('not_scheduled', 'this video is not scheduled');
+    if (!p.script) throw conflict('library_video', 'a recorded help video cannot be rendered again');
+    if (share.status !== 'failed')
+      throw conflict('not_failed', 'only a failed destination can be rendered again');
+    const detail = (share.detail ?? {}) as Record<string, any>;
+    if (
+      dest === 'youtube' &&
+      detail.videoId &&
+      !detail.rejected &&
+      !String(share.error ?? '').startsWith('YouTube rejected the video')
+    )
+      throw conflict('already_uploaded', 'the video is on YouTube already; use Retry');
+    const current = await one(ctx.pool, `SELECT status FROM video_renders WHERE post_id=$1 AND revision=$2`, [
+      postId,
+      p.revision,
+    ]);
+    if (current && ['queued', 'rendering'].includes(current.status))
+      throw conflict('render_in_progress', 'this video is being rendered already');
+    const started = await rows(
+      ctx.pool,
+      `SELECT network, status, detail FROM social_shares
+        WHERE post_id=$1 AND source='video' AND network <> $2 AND status IN ('posting','pending')`,
+      [postId, dest],
+    );
+    const busy = started.some((s) => {
+      if (s.status === 'posting') return true;
+      const d = (s.detail ?? {}) as Record<string, any>;
+      const dst = d.dest && typeof d.dest === 'object' ? Object.keys(d.dest).length > 0 : false;
+      return dst || !!d.sessionUri || !!d.videoId;
+    });
+    if (busy)
+      throw conflict(
+        'share_in_progress',
+        'another destination is still uploading the current file; try again when it has finished',
+      );
+    const now = ctx.clock.now();
+    const revision = (p.revision as number) + 1;
+    await withTx(ctx.pool, async (tx) => {
+      await ctx.store.append(
+        [
+          {
+            streamId: videoPostStream(postId),
+            event: {
+              type: 'VideoRetryRequested',
+              payload: { postId, what: 'render-again', by, network: dest, revision },
+            },
+            actor: userActor(by),
+            scope: adminScope,
+          },
+        ],
+        { tx },
+      );
+      await exec(
+        tx,
+        `INSERT INTO video_renders (id, post_id, revision, status, attempts, created_at, not_before, preview)
+         VALUES ($1,$2,$3,'queued',0,$4,NULL,false) ON CONFLICT (post_id, revision) DO NOTHING`,
+        [randomUUID(), postId, revision, now],
+      );
+      await exec(
+        tx,
+        `UPDATE social_shares SET detail = COALESCE(detail,'{}'::jsonb) || jsonb_build_object('rerender',
+                jsonb_build_object('revision', $3::int, 'requestedAt', $4::text, 'by', $5::text)), updated_at=$6
+          WHERE post_id=$1 AND network=$2 AND source='video' AND status='failed'`,
+        [postId, dest, revision, now.toISOString(), by, now],
+      );
+    });
+    return getVideoPost(ctx, postId);
+  });
 }
 
 /** The owner dealt with a video YouTube kept private (made it public by hand, or asked for the audit): uploads go on. */

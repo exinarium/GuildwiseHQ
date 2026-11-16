@@ -135,6 +135,8 @@ export const VIDEO_UPLOAD_STATUSES = [
   'skipped',
   'locked_private',
 ] as const;
+/** A failed destination waiting for the video to be rendered again (the new revision), then retried with the new file. */
+export const VideoRerenderSchema = z.object({ revision: z.number().int(), requestedAt: IsoTime }).nullable();
 export const VideoUploadSchema = z.object({
   status: z.enum(VIDEO_UPLOAD_STATUSES),
   attempts: z.number().int(),
@@ -147,6 +149,7 @@ export const VideoUploadSchema = z.object({
   privacy: z.enum(VIDEO_PRIVACIES).nullable(),
   /** Steps that were skipped or failed without failing the upload ("thumbnail: the channel is not verified"). */
   warnings: z.array(z.string()),
+  rerender: VideoRerenderSchema.optional(),
 });
 export type VideoUpload = z.infer<typeof VideoUploadSchema>;
 
@@ -170,6 +173,7 @@ export const VideoShareSchema = z.object({
   status: z.enum(VIDEO_UPLOAD_STATUSES),
   url: z.string().nullable(),
   error: z.string().nullable(),
+  rerender: VideoRerenderSchema.optional(),
 });
 export type VideoShare = z.infer<typeof VideoShareSchema>;
 

@@ -152,6 +152,76 @@ async function healRenders(ctx: Ctx): Promise<void> {
   );
 }
 
+/**
+ * A failed destination was asked to be rendered again (`detail.rerender`: the new revision). Once that revision is
+ * rendered the destination is tried again with the new file; if the render failed the reason is kept on the destination
+ * (the render's own retry resumes it); the old file is never sent again through this path.
+ */
+export async function resumeRerenders(ctx: Ctx): Promise<void> {
+  const now = ctx.clock.now();
+  const marked = await rows(
+    ctx.pool,
+    `SELECT s.post_id, s.network, s.status, s.error, s.detail, p.status AS post_status, p.revision AS post_revision,
+            r.status AS render_status, r.error AS render_error, r.purged_at
+       FROM social_shares s
+       JOIN video_posts p ON p.id = s.post_id
+       LEFT JOIN video_renders r ON r.post_id = s.post_id AND r.revision = (s.detail->'rerender'->>'revision')::int
+      WHERE s.source='video' AND s.detail ? 'rerender'`,
+  );
+  for (const s of marked) {
+    const detail = (s.detail ?? {}) as Record<string, any>;
+    const revision = Number(detail.rerender?.revision);
+    const key = [s.post_id, s.network];
+    const dropMarker = (error?: string) =>
+      exec(
+        ctx.pool,
+        `UPDATE social_shares SET detail = detail - 'rerender', error = COALESCE($3, error), updated_at=$4
+          WHERE post_id=$1 AND network=$2 AND source='video'`,
+        [...key, error ?? null, now],
+      );
+    if (s.status !== 'failed') {
+      await dropMarker();
+    } else if (s.post_status !== 'approved' || s.post_revision !== revision) {
+      await dropMarker('the render made for this retry was replaced; retry again');
+    } else if (s.render_status === 'rendered' && !s.purged_at) {
+      const next: Record<string, any> = { ...detail, retryAt: now.toISOString() };
+      delete next.rerender;
+      delete next.dest;
+      if (s.network === 'youtube')
+        for (const k of [
+          'videoId',
+          'sessionUri',
+          'sessionStartedAt',
+          'uploadedAt',
+          'steps',
+          'warnings',
+          'publishAt',
+          'verifiedAt',
+          'rejected',
+        ])
+          delete next[k];
+      await exec(
+        ctx.pool,
+        `UPDATE social_shares SET status='pending', attempts=0, next_attempt_at=$3, error=NULL, updated_at=$3,
+                detail=$4::jsonb,
+                external_id = CASE WHEN network='youtube' THEN NULL ELSE external_id END,
+                url = CASE WHEN network='youtube' THEN NULL ELSE url END
+          WHERE post_id=$1 AND network=$2 AND source='video' AND status='failed'
+            AND detail->'rerender'->>'revision' = $5`,
+        [...key, now, JSON.stringify(next), String(revision)],
+      );
+    } else if (s.render_status === 'failed') {
+      const prefix = 'the new render failed: ';
+      if (!String(s.error ?? '').startsWith(prefix))
+        await exec(
+          ctx.pool,
+          `UPDATE social_shares SET error=$3, updated_at=$4 WHERE post_id=$1 AND network=$2 AND source='video'`,
+          [...key, `${prefix}${s.render_error ?? 'the render did not finish'}`.slice(0, 480), now],
+        );
+    }
+  }
+}
+
 /** A render that may start: of an approved post once its `not_before` has passed, or an explicit preview in review. */
 const CLAIMABLE = `NOT x.library AND p.script IS NOT NULL
   AND ((p.status='approved' AND (x.not_before IS NULL OR x.not_before <= $1))
@@ -399,6 +469,8 @@ type Detail = {
   lastCheckedAt?: string;
   steps?: Record<string, string>;
   warnings?: string[];
+  /** YouTube refused the uploaded video (the reason): a new file may be uploaded. */
+  rejected?: string;
 };
 
 async function saveDetail(
@@ -661,11 +733,13 @@ export async function runUpload(ctx: Ctx, share: Row): Promise<void> {
     // YouTube may lock the video private (an API project that has not passed the audit): read back what it did. A video
     // scheduled for its slot is private WITH a publishAt; whether it really goes public is checked after the slot passes.
     const status = await call((t) => ctx.youtube.videoStatus(t, videoId));
-    if (status && (status.uploadStatus === 'rejected' || status.uploadStatus === 'failed'))
+    if (status && (status.uploadStatus === 'rejected' || status.uploadStatus === 'failed')) {
+      detail.rejected = status.rejectionReason ?? status.failureReason ?? status.uploadStatus;
       throw new YouTubeError(
         'final',
         `YouTube rejected the video: ${status.rejectionReason ?? status.failureReason ?? status.uploadStatus}`,
       );
+    }
     const locked =
       !!status && privacy !== 'private' && status.privacyStatus === 'private' && !status.publishAt;
     // unlisted/private need no check; a public video uploaded without a publishAt is verified when YouTube shows it public
@@ -1237,7 +1311,8 @@ export async function cleanupVideos(ctx: Ctx, opts: { force?: boolean } = {}): P
     ctx.pool,
     `SELECT r.* FROM video_renders r JOIN video_posts p ON p.id = r.post_id
       WHERE NOT r.library AND r.purged_at IS NULL AND r.revision < p.revision
-        AND COALESCE(r.finished_at, r.created_at) < $1 AND p.approved_render_id IS DISTINCT FROM r.id`,
+        AND COALESCE(r.finished_at, r.created_at) < $1 AND p.approved_render_id IS DISTINCT FROM r.id
+        AND NOT EXISTS (SELECT 1 FROM social_shares s WHERE s.post_id = p.id AND s.source='video' AND s.detail ? 'rerender')`,
     [ago(DAY)],
   ))
     await purge(r, false);
@@ -1346,13 +1421,17 @@ export async function videoTick(
   }
   if (doPublish) {
     await healRenders(ctx);
+    await resumeRerenders(ctx);
     await videoWatch(ctx).catch((err) => ctx.log.error({ err }, 'video watch failed'));
     await createMissingUploads(ctx);
   }
   let rendered = false;
   if (doRender) {
     rendered = await renderNext(ctx, deps);
-    if (rendered && doPublish) await createMissingUploads(ctx);
+    if (rendered && doPublish) {
+      await resumeRerenders(ctx);
+      await createMissingUploads(ctx);
+    }
   }
   let uploaded = false;
   let cleaned = 0;
