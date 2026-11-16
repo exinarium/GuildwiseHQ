@@ -138,6 +138,67 @@ describe('repo.release_facts', () => {
     expect(r.commits.map((c) => c.subject)).toEqual(['fix: y']);
   });
 
+  /**
+   * The 1.8.0 layout: the release commit lands on develop, develop is merged into main and the merge commit on main
+   * is tagged, so the tag is not in develop's history until main is merged back.
+   */
+  function shippedOnMain() {
+    const repo = tagged();
+    commit(repo.clone, 'apps/runner/src/a.ts', 'a', 'feat(runner): add a');
+    commit(
+      repo.clone,
+      'apps/runner/src/version.ts',
+      "export const RUNNER_VERSION = '0.1.63';\n",
+      'chore(release): 1.4.0',
+    );
+    sh(repo.clone, 'git', ['push', '-u', 'origin', 'develop']);
+    sh(repo.clone, 'git', ['checkout', 'main']);
+    sh(repo.clone, 'git', ['merge', '--no-ff', '-m', 'Merge develop into main for release 1.4.0', 'develop']);
+    sh(repo.clone, 'git', ['tag', '-a', 'v1.4.0', '-m', 'Guildwise HQ 1.4.0']);
+    sh(repo.clone, 'git', ['push', 'origin', 'main', '--tags']);
+    sh(repo.clone, 'git', ['checkout', 'develop']);
+    return repo;
+  }
+
+  it('counts a release whose tag is on main once its release commit is on the branch, with nothing since', async () => {
+    const repo = shippedOnMain();
+    const r = await readReleaseFacts({ payload: payload(repo), repoPath: repo.clone });
+    expect(r.ok).toBe(true);
+    expect(r.lastTag?.name).toBe('v1.4.0');
+    expect(r.lastTag?.sha).toBe(sh(repo.clone, 'git', ['rev-parse', 'refs/tags/v1.4.0^{commit}']).trim());
+    expect(r.commits).toEqual([]);
+    expect(r.changedTotal).toBe(0);
+    expect(r.components[0]).toMatchObject({ changedCount: 0 });
+    expect(r.components[0]?.contentAtTag).toContain("'0.1.63'");
+  });
+
+  it('lists only the work after a release whose tag is on main (the 1.8.0 case)', async () => {
+    const repo = shippedOnMain();
+    commit(repo.clone, 'apps/runner/src/c.ts', 'c', 'feat(runner): add c');
+    sh(repo.clone, 'git', ['push', 'origin', 'develop']);
+    const r = await readReleaseFacts({ payload: payload(repo), repoPath: repo.clone });
+    expect(r.lastTag?.name).toBe('v1.4.0');
+    expect(r.commits.map((c) => c.subject)).toEqual(['feat(runner): add c']);
+    expect(r.changedTotal).toBe(1);
+    expect(r.components[0]).toMatchObject({ changedCount: 1 });
+    // the version the shipped release set, not the one before it
+    expect(r.components[0]?.contentAtTag).toContain("'0.1.63'");
+  });
+
+  it('does not count a newer tag whose release commit is not on the branch', async () => {
+    const repo = tagged();
+    commit(repo.clone, 'x.txt', 'x', 'feat: x');
+    sh(repo.clone, 'git', ['push', '-u', 'origin', 'develop']);
+    sh(repo.clone, 'git', ['checkout', 'main']);
+    commit(repo.clone, 'hotfix.txt', 'h', 'fix: hotfix on main');
+    sh(repo.clone, 'git', ['tag', 'v1.3.1']);
+    sh(repo.clone, 'git', ['push', 'origin', 'main', '--tags']);
+    sh(repo.clone, 'git', ['checkout', 'develop']);
+    const r = await readReleaseFacts({ payload: payload(repo), repoPath: repo.clone });
+    expect(r.lastTag?.name).toBe('v1.3.0');
+    expect(r.commits.map((c) => c.subject)).toEqual(['feat: x']);
+  });
+
   it('answers a missing branch, an unsafe ref and no remote without throwing', async () => {
     const repo = tagged();
     const gone = await readReleaseFacts({ payload: payload(repo, { head: 'nope' }), repoPath: repo.clone });
