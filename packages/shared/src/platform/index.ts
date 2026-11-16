@@ -166,13 +166,18 @@ export type TriageBugRequest = z.infer<typeof TriageBugRequestSchema>;
 // ----------------------------------------------------------------------------------------------- deploys
 
 /** Which part of the fix diff makes a deploy high risk (design 13: auth/secrets, data/migrations, tenancy/billing). */
-export type RiskCategory = 'auth_permissions_secrets' | 'data_migrations' | 'tenancy_billing';
+export type RiskCategory =
+  | 'auth_permissions_secrets'
+  | 'data_migrations'
+  | 'tenancy_billing'
+  | 'check_configuration';
 
 /** One definition of "high risk" for cards and deploys: the shared list in `workflows/high-risk.ts`. */
 const CATEGORY: Record<HighRiskCategory, RiskCategory> = {
   auth: 'auth_permissions_secrets',
   data: 'data_migrations',
   tenancy: 'tenancy_billing',
+  'check-config': 'check_configuration',
 };
 
 export function matchesGlob(path: string, glob: string): boolean {
