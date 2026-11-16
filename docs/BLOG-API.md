@@ -431,12 +431,23 @@ slot is 6 hours past), or 3 days after a failure. **Retry one destination:** `PO
 or `skipped`, `409 video_purged` when the file is gone and cannot be rendered again). A retry of a destination other than YouTube
 starts from scratch and opens a new 6-hour window; if the clean-up already removed the MP4 the same revision renders again first.
 
-**Instagram processing failures (1.7.0).** A failure Instagram reports while it processes the video (an upload answered with
-`ProcessingFailedError`, a Graph error 100 saying "Unsupported post/get request" or "does not exist", or an error marked
-transient) is retried by the sweep with a new container, with code `ig_processing`, after the usual 1, 5 and 30 minutes inside
-the 6-hour window, and gives up after 4 attempts ("gave up after 4 attempts"). Authorization, rate-limit and 5xx handling are
-unchanged and any other refusal (invalid media included) is final. Publishing is still reached only after the container is
-`FINISHED`, so nothing is posted twice. The rendered MP4 is written without edit lists (`-use_editlist 0`, `+faststart`).
+**Instagram processing failures.** A Graph error 100 ("Unsupported post/get request", "does not exist") or an error marked transient,
+which Instagram answers before it has the file, is retried by the sweep with a new container, with code `ig_processing`, after the
+usual 1, 5 and 30 minutes inside the 6-hour window, and gives up after 4 attempts ("gave up after 4 attempts"). Authorization,
+rate-limit and 5xx handling are unchanged and any other refusal (invalid media included) is final. Publishing is still reached only
+after the container is `FINISHED`, so nothing is posted twice.
+
+**Instagram refusing the file (`ProcessingFailedError`).** An upload answered with `ProcessingFailedError` is its own failure kind
+(`file`, code `ig_processing_failed`): the same bytes are never sent again. On the first refusal the sweep checks the stored MP4
+against the Reels rules (`REELS_LIMITS` in `packages/video/src/reels.ts`: no edit list, moov first, H.264/HEVC 4:2:0 progressive,
+23 to 60 fps, width at most 1920, 3 s to 15 min, at most 300 MB, AAC at most 48 kHz with 1 or 2 channels; the numbers live in that
+one file). The result (each failed rule with its measured value) is stored in `social_shares.detail.fileRejection` and written to the
+post's event stream as `VideoFileChecked`. If a rule fails, the destination stays `failed` and shows "needs re-render"; the video
+review screens offer **Re-render** (`POST /api/platform/video/posts/:id/rerender`) and no retry for that file, and
+`POST /shares/instagram/retry` answers `409 needs_rerender` while the file is unchanged. After the re-render the new file is checked
+before it is sent. If the file meets every rule and Instagram still refuses it, one extra attempt follows after 5 minutes (logged); a
+second refusal fails the destination for good with an alert. Other destinations are not affected. The rendered MP4 is written
+without edit lists (`-use_editlist 0`, `+faststart`), so only files rendered before that need the re-render.
 
 **No double posts.** A destination's progress (upload session, container, media or publish id) is kept in `social_shares.detail.dest`;
 a share that holds progress counts as started, so unscheduling, moving, slipping and re-flowing that post are refused

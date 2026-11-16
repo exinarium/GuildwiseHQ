@@ -165,11 +165,61 @@ export const VIDEO_PHASES = [
 export type VideoPhase = (typeof VIDEO_PHASES)[number];
 export const VIDEO_PUBLISH_MODES = ['slot', 'now'] as const;
 
+export const REELS_RULE_IDS = [
+  'readable',
+  'container',
+  'edit_list',
+  'faststart',
+  'video_codec',
+  'video_profile',
+  'pixel_format',
+  'scan',
+  'frame_rate',
+  'width',
+  'aspect_ratio',
+  'video_bitrate',
+  'duration',
+  'file_size',
+  'audio_codec',
+  'audio_sample_rate',
+  'audio_channels',
+] as const;
+export type ReelsRuleId = (typeof REELS_RULE_IDS)[number];
+
+/** The result of checking a rendered MP4 against Instagram's Reels rules. */
+export const ReelsCheckSchema = z.object({
+  passed: z.boolean(),
+  checkedAt: IsoTime,
+  failed: z.array(
+    z.object({
+      rule: z.enum(REELS_RULE_IDS),
+      /** "edit list present (video, audio)", "moov not at start", "frame rate 120 > 60". */
+      message: z.string(),
+      measured: z.string().nullable(),
+      limit: z.string(),
+    }),
+  ),
+  warnings: z.array(z.string()),
+  measured: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
+  sha256: z.string().optional(),
+});
+export type ReelsCheck = z.infer<typeof ReelsCheckSchema>;
+
+/**
+ * Why an Instagram share that failed is not retried with the same file: `needs_rerender` (the check found failed rules),
+ * `rejected_compliant` (the file meets every rule, Instagram refused it anyway), `check_failed` (the check could not run).
+ */
+export const VIDEO_FILE_REJECTIONS = ['needs_rerender', 'rejected_compliant', 'check_failed'] as const;
+export type VideoFileRejection = (typeof VIDEO_FILE_REJECTIONS)[number];
+
 export const VideoShareSchema = z.object({
   network: z.enum(VIDEO_DESTINATIONS),
   status: z.enum(VIDEO_UPLOAD_STATUSES),
   url: z.string().nullable(),
   error: z.string().nullable(),
+  /** Optional and nullable so that older payloads (and clients) without them stay valid; the server always sends them. */
+  fileRejection: z.enum(VIDEO_FILE_REJECTIONS).nullish(),
+  reelsCheck: ReelsCheckSchema.nullish(),
 });
 export type VideoShare = z.infer<typeof VideoShareSchema>;
 

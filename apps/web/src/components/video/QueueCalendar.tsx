@@ -22,6 +22,7 @@ import {
   slotTime,
 } from '../../lib/video-schedule.ts';
 import { Badge, Button, EmptyState, ErrorBox, Panel, Select, useToast } from '../ui.tsx';
+import { needsRerender, RerenderNotice } from './RerenderNotice.tsx';
 
 type ShareState = 'pending' | 'posting' | 'sent' | 'failed' | 'skipped' | 'locked_private';
 const ICON = {
@@ -36,13 +37,23 @@ const ICON = {
 /** The state of each destination of a post: YouTube is the upload, the others are shares. */
 export function destinationStates(
   p: VideoPost,
-): Array<{ dest: VideoDestination; state: ShareState; url: string | null }> {
+): Array<{ dest: VideoDestination; state: ShareState; url: string | null; rerender: boolean }> {
   const dests = p.destinations.length ? p.destinations : (['youtube'] as VideoDestination[]);
   return dests.map((dest) => {
     if (dest === 'youtube')
-      return { dest, state: (p.upload?.status ?? 'pending') as ShareState, url: p.upload?.url ?? null };
+      return {
+        dest,
+        state: (p.upload?.status ?? 'pending') as ShareState,
+        url: p.upload?.url ?? null,
+        rerender: false,
+      };
     const s = p.shares.find((x) => x.network === dest);
-    return { dest, state: (s?.status ?? 'pending') as ShareState, url: s?.url ?? null };
+    return {
+      dest,
+      state: (s?.status ?? 'pending') as ShareState,
+      url: s?.url ?? null,
+      rerender: needsRerender(s),
+    };
   });
 }
 
@@ -57,8 +68,9 @@ export function canChangeSlot(p: VideoPost): boolean {
 function Icons({ post }: { post: VideoPost }) {
   return (
     <ul className="flex flex-wrap gap-1.5" aria-label="Destinations">
-      {destinationStates(post).map(({ dest, state }) => {
-        const { Icon, cls, label } = ICON[state];
+      {destinationStates(post).map(({ dest, state, rerender }) => {
+        const { Icon, cls } = ICON[state];
+        const label = rerender ? 'needs re-render' : ICON[state].label;
         return (
           <li
             key={dest}
@@ -182,7 +194,8 @@ function ScheduledPost({
   const retryShare = useRetryShare();
   const toast = useToast();
   const change = canChangeSlot(post);
-  const failedDestinations = destinationStates(post).filter((d) => d.state === 'failed');
+  const failedDestinations = destinationStates(post).filter((d) => d.state === 'failed' && !d.rerender);
+  const rerenderShares = post.shares.filter((s) => needsRerender(s));
   const renderFailed = post.render?.status === 'failed';
   return (
     <div className="flex flex-col gap-1.5" data-testid={`queue-post-${post.id}`}>
@@ -254,6 +267,19 @@ function ScheduledPost({
           </Button>
         )}
       </div>
+      {rerenderShares.map((s) => (
+        <RerenderNotice
+          key={s.network}
+          share={s}
+          loading={retry.isPending}
+          onRerender={() =>
+            retry.mutate(
+              { id: post.id, what: 'rerender' },
+              { onSuccess: () => toast.success('Queued: the video renders again') },
+            )
+          }
+        />
+      ))}
       <ErrorBox error={unschedule.error ?? retry.error ?? retryShare.error} />
       {mode === 'move' && <MoveForm post={post} onDone={() => setMode(null)} />}
       {mode === 'swap' && <SwapForm post={post} others={others} onDone={() => setMode(null)} />}

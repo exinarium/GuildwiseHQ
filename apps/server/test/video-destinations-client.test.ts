@@ -180,45 +180,40 @@ describe('Instagram Reels', () => {
     expect(state.state.igContainer).toBeUndefined();
   });
 
-  it('a ProcessingFailedError on the upload is retried (bounded) with a new container; nothing is published twice', async () => {
+  it('a ProcessingFailedError on the upload is its own failure kind (the file); no retry, nothing is published', async () => {
     let containers = 0;
-    let uploads = 0;
     router = (c) => {
       if (path(c).endsWith('/ig-1/media')) return { json: { id: `c${++containers}` } };
       if (c.url.startsWith('https://rupload.facebook.com/ig-api-upload/'))
-        return ++uploads === 1
-          ? {
-              status: 400,
-              json: {
-                debug_info: {
-                  retriable: false,
-                  type: 'ProcessingFailedError',
-                  message: 'Request processing failed',
-                },
-              },
-            }
-          : { json: { success: true } };
-      if (c.url.includes('?fields=status_code')) return { json: { status_code: 'FINISHED' } };
-      if (path(c).endsWith('/ig-1/media_publish')) return { json: { id: 'm7' } };
-      if (c.url.includes('/m7?fields=permalink'))
-        return { json: { permalink: 'https://www.instagram.com/reel/m7/' } };
+        return {
+          status: 400,
+          json: {
+            debug_info: {
+              retriable: false,
+              type: 'ProcessingFailedError',
+              message: 'Request processing failed',
+            },
+          },
+        };
       return undefined;
     };
     const state = io();
     const err = await client.publish(payload('instagram', { accountId: 'ig-1' }), state).catch((e) => e);
     expect(err).toBeInstanceOf(DestinationError);
-    expect(err).toMatchObject({ kind: 'retry', code: 'ig_processing', maxAttempts: IG_PROCESSING_ATTEMPTS });
+    expect(err).toMatchObject({ kind: 'file', code: 'ig_processing_failed' });
+    expect(err.maxAttempts).toBeUndefined();
     expect(err.message).toMatch(/Instagram upload: HTTP 400: .*ProcessingFailedError/);
-    expect(state.state.igContainer).toBeUndefined(); // the next attempt does not reuse the container
+    expect(state.state.igContainer).toBeUndefined(); // the container is dropped
     expect(calls.some((c) => c.url.includes('media_publish'))).toBe(false);
-    // the retry: a new container, the upload, then one publish
-    const out = await client.publish(payload('instagram', { accountId: 'ig-1' }), state);
-    expect(out).toMatchObject({ done: true, externalId: 'm7' });
-    expect(calls.filter((c) => c.url.startsWith('https://rupload')).map((c) => path(c))).toEqual([
-      '/ig-api-upload/v26.0/c1',
-      '/ig-api-upload/v26.0/c2',
-    ]);
-    expect(calls.filter((c) => c.url.includes('media_publish'))).toHaveLength(1);
+    expect(calls.filter((c) => c.url.startsWith('https://rupload'))).toHaveLength(1);
+  });
+
+  it('a timeout or a 5xx from Instagram is still a transient failure, not a file failure', async () => {
+    router = (c) =>
+      path(c).endsWith('/ig-1/media') ? { status: 503, json: { error: { message: 'down' } } } : undefined;
+    const err = await client.publish(payload('instagram', { accountId: 'ig-1' }), io()).catch((e) => e);
+    expect(err).toMatchObject({ kind: 'retry' });
+    expect(err.kind).not.toBe('file');
   });
 
   it("classifies Instagram's errors: the transient Graph 100 is retried, the token is auth, other refusals stay final", async () => {

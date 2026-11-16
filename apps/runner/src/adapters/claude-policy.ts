@@ -1,11 +1,12 @@
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative, resolve, sep } from 'node:path';
-import { type AgentPermissions, testServiceDomain } from '@aom/shared';
+import { type AgentPermissions, TEST_SERVICE_HOSTS, testServiceDomain } from '@aom/shared';
 import { protectedGitPaths } from '../git/harden.ts';
 import {
   TEST_SERVICE_ROLES,
   TEST_SERVICES_SETTING,
+  type TestServiceDecision,
   type TestServicesSeen,
 } from '../sandbox/test-services.ts';
 import {
@@ -1179,6 +1180,8 @@ export function sandboxDoctorLines(
   sb: SandboxState,
   os: NodeJS.Platform,
   testServices?: Record<string, TestServicesSeen>,
+  /** The live view for the handoff check lines (GWP-248): `answering` of the decisions is a fresh probe. */
+  handoff?: { socat: boolean },
 ): Array<{ ok: boolean | 'warn'; name: string; detail: string }> {
   const out: Array<{ ok: boolean | 'warn'; name: string; detail: string }> = [
     {
@@ -1200,6 +1203,57 @@ export function sandboxDoctorLines(
       out.push({ ok: 'warn', name: i === 0 ? 'windows' : '       ', detail: step });
   // Only when the runner reported its services (an old or stopped runner reports none): the lines above stay as they were.
   if (testServices !== undefined) out.push(...testServiceDoctorLines(testServices));
+  if (testServices !== undefined && handoff)
+    out.push(...handoffCheckDoctorLines(testServices, os, handoff.socat));
+  return out;
+}
+
+/**
+ * The `handoff checks` lines of the doctor (GWP-248): per declared loopback test service, whether a builder's handoff unit
+ * runs can reach it (bridged into the check's network namespace) and whether it answers now. `answering` is the doctor's
+ * own live probe. Nothing declared: no lines.
+ */
+export function handoffCheckDoctorLines(
+  seen: Record<string, TestServicesSeen>,
+  os: NodeJS.Platform,
+  socat: boolean,
+): Array<{ ok: boolean | 'warn'; name: string; detail: string }> {
+  const out: Array<{ ok: boolean | 'warn'; name: string; detail: string }> = [];
+  const name = 'handoff checks';
+  const probed = (d: TestServiceDecision): boolean | undefined => (d as { answering?: boolean }).answering;
+  for (const [project, { decisions }] of Object.entries(seen).sort(([a], [b]) => a.localeCompare(b)))
+    for (const d of decisions) {
+      if (!(TEST_SERVICE_HOSTS as readonly string[]).includes(d.host)) continue;
+      const where = `${project} ${d.name} ${testServiceDomain(d)}`;
+      if (os !== 'linux')
+        out.push({
+          ok: 'warn',
+          name,
+          detail: `${where} not bridged: no network namespace for checks on this platform`,
+        });
+      else if (d.state === 'refused' && /runner|sandbox proxy|not valid/.test(d.reason))
+        out.push({ ok: 'warn', name, detail: `${where} not bridged: ${d.reason}` });
+      else if (probed(d) === false)
+        out.push({
+          ok: 'warn',
+          name,
+          detail: `${where} not answering now: handoff unit runs that need it will report an environment problem`,
+        });
+      else if (probed(d) === true)
+        out.push({ ok: true, name, detail: `${where} reachable now (bridged into builder unit test runs)` });
+      else
+        out.push({
+          ok: 'warn',
+          name,
+          detail: `${where} not checked now (bridged into builder unit test runs when declared and answering)`,
+        });
+    }
+  if (out.length && os === 'linux' && !socat)
+    out.push({
+      ok: 'warn',
+      name,
+      detail: 'socat not installed: handoff unit runs cannot reach the test services',
+    });
   return out;
 }
 

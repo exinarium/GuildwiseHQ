@@ -43,6 +43,8 @@ Playwright's Chromium (`playwright install chromium`, or `AOM_CHROMIUM_PATH`). F
 machine. `AOM_FFMPEG` picks another ffmpeg, `AOM_MEDIA_VIDEOS_DIR` another folder of help videos, `--silent` renders with
 silent placeholder audio when the voice is missing (smoke tests only).
 
+`checkReelsFile(file)` (`packages/video/src/reels.ts`) checks a rendered MP4 against Instagram's Reels rules with that ffmpeg (no ffprobe needed); the publish sweep runs it after Instagram refuses a file.
+
 ## Worker roles and the artifact push
 
 The video worker (`node dist/video-worker.mjs --loop`) has two halves, picked with `AOM_VIDEO_ROLE`:

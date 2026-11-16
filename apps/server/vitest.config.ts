@@ -1,6 +1,12 @@
 import { defineConfig } from 'vitest/config';
 
-const TEST_DB = process.env.AOM_TEST_DB_URL ?? 'postgres://aom:aom@127.0.0.1:5433/aom_test';
+// A handoff check gives each unit run an id (AOM_TEST_RUN_ID): that run gets a database of its own, aom_test_<id>, which
+// test/global-setup.ts creates and drops, so concurrent runs never share test data. An explicit AOM_TEST_DB_URL still wins.
+const RUN_ID = /^[a-z0-9]{1,40}$/.test(process.env.AOM_TEST_RUN_ID ?? '')
+  ? process.env.AOM_TEST_RUN_ID
+  : undefined;
+const TEST_DB =
+  process.env.AOM_TEST_DB_URL ?? `postgres://aom:aom@127.0.0.1:5433/aom_test${RUN_ID ? `_${RUN_ID}` : ''}`;
 // globalSetup runs in the main process: tests must only ever touch aom_test.
 process.env.DATABASE_URL = TEST_DB;
 

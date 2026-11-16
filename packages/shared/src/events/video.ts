@@ -73,10 +73,22 @@ export const videoEvents = [
   defineEvent('VideoPostRejected', z.object({ postId: Id, reason: z.string().min(1).max(2000), by: Id })),
   /** YouTube kept the uploaded video private although another privacy was requested (the audit is missing). */
   defineEvent('VideoUploadLockedPrivate', z.object({ postId: Id, videoId: z.string().max(40) })),
+  /** An Instagram rejection (ProcessingFailedError) or a check before posting a re-rendered file: the file was checked against the Reels rules. */
+  defineEvent(
+    'VideoFileChecked',
+    z.object({
+      postId: Id,
+      network: z.literal('instagram'),
+      renderId: Id,
+      passed: z.boolean(),
+      failed: z.array(z.object({ rule: z.string().max(40), message: z.string().max(300) })).max(20),
+      outcome: z.enum(['needs_rerender', 'one_more_attempt', 'check_failed', 'preflight_ok']),
+    }),
+  ),
   /** The owner asked for a render or an upload to be tried again, or said a locked upload was dealt with. */
   defineEvent(
     'VideoRetryRequested',
-    z.object({ postId: Id, what: z.enum(['render', 'upload', 'resolve-locked']), by: Id }),
+    z.object({ postId: Id, what: z.enum(['render', 'upload', 'resolve-locked', 'rerender']), by: Id }),
   ),
   defineEvent(
     'VideoSettingsChanged',

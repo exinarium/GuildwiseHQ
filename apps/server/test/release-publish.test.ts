@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   RELEASE_PUBLISH_CAPABILITY,
   RELEASE_SHIP_CAPABILITY,
@@ -8,6 +9,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { applyReleasePublishResult, mergeBackLine, releaseChecks } from '../src/release/publish.ts';
 import { reconcileReleaseProposal } from '../src/release/reconcile.ts';
 import { applyReleaseShipResult } from '../src/release/ship.ts';
+import { enqueueRunnerCommand } from '../src/runner-gateway/commands-queue.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { addMember } from './helpers/members.ts';
 import { freshState } from './helpers/shifts.ts';
@@ -32,6 +34,7 @@ const facts = (): ReleaseFacts =>
     ahead: 3,
     lastTag: { name: 'v1.3.0', sha: 'b'.repeat(40) },
     existingTags: ['v1.3.0'],
+    commits: [{ sha: 'd'.repeat(40), subject: 'feat: one', breakingFooter: false }],
     changedTotal: 4,
     components: [],
     changelog: '## [Unreleased]\n\n### Added\n\n- One.\n\n## [1.3.0] - 2026-10-20\n',
@@ -187,6 +190,27 @@ describe('release.publish on the server', () => {
     expect(await q2(`SELECT * FROM desk_items WHERE subkind='release_published'`)).toHaveLength(1);
     expect(await eventCount('ReleasePublished')).toBe(1);
     expect(await eventCount('ReleaseTagged')).toBe(1);
+  });
+
+  it('a done answer closes a prep run started while the release was landing: skipped with a reason, commands failed', async () => {
+    const id = await committed();
+    const runId = randomUUID();
+    await q(
+      `INSERT INTO release_docs_prep_runs (id, org_id, project_id, release_branch, status, steps, trigger, started_at, updated_at)
+       SELECT $1, org_id, id, 'development', 'running', '{}', 'manual', now(), now() FROM projects WHERE id=$2`,
+      [runId, w.projectId],
+    );
+    await enqueueRunnerCommand(w.t.app.ctx.pool, w.workstationId, 'release.docs_prep', {
+      runId,
+      step: 'commit',
+    });
+    await applyReleasePublishResult(w.t.app.ctx, w.workstationId, { shipId: id }, true, done, undefined);
+    const [run] = await q2(`SELECT * FROM release_docs_prep_runs WHERE id=$1`, [runId]);
+    expect(run).toMatchObject({ status: 'skipped', skipped_by: null });
+    expect(run.skip_reason).toContain('Release 1.4.0 was shipped while release prep was running');
+    const [cmd] = await q2(`SELECT * FROM runner_commands WHERE type='release.docs_prep'`);
+    expect(cmd.status).toBe('failed');
+    await q(`DELETE FROM release_docs_prep_runs WHERE id=$1`, [runId]);
   });
 
   it('says on the Released desk item whether main was merged back into the working branch', async () => {
