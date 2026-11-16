@@ -217,8 +217,9 @@ export const VideoShareSchema = z.object({
   status: z.enum(VIDEO_UPLOAD_STATUSES),
   url: z.string().nullable(),
   error: z.string().nullable(),
-  fileRejection: z.enum(VIDEO_FILE_REJECTIONS).nullable().default(null),
-  reelsCheck: ReelsCheckSchema.nullable().default(null),
+  /** Optional and nullable so that older payloads (and clients) without them stay valid; the server always sends them. */
+  fileRejection: z.enum(VIDEO_FILE_REJECTIONS).nullish(),
+  reelsCheck: ReelsCheckSchema.nullish(),
 });
 export type VideoShare = z.infer<typeof VideoShareSchema>;
 
