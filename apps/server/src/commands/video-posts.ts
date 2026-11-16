@@ -1385,7 +1385,7 @@ export async function rerenderVideo(ctx: Ctx, by: string, postId: string): Promi
   );
   const refused = shares.filter((s) => {
     const rej = s.status === 'failed' ? readFileRejection(s.detail) : undefined;
-    return rej && (rej.kind === 'needs_rerender' || rej.kind === 'rejected_compliant');
+    return rej;
   });
   if (!render || render.status !== 'rendered' || refused.length === 0)
     throw conflict('no_rerender_needed', 'no destination needs this video to be rendered again');

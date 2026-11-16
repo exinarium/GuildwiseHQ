@@ -731,6 +731,25 @@ describe('errors', () => {
     expect(igPosts()).toBe(1);
   });
 
+  it('a share whose file could not be checked can be re-rendered, and is posted again with the new file', async () => {
+    dest.script.instagram = ['igfile'];
+    reels.next = () => {
+      throw new Error('no ffmpeg');
+    };
+    const { p } = await setup('ig-check-rerender', ['instagram']);
+    expect(await igDetail(p.id)).toMatchObject({ kind: 'check_failed' });
+    const retry = await api('POST', `/api/platform/video/posts/${p.id}/shares/instagram/retry`);
+    expect([retry.status, retry.body.error.code]).toEqual([409, 'needs_rerender']);
+    await ok(api('POST', `/api/platform/video/posts/${p.id}/rerender`));
+    expect((await share(p.id, 'instagram'))?.status).toBe('pending');
+    t.clock.advance(5_000);
+    reels.next = passedCheck;
+    await tick();
+    await tick();
+    expect((await share(p.id, 'instagram'))?.status).toBe('sent');
+    expect(igPosts()).toBe(2);
+  });
+
   it('retrying a failed Instagram share that was not a file rejection works as before', async () => {
     dest.script.instagram = ['final'];
     const { p } = await setup('ig-plain-retry', ['instagram']);

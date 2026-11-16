@@ -918,6 +918,53 @@ describe('Core 5: destinations', () => {
     );
   });
 
+  it('an Instagram destination that needs a re-render whose file could not be checked shows Re-render, not a retry', async () => {
+    const id = '88888888-8888-4888-8888-888888888888';
+    const sch = defaultSchedule(0, 7);
+    st = status({ settings: { ...st.settings, schedule: sch } });
+    posts = [
+      video({
+        id,
+        format: 'short',
+        title: 'A Short',
+        status: 'approved',
+        slotAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+        publishMode: 'slot',
+        destinations: ['youtube', 'instagram'],
+        phase: 'partial',
+        shares: [
+          {
+            network: 'instagram',
+            status: 'failed',
+            url: null,
+            error: 'Instagram could not process the video; it needs a new render',
+            fileRejection: 'check_failed',
+            reelsCheck: {
+              passed: true,
+              checkedAt: '2026-11-16T10:00:00.000Z',
+              failed: [],
+              warnings: [],
+              measured: {},
+            },
+          },
+        ],
+      }),
+    ];
+    wrap(<PlatformVideo />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('video-tab-queue'));
+    const card = await screen.findByTestId(`queue-post-${id}`);
+    expect(within(card).getByText('Instagram needs a new render')).toBeTruthy();
+    expect(within(card).getByText(/could not be checked/)).toBeTruthy();
+    expect(within(card).queryByTestId('retry-instagram')).toBeNull();
+    await user.click(within(card).getByTestId('rerender-instagram'));
+    await waitFor(() =>
+      expect(
+        calls.some((c) => c.method === 'POST' && c.url === `/api/platform/video/posts/${id}/rerender`),
+      ).toBe(true),
+    );
+  });
+
   it('share links are shown only for https addresses', async () => {
     const { safeHref } = await import('../lib/video-schedule.ts');
     expect(safeHref('https://x.com/i/web/status/1')).toBe('https://x.com/i/web/status/1');
