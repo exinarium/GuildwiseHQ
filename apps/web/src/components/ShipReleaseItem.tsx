@@ -5,6 +5,7 @@ import {
   composeReleaseSection,
   type DeskItemDto,
   RELEASE_SUBMODULE_GATE_CODE,
+  type ReleaseProposalView,
   type ReleaseSubmoduleFacts,
   releaseIntro,
   releasePointerGate,
@@ -35,6 +36,14 @@ function age(at: string | null): string {
   return min < 1 ? 'read just now' : min < 60 ? `read ${min} min ago` : `read ${Math.round(min / 60)} h ago`;
 }
 
+/** The release the recommendation starts from: the newest release tag, a newer CHANGELOG.md version, or none. */
+export function baseLabel(rel: Pick<ReleaseProposalView, 'base' | 'baseSource' | 'lastTag'>): string {
+  if (rel.baseSource === 'changelog')
+    return `Last release: ${rel.base} (from CHANGELOG.md; ${rel.lastTag ? `newest tag ${rel.lastTag}` : 'no tag yet'})`;
+  if (rel.lastTag) return `Last release: ${rel.lastTag}`;
+  return 'No release yet (starting from 0.0.0)';
+}
+
 /**
  * "Ship release": the recommended version with its reason, the changelog as it will read, and the component bumps. The
  * owner can type another version (refused inline, never as a toast) or raise a component. Approving prepares the release commit;
@@ -51,8 +60,11 @@ export function ShipReleaseItem({ item }: { item: DeskItemDto }) {
   const input = useRef<HTMLInputElement | null>(null);
 
   const check = useMemo(
-    () => validateReleaseVersion(version, rel?.lastTag ?? null, rel?.existingTags ?? []),
-    [version, rel?.lastTag, rel?.existingTags],
+    () =>
+      validateReleaseVersion(version, rel?.lastTag ?? null, rel?.existingTags ?? [], {
+        ...(rel?.base ? { base: rel.base } : {}),
+      }),
+    [version, rel?.lastTag, rel?.existingTags, rel?.base],
   );
   const bumps: ComponentBump[] = useMemo(
     () =>
@@ -114,7 +126,9 @@ export function ShipReleaseItem({ item }: { item: DeskItemDto }) {
   return (
     <div className="mt-3 flex flex-col gap-4" data-testid="ship-release">
       <div className="flex flex-wrap items-center gap-2 text-sm text-subtle">
-        <span>{rel.lastTag ? `Last release ${rel.lastTag}` : 'No release yet'}</span>
+        <span className="break-words" data-testid="ship-base">
+          {baseLabel(rel)}
+        </span>
         <span aria-hidden="true">·</span>
         <span>{rel.ahead} commits ahead of the main branch</span>
         <span aria-hidden="true">·</span>

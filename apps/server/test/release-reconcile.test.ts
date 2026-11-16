@@ -195,13 +195,51 @@ describe('Ship release approval (resolveShipReleaseIn)', () => {
     expect(JSON.stringify(r.body)).toContain('proposal_changed');
   });
 
-  it('400 invalid_version for non-semver, equal and lower versions', async () => {
-    for (const version of ['next', '1.3.0', '1.2.9']) {
+  it('400 invalid_version for non-semver, 409 version_not_higher for equal and lower versions', async () => {
+    const bad = await approve({ version: 'next', components: [], factsHeadSha: HEAD });
+    expect(bad.status).toBe(400);
+    expect(JSON.stringify(bad.body)).toContain('invalid_version');
+    for (const version of ['1.3.0', '1.2.9']) {
       const r = await approve({ version, components: [], factsHeadSha: HEAD });
-      expect(r.status).toBe(400);
-      expect(JSON.stringify(r.body)).toContain('invalid_version');
+      expect(r.status).toBe(409);
+      expect(JSON.stringify(r.body)).toContain('version_not_higher');
+      expect(JSON.stringify(r.body)).toContain('v1.3.0');
     }
     expect((await proposals())[0].state).toBe('proposed');
+  });
+
+  it('floors on the newest tag when the facts last tag is older, and ships against that tag', async () => {
+    // the 1.8.0 layout on an older runner: the last tag is the newest merged one, a newer tag exists on main
+    await setFacts(facts({ existingTags: ['v1.4.0', 'v1.3.0'] }));
+    for (const version of ['1.4.0', '1.3.9']) {
+      const r = await approve({ version, components: [], factsHeadSha: HEAD });
+      expect(r.status).toBe(409);
+      expect(JSON.stringify(r.body)).toContain('version_not_higher');
+      expect(JSON.stringify(r.body)).toContain('not higher than the last release v1.4.0');
+    }
+    expect((await proposals())[0].state).toBe('proposed');
+    const ok = await approve({ version: '1.4.1', components: [], factsHeadSha: HEAD });
+    expect(ok.status).toBe(200);
+    // ReleaseApproved carries the newest tag and the projection stores it, so the ship uses it
+    expect((await proposals())[0]).toMatchObject({ state: 'approved', version: '1.4.1', last_tag: 'v1.4.0' });
+    const cmds = (await q(
+      `SELECT payload FROM runner_commands WHERE type='release.ship' ORDER BY created_at DESC LIMIT 1`,
+    )) as Rows;
+    expect(cmds[0].payload).toMatchObject({ lastTag: 'v1.4.0', version: '1.4.1' });
+  });
+
+  it('409 version_not_higher at or below a newer dated CHANGELOG.md version', async () => {
+    await setFacts(
+      facts({
+        changelog: `${CHANGELOG('### Added\n\n- One.\n\n')}`.replace(
+          '## [1.3.0] - 2026-10-20',
+          '## [1.4.0] - 2026-11-01\n\n- New.\n\n## [1.3.0] - 2026-10-20',
+        ),
+      }),
+    );
+    const r = await approve({ version: '1.4.0', components: [], factsHeadSha: HEAD });
+    expect(r.status).toBe(409);
+    expect(JSON.stringify(r.body)).toContain('the newest version in CHANGELOG.md');
   });
 
   it('400 for an unknown component', async () => {

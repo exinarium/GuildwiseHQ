@@ -47,6 +47,7 @@ const view = (over: Record<string, unknown> = {}) => ({
   state: 'proposed',
   lastTag: 'v1.3.0',
   base: '1.3.0',
+  baseSource: 'tag',
   recommended: { version: '1.4.0', level: 'minor', reason: 'minor: 3 Added entries, no breaking changes' },
   headSha: 'a'.repeat(40),
   factsAt: new Date().toISOString(),
@@ -123,6 +124,85 @@ describe('Ship release desk item', () => {
     await user.type(field, '1.5.0');
     expect(screen.getByRole('button', { name: /Approve release 1.5.0/ })).toBeEnabled();
     expect(screen.getByTestId('ship-preview')).toHaveTextContent('## [1.5.0] - 2026-10-31');
+  });
+
+  it('refuses a version at or below the newest tag, also when the branch has not merged that tag', async () => {
+    const user = userEvent.setup();
+    wrap(
+      <ShipReleaseItem
+        item={item(
+          view({
+            lastTag: 'v1.8.0',
+            base: '1.8.0',
+            existingTags: ['v1.8.0', 'v1.7.2'],
+            recommended: { version: '1.8.1', level: 'patch', reason: 'patch' },
+          }),
+        )}
+      />,
+    );
+    const field = screen.getByTestId('ship-version');
+    for (const v of ['1.8.0', '1.7.9']) {
+      await user.clear(field);
+      await user.type(field, v);
+      expect(screen.getByText(`${v} is not higher than the last release v1.8.0`)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Approve release/ })).toBeDisabled();
+    }
+    await user.clear(field);
+    await user.type(field, '1.8.1');
+    expect(screen.getByRole('button', { name: /Approve release 1.8.1/ })).toBeEnabled();
+  });
+
+  it('refuses a version at or below a newer CHANGELOG.md base', async () => {
+    const user = userEvent.setup();
+    wrap(
+      <ShipReleaseItem
+        item={item(
+          view({ lastTag: 'v1.8.0', base: '1.9.0', baseSource: 'changelog', existingTags: ['v1.8.0'] }),
+        )}
+      />,
+    );
+    const field = screen.getByTestId('ship-version');
+    await user.clear(field);
+    await user.type(field, '1.9.0');
+    expect(
+      screen.getByText('1.9.0 is not higher than 1.9.0, the newest version in CHANGELOG.md'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Approve release/ })).toBeDisabled();
+  });
+
+  it('shows the release the recommendation is based on', () => {
+    const { unmount } = wrap(<ShipReleaseItem item={item(view({ lastTag: 'v1.8.0', base: '1.8.0' }))} />);
+    expect(screen.getByTestId('ship-base')).toHaveTextContent('Last release: v1.8.0');
+    unmount();
+    const second = wrap(
+      <ShipReleaseItem item={item(view({ lastTag: 'v1.8.0', base: '1.9.0', baseSource: 'changelog' }))} />,
+    );
+    expect(screen.getByTestId('ship-base')).toHaveTextContent(
+      'Last release: 1.9.0 (from CHANGELOG.md; newest tag v1.8.0)',
+    );
+    second.unmount();
+    wrap(
+      <ShipReleaseItem
+        item={item(view({ lastTag: null, base: '0.0.0', baseSource: 'none', existingTags: [] }))}
+      />,
+    );
+    expect(screen.getByTestId('ship-base')).toHaveTextContent('No release yet (starting from 0.0.0)');
+  });
+
+  it('shows the server refusal of a version that is not higher under the field', async () => {
+    const user = userEvent.setup();
+    reply = () =>
+      json(
+        {
+          error: { code: 'version_not_higher', message: '1.8.0 is not higher than the last release v1.8.0' },
+        },
+        409,
+      );
+    wrap(<ShipReleaseItem item={item(view())} />);
+    await user.click(screen.getByRole('button', { name: /Approve release 1.4.0/ }));
+    await waitFor(() =>
+      expect(screen.getByText('1.8.0 is not higher than the last release v1.8.0')).toBeInTheDocument(),
+    );
   });
 
   it('raising the runner to minor updates the row and the preview', async () => {
