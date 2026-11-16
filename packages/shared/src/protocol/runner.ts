@@ -115,6 +115,7 @@ import { RELAY_BODY_HARD_MAX_BYTES, RELAY_RESPONSE_MAX_BYTES, RelayKindSchema } 
 import { ReleaseDocsPrepPayloadSchema } from '../release/docs-prep-dto.ts';
 import { ReleasePrepShiftSchema } from '../release/docs-prep-task.ts';
 import { BumpLevelSchema, ComponentBumpSchema } from '../release/dto.ts';
+import { ReleaseProjectRepoSchema, ReleaseSubmodulesSchema } from '../release/submodules.ts';
 import { RELEASE_TAG_RE } from '../release/tags.ts';
 import {
   CommitAsSchema,
@@ -885,6 +886,8 @@ export const RepoReleaseFactsPayloadSchema = z.object({
   components: ComponentRulesSchema.default([]),
   /** The project's "post as" plan (absent: no app selected, today's credentials). */
   postAs: PostAsPlanSchema.optional(),
+  /** The other repositories of the project, for the submodule pointer check (absent: older server, not checked). */
+  projectRepos: z.array(ReleaseProjectRepoSchema).max(200).optional(),
 });
 export type RepoReleaseFactsPayload = z.infer<typeof RepoReleaseFactsPayloadSchema>;
 
@@ -914,6 +917,8 @@ export const RepoReleaseFactsResultSchema = z.object({
     )
     .default([]),
   changelog: z.string().max(1_048_576).nullable().optional(),
+  /** Submodules at headSha (absent: no .gitmodules, or an older runner). */
+  submodules: ReleaseSubmodulesSchema.optional(),
 });
 export type RepoReleaseFactsResult = z.infer<typeof RepoReleaseFactsResultSchema>;
 
