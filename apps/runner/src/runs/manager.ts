@@ -198,6 +198,7 @@ export class RunManager {
   private readonly launcher: ServiceLauncher;
   private readonly restarting = new Set<string>();
   private netnsWarned = false;
+  private readonly sandboxWarned = new Set<string>();
 
   constructor(private readonly deps: RunManagerDeps) {
     this.store = new RunStore(join(deps.paths.root, 'runs'));
@@ -1292,6 +1293,7 @@ export class RunManager {
         );
         cmd = c.cmd;
         args = c.args;
+        this.warnSandbox(c.warning);
       } catch (err) {
         forwards?.close();
         throw err;
@@ -1312,6 +1314,13 @@ export class RunManager {
       network,
       ...(forwards ? { forwards } : {}),
     };
+  }
+
+  /** Logs a sandbox warning (for example DNS unavailable) once per distinct message. */
+  private warnSandbox(w: string | undefined): void {
+    if (!w || this.sandboxWarned.has(w)) return;
+    this.sandboxWarned.add(w);
+    this.deps.log.warn(w);
   }
 
   /** The command line a step or service is really started with, and the environment it gets. */
@@ -1346,6 +1355,7 @@ export class RunManager {
       );
       cmd = c.cmd;
       args = c.args;
+      this.warnSandbox(c.warning);
     }
     const childEnv = { ...this.baseEnv(sandbox === 'sandboxed'), ...extraEnv };
     // Services leave the runner's cgroup (systemd scope) so a runner restart or update does not kill them.

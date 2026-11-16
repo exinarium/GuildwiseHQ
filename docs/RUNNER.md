@@ -1821,7 +1821,7 @@ unit runs under their own 10-minute budget.
   a check. Root cause this fixes (1.8.0): pnpm 11+ checks the install state before every `pnpm run` and, finding the
   worktree's `node_modules` missing or stale, starts an install that first verifies the lockfile against its supply-chain
   policies (registry metadata) and then fetches tarballs with retries; with no resolver in the sandbox (the `/run/systemd`
-  mask hides `/etc/resolv.conf`'s target on systemd-resolved hosts) every check timed out after 5 minutes. Now such a check
+  mask hid `/etc/resolv.conf`'s target on systemd-resolved hosts; run steps now get that one file back, see the Service sandbox) every check timed out after 5 minutes. Now such a check
   fails at once ("biome: not found", `ERR_PNPM_NO_OFFLINE_META`) and is reported as a missing tool.
 - **Test services in unit runs (GWP-248).** A builder's handoff unit runs reach the local test services the project
   declared in Project settings > Local test services (see "Local test services (GWP-41)"), and nothing else. The route
@@ -2796,7 +2796,14 @@ and the DevOps engineer split the work:
   set agents get (`HOME_SECRETS` in the real home and the runner data dir, masked with an empty tmpfs; the worktrees and caches
   are bound back inside it). Unix sockets are not filtered by bubblewrap, so the system and session buses, `/run/systemd`,
   `/run/user/<uid>` (the user's systemd manager: `systemd-run --user` would start a unit outside the sandbox) and the Docker
-  socket are masked too. Writable: the run worktrees, the shared caches (`<data dir>/cache`, with the same cache variables
+  socket are masked too. **DNS:** on systemd-resolved hosts `/etc/resolv.conf` links into `/run/systemd/resolve/`, which the
+  mask would leave dangling (every lookup fails). So when the file resolves to a regular file under a masked system path,
+  exactly that file (for example `stub-resolv.conf`) is bound back **read-only** after the masks; never the `resolve/`
+  folder (it holds resolved's sockets) and never `private`, `journal` or `notify`. The stub `127.0.0.53` is reachable because
+  steps and services use the host network. A plain `/etc/resolv.conf` needs nothing. When the config is missing or dangling
+  the runner logs one warning per message (`run sandbox: DNS unavailable, ...`) and binds nothing. Runs with `network: none`
+  (the handoff checks) stay offline: no bind, no warning. Only this sandbox is affected: agent shells go through the egress
+  proxy and the reviewer sandbox is offline. Writable: the run worktrees, the shared caches (`<data dir>/cache`, with the same cache variables
   agents get) and a private `/tmp` (`/tmp/aom-run-<env>`, removed when the environment stops) in which `HOME` lives
   (`/tmp/home`). **.NET user secrets:** `~/.microsoft/usersecrets` of the real home is bound **read-only** at
   `/tmp/home/.microsoft/usersecrets` (the services' `HOME`), because `dotnet run` in Development reads its secrets there; only
