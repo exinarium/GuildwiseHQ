@@ -157,7 +157,7 @@ describe('rendered scripts', () => {
     expect(step2.match(/Request-Restart/g)).toHaveLength(1);
     expect(step2).toContain("Set-StateValue 'wslRestarts' ($wslRestarts + 1)");
     // still not ready: stop with the state of each feature and the last line of wsl.exe --status
-    expect(step2).toContain('Stop-Install "WSL2 is still not ready. $detail." $todo');
+    expect(step2).toContain('Stop-Install "WSL2 is still not ready. $VirtHint $detail." $todo');
     expect(step2).toContain('$detail = $wsl.Summary');
     expect(ps).toContain('wsl.exe --status said: $last');
     expect(step2).toContain('BIOS/UEFI');
@@ -167,13 +167,54 @@ describe('rendered scripts', () => {
     expect(step2).toMatch(/\nSet-StateValue 'wslRestarts' 0\n& wsl\.exe --update/);
   });
 
+  it('Windows step 2 checks virtualization before anything that uses wsl.exe', () => {
+    const ps = renderPowerShell(win).replace(/\r\n/g, '\n');
+    const step2 = ps.slice(
+      ps.indexOf("Start-Step 'Turning on WSL2"),
+      ps.indexOf("Start-Step 'Installing Ubuntu'"),
+    );
+    const at = step2.indexOf('Get-Virtualization');
+    expect(at).toBeGreaterThan(-1);
+    expect(at).toBeLessThan(step2.indexOf('Get-WslReadiness'));
+    expect(at).toBeLessThan(step2.indexOf('wsl.exe --install --no-distribution'));
+    expect(at).toBeLessThan(step2.indexOf('--set-default-version 2'));
+    // the check reads Windows itself, never wsl.exe
+    const from = ps.indexOf('function Get-Virtualization');
+    const fn = ps.slice(from, ps.indexOf('$script:VirtState = ', from));
+    expect(fn).not.toContain('wsl.exe');
+    expect(fn).toContain('Win32_ComputerSystem');
+    expect(fn).toContain('VirtualizationFirmwareEnabled');
+    // a running hypervisor is a pass, even when the firmware flag reads false
+    expect(fn).toContain("if ($cs.HypervisorPresent -eq $true) { return @{ State = 'pass'");
+    expect(fn).toContain("$vmp -eq 'Enabled'");
+    expect(fn).toContain('Architecture -in 5, 12');
+    // only the 'off' branch stops, with the BIOS text at the start of the message the web app sees
+    expect(step2).toContain('Stop-Install "Virtualization is off in the BIOS/UEFI');
+    expect(step2).toContain('Intel VT-x, AMD-V or SVM');
+    expect(step2).toContain('restart the PC and run the installer again');
+    expect(ps).toContain('install-troubleshooting#windows-virtualization');
+    expect(step2).toContain('$VirtHelp');
+    const checkBlock = step2.slice(at, step2.indexOf('$wsl = Get-WslReadiness'));
+    expect(checkBlock.match(/Stop-Install/g)).toHaveLength(1);
+    expect(checkBlock).toContain("Send-Report $script:CurrentStep 'warn'");
+    // later stops name the BIOS too
+    expect(ps).toContain('0x80370102');
+    expect(step2).toContain('$VirtHint');
+    const step3 = ps.slice(ps.indexOf("Start-Step 'Installing Ubuntu'"), ps.indexOf('# ---- 4.'));
+    expect(step3).toContain("Format-WslFailure 'Ubuntu is still not installed after a restart.'");
+    expect(step3).toContain("Format-WslFailure 'Ubuntu could not start.'");
+    expect(ps).toContain("Format-WslFailure 'Could not set systemd=true in /etc/wsl.conf.'");
+    // no new restart request
+    expect(step2.match(/Request-Restart/g)).toHaveLength(1);
+  });
+
   it('Windows step 3 asks for a restart for Ubuntu at most once', () => {
     const ps = renderPowerShell(win).replace(/\r\n/g, '\n');
     const step3 = ps.slice(ps.indexOf("Start-Step 'Installing Ubuntu'"), ps.indexOf('# ---- 4.'));
     expect(ps).toContain('ubuntuRestartRequested = $false');
     expect(step3).toContain('if ((Get-State).ubuntuRestartRequested -and (Test-RestartedSince))');
     expect(step3).toContain("Set-StateValue 'ubuntuRestartRequested' $true");
-    expect(step3).toContain('wsl.exe -l -q returned');
+    expect(step3).toContain('wsl.exe -l -q 2>&1');
     expect(step3.match(/Request-Restart/g)).toHaveLength(1);
     expect(step3.indexOf('Stop-Install')).toBeLessThan(step3.indexOf('Request-Restart'));
     expect(step3).toContain("Set-StateValue 'ubuntuRestartRequested' $false");

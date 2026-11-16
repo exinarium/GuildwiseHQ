@@ -1,7 +1,7 @@
 ---
 title: Installing a workstation: if something goes wrong
 summary: Installer troubleshooting: expired links, restart, permissions, git version, sandbox.
-keywords: [install, troubleshooting, error, fix, workstation]
+keywords: [install, troubleshooting, error, fix, workstation, virtualization, BIOS]
 order: 19
 ---
 
@@ -17,7 +17,11 @@ The installer has not reported in yet. Check that you ran the command on the com
 
 ## Windows asked me to restart {#windows-restart}
 
-Say yes. Turning on WSL2 (Linux inside Windows) needs one restart. Sign in as usual: the installer opens again by itself, and Windows may ask you to allow it. If it does not come back, run the command again. The installer asks for at most two restarts for this step. If WSL2 is still not ready after that, it stops and names what is still off: turn on virtualization in the BIOS/UEFI of the PC, or run `wsl --install` in PowerShell, then run the command again.
+Say yes. Turning on WSL2 (Linux inside Windows) can need more than one restart (up to two for WSL2 and one more for Ubuntu). After each restart, sign in as usual: the installer opens again by itself, and Windows may ask you to allow it. If it does not come back, run the command again. If WSL2 is still not ready after that, it stops and names what is still off: turn on virtualization in the BIOS/UEFI of the PC (see [virtualization is off](#windows-virtualization)), or run `wsl --install` in PowerShell, then run the command again.
+
+## It says virtualization is off in the BIOS/UEFI (Windows) {#windows-virtualization}
+
+WSL2 runs Ubuntu in a small virtual machine, so the PC must have virtualization turned on in its firmware. The installer stops at step 2 and says so when it is off. Open the BIOS/UEFI settings while the PC starts (often F2, F10, F12 or Del), or in Windows go to Settings > System > Recovery > Advanced start-up > UEFI firmware settings. Turn on **Intel VT-x** / **Virtualization Technology**, or **AMD SVM** / **AMD-V**, save, restart and run the installer command again. If the setting is on and it still stops, run `bcdedit /set hypervisorlaunchtype auto` in an administrator PowerShell and restart. On a virtual machine, turn on nested virtualization in its host. A PC with no such setting may have a processor that cannot run WSL2.
 
 ## Ubuntu asks me for a user name and password (Windows) {#ubuntu-user}
 
