@@ -291,7 +291,7 @@ export interface UnreleasedWork {
 
 /**
  * Whether any repository of a run has work that no release contains yet, judged on facts read after that
- * repository's last published release. A failed read also moves `updated_at`, so only a clean read counts as fresh.
+ * repository's last published release. A repository with no published release always has such work. A failed read also moves `updated_at`, so only a clean read counts as fresh.
  */
 export async function unreleasedWork(db: Queryable, repos: PrepRepo[]): Promise<UnreleasedWork> {
   let yes = false;
@@ -305,12 +305,17 @@ export async function unreleasedWork(db: Queryable, repos: PrepRepo[]): Promise<
       [r.id],
     );
     const publishedAt = last?.at ? new Date(last.at) : null;
+    // Nothing published yet: no release can contain the work, so the start goes on as before.
+    if (!publishedAt) {
+      yes = true;
+      continue;
+    }
     const fresh =
       !!f?.facts &&
       f.state === 'ready' &&
       f.message === null &&
       !!f.at &&
-      (!publishedAt || f.at.getTime() >= publishedAt.getTime());
+      f.at.getTime() >= publishedAt.getTime();
     if (!fresh || !f?.facts) {
       stale.push(r.id);
       continue;

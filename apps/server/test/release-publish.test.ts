@@ -32,6 +32,7 @@ const facts = (): ReleaseFacts =>
     ahead: 3,
     lastTag: { name: 'v1.3.0', sha: 'b'.repeat(40) },
     existingTags: ['v1.3.0'],
+    commits: [{ sha: 'd'.repeat(40), subject: 'feat: one', breakingFooter: false }],
     changedTotal: 4,
     components: [],
     changelog: '## [Unreleased]\n\n### Added\n\n- One.\n\n## [1.3.0] - 2026-10-20\n',
