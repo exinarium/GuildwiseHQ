@@ -61,11 +61,15 @@ describe('workerOutdatedMessage', () => {
     expect(workerOutdatedMessage('1.5.0', '1.9.0')).toBe(
       'video worker 1.5.0 is older than server 1.9.0; update the worker',
     );
-    expect(workerOutdatedMessage(null, '1.9.0')).toContain('video worker (no version) is older than server 1.9.0');
+    expect(workerOutdatedMessage(null, '1.9.0')).toContain(
+      'video worker (no version) is older than server 1.9.0',
+    );
   });
 
   it('matches the LIKE pattern used to find refused renders', () => {
-    const re = new RegExp(`^${WORKER_OUTDATED_LIKE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*')}`);
+    const re = new RegExp(
+      `^${WORKER_OUTDATED_LIKE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*')}`,
+    );
     expect(re.test(workerOutdatedMessage('1.5.0', '1.9.0'))).toBe(true);
     expect(re.test(workerOutdatedMessage(null, '1.9.0'))).toBe(true);
   });

@@ -17,7 +17,10 @@ export function cleanWorkerVersion(v: unknown): string | null {
  * Outdated = the worker is older than the server. A missing or non-semver worker version counts as older. When the
  * server's own version is unknown (null or not semver), nothing can be compared and no worker is outdated.
  */
-export function workerOutdated(worker: string | null | undefined, server: string | null | undefined): boolean {
+export function workerOutdated(
+  worker: string | null | undefined,
+  server: string | null | undefined,
+): boolean {
   if (!server || compareSemver(server, server) === null) return false;
   if (!worker) return true;
   const c = compareSemver(worker, server);

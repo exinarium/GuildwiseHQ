@@ -468,7 +468,9 @@ describe('worker version', () => {
       },
     });
   const renderOf = async (postId: string) =>
-    (await q('SELECT id, status, attempts, error, lease_until FROM video_renders WHERE post_id=$1', [postId]))[0];
+    (
+      await q('SELECT id, status, attempts, error, lease_until FROM video_renders WHERE post_id=$1', [postId])
+    )[0];
   /** A rendering row, as if a worker had claimed it. */
   const claimed = async (ref: string) => {
     const p = await newPost(ref);
@@ -631,7 +633,9 @@ describe('worker version', () => {
             ...instant,
             fetch: counting,
           }),
-        ).rejects.toThrow(/refused: HTTP 409 .*video worker 1\.5\.0 is older than server 2\.0\.0; update the worker/);
+        ).rejects.toThrow(
+          /refused: HTTP 409 .*video worker 1\.5\.0 is older than server 2\.0\.0; update the worker/,
+        );
         expect(calls).toBe(1); // a refusal is not retried
         await q(`UPDATE video_renders SET status='rendering' WHERE id=$1`, [renderId]);
         await pushArtifacts({ baseUrl: url, token: TOKEN, version: '2.0.0' }, renderId, [file], instant);
@@ -678,9 +682,9 @@ describe('worker version', () => {
       const { postId, renderId } = await claimed('recover');
       expect((await push(renderId, '1.5.0')).statusCode).toBe(409); // back in the queue with a 10-minute wait
       const { ctx, errors } = withLog();
-      expect((await videoTick(ctx, { render: mustNotRender, role: 'render', version: '1.5.0' })).rendered).toBe(
-        false,
-      );
+      expect(
+        (await videoTick(ctx, { render: mustNotRender, role: 'render', version: '1.5.0' })).rendered,
+      ).toBe(false);
       expect((await videoStatus(t.app.ctx)).render?.outdated).toBe(true);
       expect(errors).toHaveLength(1);
 

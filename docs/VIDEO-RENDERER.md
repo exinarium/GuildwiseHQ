@@ -53,8 +53,8 @@ The video worker (`node dist/video-worker.mjs --loop`) has two halves, picked wi
 | `publish` | render rows, the missed-slot watch, destination rows, uploads and slot posts, re-checks, cleanup | `video_worker_publish` |
 | `all` (default) | both, as a single container always did | both |
 
-`GET /api/platform/video/status` reports `render` and `publish` (`{ running, lastSeen }` each); `worker` stays as the combined
-view (running only when both are).
+`GET /api/platform/video/status` reports `render` and `publish` (`{ running, lastSeen, version, outdated }` each, see "Worker
+version" below) and `serverVersion`; `worker` stays as the combined view (running only when both are).
 
 Use it when the machine that publishes cannot render (for example a VPS without AVX): run `AOM_VIDEO_ROLE=publish` there and
 `AOM_VIDEO_ROLE=render` on a machine that can, both on the same database.
@@ -80,6 +80,22 @@ Use it when the machine that publishes cannot render (for example a VPS without 
   same route there instead.
 - A video whose file is not (yet) on the publish machine waits ("waiting for the video file", retried every minute) until its
   slot has passed, instead of failing.
+
+**Worker version.** A worker must not be older than the server it renders for:
+
+- The app records its application version (the newest dated release in its bundled `CHANGELOG.md`) at boot as the platform
+  setting `server_version`. Every heartbeat carries the worker's own version (`video_worker_<role>` gets `version`), and so does
+  every push (`x-worker-version`).
+- `GET /api/platform/video/status` reports `version` and `outdated` per role and `serverVersion`. A worker older than the server,
+  or one that reports no version (a build from before version reporting), is `outdated`; an equal or newer one is not. The
+  Video page shows each worker's version, an "outdated" badge and a "Video worker out of date" problem with both versions, and
+  the watch mails the super-admins once per worker version and server version.
+- An outdated render worker claims no render: it logs `video worker <v> is older than server <v>; update the worker` once and
+  keeps beating. A push from an outdated worker (or one without the header) gets `409 worker_outdated` with the same message;
+  the render goes back to the queue without counting the attempt and waits 10 minutes, unless a current worker asks first.
+- Update the worker together with the server. Once an updated worker beats, the flag clears and it renders again with no manual
+  step. There is no override. A worker from before version reporting that writes to the shared volume (no push) cannot be
+  refused, only flagged.
 
 ## Tests
 
