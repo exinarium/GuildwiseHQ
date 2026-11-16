@@ -16,6 +16,7 @@
       "!packages/shared/src/capabilities/builtin-data.ts",
       "!packages/shared/test/fixtures/setup/setup.json",
       "!.claude",
+      "!.mcp.json",
       "!**/*.md",
       "!**/*.yml",
       "!**/*.yaml"
