@@ -141,6 +141,50 @@ fi
 "$@"
 `;
 
+/** Exit status of `CHECK_BRIDGE_SCRIPT` when it cannot bridge the test services (an environment problem, not a test). */
+export const CHECK_BRIDGE_EXIT = 125;
+
+/** The line prefix `CHECK_BRIDGE_SCRIPT` prints for an environment problem (read by `checks/run.ts`). */
+export const CHECK_ENV_PREFIX = 'aom-check: environment:';
+
+/**
+ * Handoff checks (GWP-248): `bash -c CHECK_BRIDGE_SCRIPT aom-check-bridge <spec> <command> [args...]`, run inside the
+ * check's own network namespace. `<spec>` is `host:port=<unix socket>,...` (`runs/forward.ts startServiceForwards`): one
+ * `socat` per entry listens on that loopback port and connects to the runner's socket, which reaches that declared
+ * service and nothing else. Then the command runs; its exit status is returned. Without socat, or when a listener does
+ * not come up, it prints a `CHECK_ENV_PREFIX` line and exits `CHECK_BRIDGE_EXIT` without running the command.
+ */
+export const CHECK_BRIDGE_SCRIPT = `spec="$1"; shift
+if ! command -v socat >/dev/null 2>&1; then
+  echo "${CHECK_ENV_PREFIX} socat is not installed on this workstation, so the test services ($spec) cannot be reached" >&2; exit ${CHECK_BRIDGE_EXIT}
+fi
+pids=()
+IFS=',' read -r -a items <<<"$spec"
+for it in "\${items[@]}"; do
+  hp="\${it%%=*}"; sock="\${it#*=}"; port="\${hp##*:}"; host="\${hp%:*}"
+  case "$port" in ''|*[!0-9]*) echo "${CHECK_ENV_PREFIX} bad test service entry '$hp'" >&2; exit ${CHECK_BRIDGE_EXIT} ;; esac
+  case "$host" in
+    '[::1]') listen="TCP6-LISTEN:$port,bind=[::1],fork,reuseaddr"; hex="00000000000000000000000001000000:$(printf '%04X' "$port")"; tbl=/proc/net/tcp6 ;;
+    *) listen="TCP-LISTEN:$port,bind=127.0.0.1,fork,reuseaddr"; hex="0100007F:$(printf '%04X' "$port")"; tbl=/proc/net/tcp ;;
+  esac
+  socat "$listen" "UNIX-CONNECT:$sock" </dev/null >/dev/null 2>&1 &
+  pids+=($!)
+  up=
+  for _ in $(seq 1 50); do
+    if grep -qi "$hex 0*:0000 0A" "$tbl" 2>/dev/null; then up=1; break; fi
+    sleep 0.1
+  done
+  if [ -z "$up" ]; then
+    for p in "\${pids[@]}"; do kill "$p" 2>/dev/null; done
+    echo "${CHECK_ENV_PREFIX} could not listen on $hp inside the check sandbox for the test service" >&2; exit ${CHECK_BRIDGE_EXIT}
+  fi
+done
+"$@"
+rc=$?
+for p in "\${pids[@]}"; do kill "$p" 2>/dev/null; done
+exit "$rc"
+`;
+
 /** Name of the sourced bridge file in the runner's bin dir (tester shifts' `BASH_ENV`). */
 export const AOM_BRIDGES_FILE = 'aom-bridges.sh';
 

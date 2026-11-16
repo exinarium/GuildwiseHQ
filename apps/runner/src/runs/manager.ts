@@ -38,8 +38,10 @@ import { type GitAuth, removeWorktree } from '../git/worktrees.ts';
 import type { Logger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { agentTmpRoot, cacheEnv, ensureSharedCaches, sharedCacheRoot } from '../sandbox/sandbox.ts';
+import { CHECK_BRIDGE_SCRIPT } from '../shims.ts';
 import { checkEnvVar } from '../toolchain/registry.ts';
 import { discoverExtraGuides, type ExtraGuide, findBuildDoc, guidesHash } from './discovery.ts';
+import { type ServiceForwards, startServiceForwards } from './forward.ts';
 import { probeHttp, probeTcp } from './health.ts';
 import { FileFollower, rotateIfBig, tailLines } from './logs.ts';
 import { PortAllocator, type PortRange } from './ports.ts';
@@ -1226,6 +1228,13 @@ export class RunManager {
     argv: string[];
     network?: 'host' | 'none';
     extraEnv?: Record<string, string>;
+    /**
+     * A builder's handoff unit run (GWP-248): the declared, allowed local test services to bridge into the check's own
+     * network namespace (only when it has one; with the host network they are reachable directly).
+     */
+    services?: ReadonlyArray<{ name: string; host: string; port: number }>;
+    /** `AOM_TEST_RUN_ID` of a handoff unit run: the suite keeps its test data apart under this id. */
+    runId?: string;
   }): Promise<{
     cmd: string;
     args: string[];
@@ -1233,15 +1242,18 @@ export class RunManager {
     sandbox: 'sandboxed' | 'off';
     tmp: string;
     network: 'host' | 'none';
+    /** The service forwarders of this run (close them after it). */
+    forwards?: ServiceForwards;
   }> {
     if (isDockerCommand(o.argv)) throw new Error('checks never run Docker');
-    const argv = offlineArgv(o.argv);
+    let argv = offlineArgv(o.argv);
     const kind = await this.sandboxKind(argv, false);
     const tmp = `${agentTmpRoot()}/aom-check-${slug(o.key).slice(0, 16)}`;
     mkdirSync(join(tmp, 'home'), { recursive: true, mode: 0o700 });
     let cmd = argv[0] as string;
     let args = argv.slice(1);
     let network: 'host' | 'none' = 'host';
+    let forwards: ServiceForwards | undefined;
     if (kind === 'sandboxed') {
       const cacheRoot = sharedCacheRoot(this.deps.paths);
       await ensureSharedCaches(cacheRoot);
@@ -1254,28 +1266,52 @@ export class RunManager {
           );
         }
       }
-      const c = sandboxCommand(
-        {
-          runnerRoot: this.deps.paths.root,
-          realHome: this.deps.realHome ?? homedir(),
-          worktrees: [o.worktree],
-          cacheRoot,
-          runTmp: tmp,
-          gitDirs: gitDirOf(o.worktree),
-          userSecrets: false,
-          network,
-        },
-        argv,
-      );
-      cmd = c.cmd;
-      args = c.args;
+      if (network === 'none' && o.services?.length) {
+        // the check's tmp dir is bound over /tmp, so the sockets are /tmp/svc/<port>.sock inside
+        forwards = await startServiceForwards(tmp, o.services, '/tmp');
+        if (forwards.forwards.length)
+          argv = ['bash', '-c', CHECK_BRIDGE_SCRIPT, 'aom-check-bridge', forwards.spec, ...argv];
+        else {
+          forwards.close();
+          forwards = undefined;
+        }
+      }
+      try {
+        const c = sandboxCommand(
+          {
+            runnerRoot: this.deps.paths.root,
+            realHome: this.deps.realHome ?? homedir(),
+            worktrees: [o.worktree],
+            cacheRoot,
+            runTmp: tmp,
+            gitDirs: gitDirOf(o.worktree),
+            userSecrets: false,
+            network,
+          },
+          argv,
+        );
+        cmd = c.cmd;
+        args = c.args;
+      } catch (err) {
+        forwards?.close();
+        throw err;
+      }
     }
     // unsandboxed: still without the runner's credentials (scrubEnv), plus the registered toolchains on PATH
     const env: Record<string, string> = kind === 'sandboxed' ? this.baseEnv(true) : this.scrubbedEnv();
     Object.assign(env, offlineEnv(this.deps.realHome ?? homedir()), o.extraEnv ?? {});
     env.NO_COLOR = '1';
     env.FORCE_COLOR = '0';
-    return { cmd, args, env, sandbox: kind === 'sandboxed' ? 'sandboxed' : 'off', tmp, network };
+    if (o.runId) env.AOM_TEST_RUN_ID = o.runId;
+    return {
+      cmd,
+      args,
+      env,
+      sandbox: kind === 'sandboxed' ? 'sandboxed' : 'off',
+      tmp,
+      network,
+      ...(forwards ? { forwards } : {}),
+    };
   }
 
   /** The command line a step or service is really started with, and the environment it gets. */

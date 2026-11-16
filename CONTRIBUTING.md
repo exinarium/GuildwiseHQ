@@ -66,6 +66,7 @@ docker exec aom-postgres createdb -U aom aom_test_mybranch
 cd apps/server && AOM_TEST_DB_URL=postgres://aom:aom@127.0.0.1:5433/aom_test_mybranch npx vitest run --maxWorkers=3
 ```
 
+- The test setup creates the database when it does not exist yet, so `createdb` is optional. A run with `AOM_TEST_RUN_ID` set (the runner's handoff checks) uses its own `aom_test_<id>` database and drops it afterwards; see docs/RUNNER.md, "Test services in unit runs".
 - The full server run takes about 20 minutes. While you work, run only the files you touched, for example `npx vitest run test/<file>.test.ts`.
 - A few runner tests are timing-sensitive under load. If one fails, run it on its own before you look for a bug.
 - Before you open a pull request, run the typecheck, lint and the tests for every package you changed.

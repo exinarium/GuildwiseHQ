@@ -10,8 +10,10 @@ import {
   UNIT_BUDGET_MS,
   UNIT_HANDOFF_TIMEOUT_MIN,
 } from '@aom/shared';
+import type { TestServiceDecision } from '../sandbox/test-services.ts';
+import { CHECK_BRIDGE_EXIT, CHECK_ENV_PREFIX } from '../shims.ts';
 import { type Attribution, attribute, type Finding, stripAnsi } from './attribute.ts';
-import { failingTestFiles, handoffUnitRuns } from './units.ts';
+import { failingTestFiles, handoffUnitRuns, unitCounts } from './units.ts';
 
 /** The most output of one check the runner keeps in memory (the rest is dropped and the result says so). */
 export const CHECK_OUTPUT_CAP = 2 * 1024 * 1024;
@@ -28,6 +30,19 @@ export interface CheckLaunch {
   sandbox?: 'sandboxed' | 'off';
   /** Private tmp dir to remove afterwards (the caller does). */
   tmp?: string;
+  /** A handoff unit run's test service forwarders (GWP-248): closed after the run; their failures name an environment problem. */
+  forwards?: {
+    forwards: ReadonlyArray<{ name: string; host: string; port: number }>;
+    failures(): string[];
+    close(): void;
+  };
+  /** The test service decisions of this run, refused ones included (to say why a port is closed). */
+  services?: readonly TestServiceDecision[];
+}
+
+/** What a launch is for: `unit` (a builder's handoff unit run, which may reach the declared test services) or a check. */
+export interface LaunchOptions {
+  unit: boolean;
 }
 
 /** Which files the handing-off role may edit (the guard's own scope rules), and what to do about the rest. */
@@ -56,7 +71,7 @@ export interface RunChecksInput {
   /** Where the full output of each check is written. */
   logDir: string;
   /** Builds the sandboxed command line; may throw (no sandbox, Docker): the check is then `error`. Absent: no check can run. */
-  launch?: (argv: string[], key: string) => Promise<CheckLaunch>;
+  launch?: (argv: string[], key: string, opts: LaunchOptions) => Promise<CheckLaunch>;
   signal?: AbortSignal;
   spawnImpl?: typeof nodeSpawn;
   now?: () => number;
@@ -278,6 +293,93 @@ export function judgeUnit(timeoutMin: number, c: Captured, failing: readonly str
   return { status: 'error', summary: `failed (exit ${c.exitCode ?? '?'}) without naming a failing test` };
 }
 
+/** "12 tests in 3 files" style counts of a unit run, or '' when the output printed none (GWP-248). */
+export function countsText(output: string): string {
+  const c = unitCounts(output);
+  if (!c.tests && !c.files) return '';
+  const parts: string[] = [];
+  if (c.tests) {
+    const t = c.tests;
+    parts.push(
+      t.failed
+        ? `${t.failed} failed, ${t.passed} passed of ${plural(t.total, 'test')}`
+        : plural(t.total, 'test'),
+    );
+  }
+  if (c.files) parts.push(`${c.tests ? 'in ' : ''}${plural(c.files.total, 'file')}`);
+  return parts.join(' ');
+}
+
+const ECONNREFUSED_LOOPBACK = /ECONNREFUSED\s+(127\.\d+\.\d+\.\d+|::1|\[::1\]):(\d+)/;
+const TEST_SERVICES_SETTING_NAME = 'Project settings > Local test services';
+
+const domainOf = (host: string, port: number): string =>
+  `${host.includes(':') && !host.startsWith('[') ? `[${host}]` : host}:${port}`;
+
+/**
+ * Why a unit run that did not pass is an environment problem on this workstation rather than a failure in the code
+ * (GWP-248), or undefined. In order: the runner's own forwarder could not connect to a declared test service (strong);
+ * the check's bridge exited `CHECK_BRIDGE_EXIT` with a `CHECK_ENV_PREFIX` line; and only when no failing test file is
+ * named, a connection refused to a loopback host:port in the output. `environment` is the host:port when one is known.
+ */
+export function environmentProblem(
+  c: Captured,
+  failing: readonly string[],
+  l: Pick<CheckLaunch, 'forwards' | 'services'> | undefined,
+): { text: string; environment?: string } | undefined {
+  if (c.exitCode === 0 || c.aborted || c.timedOut || c.spawnError !== undefined) return undefined;
+  const failed = l?.forwards?.failures() ?? [];
+  if (failed.length) {
+    const first = failed[0] as string;
+    const named = (l?.forwards?.forwards ?? []).find((f) => domainOf(f.host, f.port) === first);
+    return {
+      text: `the test service ${named ? `${named.name} (${first})` : first}, declared in ${TEST_SERVICES_SETTING_NAME}, did not accept a connection on this workstation`,
+      environment: first,
+    };
+  }
+  const output = stripAnsi(c.output);
+  if (c.exitCode === CHECK_BRIDGE_EXIT) {
+    const line = output
+      .split(/\r?\n/)
+      .find((x) => x.includes(CHECK_ENV_PREFIX))
+      ?.trim();
+    if (line) {
+      const text = line
+        .slice(line.indexOf(CHECK_ENV_PREFIX) + CHECK_ENV_PREFIX.length)
+        .trim()
+        .slice(0, 300);
+      const hp = /((?:127\.0\.0\.1|localhost|\[::1\]):\d+)/.exec(text)?.[1];
+      return { text, ...(hp ? { environment: hp } : {}) };
+    }
+  }
+  if (failing.length) return undefined;
+  const m = ECONNREFUSED_LOOPBACK.exec(output);
+  if (!m) return undefined;
+  const host = (m[1] as string).replace(/^\[|\]$/g, '');
+  const port = Number(m[2]);
+  const hp = domainOf(host, port);
+  const declared = (l?.services ?? []).filter(
+    (d) => d.port === port && (d.host === host || (d.host === 'localhost' && host.startsWith('127.'))),
+  );
+  const refused = declared.find(
+    (d): d is Extract<TestServiceDecision, { state: 'refused' }> => d.state === 'refused',
+  );
+  if (refused)
+    return {
+      text: `the tests tried ${hp} (${refused.name}), which is not reachable from handoff checks: ${refused.reason}`,
+      environment: hp,
+    };
+  if (declared.length)
+    return {
+      text: `the tests could not connect to ${hp} (${(declared[0] as TestServiceDecision).name}): nothing accepted the connection on this workstation`,
+      environment: hp,
+    };
+  return {
+    text: `the tests tried ${hp}, which is not declared in ${TEST_SERVICES_SETTING_NAME}; handoff checks can reach only declared test services`,
+    environment: hp,
+  };
+}
+
 const cmdText = (argv: readonly string[]): string => argv.join(' ').slice(0, 500);
 const LIST_MAX = 20;
 
@@ -286,7 +388,13 @@ function refusalText(blocking: Array<{ ev: CheckEvidence; log: string }>, scope?
   for (const { ev, log } of blocking) {
     const what = ev.kind === 'unit' ? 'the unit tests' : 'the check';
     const lines: string[] = [];
-    if (ev.status === 'error' || ev.status === 'timeout') {
+    if (ev.environment !== undefined) {
+      lines.push(
+        `${what} "${ev.name}" (\`${ev.command}\`) could not run: this is an environment problem on this workstation, not a failure in your code: ${ev.summary}.`,
+        `Ask DevOps to start it (\`aom devops "start the test service ${ev.environment}"\`) or ask with \`aom question --topic environment\`, quoting this. Do not change or skip tests to get around it.`,
+      );
+      if (ev.tail?.length) lines.push('Last lines of its output:', ...ev.tail.map((l) => `  ${l}`));
+    } else if (ev.status === 'error' || ev.status === 'timeout') {
       lines.push(
         `${what} "${ev.name}" (\`${ev.command}\`) did not produce a verdict (${ev.status === 'timeout' ? 'timed out' : 'error'}): ${ev.summary}.`,
       );
@@ -457,14 +565,21 @@ export async function runHandoffChecks(i: RunChecksInput): Promise<RunChecksResu
       }
       let l: CheckLaunch;
       try {
-        l = await i.launch(job.argv, `${job.kind === 'unit' ? 'u-' : ''}${sha8}`);
+        l = await i.launch(job.argv, `${job.kind === 'unit' ? 'u-' : ''}${sha8}`, {
+          unit: job.kind === 'unit',
+        });
       } catch (err) {
         fail('error', (err instanceof Error ? err.message : String(err)).slice(0, 500));
         continue;
       }
       const t0 = now();
       const cwd = resolve(i.worktree, suite.cwd);
-      const cap = await capture(l, cwd, Math.min(job.timeoutMin * 60_000, remaining), i.signal, spawnImpl);
+      let cap: Captured;
+      try {
+        cap = await capture(l, cwd, Math.min(job.timeoutMin * 60_000, remaining), i.signal, spawnImpl);
+      } finally {
+        l.forwards?.close();
+      }
       const durationMs = Math.max(0, now() - t0);
       const output = stripAnsi(cap.output);
       const logPath = join(i.logDir, `${job.kind === 'unit' ? 'unit-' : ''}${slug(suite.name)}-${sha8}.log`);
@@ -480,7 +595,16 @@ export async function runHandoffChecks(i: RunChecksInput): Promise<RunChecksResu
       const budgetText = `timed out: the ${budget >= 60_000 ? `${Math.round(budget / 60_000)}-minute` : `${Math.round(budget / 1000)}-second`} budget for these runs ran out`;
       if (job.kind === 'unit') {
         const failing = failingTestFiles(output);
-        const v0 = judgeUnit(job.timeoutMin, cap, failing);
+        const env = environmentProblem(cap, failing, l);
+        const counts = countsText(output);
+        const judged = judgeUnit(job.timeoutMin, cap, failing);
+        const v0: Verdict = env
+          ? { status: 'error', summary: `environment problem: ${env.text}` }
+          : counts && judged.status === 'passed'
+            ? { status: 'passed', summary: `passed: ${counts}` }
+            : counts && judged.status === 'failed'
+              ? { ...judged, summary: `${judged.summary} (${counts})` }
+              : judged;
         const verdict = budgetCut ? { ...v0, summary: budgetText } : v0;
         const prefix = suite.cwd && suite.cwd !== '.' ? `${suite.cwd.replace(/\/+$/, '')}/` : '';
         const named = failing.map((f) => `FAIL ${prefix}${f}`);
@@ -499,6 +623,7 @@ export async function runHandoffChecks(i: RunChecksInput): Promise<RunChecksResu
           (verdict.status === 'failed' && !named.length)
             ? { tail: lastLines(cap.output) }
             : {}),
+          ...(env && !budgetCut ? { environment: (env.environment ?? 'test services').slice(0, 200) } : {}),
         };
       } else {
         const attributed = attribute(output, {
