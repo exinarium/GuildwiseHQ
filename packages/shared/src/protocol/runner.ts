@@ -1173,7 +1173,7 @@ export const ReleasePublishResultSchema = z.object({
     })
     .optional(),
 });
-export type ReleasePublishResult =z.infer<typeof ReleasePublishResultSchema>;
+export type ReleasePublishResult = z.infer<typeof ReleasePublishResultSchema>;
 
 /**
  * `repo.bump_submodule`: a card merged into repository X (the submodule); repository D (the deploy repository) holds X as a

@@ -466,7 +466,11 @@ async function mergeBack(
 ): Promise<MergeBack> {
   const { payload: p, repoPath } = input;
   const wb = p.workingBranch;
-  const failedWith = (reason: string): MergeBack => ({ branch: wb, state: 'failed', reason: reason.slice(0, 2000) });
+  const failedWith = (reason: string): MergeBack => ({
+    branch: wb,
+    state: 'failed',
+    reason: reason.slice(0, 2000),
+  });
   const app = appOfPlan(p.postAs, p.remoteUrlNormalized);
   try {
     const fetched = await git(repoPath, [...a.args, 'fetch', '--', 'origin', wb], { env: a.env });
@@ -541,7 +545,8 @@ async function mergeBack(
       },
     );
     if (!made.ok) return failedWith(made.error);
-    if (made.value.state === 'merged' && made.value.sha) await advanceLocalBranch(repoPath, wb, made.value.sha);
+    if (made.value.state === 'merged' && made.value.sha)
+      await advanceLocalBranch(repoPath, wb, made.value.sha);
     return made.value;
   } catch (err) {
     return failedWith(errText(err));

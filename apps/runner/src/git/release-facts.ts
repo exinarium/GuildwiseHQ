@@ -59,9 +59,16 @@ export async function releasePointOf(repoPath: string, tag: string, head: string
   const c = await revParse(repoPath, `refs/tags/${tag}`);
   if (!c) return null;
   if (await isAncestor(repoPath, c, head)) return c;
-  for (const parent of await laterParents(repoPath, c)) if (await isAncestor(repoPath, parent, head)) return parent;
+  for (const parent of await laterParents(repoPath, c))
+    if (await isAncestor(repoPath, parent, head)) return parent;
   const rel = (
-    await git(repoPath, ['log', '-1', '--format=%H', `--grep=^chore(release): ${escapeRe(tag.slice(1))}$`, head])
+    await git(repoPath, [
+      'log',
+      '-1',
+      '--format=%H',
+      `--grep=^chore(release): ${escapeRe(tag.slice(1))}$`,
+      head,
+    ])
   ).stdout.trim();
   if (rel) return rel;
   const mb = await git(repoPath, ['merge-base', c, head]);
@@ -238,13 +245,7 @@ export async function readReleaseFacts(input: ReleaseFactsInput): Promise<RepoRe
     };
   });
 
-  const { paths, components } = await componentFactsAt(
-    repoPath,
-    p.components,
-    lastName,
-    headSha,
-    last?.from,
-  );
+  const { paths, components } = await componentFactsAt(repoPath, p.components, lastName, headSha, last?.from);
 
   return {
     ok: true,

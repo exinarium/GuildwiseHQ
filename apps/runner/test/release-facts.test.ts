@@ -173,7 +173,13 @@ describe('repo.release_facts', () => {
         sh(repo.clone, 'git', ['merge', '--squash', 'develop']);
         sh(repo.clone, 'git', ['commit', '-m', 'Release 1.4.0 (#12)']);
       } else {
-        sh(repo.clone, 'git', ['merge', '--no-ff', '-m', 'Merge develop into main for release 1.4.0', 'develop']);
+        sh(repo.clone, 'git', [
+          'merge',
+          '--no-ff',
+          '-m',
+          'Merge develop into main for release 1.4.0',
+          'develop',
+        ]);
       }
       sh(repo.clone, 'git', ['tag', '-a', 'v1.4.0', '-m', 'Guildwise HQ 1.4.0']);
       sh(repo.clone, 'git', ['push', 'origin', 'main', '--tags']);
@@ -215,7 +221,13 @@ describe('repo.release_facts', () => {
 
     it('does not count a lone merge-back merge commit as ahead or as a commit to release', async () => {
       const { repo, M } = shipped();
-      sh(repo.clone, 'git', ['merge', '--no-ff', '-m', 'Merge main into develop after release 1.4.0', 'main']);
+      sh(repo.clone, 'git', [
+        'merge',
+        '--no-ff',
+        '-m',
+        'Merge main into develop after release 1.4.0',
+        'main',
+      ]);
       sh(repo.clone, 'git', ['push', 'origin', 'develop']);
       const r = await readReleaseFacts({ payload: payload(repo), repoPath: repo.clone });
       expect(r.lastTag).toEqual({ name: 'v1.4.0', sha: M });
@@ -260,7 +272,10 @@ describe('repo.release_facts', () => {
     sh(repo.clone, 'git', ['push', 'origin', 'main']);
     const r = await readReleaseFacts({ payload: payload(repo, { head: 'main' }), repoPath: repo.clone });
     expect(r.ok).toBe(true);
-    expect(r.lastTag).toEqual({ name: 'v1.3.0', sha: sh(repo.clone, 'git', ['rev-parse', 'v1.3.0^{commit}']) });
+    expect(r.lastTag).toEqual({
+      name: 'v1.3.0',
+      sha: sh(repo.clone, 'git', ['rev-parse', 'v1.3.0^{commit}']),
+    });
     expect(r.commits.map((c) => c.subject)).toEqual(['feat(runner): add a']);
     expect(r.ahead).toBe(0);
     expect(r.changedTotal).toBe(1);

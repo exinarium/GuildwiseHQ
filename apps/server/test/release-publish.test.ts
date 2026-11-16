@@ -5,7 +5,7 @@ import {
   ReleaseFactsSchema,
 } from '@aom/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { applyReleasePublishResult, releaseChecks } from '../src/release/publish.ts';
+import { applyReleasePublishResult, mergeBackLine, releaseChecks } from '../src/release/publish.ts';
 import { reconcileReleaseProposal } from '../src/release/reconcile.ts';
 import { applyReleaseShipResult } from '../src/release/ship.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
@@ -187,6 +187,41 @@ describe('release.publish on the server', () => {
     expect(await q2(`SELECT * FROM desk_items WHERE subkind='release_published'`)).toHaveLength(1);
     expect(await eventCount('ReleasePublished')).toBe(1);
     expect(await eventCount('ReleaseTagged')).toBe(1);
+  });
+
+  it('says on the Released desk item whether main was merged back into the working branch', async () => {
+    const id = await committed();
+    await applyReleasePublishResult(
+      w.t.app.ctx,
+      w.workstationId,
+      { shipId: id },
+      true,
+      {
+        ...done,
+        mergeBack: {
+          branch: 'develop',
+          state: 'failed',
+          reason: 'merging main back into develop conflicts in notes.txt',
+        },
+      },
+      undefined,
+    );
+    const body = (await q2(`SELECT * FROM desk_items WHERE subkind='release_published'`))[0].body;
+    expect(body).toContain('Could not merge the main branch back into develop');
+    expect(body).toContain('notes.txt');
+    expect(body).toContain('the next release still starts from v1.4.0');
+    expect((await ship()).status).toBe('published');
+  });
+
+  it('mergeBackLine: a line for merged and failed, none for already or absent', () => {
+    expect(mergeBackLine({ branch: 'develop', state: 'merged', sha: M }, 'v1.4.0')).toBe(
+      `The main branch was merged back into develop (${M.slice(0, 7)}).`,
+    );
+    expect(mergeBackLine({ branch: 'develop', state: 'fast-forward', sha: M }, 'v1.4.0')).toContain(
+      'merged back into develop',
+    );
+    expect(mergeBackLine({ branch: 'develop', state: 'already', sha: M }, 'v1.4.0')).toBeNull();
+    expect(mergeBackLine(undefined, 'v1.4.0')).toBeNull();
   });
 
   it('a forge without release pages publishes with the tag and says no release page was created', async () => {
