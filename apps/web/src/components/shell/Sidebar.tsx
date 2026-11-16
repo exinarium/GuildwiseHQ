@@ -13,21 +13,69 @@ export interface DeskCounts {
   blocking: number;
 }
 
-function DeskPill({ counts, collapsed }: { counts: DeskCounts; collapsed: boolean }) {
-  if (counts.open <= 0) return null;
-  const blocking = counts.blocking > 0;
+/** The Releases badge: deploys waiting in the release queue plus open Ship release desk items. */
+export interface ReleaseCounts {
+  waiting: number;
+  ship: number;
+}
+
+/** The counts the navigation shows: the Desk's, and optionally the Releases badge. */
+export interface NavCounts extends DeskCounts {
+  releases?: ReleaseCounts | undefined;
+}
+
+/** The count pill of a navigation link. Nothing when the count is 0. */
+function CountPill({
+  count,
+  tone,
+  collapsed,
+  testId,
+  title,
+}: {
+  count: number;
+  tone: 'accent' | 'danger';
+  collapsed: boolean;
+  testId: string;
+  title: string;
+}) {
+  if (count <= 0) return null;
   return (
     <span
-      data-testid="desk-badge"
-      title={`${counts.blocking} blocking, ${counts.open} open`}
+      data-testid={testId}
+      title={title}
       className={cx(
         'tnum inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-semibold',
-        blocking ? 'bg-danger-solid text-white' : 'bg-accent text-accent-fg',
+        tone === 'danger' ? 'bg-danger-solid text-white' : 'bg-accent text-accent-fg',
         collapsed && 'absolute -top-1.5 -right-1.5 h-[18px] min-w-[18px] px-1 text-xs',
       )}
     >
-      {counts.open}
+      {count}
     </span>
+  );
+}
+
+function DeskPill({ counts, collapsed }: { counts: DeskCounts; collapsed: boolean }) {
+  return (
+    <CountPill
+      count={counts.open}
+      tone={counts.blocking > 0 ? 'danger' : 'accent'}
+      collapsed={collapsed}
+      testId="desk-badge"
+      title={`${counts.blocking} blocking, ${counts.open} open`}
+    />
+  );
+}
+
+function ReleasesPill({ counts, collapsed }: { counts: ReleaseCounts | undefined; collapsed: boolean }) {
+  if (!counts) return null;
+  return (
+    <CountPill
+      count={counts.waiting + counts.ship}
+      tone="accent"
+      collapsed={collapsed}
+      testId="releases-badge"
+      title={`${counts.waiting} waiting to release, ${counts.ship} Ship release`}
+    />
   );
 }
 
@@ -39,16 +87,19 @@ function Item({
 }: {
   entry: NavEntry;
   collapsed: boolean;
-  counts: DeskCounts;
+  counts: NavCounts;
   onNavigate?: (() => void) | undefined;
 }) {
   const { pathname } = useLocation();
   const active = isActive(entry, pathname);
+  const releases =
+    entry.id === 'releases' && counts.releases ? counts.releases.waiting + counts.releases.ship : 0;
   const link = (
     <Link
       to={entry.to}
       onClick={onNavigate}
       aria-current={active ? 'page' : undefined}
+      {...(releases > 0 ? { 'aria-label': `${entry.label}, ${releases} waiting` } : {})}
       data-tour={`nav-${entry.id}`}
       {...(entry.testId ? { 'data-testid': entry.testId } : {})}
       className={cx(
@@ -65,6 +116,7 @@ function Item({
       <entry.icon aria-hidden="true" className="size-5 shrink-0" strokeWidth={1.75} />
       <span className={collapsed ? 'sr-only' : 'flex-1 truncate'}>{entry.label}</span>
       {entry.id === 'desk' && <DeskPill counts={counts} collapsed={collapsed} />}
+      {entry.id === 'releases' && <ReleasesPill counts={counts.releases} collapsed={collapsed} />}
     </Link>
   );
   if (!collapsed) return link;
@@ -103,7 +155,7 @@ export function SidebarBody({
   sections: NavSection[];
   footer: NavEntry[];
   collapsed?: boolean;
-  counts: DeskCounts;
+  counts: NavCounts;
   project: ProjectDto | null;
   projects: ProjectDto[];
   user: { id?: string; name: string; email: string; roleLabel: string; avatar?: UserAvatarValue | null };

@@ -1,5 +1,6 @@
 import { useSearchParams } from 'react-router';
 import { useReleaseQueue } from '../api/queries/delivery.ts';
+import { useDesk } from '../api/queries/desk.ts';
 import { useReleaseDocsPrepOverview } from '../api/queries/releaseDocsPrep.ts';
 import { DeployRuns } from '../components/delivery/DeployRuns.tsx';
 import { RulesPanel } from '../components/delivery/GatesPanel.tsx';
@@ -9,6 +10,7 @@ import { ReleaseQueue } from '../components/delivery/ReleaseQueue.tsx';
 import { panelId, tabId } from '../components/ui/Tabs.tsx';
 import { Badge, Callout, PageHeader, Tabs } from '../components/ui.tsx';
 import { useCanManageOrg } from '../lib/orgRole.ts';
+import { countOpenShipReleases, countWaitingReleases } from '../lib/releaseCounts.ts';
 
 const PREFIX = 'releases';
 type TabKey = 'waiting' | 'live' | 'history' | 'rules' | 'prep';
@@ -22,10 +24,13 @@ export function Releases() {
   const manage = useCanManageOrg();
   const [params, setParams] = useSearchParams();
   const queue = useReleaseQueue(manage);
-  const waiting = queue.data?.length ?? 0;
+  const waiting = countWaitingReleases(queue.data);
   // Release prep (docs and videos): the tab exists only when a project uses it, so the page is unchanged otherwise.
   const prep = useReleaseDocsPrepOverview();
   const prepTab = (prep.data?.length ?? 0) > 0;
+  // Open Ship release items, from the same cached desk list the sidebar badge and the Desk read.
+  const desk = useDesk();
+  const ship = countOpenShipReleases(desk.data?.items);
   const base: Array<{ id: TabKey; label: string; badge?: React.ReactNode }> = manage
     ? [
         {
@@ -41,7 +46,12 @@ export function Releases() {
         { id: 'live', label: 'What is live' },
         { id: 'history', label: 'History' },
       ];
-  const tabs = prepTab ? [...base, { id: 'prep' as TabKey, label: 'Release prep' }] : base;
+  const prepEntry = {
+    id: 'prep' as TabKey,
+    label: 'Release prep',
+    ...(ship > 0 ? { badge: <Badge tone="brand">{ship}</Badge> } : {}),
+  };
+  const tabs = prepTab ? [...base, prepEntry] : base;
   const asked = params.get('tab');
   const value: TabKey = tabs.some((t) => t.id === asked) ? (asked as TabKey) : (tabs[0]?.id as TabKey);
   return (

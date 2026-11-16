@@ -82,6 +82,7 @@ import {
 import { useExpertMode } from '../lib/expert-mode.ts';
 import { canUseIntake } from '../lib/intake.ts';
 import { focusOf, integrationsLink } from '../lib/integrations.ts';
+import { isShipReleaseItem } from '../lib/releaseCounts.ts';
 import { useOrgTerms } from '../lib/terms.ts';
 import { ageLabel, formatDateTime } from '../lib/time.ts';
 
@@ -636,7 +637,7 @@ export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?:
         <SizeExceptionDeskItem item={item} />
       ) : item.kind === 'approval' && item.subkind === 'outbound' ? (
         <OutboundApproval item={item} />
-      ) : item.kind === 'approval' && item.subkind === 'ship_release' ? (
+      ) : isShipReleaseItem(item) ? (
         <ShipReleaseItem item={item} />
       ) : item.subkind === WORKING_BRANCH_SUBKIND ? (
         <WorkingBranchQuestion item={item} />

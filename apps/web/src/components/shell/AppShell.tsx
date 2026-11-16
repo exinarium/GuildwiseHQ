@@ -7,6 +7,7 @@ import { matchPath, Outlet, useLocation, useNavigate } from 'react-router';
 import { useLogout, useMe } from '../../api/queries/auth.ts';
 import { useCard } from '../../api/queries/cards.ts';
 import { useUnreadChatTotal } from '../../api/queries/chats.ts';
+import { useReleaseBadgeCounts } from '../../api/queries/delivery.ts';
 import { useDesk } from '../../api/queries/desk.ts';
 import { useRelayOfflineNotice } from '../../api/queries/relay.ts';
 import { BRAND } from '../../brand.ts';
@@ -124,8 +125,14 @@ function Shell({ name, live }: { name: string; live: string }) {
   const savedScroll = useRef<number | null>(null);
   useViewportSync(!isTabletUp);
 
-  const counts = { open: desk.data?.counts.open ?? 0, blocking: desk.data?.counts.blocking ?? 0 };
   const org = me.data?.activeOrg ?? null;
+  // Business view has no Releases link, so it makes no release-queue request either.
+  const releases = useReleaseBadgeCounts(!isBusinessView(org));
+  const counts = {
+    open: desk.data?.counts.open ?? 0,
+    blocking: desk.data?.counts.blocking ?? 0,
+    releases: { waiting: releases.waiting, ship: releases.ship },
+  };
   const relayOffline = useRelayOfflineNotice(org);
   const canManage = org?.role === 'owner' || org?.role === 'admin';
   const terms = useOrgTerms();
