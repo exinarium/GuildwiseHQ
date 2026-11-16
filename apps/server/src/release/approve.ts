@@ -14,6 +14,7 @@ import type { Tx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden } from '../errors.ts';
 import { releaseDocsPrepViewFor } from './docs-prep.ts';
 import { loadFacts } from './facts.ts';
+import { assertReleasePointers, withServerStaleness } from './pointer-gate.ts';
 import { buildProposal } from './proposal.ts';
 import { loadComponentRules } from './rules.ts';
 
@@ -81,6 +82,8 @@ export async function resolveShipReleaseIn(
       'proposal_changed',
       'The working branch moved since you opened this item. Check the refreshed proposal and approve again.',
     );
+  // A submodule behind the latest release of the project repository it points to refuses the release (nothing stored).
+  await assertReleasePointers(tx, proposal.repo_id);
   const check = validateReleaseVersion(release.version, facts.lastTag?.name ?? null, facts.existingTags);
   if (!check.ok) throw badRequest('invalid_version', check.message);
   const rules = await loadComponentRules(tx, proposal.repo_id);
@@ -173,6 +176,8 @@ async function releaseViewBase(db: Queryable, item: Row): Promise<ReleaseProposa
       existingTags: [],
     };
   const built = buildProposal(facts, rules);
+  // Submodule pointers: only on repositories that have them, so the view of any other repository reads as before.
+  const submodules = facts.submodules?.length ? await withServerStaleness(db, facts.submodules) : undefined;
   return {
     proposalId: proposal.id,
     projectId: proposal.project_id,
@@ -200,5 +205,6 @@ async function releaseViewBase(db: Queryable, item: Row): Promise<ReleaseProposa
     },
     rules: rules.map((r) => ({ name: r.name, paths: r.paths, versionFile: r.versionFile })),
     existingTags: facts.existingTags,
+    ...(submodules ? { submodules } : {}),
   };
 }

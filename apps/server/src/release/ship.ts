@@ -21,6 +21,7 @@ import { withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { loadReleaseDocsPrepGate } from './docs-prep.ts';
+import { assertReleasePointers } from './pointer-gate.ts';
 import { enqueueReleasePublish, planReleasePublish } from './publish.ts';
 import { loadComponentRules } from './rules.ts';
 
@@ -160,6 +161,8 @@ export async function startReleaseShipIn(
     [proposal.repo_id, proposal.version],
   );
   if (done) return undefined;
+  // A submodule behind the latest release of the project repository it points to: nothing is queued.
+  await assertReleasePointers(tx, proposal.repo_id);
   // Release prep (docs and videos): off reads the switch and allows; on, the ship waits for a passed or skipped run.
   const gate = await loadReleaseDocsPrepGate(tx, proposal);
   if (!gate.allowed)
@@ -242,6 +245,8 @@ export async function retryReleaseShipIn(
     const target = await enqueueReleasePublishFor(ctx, tx, user, ship);
     return target;
   }
+  // release.ship cuts from the current working branch, so its current facts decide (a bump and a refresh clear this).
+  await assertReleasePointers(tx, ship.repo_id);
   const workstationId = await shipWorkstation(tx, ship.repo_id, user.id, ship.workstation_id);
   const stored = ship.payload as ShipPayload;
   await cancelLiveShipCommands(

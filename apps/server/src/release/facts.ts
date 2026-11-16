@@ -8,7 +8,7 @@ import {
 } from '@aom/shared';
 import { postAsFieldFor } from '../commands/commit-as.ts';
 import type { Ctx } from '../context.ts';
-import { exec, one, type Queryable } from '../db/sql.ts';
+import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { reconcileReleaseProposal } from './reconcile.ts';
 import { loadComponentRules } from './rules.ts';
@@ -119,9 +119,26 @@ export async function requestReleaseFacts(
     ...(repo.forge_kind ? { forge: repo.forge_kind } : {}),
     components: rules,
     ...(await postAsFieldFor(ctx.pool, repo.project_id, ws.id, { write: false })),
+    projectRepos: await projectReposFor(ctx.pool, repo.project_id, repoId),
   });
   void Promise.resolve(ctx.services.gateway.deliverPending(ws.id)).catch(() => undefined);
   return { queued: true, requestId };
+}
+
+/** The other active repositories of the project, for the runner's submodule pointer check. */
+async function projectReposFor(
+  db: Queryable,
+  projectId: string,
+  repoId: string,
+): Promise<Array<{ repoId: string; name: string; remoteUrlNormalized: string }>> {
+  const list = await rows<{ repoId: string; name: string; remoteUrlNormalized: string }>(
+    db,
+    `SELECT id AS "repoId", name, remote_url_normalized AS "remoteUrlNormalized" FROM project_repos
+      WHERE project_id=$1 AND id<>$2 AND removed_at IS NULL AND remote_url_normalized IS NOT NULL
+      ORDER BY name LIMIT 200`,
+    [projectId, repoId],
+  );
+  return list.map((r) => ({ ...r, name: r.name.slice(0, 200) }));
 }
 
 /** `command.result` of `repo.release_facts`: stores the facts (or the message) and reconciles the proposal. */
