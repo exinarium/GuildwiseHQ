@@ -277,6 +277,11 @@ baseSource: z.enum(['tag', 'changelog', 'none']),
 
 ### 5.9 Runner (`apps/runner/src/git/release-facts.ts`)
 
+> Update (section 8): as built, the runner part is covered by GWP-261, whose `releaseTagsAt` already counts a tag on
+> main whose release commit is on the branch as `last`. The server takes the newest of `lastTag` and `existingTags`
+> (`newestTagOf`), so a tag the runner does not count as `last` still raises the base. On top of 261, this card only
+> changes the runner test and `RUNNER_VERSION`. The original plan below stays as the fallback if 261 changes that rule.
+
 - `releaseTagsAt`: also return `newest: { name, sha } | null` = `newestFirst(all)[0]` with its `rev-parse
   refs/tags/<name>`. Keep `last` (merged) as it is for `lastReleaseTagAt` / Release prep.
 - `readReleaseFacts`: use `newest` as `lastTag`, which also drives the commit range and `componentFactsAt`.
@@ -350,3 +355,29 @@ them against your own test database as CLAUDE.md describes, or leave them for th
 6. **Error code change.** Equal or lower versions now get 409 instead of 400. The web item shows the message the same
    way. Update the server test and ARCHITECTURE.md. No other client sends this request.
 7. Do not create, move or delete tags. Every change here is a read or a computation.
+
+## 8. Status and build order (checked 2026-11-16)
+
+- The build for this design is done and approved (two reviews, E2E regression pass). It sits on the card branch as
+  three commits on top of an **old copy** of the GWP-261 branch (`f10944cb`):
+  - `d227e86e` Design: base the release recommendation on the newest release tag
+  - `883e0431` Base the release recommendation and version check on the newest release tag
+  - `6af054d0` Document the release base: newest release tag or newer changelog version
+- The GWP-261 branch has since been rebased onto the latest `development` (now including GWP-248, `8cfab2ff`) and has one
+  new commit, `ae5d859f` (release facts asked at most once from the automatic prep start). That commit touches
+  `apps/server/src/release/{docs-prep-auto,docs-prep,facts}.ts` and their tests, none of which are in this card's diff.
+  A trial three-way merge of `f10944cb..6af054d0` onto the current 261 head (`git merge-tree`) is clean.
+- The design does not change. What remains is order only:
+  1. Wait until GWP-261 has merged into `development` (`aom card facts` → `allDependenciesMerged: true`). Do not
+     build on the unmerged 261 branch again.
+  2. Put the card branch on the new `development` so that only the three commits above remain (for example
+     `git rebase --onto origin/development f10944cb`, done by the runner or through `aom git merge-main`, whichever the
+     build shift allows). If GWP-261 changed during its own review, the conflicts can only be in `reconcile.ts`,
+     `approve.ts` or `release-facts.ts`: keep 261's rules and re-apply this card's two `newestTagOf(facts)` reads
+     (5.7), the 400/409 split (5.5) and `last_tag` in the projection (5.6).
+  3. Re-check 5.9: if the merged 261 no longer counts a main-only tag as `last`, the server's `newestTagOf` still
+     floors the base and validation, but the commit range and `contentAtTag` come from the older tag. In that case
+     apply the original runner plan in 5.9.
+  4. Set `RUNNER_VERSION` one patch above what `development` has at that time (the merged 261 may have bumped it).
+  5. Re-run the unit tests in section 6 and hand off. The release-reconcile and projection tests need Postgres
+     (GWP-248 now provides a test database to handoff unit runs; if it is not available, name them for the testers).
