@@ -1,9 +1,8 @@
-import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
-import { hostname, tmpdir } from 'node:os';
+import { hostname } from 'node:os';
 import { join } from 'node:path';
 import {
   capVideoReport,
@@ -68,7 +67,6 @@ const BUILD_TIMEOUT_MS = 30 * 60_000;
 const TAIL_LINES = 40;
 const TAIL_CHARS = 2000;
 
-const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 const isTest = () => process.env.NODE_ENV === 'test';
 
 interface Ran {
@@ -76,37 +74,19 @@ interface Ran {
   out: string;
 }
 
-/** Runs a command with a time limit, keeping the combined output (its tail is what a failure reports). */
-function run(
+/**
+ * Runs a command through the step's exec (the runner's sandbox), keeping stdout then stderr (its tail is what a failure
+ * reports).
+ */
+async function run(
+  ctx: DocsPrepStepContext,
   cmd: string,
   args: string[],
-  opts: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs: number },
+  opts: { cwd: string; env?: Record<string, string>; timeoutMs: number },
 ): Promise<Ran> {
-  return new Promise((resolve) => {
-    const child = spawn(cmd, args, {
-      cwd: opts.cwd,
-      env: opts.env ?? process.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let out = '';
-    const keep = (d: Buffer) => {
-      out = (out + d.toString()).slice(-200_000);
-    };
-    child.stdout.on('data', keep);
-    child.stderr.on('data', keep);
-    const timer = setTimeout(() => {
-      out += `\n(timed out after ${Math.round(opts.timeoutMs / 60_000)} min)`;
-      child.kill('SIGKILL');
-    }, opts.timeoutMs);
-    child.on('error', (e) => {
-      clearTimeout(timer);
-      resolve({ code: null, out: `${out}\n${errMsg(e)}` });
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      resolve({ code, out });
-    });
-  });
+  const r = await ctx.exec(cmd, args, opts);
+  const timedOut = r.timedOut ? `\n(timed out after ${Math.round(opts.timeoutMs / 60_000)} min)` : '';
+  return { code: r.exitCode, out: `${r.stdout}\n${r.stderr}${timedOut}`.slice(-200_000) };
 }
 
 export const tailOf = (out: string): string =>
@@ -145,10 +125,12 @@ async function sidecars(wt: string): Promise<{ voice?: unknown }[]> {
 }
 
 /**
- * The voice and ffmpeg of this workstation, read from the repository's own packages/video code (node strips the
- * types), with the runner's environment. Tests replace the probe with AOM_PREP_VIDEO_PROBE (JSON), read only under test.
+ * The voice and ffmpeg of this workstation, read from the repository's own packages/video code (the toolchain's node
+ * strips the types), inside the sandbox with the video tool variables passed through. Tests replace the probe with
+ * AOM_PREP_VIDEO_PROBE (JSON), read only under test.
  */
-async function probe(wt: string): Promise<VoiceProbe & { ffmpeg: string | null }> {
+async function probe(ctx: DocsPrepStepContext): Promise<VoiceProbe & { ffmpeg: string | null }> {
+  const wt = ctx.worktree;
   if (isTest() && process.env.AOM_PREP_VIDEO_PROBE) return JSON.parse(process.env.AOM_PREP_VIDEO_PROBE);
   const voice = join(wt, 'packages/video/src/voice.ts');
   const ffmpeg = join(wt, 'packages/video/src/ffmpeg.ts');
@@ -157,7 +139,7 @@ async function probe(wt: string): Promise<VoiceProbe & { ffmpeg: string | null }
     `let ff = null; try { const f = await import(${JSON.stringify(`file://${ffmpeg}`)}); await f.findFfmpeg(); } catch (e) { ff = String(e && e.message || e); }`,
     'process.stdout.write(JSON.stringify({ available: !!(await v.voiceAvailable()), label: v.VOICE_LABEL, ffmpeg: ff }));',
   ].join('\n');
-  const r = await run(process.execPath, ['--input-type=module', '-e', script], {
+  const r = await run(ctx, 'node', ['--input-type=module', '-e', script], {
     cwd: wt,
     timeoutMs: 60_000,
   });
@@ -168,9 +150,11 @@ async function probe(wt: string): Promise<VoiceProbe & { ffmpeg: string | null }
 }
 
 /** The voice check of 5.6: null when the voice and ffmpeg are fine, else the failure. */
-async function preflight(wt: string): Promise<{ error: string; voice: string | null } | { voice: string }> {
-  const library = libraryVoiceLabel(await sidecars(wt));
-  const p = await probe(wt);
+async function preflight(
+  ctx: DocsPrepStepContext,
+): Promise<{ error: string; voice: string | null } | { voice: string }> {
+  const library = libraryVoiceLabel(await sidecars(ctx.worktree));
+  const p = await probe(ctx);
   const voiceError = checkVideoVoice(p, library, hostname());
   if (voiceError) return { error: voiceError, voice: library.ok ? library.label : null };
   if (p.ffmpeg) return { error: `ffmpeg unavailable: ${p.ffmpeg}`, voice: p.label };
@@ -273,7 +257,7 @@ async function plan(ctx: DocsPrepStepContext): Promise<DocsPrepStepOutcome> {
   if ('error' in map) return { ok: false, error: map.error };
   const head = ctx.start;
   const base = ctx.payload.base?.sha ?? ctx.summary?.base.sha;
-  const pre = await preflight(ctx.worktree);
+  const pre = await preflight(ctx);
   const empty: VideoStepReport = {
     harness: true,
     rule: VIDEO_RULE_TEXT,
@@ -408,7 +392,7 @@ async function render(ctx: DocsPrepStepContext): Promise<DocsPrepStepOutcome> {
   if (!parsed.success) return { ok: false, error: 'the render phase got no plan: run the prep again' };
   const planned = parsed.data;
   const authored = new Set(Array.isArray(ctx.input?.authored) ? (ctx.input?.authored as string[]) : []);
-  const pre = await preflight(ctx.worktree);
+  const pre = await preflight(ctx);
   const videos: VideoReportEntry[] = planned.videos.map((v) => ({ ...v }));
   const out: VideoStepReport = { ...planned, voice: pre.voice, videos, needsAuthoring: undefined };
   if ('error' in pre) return { ok: false, error: pre.error, report: report(out) };
@@ -431,14 +415,17 @@ async function render(ctx: DocsPrepStepContext): Promise<DocsPrepStepOutcome> {
     for (const [cmd, args] of [
       ['pnpm', ['install', '--frozen-lockfile', '--prefer-offline']],
       ['pnpm', ['build']],
+      // The recorder's browser, in the sandbox's browser cache (PLAYWRIGHT_BROWSERS_PATH)
+      ['pnpm', ['--filter', '@aom/e2e', 'exec', 'playwright', 'install', 'chromium']],
     ] as const) {
-      const r = await run(cmd, [...args], { cwd: ctx.worktree, timeoutMs: BUILD_TIMEOUT_MS });
+      const r = await run(ctx, cmd, [...args], { cwd: ctx.worktree, timeoutMs: BUILD_TIMEOUT_MS });
       if (r.code !== 0) return { ok: false, error: `build failed: ${tailOf(r.out)}`, report: report(out) };
     }
   }
 
+  // Under the step's scratch folder: the sandbox binds it read-write at the same path (its /tmp is private).
   const stageRoot = join(
-    tmpdir(),
+    ctx.outDir,
     `aom-prep-video-${ctx.payload.runId.slice(0, 8)}-${ctx.payload.repoId.slice(0, 8)}`,
   );
   const db = `aom_prep_video_${ctx.payload.runId.replace(/-/g, '').slice(0, 8)}`;
@@ -454,15 +441,14 @@ async function render(ctx: DocsPrepStepContext): Promise<DocsPrepStepOutcome> {
       let reused = false;
       if (await fromCache(cache, inputs, stage)) reused = true;
       else {
-        const env: NodeJS.ProcessEnv = {
-          ...process.env,
+        const env: Record<string, string> = {
           AOM_VIDEO_SLUG: v.slug,
           AOM_VIDEO_OUT: stage,
           AOM_VIDEO_PORT: String(await freePort()),
           AOM_VIDEO_DB: db,
           AOM_VIDEO_DIR_BASE: stageRoot,
         };
-        const r = await run(rec.cmd, rec.args, { cwd: ctx.worktree, env, timeoutMs: RENDER_TIMEOUT_MS });
+        const r = await run(ctx, rec.cmd, rec.args, { cwd: ctx.worktree, env, timeoutMs: RENDER_TIMEOUT_MS });
         if (r.code !== 0) {
           v.state = 'failed';
           v.error = tailOf(r.out) || `the recording exited with ${r.code}`;
@@ -508,10 +494,18 @@ async function render(ctx: DocsPrepStepContext): Promise<DocsPrepStepOutcome> {
   } finally {
     await rm(stageRoot, { recursive: true, force: true }).catch(() => undefined);
     if (rec.build)
-      await run('psql', ['-h', '127.0.0.1', '-p', '5433', '-c', `DROP DATABASE IF EXISTS ${db}`], {
-        cwd: ctx.worktree,
-        timeoutMs: 30_000,
-      }).catch(() => undefined);
+      // Best effort, with the harness's own address and credentials (e2e/support/env.ts): the sandbox shows no
+      // PGPASSWORD or ~/.pgpass.
+      await run(
+        ctx,
+        'psql',
+        [
+          `postgres://aom:aom@${process.env.AOM_E2E_PG_HOSTPORT || '127.0.0.1:5433'}/postgres`,
+          '-c',
+          `DROP DATABASE IF EXISTS ${db}`,
+        ],
+        { cwd: ctx.worktree, timeoutMs: 30_000 },
+      ).catch(() => undefined);
   }
   const bad = videos.filter((v) => v.state === 'failed');
   if (bad.length > 0)

@@ -22,7 +22,10 @@ export interface DocsPrepStepContext {
   summary: ReleaseDocsPrepSummary | undefined;
   /** A scratch folder for this step (removed afterwards). */
   outDir: string;
-  /** A process with a time limit and the runner's toolchain PATH; output redacted. */
+  /**
+   * The only way a step runs a project command: inside the runner's bubblewrap sandbox, with a time limit, the toolchain
+   * PATH and a scrubbed environment; output redacted. Throws DocsPrepSandboxError when the sandbox cannot be set up.
+   */
   exec: DocsPrepExec;
   /** The phase of a step with phases; '' for a single-phase step. */
   phase: string;
@@ -39,8 +42,30 @@ export interface DocsPrepStepContext {
 export type DocsPrepExec = (
   cmd: string,
   args: string[],
-  opts: { cwd: string; timeoutMs: number },
+  /** `env`: extra variables for this one command (on top of the sandbox's environment). */
+  opts: { cwd: string; timeoutMs: number; env?: Record<string, string> },
 ) => Promise<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean }>;
+
+/** What a step's exec is bound to: the step, its worktree and its scratch folder (the only writable paths). */
+export interface DocsPrepExecScope {
+  step: string;
+  phase: string;
+  worktree: string;
+  outDir: string;
+  runId: string;
+  repoId: string;
+}
+
+/** Makes the exec of one step run; the runner's factory always sandboxes. */
+export type DocsPrepExecFactory = (scope: DocsPrepExecScope) => DocsPrepExec;
+
+/** Thrown by the exec seam when the sandbox cannot be set up; the command was not run. */
+export class DocsPrepSandboxError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DocsPrepSandboxError';
+  }
+}
 
 export type DocsPrepStepOutcome =
   | {

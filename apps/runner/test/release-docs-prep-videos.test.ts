@@ -1,8 +1,10 @@
+import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { type ReleaseDocsPrepPayload, type ReleaseDocsPrepResult, writableFilesFor } from '@aom/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runReleaseDocsPrep } from '../src/git/release-docs-prep.ts';
+import type { DocsPrepExec, DocsPrepExecScope } from '../src/git/release-docs-prep-steps.ts';
 import { addPrepTaskWorktree, finishPrepTask, removePrepTaskWorktree } from '../src/git/release-prep-task.ts';
 import { cleanupTmp, makeRepo, sh, tmp } from './helpers.ts';
 
@@ -81,12 +83,29 @@ const payload = (s: Setup, over: Partial<ReleaseDocsPrepPayload> = {}): ReleaseD
   ...over,
 });
 
+/** A plain exec for the fake recorder (the runner's own exec runs it in the sandbox; release-docs-prep-exec.test.ts). */
+const plainExec: DocsPrepExec = async (cmd, args, o) => {
+  const r = spawnSync(cmd, args, {
+    cwd: o.cwd,
+    env: { ...process.env, ...o.env },
+    encoding: 'utf8',
+    timeout: o.timeoutMs,
+  });
+  return {
+    exitCode: r.status ?? 1,
+    stdout: r.stdout ?? '',
+    stderr: r.stderr ?? (r.error ? String(r.error) : ''),
+    timedOut: false,
+  };
+};
+
 const run = (s: Setup, over: Partial<ReleaseDocsPrepPayload> = {}): Promise<ReleaseDocsPrepResult> =>
   runReleaseDocsPrep({
     payload: payload(s, over),
     repoPath: s.repo.clone,
     integrationDir: s.integrationDir,
     dataDir: s.dataDir,
+    execFor: () => plainExec,
   });
 
 type Videos = { slug: string; action: string; state: string; reasons: string[]; error?: string }[];
@@ -234,6 +253,42 @@ describe('release.docs_prep videos: render', () => {
     );
     // the render worktree is gone
     expect(sh(s.repo.clone, 'git', ['worktree', 'list'])).not.toContain('docs-prep-');
+  });
+
+  it("runs the recorder through the step's exec, staging under the step's scratch folder", async () => {
+    const f = fakeRecorder(tmp('aom-fake-'));
+    process.env.AOM_PREP_VIDEO_CMD = f.cmd;
+    const s = setup({ 'apps/web/src/pages/Backlog.tsx': 'v2\n' });
+    const plan = await run(s);
+    const calls: { cmd: string; cwd: string; env: Record<string, string> }[] = [];
+    let scope: DocsPrepExecScope | undefined;
+    const render = await runReleaseDocsPrep({
+      payload: payload(s, { phase: 'render', input: { plan: plan.report, authored: [] } }),
+      repoPath: s.repo.clone,
+      integrationDir: s.integrationDir,
+      dataDir: s.dataDir,
+      execFor: (sc) => {
+        scope = sc;
+        return async (cmd, args, o) => {
+          calls.push({ cmd, cwd: o.cwd, env: o.env ?? {} });
+          return plainExec(cmd, args, o);
+        };
+      },
+    });
+    expect(render.state).toBe('passed');
+    expect(scope).toMatchObject({ step: 'videos', phase: 'render', runId: RUN, repoId: ID(3) });
+    expect(calls.map((c) => c.cmd)).toEqual([f.cmd]);
+    expect(calls[0]?.cwd).toBe(scope?.worktree);
+    expect(calls[0]?.env.AOM_VIDEO_SLUG).toBe('backlog');
+    expect(calls[0]?.env.AOM_VIDEO_OUT?.startsWith(`${scope?.outDir}/`)).toBe(true);
+    // only the recorder's own variables, never the runner's environment
+    expect(Object.keys(calls[0]?.env ?? {}).sort()).toEqual([
+      'AOM_VIDEO_DB',
+      'AOM_VIDEO_DIR_BASE',
+      'AOM_VIDEO_OUT',
+      'AOM_VIDEO_PORT',
+      'AOM_VIDEO_SLUG',
+    ]);
   });
 
   it('fails naming the video and its error, and still renders the others (nothing kept)', async () => {

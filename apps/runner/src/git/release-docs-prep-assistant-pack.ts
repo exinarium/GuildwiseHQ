@@ -25,11 +25,12 @@ export async function changedPaths(wt: string): Promise<string[]> {
 /**
  * Release prep step 'assistant-pack': regenerates the assistant knowledge pack (`pnpm --filter @aom/server
  * assistant:pack`) in the throwaway worktree, after the Help articles step applied its edits, so a release whose Help
- * changed ships a pack that matches it. The generator is project code: it runs here, through `ctx.exec`, as the runner
- * user with the runner's environment and the toolchain PATH, NOT in the sandbox (the same trust as the guide step's PDF
- * build: release-branch code is trusted); never in a writer shift and never on the server. The path check below limits
- * only what gets committed, not what the commands can touch. A repository without the generator is skipped with a note. Only files under the pack folder may change; the
- * generator is byte-stable, so a retry on a branch that has the pack already changes nothing.
+ * changed ships a pack that matches it. The generator is project code: it runs through `ctx.exec`, inside the runner's
+ * sandbox (the worktree writable; the runner's data, credentials and secrets hidden; a scrubbed environment with the
+ * toolchain PATH), never as the runner user, never in a writer shift and never on the server. No sandbox: the step
+ * fails. The path check below limits what gets committed. A repository without the generator is skipped with a note.
+ * Only files under the pack folder may change; the generator is byte-stable, so a retry on a branch that has the pack
+ * already changes nothing.
  */
 export const assistantPackStep: DocsPrepStepHandler = async (ctx) => {
   const wt = ctx.worktree;

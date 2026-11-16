@@ -147,13 +147,13 @@ async function analyseThenGuide(
     payload: payload(s, { ...base, phase: 'check' }),
     repoPath: s.repo.clone,
     integrationDir: s.integrationDir,
-    exec: e.exec,
+    execFor: () => e.exec,
   });
   const guide = await runReleaseDocsPrep({
     payload: payload(s, { ...base, phase: 'apply', ...(proposal === null ? {} : { input: { proposal } }) }),
     repoPath: s.repo.clone,
     integrationDir: s.integrationDir,
-    exec: e.exec,
+    execFor: () => e.exec,
   });
   return { analyse, check, guide };
 }
@@ -285,7 +285,7 @@ describe("release prep step 'guide'", () => {
       }),
       repoPath: s.repo.clone,
       integrationDir: s.integrationDir,
-      exec: fakeExec().exec,
+      execFor: () => fakeExec().exec,
     });
     expect(again.state).toBe('passed');
     expect(again.files).toEqual([]);
@@ -325,7 +325,7 @@ describe("release prep step 'guide'", () => {
       }),
       repoPath: s.repo.clone,
       integrationDir: s.integrationDir,
-      exec: e.exec,
+      execFor: () => e.exec,
     });
     expect(commit.state).toBe('passed');
     expect(commit.notices).toContain('no changes');

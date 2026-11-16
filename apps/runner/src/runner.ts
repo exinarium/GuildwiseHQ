@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, platform } from 'node:os';
-import { basename, delimiter, join } from 'node:path';
+import { basename, join } from 'node:path';
 import {
   APP_INTEGRATIONS_CAPABILITY,
   BOARD_VERBS_CAPABILITY,
@@ -164,6 +164,7 @@ import type { PrCreator } from './git/gh.ts';
 import { AppIdentityError, type AppTokenProbe, appIdentityWire } from './git/identity.ts';
 import { checkBranchMerged } from './git/merged.ts';
 import { runReleaseDocsPrep } from './git/release-docs-prep.ts';
+import { sandboxedDocsPrepExec } from './git/release-docs-prep-exec.ts';
 import { readReleaseFacts } from './git/release-facts.ts';
 import { openReleasePr } from './git/release-pr.ts';
 import { publishRelease } from './git/release-publish.ts';
@@ -207,7 +208,8 @@ import { PrReviewCommands, sweepPrReviewAgents } from './review/pr-review-comman
 import { sweepReviewRuns } from './review/reviewer-sandbox.ts';
 import { FileReviewerTokenStore, reviewerTokenFact } from './review/reviewer-tokens.ts';
 import { RunManager } from './runs/manager.ts';
-import { removeOrphanAgentTmps, sweepAgentTmps, wipeAgent } from './sandbox/sandbox.ts';
+import { ServiceLauncher } from './runs/sandbox.ts';
+import { removeOrphanAgentTmps, sharedCacheRoot, sweepAgentTmps, wipeAgent } from './sandbox/sandbox.ts';
 import { sweepAgentScratch } from './sandbox/scratch.ts';
 import { DeploySecrets } from './secrets/deploy.ts';
 import { RunnerKeys } from './secrets/keys.ts';
@@ -402,6 +404,8 @@ export class Runner {
   /** Run a branch (#58): detached run worktrees, setup steps and supervised services. */
   readonly runs: RunManager;
   private readonly exec: Executor;
+  /** Release prep's sandbox probe (bubblewrap is tried once per process). */
+  private readonly docsPrepLauncher = new ServiceLauncher();
   /** Keeps each repository's local working branch in step with origin (fetch, fast-forward when safe, report). */
   readonly sync: SyncService;
   private readonly log: Logger;
@@ -2616,16 +2620,15 @@ export class Runner {
               integrationDir: this.paths.integration,
               dataDir: this.paths.root,
               auth: this.scopeFor(p.postAs).auth,
-              // The repository's own build scripts (the PDF guide), with the toolchain PATH; output is redacted.
-              exec: async (cmd, args, o) => {
-                const tc = this.toolchains.resolve();
-                const r = await this.exec.run(cmd, args, {
-                  cwd: o.cwd,
-                  timeoutMs: o.timeoutMs,
-                  env: { ...tc.env, PATH: [...tc.pathDirs, process.env.PATH ?? ''].join(delimiter) },
-                });
-                return { ...r, timedOut: false };
-              },
+              // The repository's own commands (PDF guide, assistant pack, videos): always in the runner's sandbox.
+              execFor: sandboxedDocsPrepExec({
+                runnerRoot: this.paths.root,
+                realHome: homedir(),
+                cacheRoot: sharedCacheRoot(this.paths),
+                launcher: this.docsPrepLauncher,
+                toolchains: () => this.toolchains.resolve(),
+                log: this.log,
+              }),
             })
           : {
               ok: false,
