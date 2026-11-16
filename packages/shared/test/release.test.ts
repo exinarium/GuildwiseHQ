@@ -11,6 +11,7 @@ import {
   recommendVersion,
   releaseIntro,
   tagVersion,
+  newestReleaseTag,
   validateReleaseVersion,
 } from '../src/index.ts';
 
@@ -132,6 +133,7 @@ describe('validateReleaseVersion', () => {
   it('refuses non-semver', () => {
     expect(validateReleaseVersion('1.4', 'v1.3.0', [])).toEqual({
       ok: false,
+      reason: 'not_semver',
       message: '1.4 is not a semantic version (use MAJOR.MINOR.PATCH, for example 1.4.0)',
     });
     expect(validateReleaseVersion('abc', null, []).ok).toBe(false);
@@ -140,12 +142,60 @@ describe('validateReleaseVersion', () => {
   });
   it('refuses equal and lower versions and existing tags', () => {
     const msg = '1.3.0 is not higher than the last release v1.3.0';
-    expect(validateReleaseVersion('1.3.0', 'v1.3.0', [])).toEqual({ ok: false, message: msg });
+    expect(validateReleaseVersion('1.3.0', 'v1.3.0', [])).toEqual({ ok: false, reason: 'not_higher', message: msg });
     expect(validateReleaseVersion('1.2.9', 'v1.3.0', []).ok).toBe(false);
+    // an existing tag is never above the newest tag, so it is refused as not higher, naming the newest tag
     expect(validateReleaseVersion('1.4.1', 'v1.3.0', ['v1.4.1'])).toEqual({
       ok: false,
-      message: 'v1.4.1 already exists as a tag',
+      reason: 'not_higher',
+      message: '1.4.1 is not higher than the last release v1.4.1',
     });
+    expect(validateReleaseVersion('1.4.1', null, ['v1.4.1-rc.1', 'v1.4.1'])).toMatchObject({
+      ok: false,
+      reason: 'not_higher',
+    });
+    expect(validateReleaseVersion('2.0.0', 'v1.3.0', ['v2.0.0-rc.1', 'v2.0.0'])).toEqual({
+      ok: false,
+      reason: 'not_higher',
+      message: '2.0.0 is not higher than the last release v2.0.0',
+    });
+  });
+  it('floors on the newest tag, also when the last tag is older (a tag on main not merged back)', () => {
+    for (const last of [null, 'v1.7.2']) {
+      for (const v of ['1.8.0', '1.7.9']) {
+        const r = validateReleaseVersion(v, last, ['v1.8.0', 'v1.7.2']);
+        expect(r).toEqual({ ok: false, reason: 'not_higher', message: `${v} is not higher than the last release v1.8.0` });
+      }
+      expect(validateReleaseVersion('1.8.1', last, ['v1.8.0', 'v1.7.2'])).toEqual({ ok: true, version: '1.8.1' });
+    }
+  });
+  it('floors on a newer CHANGELOG.md base, and ignores a base below the tag', () => {
+    expect(validateReleaseVersion('1.9.0', 'v1.8.0', ['v1.8.0'], { base: '1.9.0' })).toEqual({
+      ok: false,
+      reason: 'not_higher',
+      message: '1.9.0 is not higher than 1.9.0, the newest version in CHANGELOG.md',
+    });
+    expect(validateReleaseVersion('1.9.1', 'v1.8.0', ['v1.8.0'], { base: '1.9.0' })).toEqual({
+      ok: true,
+      version: '1.9.1',
+    });
+    expect(validateReleaseVersion('1.8.1', 'v1.8.0', ['v1.8.0'], { base: '1.7.2' })).toEqual({
+      ok: true,
+      version: '1.8.1',
+    });
+    expect(validateReleaseVersion('1.8.0', 'v1.8.0', ['v1.8.0'], { base: '1.8.0' })).toMatchObject({
+      message: '1.8.0 is not higher than the last release v1.8.0',
+    });
+    expect(validateReleaseVersion('0.9.0', null, [], { base: '1.0.0' })).toMatchObject({ reason: 'not_higher' });
+  });
+});
+
+describe('newestReleaseTag', () => {
+  it('picks the highest release tag in semver order, pre-releases count', () => {
+    expect(newestReleaseTag(['v1.7.2', 'v1.8.0', null, undefined, 'v1.10.0-rc.1'])).toBe('v1.10.0-rc.1');
+    expect(newestReleaseTag(['v1.8.0-rc.1', 'v1.8.0'])).toBe('v1.8.0');
+    expect(newestReleaseTag(['not-a-release', 'v1.2'])).toBeNull();
+    expect(newestReleaseTag([])).toBeNull();
   });
 });
 
@@ -199,6 +249,33 @@ describe('componentBumps', () => {
       [{ name: 'runner', changedCount: 3, contentAtHead: 'nothing', contentAtTag: null }],
     );
     expect(m2?.state).toBe('missing');
+  });
+  it('never goes below the released version', () => {
+    // released 2.3.0, head 2.3.0, files changed: 2.3.1
+    const [same] = componentBumps(
+      [rule],
+      [{ name: 'runner', changedCount: 3, contentAtHead: file('2.3.0'), contentAtTag: file('2.3.0') }],
+    );
+    expect(same).toMatchObject({ state: 'bump', from: '2.3.0', to: '2.3.1' });
+    // head behind the release, nothing changed: bumped from the release
+    const [behind] = componentBumps(
+      [rule],
+      [{ name: 'runner', changedCount: 0, contentAtHead: file('2.2.5'), contentAtTag: file('2.3.0') }],
+    );
+    expect(behind).toMatchObject({ state: 'bump', from: '2.3.0', to: '2.3.1' });
+    // head behind the release, files changed, minor: 2.4.0
+    const [minor] = componentBumps(
+      [rule],
+      [{ name: 'runner', changedCount: 2, contentAtHead: file('2.2.5'), contentAtTag: file('2.3.0') }],
+      { runner: 'minor' },
+    );
+    expect(minor).toMatchObject({ state: 'bump', from: '2.3.0', to: '2.4.0' });
+    // unchanged at the released version stays unchanged (not released again)
+    const [unchanged] = componentBumps(
+      [rule],
+      [{ name: 'runner', changedCount: 0, contentAtHead: file('2.3.0'), contentAtTag: file('2.3.0') }],
+    );
+    expect(unchanged).toMatchObject({ state: 'unchanged', from: '2.3.0', to: '2.3.0' });
   });
   it('uses the head version when the file did not exist at the tag', () => {
     const [b] = componentBumps(

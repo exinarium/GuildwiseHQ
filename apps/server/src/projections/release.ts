@@ -48,7 +48,8 @@ export const releaseProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `UPDATE release_proposals SET state='approved', version=$2, components=$3::jsonb, notes=$4, notes_source=$5,
-              approved_by=$6, approved_at=$7, head_sha=$8, updated_at=$7 WHERE id=$1`,
+              approved_by=$6, approved_at=$7, head_sha=$8, last_tag=$9, updated_at=$7 WHERE id=$1`,
+      // last_tag: the tag the version was approved against, so the ship computes the component bumps from it
       [
         p.proposalId,
         p.version,
@@ -58,6 +59,7 @@ export const releaseProjectors: Record<string, Projector> = {
         p.approvedBy,
         e.createdAt,
         p.headSha,
+        p.lastTag,
       ],
     );
   },

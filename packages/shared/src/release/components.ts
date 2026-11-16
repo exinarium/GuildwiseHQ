@@ -40,7 +40,8 @@ function underOf(rule: ComponentRule): string {
 
 /**
  * The bump of each rule. The base is the version at the last tag, so a version bumped by hand since the tag is
- * recognised (`already_set`) and never bumped twice.
+ * recognised (`already_set`) and never bumped twice. A head version below the released one is bumped from the release,
+ * also when nothing changed, so a component never goes below its newest release.
  */
 export function componentBumps(
   rules: readonly ComponentRule[],
@@ -78,10 +79,13 @@ export function componentBumps(
               : `no version found in ${rule.versionFile} with the rule's pattern`,
       };
     const current = head.version;
-    if (f.changedCount === 0) return { ...common, state: 'unchanged' as const, from: current, to: current };
     const tagged = f.contentAtTag === null ? null : readComponentVersion(rule, f.contentAtTag);
-    const base =
-      tagged?.ok && compareSemver(tagged.version, tagged.version) !== null ? tagged.version : current;
+    const released = tagged?.ok && compareSemver(tagged.version, tagged.version) !== null ? tagged.version : null;
+    // a head behind the released version is never shown or shipped: it is bumped from the release
+    const behind = released !== null && (compareSemver(current, released) ?? 0) < 0;
+    if (f.changedCount === 0 && !behind)
+      return { ...common, state: 'unchanged' as const, from: current, to: current };
+    const base = released ?? current;
     const target = bumpVersion(base, level);
     const targetVersion = target.ok ? target.version : base;
     const higher = (compareSemver(current, targetVersion) ?? 0) > 0;

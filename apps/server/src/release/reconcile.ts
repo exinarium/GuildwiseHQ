@@ -5,7 +5,7 @@ import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { publishedShips } from './facts.ts';
-import { buildProposal } from './proposal.ts';
+import { buildProposal, newestTagOf } from './proposal.ts';
 import { loadComponentRules } from './rules.ts';
 
 type Trigger = 'release_pr' | 'ahead' | 'manual';
@@ -109,7 +109,7 @@ export async function reconcileReleaseProposal(ctx: Ctx, repoId: string, trigger
           ORDER BY updated_at DESC LIMIT 1`,
         [repoId],
       );
-      const lastTag = facts.lastTag?.name ?? null;
+      const lastTag = newestTagOf(facts);
       if (last && last.closed_reason !== 'nothing_to_release' && (last.last_tag ?? null) === lastTag) return;
     }
     const built = buildProposal(facts, await loadComponentRules(tx, repoId));
@@ -153,7 +153,7 @@ export async function reconcileReleaseProposal(ctx: Ctx, repoId: string, trigger
               recommendedVersion: built.recommended.version,
               level: built.recommended.level,
               reason: built.recommended.reason,
-              lastTag: facts.lastTag?.name ?? null,
+              lastTag: newestTagOf(facts),
               headSha: facts.headSha,
             },
           },

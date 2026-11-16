@@ -15,7 +15,7 @@ import { badRequest, conflict, forbidden } from '../errors.ts';
 import { releaseDocsPrepViewFor } from './docs-prep.ts';
 import { loadFacts } from './facts.ts';
 import { assertReleasePointers, withServerStaleness } from './pointer-gate.ts';
-import { buildProposal } from './proposal.ts';
+import { buildProposal, releaseBase } from './proposal.ts';
 import { loadComponentRules } from './rules.ts';
 
 /**
@@ -84,8 +84,13 @@ export async function resolveShipReleaseIn(
     );
   // A submodule behind the latest release of the project repository it points to refuses the release (nothing stored).
   await assertReleasePointers(tx, proposal.repo_id);
-  const check = validateReleaseVersion(release.version, facts.lastTag?.name ?? null, facts.existingTags);
-  if (!check.ok) throw badRequest('invalid_version', check.message);
+  // the floor is the newest release tag (or a newer dated CHANGELOG.md version), the same as the desk item's check
+  const b = releaseBase(facts);
+  const check = validateReleaseVersion(release.version, b.tag, facts.existingTags, { base: b.version });
+  if (!check.ok)
+    throw check.reason === 'not_semver'
+      ? badRequest('invalid_version', check.message)
+      : conflict(check.reason === 'exists' ? 'version_exists' : 'version_not_higher', check.message);
   const rules = await loadComponentRules(tx, proposal.repo_id);
   const levels: Record<string, 'patch' | 'minor' | 'major'> = {};
   for (const c of release.components) {
@@ -107,7 +112,7 @@ export async function resolveShipReleaseIn(
             repoId: proposal.repo_id,
             deskItemId: item.id,
             version: check.version,
-            lastTag: facts.lastTag?.name ?? null,
+            lastTag: b.tag,
             headSha: facts.headSha,
             components: built.components.map(({ under: _u, versionFile: _v, message: _m, ...c }) => c),
             notes,
@@ -155,6 +160,7 @@ async function releaseViewBase(db: Queryable, item: Row): Promise<ReleaseProposa
       state: proposal.state,
       lastTag: proposal.last_tag ?? null,
       base: proposal.last_tag ? String(proposal.last_tag).replace(/^v/, '') : '0.0.0',
+      baseSource: proposal.last_tag ? 'tag' : 'none',
       recommended: {
         version: proposal.recommended_version,
         level: proposal.recommended_level,
@@ -184,8 +190,9 @@ async function releaseViewBase(db: Queryable, item: Row): Promise<ReleaseProposa
     repoId,
     repoName: repo.name,
     state: proposal.state,
-    lastTag: facts.lastTag?.name ?? null,
+    lastTag: built.newestTag,
     base: built.base,
+    baseSource: built.baseSource,
     recommended: built.recommended,
     headSha: facts.headSha,
     factsAt: stored?.at?.toISOString() ?? null,

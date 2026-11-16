@@ -54,8 +54,11 @@ export const ReleaseProposalViewSchema = z.object({
   repoId: z.uuid(),
   repoName: z.string(),
   state: z.enum(['proposed', 'approved', 'dismissed', 'released', 'closed']),
+  /** The newest release tag of the repository (also one on main that the working branch has not merged yet). */
   lastTag: z.string().nullable(),
   base: z.string(),
+  /** Where `base` came from: the newest release tag, a newer dated section of CHANGELOG.md, or nothing (0.0.0). */
+  baseSource: z.enum(['tag', 'changelog', 'none']),
   recommended: z.object({ version: z.string(), level: BumpLevelSchema, reason: z.string() }),
   headSha: z.string(),
   factsAt: z.string().nullable(),
