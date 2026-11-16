@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { existsSync, lstatSync, realpathSync } from 'node:fs';
-import { delimiter, join } from 'node:path';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { delimiter, join, resolve } from 'node:path';
 import { BROWSER_MASKED, DEVOPS_INHERITED_ENV, HOME_SECRETS, onPath } from '../adapters/claude-policy.ts';
 import { SECRETISH } from '../toolchain/registry.ts';
 
@@ -39,6 +39,13 @@ export interface SandboxSpec {
    * loopback): the handoff checks and the worktree preparation, which must never download anything.
    */
   network?: 'host' | 'none';
+  /**
+   * More paths to make unreadable, like the runner root (release prep: the machine data dir, so sibling pairings stay
+   * hidden). Masked before every other path, so a parent mask never covers a child mask made earlier.
+   */
+  extraMasked?: string[];
+  /** `--die-with-parent`: the command's tree ends with the runner. Off by default (services outlive the runner). */
+  dieWithParent?: boolean;
 }
 
 /** The services' HOME inside the sandbox (inside the private `/tmp`). */
@@ -48,9 +55,12 @@ export const SERVICE_HOME = '/tmp/home';
 export const userSecretsDir = (realHome: string): string => join(realHome, '.microsoft', 'usersecrets');
 
 /** Directories and files that stay out of reach, skipping the ones that do not exist (bwrap cannot create them). */
-export function maskedPaths(spec: Pick<SandboxSpec, 'runnerRoot' | 'realHome' | 'uid'>): string[] {
+export function maskedPaths(
+  spec: Pick<SandboxSpec, 'runnerRoot' | 'realHome' | 'uid' | 'extraMasked'>,
+): string[] {
   const uid = spec.uid ?? process.getuid?.();
   const all = [
+    ...(spec.extraMasked ?? []),
     spec.runnerRoot,
     ...HOME_SECRETS.map((p) => join(spec.realHome, p)),
     ...BROWSER_MASKED,
@@ -87,6 +97,7 @@ export function bwrapArgs(spec: SandboxSpec): string[] {
     '--unshare-pid',
     '--unshare-ipc',
     ...(spec.network === 'none' ? ['--unshare-net'] : []),
+    ...(spec.dieWithParent ? ['--die-with-parent'] : []),
     '--cap-drop',
     'ALL',
   ];
@@ -107,6 +118,18 @@ export function bwrapArgs(spec: SandboxSpec): string[] {
   if (spec.userSecrets !== false && existsSync(secrets))
     args.push('--ro-bind', secrets, `${SERVICE_HOME}/.microsoft/usersecrets`);
   return args;
+}
+
+/** The clone's git dir a linked worktree points at (`<clone>/.git`), so a sandboxed `git` can read it. */
+export function gitDirOf(worktree: string): string[] {
+  try {
+    const m = /^gitdir:\s*(.+)$/m.exec(readFileSync(join(worktree, '.git'), 'utf8'));
+    if (!m) return [];
+    // <clone>/.git/worktrees/<name>  ->  <clone>/.git
+    return [resolve(m[1] as string, '..', '..')];
+  } catch {
+    return [];
+  }
 }
 
 /** `bwrap <args> -- cmd...` */

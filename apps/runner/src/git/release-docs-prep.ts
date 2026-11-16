@@ -23,6 +23,9 @@ import {
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import {
   type DocsPrepExec,
+  type DocsPrepExecFactory,
+  type DocsPrepExecScope,
+  DocsPrepSandboxError,
   type DocsPrepStepContext,
   type DocsPrepStepOutcome,
   type DocsPrepStepSpec,
@@ -42,8 +45,12 @@ export interface ReleaseDocsPrepInput {
   /** Folder of the throwaway integration worktrees. */
   integrationDir: string;
   auth?: GitAuth;
-  /** Runs the repository's own build scripts (the PDF guide). Absent: such a build fails with the reason. */
-  exec?: DocsPrepExec;
+  /**
+   * Makes the exec a step runs project commands with (the PDF guide, the assistant pack, the videos), bound to the step's
+   * worktree and scratch folder; the runner's factory runs every command in its sandbox. Absent: such a command fails
+   * with the reason.
+   */
+  execFor?: DocsPrepExecFactory;
   /** The runner's data folder (the videos render cache). */
   dataDir?: string;
 }
@@ -351,20 +358,33 @@ async function runSpec(
   wt: string,
   start: string,
 ): Promise<DocsPrepStepOutcome> {
-  const outDir = await mkdtemp(join(tmpdir(), `docs-prep-${input.payload.step}-`));
+  const p = input.payload;
+  const outDir = await mkdtemp(join(tmpdir(), `docs-prep-${p.step}-`));
+  const scope: DocsPrepExecScope = {
+    step: p.step,
+    phase: p.phase ?? '',
+    worktree: wt,
+    outDir,
+    runId: p.runId,
+    repoId: p.repoId,
+  };
   try {
     return await spec.run({
       worktree: wt,
-      payload: input.payload,
-      summary: input.payload.summary,
+      payload: p,
+      summary: p.summary,
       outDir,
-      exec: input.exec ?? noExec,
-      phase: input.payload.phase ?? '',
-      input: input.payload.input,
+      exec: input.execFor?.(scope) ?? noExec,
+      phase: p.phase ?? '',
+      input: p.input,
       repoPath: input.repoPath,
       dataDir: input.dataDir,
       start,
     });
+  } catch (err) {
+    // The sandbox could not be set up: the step fails with the reason; the command was never run unsandboxed.
+    if (err instanceof DocsPrepSandboxError) return { ok: false, error: err.message };
+    throw err;
   } finally {
     await rm(outDir, { recursive: true, force: true });
   }

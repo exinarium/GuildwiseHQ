@@ -71,7 +71,7 @@ const run = (s: S, e: ReturnType<typeof fakeExec>) =>
     payload: payload(s),
     repoPath: s.repo.clone,
     integrationDir: s.integrationDir,
-    exec: e.exec,
+    execFor: () => e.exec,
   });
 
 const workRef = `refs/guildwise/docs-prep/${RUN}/work`;

@@ -1,14 +1,5 @@
 import { spawn } from 'node:child_process';
-import {
-  closeSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  rmdirSync,
-  rmSync,
-  writeSync,
-} from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, rmdirSync, rmSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, delimiter, join, resolve } from 'node:path';
 import {
@@ -53,7 +44,14 @@ import { probeHttp, probeTcp } from './health.ts';
 import { FileFollower, rotateIfBig, tailLines } from './logs.ts';
 import { PortAllocator, type PortRange } from './ports.ts';
 import { pidAlive, procStartTime, sameProcess, signalGroup, stopGroup } from './proc.ts';
-import { SERVICE_HOME, ServiceLauncher, sandboxCommand, scopeCommand, scrubEnv } from './sandbox.ts';
+import {
+  gitDirOf,
+  SERVICE_HOME,
+  ServiceLauncher,
+  sandboxCommand,
+  scopeCommand,
+  scrubEnv,
+} from './sandbox.ts';
 import {
   type EnvState,
   isLiveEnv,
@@ -149,17 +147,6 @@ const sandboxNote = (k: 'sandboxed' | 'docker' | 'off'): string =>
 const isDockerCommand = (cmd: string[]): boolean =>
   DOCKER_CMDS.has(basename(cmd[0] ?? '')) || (cmd[1] === 'compose' && basename(cmd[0] ?? '') === 'docker');
 
-/** The clone's git dir a linked worktree points at (`<clone>/.git`), so a sandboxed `git` can read it. */
-function gitDirOf(worktree: string): string[] {
-  try {
-    const m = /^gitdir:\s*(.+)$/m.exec(readFileSync(join(worktree, '.git'), 'utf8'));
-    if (!m) return [];
-    // <clone>/.git/worktrees/<name>  ->  <clone>/.git
-    return [resolve(m[1] as string, '..', '..')];
-  } catch {
-    return [];
-  }
-}
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const slug = (s: string) =>
   s
