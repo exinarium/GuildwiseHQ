@@ -45,7 +45,11 @@ function fixture() {
   mkdirSync(join(machine, 'pairings', 'p2'), { recursive: true });
   mkdirSync(join(root, 'cache'), { recursive: true });
   const gitDir = tmp();
+  // a plain resolver file: the DNS bind (GWP-247) depends on the host's /etc/resolv.conf, so the test does not
+  const resolvConf = join(tmp(), 'resolv.conf');
+  writeFileSync(resolvConf, 'nameserver 1.1.1.1\n');
   const spec: SandboxSpec = {
+    resolvConf,
     runnerRoot: root,
     realHome: home,
     worktrees: [join(root, 'wt')],
