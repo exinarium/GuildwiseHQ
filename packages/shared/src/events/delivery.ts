@@ -2,6 +2,9 @@ import { z } from 'zod';
 import { defineEvent, Id } from './define.ts';
 import { DeployActor, DeployOrigin, GateEvidenceSchema } from './delivery-types.ts';
 
+/** Where a run's commit came from; optional on the events so stored ones still replay. */
+const CommitSource = z.enum(['explicit', 'release', 'promoted', 'working-branch', 'rollback']);
+
 /**
  * Delivery events (docs/design/ceo-front-door.md section 9, step 2). Audience `project`. A recipe's authorization is two
  * facts: `DeliveryRecipeApproved` (who approved which content hash) and `DeployGateSatisfied` (which gate, which evidence,
@@ -157,6 +160,8 @@ export const deliveryEvents = [
       dryRun: z.boolean().default(false),
       releasedBy: z.enum(['owner', 'ceo', 'auto']),
       phaseFollowupId: Id.optional(),
+      commitSource: CommitSource.optional(),
+      commitSourceDetail: z.string().max(200).optional(),
     }),
   ),
   /** The gate's requirements held and someone (or a rule) released the run: the durable `deploy.exec` follows. */
@@ -242,6 +247,8 @@ export const deliveryEvents = [
           trial: z.boolean().default(false),
           releasedBy: z.enum(['owner', 'ceo', 'auto']).default('owner'),
           phaseFollowupId: Id.optional(),
+          commitSource: CommitSource.optional(),
+          commitSourceDetail: z.string().max(200).optional(),
         })
         .optional(),
     }),

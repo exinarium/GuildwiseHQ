@@ -11,6 +11,9 @@ import { SECRET_NAME } from './recipe.ts';
 /** Announced in `hello.capabilities` by a runner that can inspect recipes and run `deploy.exec`. */
 export const DELIVERY_CAPABILITY = 'delivery:1';
 
+/** Announced by a runner that answers `repo.commit.probe` (the tip of a working branch, or "is this commit in the clone"). */
+export const DEPLOY_COMMIT_PROBE_CAPABILITY = 'deploy-commit-probe:1';
+
 export const DeployVaultRefSchema = z.object({
   vaultId: z.string().min(1).max(64),
   storage: z.enum(['git', 'local']),

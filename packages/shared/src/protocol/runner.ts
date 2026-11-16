@@ -2497,6 +2497,37 @@ export const RelayResponseSchema = msg('relay.response', {
     .optional(),
 });
 
+// ---------------------------------------------------------------- deploy commit probe
+/**
+ * Server to runner: read a commit of a deploy repository from the clone on this workstation. Live and in memory (nothing
+ * is queued): the preview of a deploy must not enqueue a command.
+ */
+export const RepoCommitProbeSchema = msg('repo.commit.probe', {
+  requestId: z.uuid(),
+  remoteUrlNormalized: z.string().max(500),
+  branch: z.string().max(250).nullable(),
+  /** Absent: the tip of origin/<branch>. Given: this commit (full or abbreviated). */
+  sha: z
+    .string()
+    .regex(/^[0-9a-f]{7,64}$/)
+    .optional(),
+  deadlineMs: z.number().int().positive(),
+});
+export const RepoCommitProbeResultSchema = msg('repo.commit.probe.result', {
+  requestId: z.uuid(),
+  ok: z.boolean(),
+  sha: z
+    .string()
+    .regex(/^[0-9a-f]{40,64}$/)
+    .optional(),
+  shortSha: z.string().max(64).optional(),
+  subject: z.string().max(300).optional(),
+  author: z.string().max(200).optional(),
+  committedAt: z.string().max(40).optional(),
+  error: z.enum(['no_clone', 'no_branch', 'fetch_failed', 'not_found', 'ambiguous', 'timeout']).optional(),
+  message: z.string().max(500).optional(),
+});
+
 // ---------------------------------------------------------------- storage connections
 // The write relay: the server streams a public upload to the runner in credit-windowed chunks and keeps nothing.
 // None of the write frames is acked (a transfer has one deadline); `storage.report` and `storage.auth` are.
@@ -2713,6 +2744,7 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   TokenRotateSchema,
   RelayServeSchema,
   RelayResponseSchema,
+  RepoCommitProbeResultSchema,
   StorageReportSchema,
   StorageAuthSchema,
   StorageWriteCreditSchema,
@@ -2741,6 +2773,7 @@ export const ServerToRunnerSchema = z.discriminatedUnion('type', [
   RunFollowSchema,
   RelayServeResultSchema,
   RelayRequestSchema,
+  RepoCommitProbeSchema,
   StorageWriteOpenSchema,
   StorageWriteChunkSchema,
   StorageWriteEndSchema,

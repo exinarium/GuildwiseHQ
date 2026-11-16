@@ -174,7 +174,14 @@ export async function createWorld(
         r.hello({
           repos: [{ remoteUrl: REPO_SSH, localPath: '/tmp/toy', headBranch: 'main' }],
           runtimes: MOCK_RUNTIME,
-          ...(o.capabilities ? { capabilities: o.capabilities } : {}),
+          // a runner that deploys also reads commits (the deploy request asks it for the branch tip)
+          ...(o.capabilities
+            ? {
+                capabilities: o.capabilities.includes('delivery:1')
+                  ? [...new Set([...o.capabilities, 'deploy-commit-probe:1'])]
+                  : o.capabilities,
+              }
+            : {}),
           ...(o.legacyVaults ? { legacyVaults: true } : {}),
           ...(o.maxRunEnvironments ? { maxRunEnvironments: o.maxRunEnvironments } : {}),
         });

@@ -24,6 +24,9 @@ let r: FakeRunner;
 beforeAll(async () => {
   d = await deliveryWorld({ env: { AOM_MOCK_UI: 'true' } });
   r = await d.w.connectRunner({ capabilities: ['ceo:1', 'delivery:1'] });
+  // a deploy builds the tip of the working branch (read on the workstation), not the newest card merge: here the tip is
+  // the merge the project's phases land
+  r.probe.tip = 'abc1234567'.padEnd(40, '0');
   await keepOnline(d.w);
   await setWeekday(d);
 });
@@ -166,7 +169,7 @@ describe('recipe mode', () => {
     expect(run, JSON.stringify([run!.refusal, run!.refusal_detail, run!.missing])).toMatchObject({
       env: 'production',
       status: 'waiting_release',
-      commit: 'abc1234567',
+      commit: 'abc1234567'.padEnd(40, '0'),
       waiting_for: 'owner',
     });
     expect(f!.status).toBe('running');

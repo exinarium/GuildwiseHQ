@@ -7,6 +7,7 @@ import type { Clock } from './clock.ts';
 import type { CloudServices } from './cloud/service.ts';
 import type { Config } from './config.ts';
 import type { Pool } from './db/pool.ts';
+import type { CommitProbeHub } from './delivery/commit-probe.ts';
 import type { LogRing } from './diagnostics/log-ring.ts';
 import type { Dispatcher } from './dispatcher/dispatcher.ts';
 import type { Reaper } from './dispatcher/reaper.ts';
@@ -84,6 +85,8 @@ export interface Services {
   cloud: CloudServices;
   /** The inbound webhook relay: which runner serves which integration, and the requests waiting for an answer. */
   webhookRelay: RelayHub;
+  /** Live reads of a deploy repository's commits on the deploying workstation (memory only). */
+  commitProbe: CommitProbeHub;
   /** The write relay to a firm's own storage: streams a file to the runner that holds the connection and keeps nothing. */
   storage: StorageRelay;
   /** Direct browser-to-storage uploads: reported upload hosts and open grants (memory only). */

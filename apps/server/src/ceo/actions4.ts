@@ -2,6 +2,7 @@ import type { CeoActionName } from '@aom/shared';
 import { z } from 'zod';
 import { one } from '../db/sql.ts';
 import { requestDeployRun } from '../delivery/runs.ts';
+import { HttpError } from '../errors.ts';
 import { refuse, truncate } from './actions.ts';
 import type { ActionDef } from './types.ts';
 
@@ -54,14 +55,22 @@ const deploy: ActionDef<z.infer<typeof DeployP>> = {
           ...(env.turnId ? { turnId: env.turnId } : {}),
           ...(env.batchId ? { wakeBatchId: env.batchId } : {}),
         } as const);
-    const r = await requestDeployRun(env.ctx, {
-      projectId: project.id,
-      env: p.env,
-      commit: p.commit,
-      targets: p.target ? [p.target] : undefined,
-      trigger: 'request',
-      requester,
-    });
+    let r: Awaited<ReturnType<typeof requestDeployRun>>;
+    try {
+      r = await requestDeployRun(env.ctx, {
+        projectId: project.id,
+        env: p.env,
+        commit: p.commit,
+        targets: p.target ? [p.target] : undefined,
+        trigger: 'request',
+        requester,
+      });
+    } catch (err) {
+      // an owner who accepted this action named a commit that is not in the repository: a refusal, not a crash
+      if (err instanceof HttpError && err.status < 500)
+        return { message: `Refused (${err.code}): ${err.message}`, result: { refused: true } };
+      throw err;
+    }
     const refused = r.runs.every((x) => x.status === 'refused');
     return {
       message: r.message,
