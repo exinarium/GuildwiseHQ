@@ -589,6 +589,16 @@ export const platformAuditProjectors: Record<string, Projector> = {
       details: { postId: p.postId },
     };
   }),
+  VideoFileChecked: always(async (tx, e) => {
+    const p = ev<'VideoFileChecked'>(e).payload;
+    const post = await one<{ title: string }>(tx, 'SELECT title FROM video_posts WHERE id=$1', [p.postId]);
+    const reasons = p.failed.map((f) => f.message).join('; ');
+    return {
+      action: e.event.type,
+      summary: `Instagram file check: ${reasons || 'meets the Reels rules'} (${post?.title ?? p.postId})`,
+      details: { postId: p.postId, renderId: p.renderId, passed: p.passed, outcome: p.outcome },
+    };
+  }),
   VideoRetryRequested: always(async (tx, e) => {
     const p = ev<'VideoRetryRequested'>(e).payload;
     const post = await one<{ title: string }>(tx, 'SELECT title FROM video_posts WHERE id=$1', [p.postId]);
@@ -596,6 +606,7 @@ export const platformAuditProjectors: Record<string, Projector> = {
       render: 'render tried again',
       upload: 'upload tried again',
       'resolve-locked': 'private upload marked as dealt with',
+      rerender: 'render made again after a network rejected the file',
     }[p.what];
     return {
       action: e.event.type,

@@ -41,6 +41,7 @@ import {
   rejectVideoTopic,
   releasesNeedingVideo,
   resolveLockedUpload,
+  rerenderVideo,
   retryRender,
   retryShare,
   retryUpload,
@@ -194,6 +195,14 @@ export function videoPlatformRoutes(ctx: Ctx) {
       async (req) => {
         const s = await requireSuperAdmin(ctx, req);
         return retryRender(ctx, s.user.id, req.params.id);
+      },
+    );
+    app.post(
+      '/api/platform/video/posts/:id/rerender',
+      { schema: { params: IdParamsSchema } },
+      async (req) => {
+        const s = await requireSuperAdmin(ctx, req);
+        return rerenderVideo(ctx, s.user.id, req.params.id);
       },
     );
     app.post(
