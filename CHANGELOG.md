@@ -4,6 +4,10 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Fixed
+
+- A release is refused while a submodule points behind the latest release of the project repository it points to. The Ship release item lists each submodule's state (pinned, behind, not on a release tag, not checked, unknown); behind or not on a release tag greys out Approve with the reason and the fix (bump the submodule to the tag and refresh), and the server refuses approve and Retry the same way. Unknown is a warning and never blocks; repositories without project submodules ship as before.
+
 ## [1.9.0] - 2026-11-15
 
 Runner 0.1.76.
