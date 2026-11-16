@@ -10,8 +10,11 @@ import type {
   SetGateBindingRequest,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCanManageOrg } from '../../lib/orgRole.ts';
+import { countOpenShipReleases, countWaitingReleases } from '../../lib/releaseCounts.ts';
 import { encryptForRunner } from '../../lib/runner-seal.ts';
 import { del, get, post, put } from '../client.ts';
+import { useDesk } from './desk.ts';
 
 /**
  * Delivery recipes, the release queue and the deploy runs (docs/design/ceo-front-door.md section 9 and 14.2). The recipe lives in
@@ -91,8 +94,21 @@ export function useReleaseQueue(enabled = true) {
     queryKey: queueKey,
     enabled,
     refetchInterval: 15_000,
-    queryFn: async () => (await get<{ items: ReleaseQueueItem[] }>('/delivery/queue')).items,
+    queryFn: async () => (await get<{ items?: ReleaseQueueItem[] }>('/delivery/queue')).items ?? [],
   });
+}
+
+/**
+ * The Releases badge: the waiting rows of the release queue (Owner/Admin only; nobody else makes the request) plus the open Ship
+ * release desk items. It reads the same cached queries as the Releases page and the Desk, so their invalidation updates it too.
+ */
+export function useReleaseBadgeCounts(enabled = true) {
+  const manage = useCanManageOrg();
+  const queue = useReleaseQueue(enabled && manage);
+  const desk = useDesk();
+  const waiting = enabled && manage ? countWaitingReleases(queue.data) : 0;
+  const ship = enabled ? countOpenShipReleases(desk.data?.items) : 0;
+  return { waiting, ship, total: waiting + ship };
 }
 
 function useQueueMutation<V, R>(fn: (v: V) => Promise<R>) {

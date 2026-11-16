@@ -65,15 +65,20 @@ const makeMe = (role: 'owner' | 'member', features: Record<string, boolean> = {}
 
 let me: MeResponse;
 let desk = { open: 3, blocking: 1 };
+let deskItems: unknown[] = [];
+let queue: unknown[] = [];
 beforeEach(() => {
   me = makeMe('owner');
   desk = { open: 3, blocking: 1 };
+  deskItems = [];
+  queue = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string) => {
       if (url === '/api/auth/me') return json(me);
       if (url.startsWith('/api/desk'))
-        return json({ items: [], counts: { open: desk.open, blocking: desk.blocking, urgent: 0 } });
+        return json({ items: deskItems, counts: { open: desk.open, blocking: desk.blocking, urgent: 0 } });
+      if (url === '/api/delivery/queue') return json({ items: queue });
       if (url.startsWith('/api/projects')) return json({ projects: [] });
       if (url.startsWith('/api/agents')) return json({ agents: [] });
       if (url.startsWith('/api/chats')) return json({ chats: [] });
@@ -205,6 +210,25 @@ describe('the app shell on a phone', () => {
     await user.click(within(menu).getByRole('link', { name: 'Agents' }));
     expect(screen.getByTestId('where')).toHaveTextContent('/agents');
     expect(screen.queryByRole('dialog', { name: 'Main menu' })).not.toBeInTheDocument();
+  });
+
+  it('shows the Releases count in the More menu, like the Desk count, with no new tab', async () => {
+    queue = [{ projectKey: 'P5', env: 'production', commit: 'c1' }];
+    deskItems = [
+      { id: U, kind: 'approval', subkind: 'ship_release', status: 'open' },
+      { id: '0192f3a0-0000-7000-8000-000000000002', kind: 'question', subkind: null, status: 'open' },
+    ];
+    desk = { open: 2, blocking: 0 };
+    const user = userEvent.setup();
+    mount();
+    expect(await screen.findByTestId('tab-desk-badge')).toHaveTextContent('2');
+    expect(screen.queryByTestId('tab-releases')).not.toBeInTheDocument();
+    await user.click(screen.getByTestId('tab-more'));
+    const menu = await screen.findByRole('dialog', { name: 'Main menu' });
+    const releases = within(menu).getByTestId('nav-releases');
+    await waitFor(() => expect(within(releases).getByTestId('releases-badge')).toHaveTextContent('2'));
+    expect(releases).toHaveAccessibleName('Releases, 2 waiting');
+    expect(within(menu).getByTestId('desk-badge')).toHaveTextContent('2');
   });
 
   it('hides manager-only destinations from a member', async () => {

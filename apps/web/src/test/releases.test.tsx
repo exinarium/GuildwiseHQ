@@ -122,7 +122,15 @@ const status = (rulesMet: boolean) => ({
   generatedAt: ago(0),
 });
 
-function route(over: { queue?: unknown; status?: unknown; release?: () => unknown } = {}) {
+function route(
+  over: {
+    queue?: unknown;
+    status?: unknown;
+    release?: () => unknown;
+    desk?: unknown[];
+    prep?: unknown[];
+  } = {},
+) {
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
     const u = String(url);
     const method = init?.method ?? 'GET';
@@ -130,6 +138,9 @@ function route(over: { queue?: unknown; status?: unknown; release?: () => unknow
     if (u === '/api/org/live') return json({ rows: live });
     if (u === '/api/delivery/release' && over.release) return json(over.release());
     if (u === '/api/delivery/queue') return json({ items: over.queue ?? [queueItem(false)] });
+    if (u.startsWith('/api/desk') && over.desk)
+      return json({ items: over.desk, counts: { open: over.desk.length, blocking: 0, urgent: 0 } });
+    if (u === '/api/release-docs-prep' && over.prep) return json(over.prep);
     if (u.startsWith('/api/delivery/runs')) return json({ runs: [] });
     if (u.endsWith('/environments/status')) return json(over.status ?? status(false));
     if (u.includes('/environments/production/releases'))
@@ -258,6 +269,62 @@ describe('Releases page', () => {
     expect(screen.getByTestId('live-waiting-P5-production').tagName).toBe('SPAN');
     await userEvent.click(screen.getByRole('tab', { name: 'History' }));
     expect(await screen.findByTestId('history-empty')).toBeInTheDocument();
+  });
+
+  describe('Release prep tab count', () => {
+    const prepProject = [
+      {
+        projectId: U(1),
+        key: 'P5',
+        name: 'P5',
+        enabled: true,
+        releaseBranch: 'release/1.0.0',
+        state: 'not_run',
+        canAct: true,
+        run: null,
+      },
+    ];
+    const shipItem = (n: number, status = 'open') => ({
+      id: U(100 + n),
+      kind: 'approval',
+      subkind: 'ship_release',
+      status,
+    });
+
+    it('counts the open Ship release items, and leaves the Waiting for you count as it was', async () => {
+      route({
+        prep: prepProject,
+        desk: [
+          shipItem(1),
+          shipItem(2),
+          shipItem(3, 'answered'),
+          { id: U(110), kind: 'question', subkind: null, status: 'open' },
+        ],
+      });
+      wrap(<Releases />);
+      const tab = await screen.findByTestId('releases-tab-prep');
+      await waitFor(() => expect(tab).toHaveTextContent(/Release prep\s*2/));
+      expect(screen.getByTestId('releases-tab-waiting')).toHaveTextContent(/Waiting for you\s*1/);
+    });
+
+    it('shows no count when no Ship release item is open', async () => {
+      route({ prep: prepProject, desk: [shipItem(1, 'answered')] });
+      wrap(<Releases />);
+      const tab = await screen.findByTestId('releases-tab-prep');
+      await waitFor(() =>
+        expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/desk/), expect.anything()),
+      );
+      expect(tab).toHaveTextContent(/^Release prep$/);
+    });
+
+    it('shows a Member the count too, on the prep tab every role sees', async () => {
+      manage.value = false;
+      route({ prep: prepProject, desk: [shipItem(1)] });
+      wrap(<Releases />);
+      const tab = await screen.findByTestId('releases-tab-prep');
+      await waitFor(() => expect(tab).toHaveTextContent(/Release prep\s*1/));
+      expect(calls.some((c) => c.url === '/api/delivery/queue')).toBe(false);
+    });
   });
 
   // `/releases` belongs to the server (the public release blog): the app page lives at /delivery/releases and the
