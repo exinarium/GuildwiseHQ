@@ -206,15 +206,17 @@ async function analyse(
     .filter((r) => r && !r.startsWith(`${KEPT}/${p.runId}/`));
   for (const r of refs) await git(repoPath, ['update-ref', '-d', r]);
 
-  const last = await lastReleaseTagAt(repoPath, tip);
+  const mainRef = main
+    ? (await revParse(repoPath, `refs/remotes/origin/${main}`))
+      ? `origin/${main}`
+      : main
+    : null;
+  const mainSha = mainRef ? await revParse(repoPath, mainRef) : null;
+  // the range starts where the last release ended on this branch, also when main was not merged back
+  const last = await lastReleaseTagAt(repoPath, tip, mainSha);
   let base: ReleaseDocsPrepSummary['base'];
-  if (last) base = { kind: 'tag', tag: last.name, sha: last.sha };
+  if (last) base = { kind: 'tag', tag: last.name, sha: last.from };
   else {
-    const mainRef = main
-      ? (await revParse(repoPath, `refs/remotes/origin/${main}`))
-        ? `origin/${main}`
-        : main
-      : null;
     const mb = mainRef ? (await git(repoPath, ['merge-base', mainRef, tip])).stdout.trim() : '';
     if (!mb)
       return failed(

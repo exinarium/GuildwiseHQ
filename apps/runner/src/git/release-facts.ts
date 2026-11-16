@@ -12,6 +12,7 @@ import {
   type RepoReleaseFactsResult,
 } from '@aom/shared';
 import { git, revParse } from './git.ts';
+import { isAncestor } from './merged.ts';
 import { resolveReleaseBase } from './release-pr.ts';
 import { withRepoLock } from './repo-lock.ts';
 import { type FindRepo, isSafeSubmodulePath, redactGitError } from './submodule-fill.ts';
@@ -29,6 +30,8 @@ export interface ReleaseFactsInput {
 
 const COMMITS_MAX = 1000;
 const TAGS_MAX = 500;
+/** How many tags the merge-parent rule looks at when the tag is neither on head nor on main (keeps it cheap). */
+const MERGE_PARENT_TAGS_MAX = 50;
 const CHANGELOG_MAX = 1_048_576;
 const VERSION_FILE_MAX = 262_144;
 const SUBMODULES_MAX = 50;
@@ -38,6 +41,32 @@ const nonEmpty = (s: string): string[] =>
     .split('\n')
     .map((l) => l.trim())
     .filter((l) => l !== '');
+
+/** `s` with the regular expression characters escaped (for `git log --grep`). */
+export const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** The parents of `sha` after the first one (empty for a commit that is not a merge). */
+async function laterParents(repoPath: string, sha: string): Promise<string[]> {
+  return (await git(repoPath, ['rev-list', '--parents', '-n', '1', sha])).stdout.trim().split(/\s+/).slice(2);
+}
+
+/**
+ * The commit on `head` where the release `tag` ended: the tag's commit when head contains it, else the release side of
+ * its merge commit, else the release commit (`chore(release): <version>`, a squash or rebase landing), else the merge
+ * base. Null when the tag is missing or shares no history with head. Read-only.
+ */
+export async function releasePointOf(repoPath: string, tag: string, head: string): Promise<string | null> {
+  const c = await revParse(repoPath, `refs/tags/${tag}`);
+  if (!c) return null;
+  if (await isAncestor(repoPath, c, head)) return c;
+  for (const parent of await laterParents(repoPath, c)) if (await isAncestor(repoPath, parent, head)) return parent;
+  const rel = (
+    await git(repoPath, ['log', '-1', '--format=%H', `--grep=^chore(release): ${escapeRe(tag.slice(1))}$`, head])
+  ).stdout.trim();
+  if (rel) return rel;
+  const mb = await git(repoPath, ['merge-base', c, head]);
+  return mb.exitCode === 0 && mb.stdout.trim() ? mb.stdout.trim() : null;
+}
 
 /** The text of `path` at `sha`, or null when it is absent or larger than `max` bytes. */
 async function fileAt(repoPath: string, sha: string, path: string, max: number): Promise<string | null> {
@@ -51,17 +80,21 @@ async function fileAt(repoPath: string, sha: string, path: string, max: number):
 
 /**
  * The paths changed since `lastTag` (every tracked file when there is no tag) and, per rule, how many of them it
- * covers plus the version file at `sha` and at the tag. Read-only; shared by the release proposal and the release commit.
+ * covers plus the version file at `sha` and at the tag. The diff starts at the tag's release point on `sha` (`from`,
+ * worked out here when not given), so a commit that is only on main never shows up. Read-only; shared by the release
+ * proposal and the release commit.
  */
 export async function componentFactsAt(
   repoPath: string,
   rules: readonly ComponentRule[],
   lastTag: string | null,
   sha: string,
+  from?: string,
 ): Promise<{ paths: string[]; components: ComponentFacts[] }> {
+  const start = lastTag ? (from ?? (await releasePointOf(repoPath, lastTag, sha)) ?? lastTag) : null;
   const paths = (
-    lastTag
-      ? (await git(repoPath, ['diff', '--name-only', '-z', lastTag, sha])).stdout
+    start
+      ? (await git(repoPath, ['diff', '--name-only', '-z', start, sha])).stdout
       : (await git(repoPath, ['ls-tree', '-r', '--name-only', '-z', sha])).stdout
   )
     .split('\0')
@@ -78,35 +111,69 @@ export async function componentFactsAt(
   return { paths, components };
 }
 
+/** The last release: the tag, the commit it points to and its release point on head (where the next range starts). */
+export interface LastReleaseTag {
+  name: string;
+  sha: string;
+  from: string;
+}
+
 /**
- * Every release tag (`vX.Y.Z`) of the clone, newest first, and the newest one merged into `headSha`. One rule for the
- * release facts and for Release prep (docs and videos).
+ * Every release tag (`vX.Y.Z`) of the clone, newest first, and the last release of `headSha`: the newest tag merged
+ * into head or, when the main branch (`mainSha`) is not head, the newest tag on main that has a release point on head
+ * (the tag sits on the merge commit on main that was not merged back) or whose merge commit has its release side on
+ * head. One rule for the release facts and for Release prep (docs and videos).
  */
 export async function releaseTagsAt(
   repoPath: string,
   headSha: string,
+  mainSha?: string | null,
 ): Promise<{
   all: string[];
   newestFirst: (xs: string[]) => string[];
-  last: { name: string; sha: string } | null;
+  last: LastReleaseTag | null;
 }> {
   const all = nonEmpty((await git(repoPath, ['tag', '--list', 'v*'])).stdout).filter((t) =>
     RELEASE_TAG_RE.test(t),
   );
   const newestFirst = (xs: string[]) => [...xs].sort((x, y) => compareSemver(y.slice(1), x.slice(1)) ?? 0);
-  const merged = new Set(
-    nonEmpty((await git(repoPath, ['tag', '--merged', headSha, '--list', 'v*'])).stdout),
-  );
-  const lastName = newestFirst(all.filter((t) => merged.has(t)))[0] ?? null;
-  const lastSha = lastName ? await revParse(repoPath, `refs/tags/${lastName}`) : null;
-  return { all, newestFirst, last: lastName && lastSha ? { name: lastName, sha: lastSha } : null };
+  const mergedInto = async (sha: string) =>
+    new Set(nonEmpty((await git(repoPath, ['tag', '--merged', sha, '--list', 'v*'])).stdout));
+  const mergedHead = await mergedInto(headSha);
+  const separateMain = !!mainSha && mainSha !== headSha;
+  const mergedMain = separateMain ? await mergedInto(mainSha) : new Set<string>();
+  let checked = 0;
+  for (const name of newestFirst(all)) {
+    if (mergedHead.has(name)) {
+      const sha = await revParse(repoPath, `refs/tags/${name}`);
+      // the same answer as before: the newest tag merged into head, even when it cannot be peeled
+      return { all, newestFirst, last: sha ? { name, sha, from: sha } : null };
+    }
+    if (!separateMain) continue;
+    if (mergedMain.has(name)) {
+      const from = await releasePointOf(repoPath, name, headSha);
+      const sha = from ? await revParse(repoPath, `refs/tags/${name}`) : null;
+      if (from && sha) return { all, newestFirst, last: { name, sha, from } };
+      continue;
+    }
+    // the release side of the tagged merge commit is on head (main could not be read); capped, see above
+    if (checked >= MERGE_PARENT_TAGS_MAX) continue;
+    checked++;
+    const sha = await revParse(repoPath, `refs/tags/${name}`);
+    if (!sha) continue;
+    for (const parent of await laterParents(repoPath, sha))
+      if (await isAncestor(repoPath, parent, headSha))
+        return { all, newestFirst, last: { name, sha, from: parent } };
+  }
+  return { all, newestFirst, last: null };
 }
 
-/** The newest release tag merged into `headSha`, or null. */
+/** The last release of `headSha` (see `releaseTagsAt`), or null. */
 export const lastReleaseTagAt = async (
   repoPath: string,
   headSha: string,
-): Promise<{ name: string; sha: string } | null> => (await releaseTagsAt(repoPath, headSha)).last;
+  mainSha?: string | null,
+): Promise<LastReleaseTag | null> => (await releaseTagsAt(repoPath, headSha, mainSha)).last;
 
 /**
  * `repo.release_facts`: what the release proposal needs from the repository. Read-only: fetches the main branch, the
@@ -141,13 +208,15 @@ export async function readReleaseFacts(input: ReleaseFactsInput): Promise<RepoRe
   if (!headSha) return fail(`the working branch '${head}' does not exist yet`, base);
 
   const ahead = Number(
-    (await git(repoPath, ['rev-list', '--count', `${baseSha}..${headSha}`])).stdout.trim() || '0',
+    // merge commits do not count: a lone merge of main back into the working branch is nothing to release
+    (await git(repoPath, ['rev-list', '--count', '--no-merges', `${baseSha}..${headSha}`])).stdout.trim() ||
+      '0',
   );
 
-  const { all, newestFirst, last: lastTag } = await releaseTagsAt(repoPath, headSha);
-  const lastName = lastTag?.name ?? null;
+  const { all, newestFirst, last } = await releaseTagsAt(repoPath, headSha, baseSha);
+  const lastName = last?.name ?? null;
 
-  const range = lastName ? `${lastName}..${headSha}` : headSha;
+  const range = last ? `${last.from}..${headSha}` : headSha;
   const log = await git(repoPath, [
     'log',
     '--no-merges',
@@ -169,7 +238,13 @@ export async function readReleaseFacts(input: ReleaseFactsInput): Promise<RepoRe
     };
   });
 
-  const { paths, components } = await componentFactsAt(repoPath, p.components, lastName, headSha);
+  const { paths, components } = await componentFactsAt(
+    repoPath,
+    p.components,
+    lastName,
+    headSha,
+    last?.from,
+  );
 
   return {
     ok: true,
@@ -177,7 +252,7 @@ export async function readReleaseFacts(input: ReleaseFactsInput): Promise<RepoRe
     headSha,
     baseSha,
     ahead,
-    lastTag,
+    lastTag: last ? { name: last.name, sha: last.sha } : null,
     existingTags: newestFirst(all).slice(0, TAGS_MAX),
     commits,
     commitsTruncated: rows.length > COMMITS_MAX,
