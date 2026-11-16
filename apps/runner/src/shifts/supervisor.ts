@@ -91,6 +91,7 @@ import {
 import { detectChecksFromRef, detectUnitSuitesFromRef } from '../checks/detect.ts';
 import { RegressionUnits } from '../checks/regression-units.ts';
 import { runHandoffChecks } from '../checks/run.ts';
+import { checkRunId } from '../checks/units.ts';
 import type { RunnerConfig } from '../config.ts';
 import type { Outbox } from '../connection/outbox.ts';
 import {
@@ -178,6 +179,8 @@ import {
 } from '../sandbox/sandbox.ts';
 import { DEFAULT_SCRATCH_POLICY, describePrune, pruneScratch } from '../sandbox/scratch.ts';
 import {
+  allowedServices,
+  decideCheckServices,
   decideTestServices,
   isTesterShift,
   noTestServicesNote,
@@ -1036,14 +1039,7 @@ export class ShiftSupervisor {
   ): Promise<TestServiceDecision[]> {
     if (!msg.testServices?.length) return [];
     const caps = adapter ? await adapter.capabilities().catch(() => undefined) : undefined;
-    let ipcPort: number | undefined;
-    try {
-      ipcPort = Number(new URL(this.deps.ipc.url).port) || undefined;
-    } catch {
-      ipcPort = undefined;
-    }
-    const runnerPorts = new Set<number>(this.deps.runs?.ownedPorts() ?? []);
-    if (ipcPort) runnerPorts.add(ipcPort);
+    const runnerPorts = this.runnerPorts();
     const envForwardPorts =
       testEnv?.mode === 'local' && testEnv.envId && this.deps.runs
         ? this.deps.runs.testPorts(testEnv.envId)
@@ -1062,6 +1058,19 @@ export class ShiftSupervisor {
       runnerPorts,
       envForwardPorts,
     });
+  }
+
+  /** Ports the runner itself owns (its local HTTP port and every port of a run environment): never opened to a sandbox. */
+  private runnerPorts(): Set<number> {
+    let ipcPort: number | undefined;
+    try {
+      ipcPort = Number(new URL(this.deps.ipc.url).port) || undefined;
+    } catch {
+      ipcPort = undefined;
+    }
+    const runnerPorts = new Set<number>(this.deps.runs?.ownedPorts() ?? []);
+    if (ipcPort) runnerPorts.add(ipcPort);
+    return runnerPorts;
   }
 
   /** Remember what was decided for the project (replaced at every shift start, so a removed entry disappears). */
@@ -3345,6 +3354,19 @@ export class ShiftSupervisor {
       const runs = this.deps.runs;
       const gi = this.guardInput(s, wt.path, s.startSha);
       const role = msg.agent.roleKey;
+      // A builder's unit runs reach the declared local test services through the runner's forwarders (GWP-248)
+      const checkSvc = units.length
+        ? decideCheckServices({
+            services: msg.testServices,
+            kind: msg.kind,
+            roleKey: role,
+            isDevops: !!msg.agent.isDevops,
+            platform: process.platform,
+            runnerPorts: this.runnerPorts(),
+          })
+        : [];
+      const svcAllowed = allowedServices(checkSvc);
+      let svcProbed = false;
       r = await runHandoffChecks({
         suites: cb.suites,
         units,
@@ -3371,15 +3393,23 @@ export class ShiftSupervisor {
         },
         ...(runs
           ? {
-              launch: async (argv: string[], key: string) => {
+              launch: async (argv: string[], key: string, opts: { unit: boolean }) => {
+                if (opts.unit && svcAllowed.length && !svcProbed) {
+                  // informational only: the verdict comes from the run itself
+                  svcProbed = true;
+                  for (const d of await withReachability(checkSvc))
+                    if (d.state === 'allowed' && d.answering === false)
+                      this.addProgress(s, 'status', notAnsweringLine(d));
+                }
                 const l = await runs.checkLaunch({
                   key: `${msg.shiftId.slice(0, 8)}-${key}`,
                   worktree: wt.path,
                   argv,
                   network: 'none',
+                  ...(opts.unit ? { services: svcAllowed, runId: checkRunId(msg.shiftId, headSha) } : {}),
                 });
                 tmps.push(l.tmp);
-                return l;
+                return opts.unit && checkSvc.length ? { ...l, services: checkSvc } : l;
               },
             }
           : {}),

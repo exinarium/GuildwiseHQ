@@ -107,6 +107,11 @@ export const CheckEvidenceSchema = z.object({
   tail: z.array(z.string().max(300)).max(20).optional(),
   /** The formatter or import sorter command the agent may run to repair it. */
   fix: z.string().max(500).optional(),
+  /**
+   * The environment problem that kept a check from a verdict: the unreachable test service host:port (`error` only).
+   * Absent: older runners, or no environment problem.
+   */
+  environment: z.string().max(200).optional(),
 });
 export type CheckEvidence = z.infer<typeof CheckEvidenceSchema>;
 
