@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   RELEASE_REF_CLEANUP_CAPABILITY,
   RELEASE_SHIP_CAPABILITY,
@@ -5,7 +6,9 @@ import {
   ReleaseFactsSchema,
 } from '@aom/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { applyReleaseDocsPrepResult } from '../src/release/docs-prep.ts';
 import { reconcileReleaseProposal } from '../src/release/reconcile.ts';
+import { enqueueRunnerCommand } from '../src/runner-gateway/commands-queue.ts';
 import { applyReleaseShipResult } from '../src/release/ship.ts';
 import {
   RELEASE_SHIP_LOST_TEXT,
@@ -35,6 +38,7 @@ const facts = (): ReleaseFacts =>
     ahead: 3,
     lastTag: { name: 'v1.3.0', sha: 'b'.repeat(40) },
     existingTags: ['v1.3.0'],
+    commits: [{ sha: 'd'.repeat(40), subject: 'feat: one', breakingFooter: false }],
     changedTotal: 4,
     components: [
       { name: 'runner', changedCount: 17, contentAtHead: file('0.1.62'), contentAtTag: file('0.1.62') },
@@ -160,6 +164,37 @@ describe('release.ship on the server', () => {
     // the same answer twice changes nothing
     await applyReleaseShipResult(w.t.app.ctx, w.workstationId, { shipId: id }, true, good, undefined);
     expect(await q2(`SELECT * FROM desk_items WHERE subkind='release_committed'`)).toHaveLength(1);
+  });
+
+  it('closes a prep run still running when the release commit lands: skipped with a reason, its commands failed', async () => {
+    await proposeAndApprove();
+    const id = (await proposal()).id;
+    const runId = randomUUID();
+    await q(
+      `INSERT INTO release_docs_prep_runs (id, org_id, project_id, release_branch, status, steps, trigger, started_at, updated_at)
+       SELECT $1, org_id, id, 'development', 'running', '{}', 'manual', now(), now() FROM projects WHERE id=$2`,
+      [runId, w.projectId],
+    );
+    await enqueueRunnerCommand(w.t.app.ctx.pool, w.workstationId, 'release.docs_prep', { runId, step: 'commit' });
+    const proposed = await eventCount('ReleaseProposed');
+    const good = { ok: true, step: 'push', commit: 'c'.repeat(40), components: [], notices: [] };
+    await applyReleaseShipResult(w.t.app.ctx, w.workstationId, { shipId: id }, true, good, undefined);
+    const [run] = await q2(`SELECT * FROM release_docs_prep_runs WHERE id=$1`, [runId]);
+    expect(run).toMatchObject({ status: 'skipped', skipped_by: null });
+    expect(run.skip_reason).toContain('Release 1.4.0 was shipped while release prep was running');
+    const [cmd] = await q2(`SELECT * FROM runner_commands WHERE type='release.docs_prep'`);
+    expect(cmd.status).toBe('failed');
+    // a late answer of the closed run attaches nothing and raises no proposal
+    await applyReleaseDocsPrepResult(
+      w.t.app.ctx,
+      w.workstationId,
+      { runId, repoId: w.repoId, step: 'commit', phase: 'push' },
+      true,
+      { ok: true, state: 'passed', commit: 'e'.repeat(40), pushed: true },
+      undefined,
+    );
+    expect((await q2(`SELECT status FROM release_docs_prep_runs WHERE id=$1`, [runId]))[0].status).toBe('skipped');
+    expect(await eventCount('ReleaseProposed')).toBe(proposed);
   });
 
   it('a failed result puts a release_failed alert on the desk; Retry queues the stored payload again', async () => {

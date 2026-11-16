@@ -25,6 +25,8 @@ import { exec, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { closeRunningPrepForRelease } from './docs-prep.ts';
+import { requestReleaseFacts } from './facts.ts';
 import { appendReleaseFailure } from './ship.ts';
 
 const FIRST_DAY_SECONDS = 180;
@@ -264,6 +266,7 @@ export async function applyReleasePublishResult(
   const parsed = ReleasePublishResultSchema.safeParse(result);
   const r = parsed.success ? parsed.data : undefined;
   void workstationId;
+  const published: { repoId: string | null } = { repoId: null };
   await withAppendTx(ctx.pool, async (tx) => {
     const ship = await one(tx, 'SELECT * FROM release_ships WHERE id=$1 FOR UPDATE', [shipId]);
     if (!ship || (ship.status !== 'committed' && ship.status !== 'tagged')) return;
@@ -419,5 +422,11 @@ export async function applyReleasePublishResult(
       ] as never,
       { tx },
     );
+    // a run started by hand while the release was landing belongs to it as well
+    await closeRunningPrepForRelease(ctx, tx, ship.project_id, ship.version);
+    published.repoId = ship.repo_id;
   });
+  // the facts are read again at once, so nothing waits on facts from before the release
+  if (published.repoId)
+    await requestReleaseFacts(ctx, published.repoId, 'release').catch(() => undefined);
 }

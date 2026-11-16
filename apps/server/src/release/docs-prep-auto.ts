@@ -13,8 +13,9 @@ import {
   lockProjectForStart,
   releaseBranchOf,
   startRunInTx,
+  unreleasedWork,
 } from './docs-prep.ts';
-import { loadFacts } from './facts.ts';
+import { loadFacts, requestReleaseFacts } from './facts.ts';
 
 /** How often one project's readiness is worked out by the automatic start (a cost limit, not a correctness rule). */
 export const AUTO_CHECK_MS = 60_000;
@@ -158,7 +159,7 @@ const CANDIDATES = `SELECT p.* FROM projects p JOIN organizations o ON o.id = p.
 
 /**
  * Dispatcher step: starts release prep for every project whose release is ready on the test site, the automatic start
- * is on and the release has no run yet in this cycle. State based, so a missed event, a time-based requirement or a
+ * is on, the release has no run yet in this cycle and fresh facts show work that no release contains. State based, so a missed event, a time-based requirement or a
  * restart is caught by the next pass; the project row lock and a unique index keep it to one run.
  */
 export async function releaseDocsPrepAutoStart(ctx: Ctx, opts: { force?: boolean } = {}): Promise<void> {
@@ -169,6 +170,24 @@ export async function releaseDocsPrepAutoStart(ctx: Ctx, opts: { force?: boolean
     lastCheck.set(id, nowMs);
     const branch = await releaseBranchOf(ctx.pool, id, p.working_branch ?? null);
     if (!branch || (await latestRun(ctx.pool, id, branch))) continue;
+    // Only work that no release contains, on facts read after the last publish (a shipped release is never prepared again).
+    const work = await unreleasedWork(ctx.pool, await docsPrepRepos(ctx.pool, id));
+    if (work.state === 'unknown') {
+      for (const repoId of work.stale)
+        await requestReleaseFacts(ctx, repoId, 'release').catch(() => undefined);
+      continue;
+    }
+    if (work.state === 'no') {
+      const k = `${id}:${work.tag ?? ''}:nothing_since_release`;
+      if (!logged.has(k)) {
+        logged.add(k);
+        ctx.log.info(
+          { projectId: id, tag: work.tag },
+          `release prep did not start by itself: nothing new since ${work.tag ?? 'the last release'}`,
+        );
+      }
+      continue;
+    }
     const ready = await loadReleaseReadiness(ctx.pool, p, ctx.clock.now());
     if (!ready.ready || !ready.key) continue;
     try {
@@ -178,6 +197,7 @@ export async function releaseDocsPrepAutoStart(ctx: Ctx, opts: { force?: boolean
         if (s.enabled !== true || s.autoStart !== true) return null;
         const b = await releaseBranchOf(tx, id, locked.working_branch ?? null);
         if (!b || (await latestRun(tx, id, b))) return null;
+        if ((await unreleasedWork(tx, await docsPrepRepos(tx, id))).state !== 'yes') return null;
         const again = await loadReleaseReadiness(tx, locked, ctx.clock.now());
         if (!again.ready || again.key !== ready.key || !again.key) return null;
         return startRunInTx(ctx, tx, locked, { kind: 'auto', heads: again.heads, readyKey: again.key });

@@ -1,4 +1,4 @@
-import { RELEASE_DOCS_PREP_CAPABILITY } from '@aom/shared';
+import { RELEASE_DOCS_PREP_CAPABILITY, RELEASE_FACTS_CAPABILITY } from '@aom/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { loadReleaseReadiness, releaseDocsPrepAutoStart } from '../src/release/docs-prep-auto.ts';
 import { keepOnline } from './helpers/ceo.ts';
@@ -54,12 +54,31 @@ afterAll(async () => {
   await closeAdminPool();
 });
 
-async function setHead(sha: string) {
+const REAL = [{ sha: '3'.repeat(40), subject: 'feat: something new', breakingFooter: false }];
+const MACHINERY = [
+  { sha: '4'.repeat(40), subject: 'docs(release): prepare the release documentation for release/1.5.0', breakingFooter: false },
+  { sha: '5'.repeat(40), subject: 'chore(release): 1.5.0', breakingFooter: false },
+];
+
+/** Facts for the release branch at `sha`; by default with one real change since the last release. */
+async function setHead(sha: string, commits: unknown[] = REAL, at: Date = ctx().clock.now()) {
+  const facts = { headSha: sha, ahead: commits.length, lastTag: { name: 'v1.4.0', sha: '6'.repeat(40) }, commits };
   await q(
-    `INSERT INTO repo_release_facts (project_repo_id, request_id, trigger, state, head_sha, requested_at, updated_at)
-     VALUES ($1, gen_random_uuid(), 'manual', 'ready', $2, $3, $3)
-     ON CONFLICT (project_repo_id) DO UPDATE SET state='ready', head_sha=$2, updated_at=$3`,
-    [d.w.repoId, sha, ctx().clock.now()],
+    `INSERT INTO repo_release_facts (project_repo_id, request_id, trigger, state, head_sha, facts, requested_at, updated_at)
+     VALUES ($1, gen_random_uuid(), 'manual', 'ready', $2, $4::jsonb, $3, $3)
+     ON CONFLICT (project_repo_id) DO UPDATE SET state='ready', message=NULL, head_sha=$2, facts=$4::jsonb, updated_at=$3`,
+    [d.w.repoId, sha, at, JSON.stringify(facts)],
+  );
+}
+
+/** A published release 1.5.0 of the repository at `at`. */
+async function published(at: Date) {
+  await q(
+    `INSERT INTO release_ships (id, org_id, project_id, repo_id, version, tag, tag_name, release_date, payload, status,
+                                commit_sha, published_at, created_at, updated_at)
+     SELECT gen_random_uuid(), org_id, id, $2, '1.5.0', 'v1.5.0', 'v1.5.0', '2026-11-15', '{}'::jsonb, 'published',
+            $3, $4, $4, $4 FROM projects WHERE id=$1`,
+    [d.w.projectId, d.w.repoId, '5'.repeat(40), at],
   );
 }
 
@@ -204,5 +223,69 @@ describe('the automatic start', () => {
     expect(item.autoStartBlocked).toMatch(
       /^No workstation has .+ yet\. Wait for the clone to finish, then try again\.$/,
     );
+  });
+});
+
+describe('after a release has shipped', () => {
+  const ready = async () => {
+    await healthyRun(d, 'local', HEAD, 45);
+  };
+  const shippedFacts = (commits: unknown[]) => setHead(HEAD, commits).then(() =>
+    q(`UPDATE repo_release_facts SET facts = jsonb_set(facts, '{lastTag}', $2::jsonb) WHERE project_repo_id=$1`, [
+      d.w.repoId,
+      JSON.stringify({ name: 'v1.5.0', sha: '7'.repeat(40) }),
+    ]),
+  );
+
+  it('starts no automatic run when the release commit or a prep docs commit is the new head', async () => {
+    await settings({ autoStart: true });
+    await ready();
+    await published(new Date(ctx().clock.now().getTime() - 60_000));
+    await shippedFacts([MACHINERY[1]]);
+    await pass();
+    expect(await runs()).toHaveLength(0);
+    await shippedFacts(MACHINERY);
+    await pass();
+    expect(await runs()).toHaveLength(0);
+  });
+
+  it('facts older than the publish: no start, and the facts are asked for again', async () => {
+    await settings({ autoStart: true });
+    await ready();
+    await q(`UPDATE workstation_capabilities SET capabilities=$2 WHERE workstation_id=$1`, [
+      d.w.workstationId,
+      [RELEASE_DOCS_PREP_CAPABILITY, RELEASE_FACTS_CAPABILITY],
+    ]);
+    await setHead(HEAD, REAL, new Date(ctx().clock.now().getTime() - 120_000));
+    await published(new Date(ctx().clock.now().getTime() - 60_000));
+    await pass();
+    expect(await runs()).toHaveLength(0);
+    const [f] = await q2(`SELECT trigger FROM repo_release_facts WHERE project_repo_id=$1`, [d.w.repoId]);
+    expect(f.trigger).toBe('release');
+  });
+
+  it('a manual start with nothing since the release is refused; with a real change it starts', async () => {
+    await settings({});
+    await published(new Date(ctx().clock.now().getTime() - 60_000));
+    await shippedFacts(MACHINERY);
+    const refused = await owner('POST', `${base()}/runs`);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.code).toBe('nothing_since_release');
+    await shippedFacts([...REAL, ...MACHINERY]);
+    expect((await owner('POST', `${base()}/runs`)).status).toBe(202);
+  });
+
+  it('after a new-cycle automatic run exists, a newer head starts no second automatic run', async () => {
+    await settings({ autoStart: true });
+    await published(new Date(ctx().clock.now().getTime() - 60_000));
+    await ready();
+    await shippedFacts(REAL);
+    await pass();
+    expect(await runs()).toHaveLength(1);
+    await q(`UPDATE release_docs_prep_runs SET status='failed'`);
+    await setHead(NEXT);
+    await healthyRun(d, 'local', NEXT, 45);
+    await pass();
+    expect(await runs()).toHaveLength(1);
   });
 });
