@@ -358,6 +358,44 @@ describe('judging with the role scope', () => {
     expect(r.blocking).toEqual([]);
   });
 
+  it('under pnpm -r a URL in an E2E code frame is not attributed or counted: still deferred (AC5)', async () => {
+    const wt = worktree(['src/a.ts', 'src/b.ts', 'e2e/tests/x.spec.ts']);
+    const framed = [
+      'echo "e2e lint: tests/x.spec.ts:12:3 lint/x"',
+      'echo "e2e lint:   > 12 | await page.goto(\'http://127.0.0.1:3000/src/a.ts\');"',
+      'echo "e2e lint:      |        ^^^^^^^^^^"',
+      'exit 1',
+    ].join('; ');
+    const r = await runHandoffChecks({
+      ...base(wt),
+      suites: [check('lint', framed)],
+      scope: scopeOf('builder', true),
+    });
+    expect(r.evidence[0]).toMatchObject({ status: 'deferred', owedBy: 'tester' });
+    expect(r.blocking).toEqual([]);
+    expect(r.evidence[0]?.owed?.join('\n')).toContain('tests/x.spec.ts');
+  });
+
+  it('a real finding in a builder file still blocks with and without the pnpm -r prefix (AC6)', async () => {
+    for (const mark of ['', 'apps/web lint: ']) {
+      const wt = worktree(['src/a.ts', 'src/b.ts', 'e2e/tests/x.spec.ts']);
+      const out = [
+        'echo "e2e lint: tests/x.spec.ts:12:3 lint/x"',
+        'echo "e2e lint:   > 12 | goto(\'https://example.com/x\')"',
+        `echo "${mark}src/b.ts:1:1 lint/y"`,
+        'exit 1',
+      ].join('; ');
+      const r = await runHandoffChecks({
+        ...base(wt),
+        suites: [check('lint', out)],
+        scope: scopeOf('builder', true),
+      });
+      expect(r.evidence[0]?.status).toBe('failed');
+      expect(r.blocking).toHaveLength(1);
+      expect(r.refusal).toContain('src/b.ts');
+    }
+  });
+
   it('the checks use up the handoff deadline: the units are not run and say so (R2)', async () => {
     const r = await runHandoffChecks({
       ...base(worktree()),
