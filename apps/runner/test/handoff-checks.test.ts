@@ -201,6 +201,26 @@ describe('checks at aom handoff', () => {
     expect(reports[0]?.changedPaths).toEqual(expect.arrayContaining(['e2e/login.spec.ts', 'src/a.txt']));
   }, 90_000);
 
+  it('under pnpm -r a URL in the code frame of an E2E finding does not refuse the builder', async () => {
+    const out = [
+      'echo "e2e lint: tests/x.spec.ts:12:3 lint/style/noVar"',
+      'echo "e2e lint:   > 12 | await page.goto(\'http://127.0.0.1:3000/src/a.txt\');"',
+      'echo "e2e lint:      |        ^^^^"',
+      'exit 1',
+    ].join('; ');
+    const checks = { suites: [fmtCheck({ cmd: ['sh', '-c', out] })], detect: false };
+    await run(checks, async (wt, post) => {
+      execFileSync('mkdir', ['-p', join(wt, 'e2e', 'tests')]);
+      writeFileSync(join(wt, 'e2e', 'tests', 'x.spec.ts'), 'x\n');
+      sh(wt, 'git', ['add', '-A']);
+      execFileSync('git', ['commit', '-q', '-m', 'spec'], { cwd: wt });
+      commit(wt, 'a.txt', 'ok\n', 'product change');
+      expect((await post()).json.accepted).toBe(true);
+    });
+    const reports = outcomes();
+    expect(reports[0]?.checks?.[0]).toMatchObject({ status: 'deferred', owedBy: 'tester' });
+  }, 60_000);
+
   it('without brief.checks the report has no checks (an older server)', async () => {
     await run(undefined, async (wt, post) => {
       commit(wt, 'a.txt', 'BAD-FORMAT\n', 'bad');

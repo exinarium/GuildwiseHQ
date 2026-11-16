@@ -59,8 +59,14 @@ const LOCATION = /\S\.[A-Za-z0-9]{1,8}(?::\d+(?::\d+)?\b|\(\d+,\d+\))/;
  * A source code frame line under a diagnostic (Biome and friends: `> 12 │ code`, `13 │ code`, `│   ^^^`): it shows code, so
  * a URL with a port or a `foo.ts:12` comment in it is not a diagnostic location.
  */
-const CODE_FRAME = /^(?:>\s*)?\d*\s*[│|]/;
+const CODE_FRAME = /^(?:>\s*)?[\d\s]*[│|]|^[\^~]+(?:\s|$)/;
 const PNPM_PREFIX = /^(\S+) [\w:-]+: /;
+/** An http(s) URL: never a file reference or a diagnostic location (`127.0.0.1:3000` is not `file:line`). */
+const WEB_URL = /\bhttps?:\/\/\S*/gi;
+/** The location tail after a path: `:12`, `:12:3`, `(12,3)` and the rest of the line. */
+const LOC_TAIL = /(?::\d+(?::\d+)?|\(\d+,\d+\))(?:[:\s].*)?$/;
+/** Ends like a file name with an extension. */
+const PATH_END = /\S\.[A-Za-z0-9]{1,8}$/;
 
 export const stripAnsi = (s: string): string => s.replace(ANSI, '');
 
@@ -78,13 +84,18 @@ export function attribute(output: string, o: AttributeOptions): Attribution {
   for (const raw of stripAnsi(output).split(/\r?\n/)) {
     const line = raw.trim();
     if (!line) continue;
-    const prefix = PNPM_PREFIX.exec(line)?.[1];
+    const pm = PNPM_PREFIX.exec(line);
+    const prefix = pm?.[1];
     const prefixDir = prefix && o.exists(clean(prefix)) ? clean(prefix) : null;
+    // `<package> <script>: ` from pnpm -r, not a `file:line: error:` location (mypy, gcc)
+    const body =
+      pm?.[1] && !pm[1].endsWith(':') && !LOCATION.test(pm[1]) ? line.slice(pm[0].length).trim() : line;
+    if (CODE_FRAME.test(body)) continue;
+    const text = line.replace(WEB_URL, ' ');
     let hitIntroduced = false;
     let hitElsewhere = false;
     const paths = new Set<string>();
-    for (const m of line.matchAll(TOKEN)) {
-      const token = m[0].replace(/\\/g, '/');
+    const locate = (token: string): { path: string; changed: boolean } | null => {
       const candidates: string[] = [];
       if (wt && token.startsWith(wt)) candidates.push(clean(token.slice(wt.length)));
       else if (!/^([A-Za-z]:)?\//.test(token)) {
@@ -93,21 +104,28 @@ export function attribute(output: string, o: AttributeOptions): Attribution {
         candidates.push(clean(token));
       }
       const changedHit = candidates.find((c) => o.changed.has(c));
-      if (changedHit) {
-        hitIntroduced = true;
-        paths.add(changedHit);
-        continue;
-      }
+      if (changedHit) return { path: changedHit, changed: true };
       const existing = candidates.find((c) => c && !c.startsWith('..') && o.exists(c));
-      if (existing) {
-        hitElsewhere = true;
-        paths.add(existing);
+      return existing ? { path: existing, changed: false } : null;
+    };
+    const record = (hit: { path: string; changed: boolean }): void => {
+      if (hit.changed) hitIntroduced = true;
+      else hitElsewhere = true;
+      paths.add(hit.path);
+    };
+    // a line that is one path with spaces (bare, stylish header, or with a location tail)
+    const whole = body.replace(WEB_URL, ' ').trim().replace(LOC_TAIL, '').trim().replace(/\\/g, '/');
+    const wholeHit = whole.includes(' ') && PATH_END.test(whole) ? locate(whole) : null;
+    if (wholeHit) record(wholeHit);
+    else
+      for (const m of text.matchAll(TOKEN)) {
+        const hit = locate(m[0].replace(/\\/g, '/'));
+        if (hit) record(hit);
       }
-    }
     const shown = line.slice(0, LINE_MAX);
     if (hitIntroduced) introduced.add(shown);
     else if (hitElsewhere) elsewhere.add(shown);
-    if (!hitIntroduced && !hitElsewhere && !CODE_FRAME.test(line) && LOCATION.test(line)) unattributed++;
+    if (!hitIntroduced && !hitElsewhere && LOCATION.test(text)) unattributed++;
     if ((hitIntroduced || hitElsewhere) && !findings.has(shown))
       findings.set(shown, { line: shown, paths: [...paths], changed: hitIntroduced });
   }
