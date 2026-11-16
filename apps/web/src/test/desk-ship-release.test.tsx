@@ -212,3 +212,75 @@ describe('Ship release desk item', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('no local clone');
   });
 });
+
+describe('Ship release submodule pointers', () => {
+  const PIN = 'abc1234def5678abc1234def5678abc1234def56';
+  const sub = (over: Record<string, unknown> = {}) => ({
+    path: 'core',
+    url: 'github.com/acme/core',
+    pinned: PIN,
+    repoId: ID(51),
+    repoName: 'core-repo',
+    latestTag: { name: 'v1.8.0', sha: 'f'.repeat(40) },
+    containsTag: 'v1.7.2',
+    state: 'behind',
+    ...over,
+  });
+
+  it('shows a behind pointer with the pinned commit and latest release, and disables Approve with the reason', () => {
+    wrap(<ShipReleaseItem item={item(view({ repoName: 'cloud', submodules: [sub()] }))} />);
+    expect(screen.getByTestId('ship-submodules')).toHaveTextContent(
+      'core: behind - pinned abc1234 (contains 1.7.2), latest release 1.8.0',
+    );
+    const callout = screen.getByTestId('ship-submodule-blocked');
+    expect(callout).toHaveTextContent('Cannot ship cloud');
+    expect(callout).toHaveTextContent('Bump the submodule core to v1.8.0 in cloud and refresh the release.');
+    expect(screen.getByRole('button', { name: /Approve release 1.4.0/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Reject/ })).toBeEnabled();
+  });
+
+  it('refuses a pointer that is not on a release tag', () => {
+    wrap(<ShipReleaseItem item={item(view({ submodules: [sub({ state: 'not_on_release_tag', containsTag: 'v1.8.0' })] }))} />);
+    expect(screen.getByTestId('ship-submodules')).toHaveTextContent('core: not on a release tag - pinned abc1234');
+    expect(screen.getByRole('button', { name: /Approve release 1.4.0/ })).toBeDisabled();
+  });
+
+  it('pinned, not checked and unknown pointers are listed and never disable Approve', () => {
+    wrap(
+      <ShipReleaseItem
+        item={item(
+          view({
+            submodules: [
+              sub({ state: 'pinned', containsTag: 'v1.8.0' }),
+              sub({ path: 'vendor/x', state: 'not_checked', reason: 'points outside this project' }),
+              sub({ path: 'lib', state: 'unknown', reason: 'no clone of core-repo on this workstation' }),
+            ],
+          }),
+        )}
+      />,
+    );
+    const list = screen.getByTestId('ship-submodules');
+    expect(list).toHaveTextContent('core: pinned - abc1234 is release 1.8.0');
+    expect(list).toHaveTextContent('vendor/x: not checked - points outside this project');
+    expect(list).toHaveTextContent('lib: unknown - no clone of core-repo on this workstation (not verified, does not block)');
+    expect(screen.queryByTestId('ship-submodule-blocked')).toBeNull();
+    expect(screen.getByRole('button', { name: /Approve release 1.4.0/ })).toBeEnabled();
+  });
+
+  it('shows no submodule block for a repository without submodules', () => {
+    wrap(<ShipReleaseItem item={item(view())} />);
+    expect(screen.queryByTestId('ship-submodules')).toBeNull();
+    expect(screen.queryByTestId('ship-submodule-blocked')).toBeNull();
+  });
+
+  it('shows the server refusal in the callout, not under the version field', async () => {
+    const user = userEvent.setup();
+    reply = () =>
+      json({ error: { code: 'release_submodule_behind', message: 'Cannot ship cloud: core: behind.' } }, 409);
+    wrap(<ShipReleaseItem item={item(view())} />);
+    await user.click(screen.getByRole('button', { name: /Approve release 1.4.0/ }));
+    const callout = await screen.findByTestId('ship-submodule-blocked');
+    expect(callout).toHaveTextContent('Cannot ship cloud: core: behind.');
+    expect(screen.getAllByText(/Cannot ship cloud/)).toHaveLength(1);
+  });
+});
