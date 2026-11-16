@@ -1682,10 +1682,26 @@ worktree cut from `origin/<working branch>` (never in the user's checkout, never
    still the branch tip; if the branch moved, it is made again and a notice says so.
 3. **components**: the shared `componentBumps` reads each rule's version file at the tag and at the head; only a rule whose
    files changed since the tag and whose version is not already raised is written (`replaceComponentVersion` with the
-   approved version). A missing file or a pattern that does not match stops the step.
+   approved version). A missing file or a pattern that does not match stops the step. The version file is read
+   byte-exact (`git show` with `keepFinalNewline`: the final newline, CRLF and a BOM are kept) and only the version value
+   changes; a bump that would change any other byte (a different length delta or final line ending) stops the step. No
+   newline is added to a file that had none (the format check adds it when the repository's formatter asks for it).
 4. **changelog**: `## [Unreleased]` moves under `## [<version>] - <date>`, an empty `## [Unreleased]` stays above it, and the
    intro line gets one sentence per rule (`Runner 0.1.64.` or `Runner 0.1.63 (unchanged).`). Without a CHANGELOG.md the
-   approved notes become a new one.
+   approved notes become a new one. The CHANGELOG always ends with exactly one line ending, in the file's own style
+   (trailing blank lines are dropped; CRLF stays CRLF).
+   **format check**: the repository's own formatter runs on exactly the files steps 3 and 4 wrote, in the integration
+   worktree, before anything is committed (`apps/runner/src/git/release-format.ts`). The tool is found from the
+   configuration at the worktree root: `biome.json`/`biome.jsonc` (biome first), else a prettier config (`.prettierrc*`,
+   `prettier.config.*` or a `"prettier"` key in package.json). Its program is `<clone>/node_modules/.bin/<tool>`, then
+   the first one on the toolchain PATH; never `npx`, an install or the network. It runs a fix pass (biome
+   `check --write --no-errors-on-unmatched --files-ignore-unknown=true`, prettier `--write --ignore-unknown`) and then a
+   verify pass (`check` / `--check`) on the files as `./<path>` arguments; the verify exit code decides. A fix lands in the
+   release commit, and the notice `Format check: <tool> ran on <files> (<commands>): passed; it fixed <files>.` goes into
+   the result. A verify failure (or a timeout, 2 minutes per pass) stops at step `commit` with the files it names and the
+   tool's output: nothing is committed, kept or pushed, so Retry starts over. No configuration, no program, or a Windows
+   runner skips the check with the notice `Format check skipped: <reason>.`; the byte-exact writes above still hold. A
+   formatter that touched any other file is refused by step 5 (unexpected changes).
 5. **commit**: `chore(release): <version>` as the project's commit identity (the same resolution as a merge). `--signoff` is added
    when the repository asks for a DCO (`.github/dco.yml`, a workflow or `.gitlab-ci.yml` that checks `Signed-off-by`, or a
    CONTRIBUTING.md naming the Developer Certificate of Origin).

@@ -1,4 +1,5 @@
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { CommandPayloadSchemas, type ReleaseShipPayload } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
@@ -60,9 +61,19 @@ function commit(clone: string, path: string, text: string, message: string) {
 }
 
 /** main with the release v1.3.0, then develop pushed with (by default) a change under apps/runner/. */
-function setup(opts: { runnerChange?: boolean; dco?: boolean; handBump?: boolean } = {}) {
+function setup(
+  opts: {
+    runnerChange?: boolean;
+    dco?: boolean;
+    handBump?: boolean;
+    /** The version file at v1.3.0 (default: `file('0.1.62')`). */
+    versionText?: string;
+    /** Extra files committed on develop (a formatter config). */
+    extra?: Record<string, string>;
+  } = {},
+) {
   const repo = makeRepo();
-  commit(repo.clone, 'apps/runner/src/version.ts', file('0.1.62'), 'feat: runner');
+  commit(repo.clone, 'apps/runner/src/version.ts', opts.versionText ?? file('0.1.62'), 'feat: runner');
   commit(repo.clone, 'CHANGELOG.md', CHANGELOG.replace('Hand written intro.\n\n', ''), 'docs: changelog');
   sh(repo.clone, 'git', ['tag', '-a', 'v1.3.0', '-m', 'Guildwise HQ 1.3.0']);
   sh(repo.clone, 'git', ['push', 'origin', 'main', '--tags']);
@@ -71,6 +82,8 @@ function setup(opts: { runnerChange?: boolean; dco?: boolean; handBump?: boolean
     commit(repo.clone, 'CONTRIBUTING.md', '## DCO\n\nSign off: Signed-off-by: you\n', 'docs: dco');
   if (opts.runnerChange ?? true) commit(repo.clone, 'apps/runner/src/other.ts', 'x', 'fix(runner): other');
   if (opts.handBump) commit(repo.clone, 'apps/runner/src/version.ts', file('0.1.63'), 'chore: bump');
+  for (const [path, text] of Object.entries(opts.extra ?? {}))
+    commit(repo.clone, path, text, `chore: ${path}`);
   commit(repo.clone, 'CHANGELOG.md', CHANGELOG, 'docs: unreleased');
   sh(repo.clone, 'git', ['push', '-u', 'origin', 'develop']);
   return { repo, integrationDir: tmp('aom-integration-') };
@@ -80,12 +93,21 @@ const originShow = (origin: string, path: string) => sh(origin, 'git', ['show', 
 const commitsOn = (origin: string) => Number(sh(origin, 'git', ['rev-list', '--count', 'develop']));
 const refs = (dir: string) => sh(dir, 'git', ['for-each-ref', '--format=%(refname) %(objectname)']);
 
-const ship = (s: ReturnType<typeof setup>, over: Partial<ReleaseShipPayload> = {}) =>
+const ship = (
+  s: ReturnType<typeof setup>,
+  over: Partial<ReleaseShipPayload> = {},
+  extra: Partial<Parameters<typeof shipReleaseCommit>[0]> = {},
+) =>
   shipReleaseCommit({
     payload: payload({ remoteUrlNormalized: s.repo.remoteNormalized, ...over }),
     repoPath: s.repo.clone,
     integrationDir: s.integrationDir,
+    ...extra,
   });
+
+/** The blob at origin's develop, byte-exact (`sh` trims). */
+const originBlob = (origin: string, path: string) =>
+  execFileSync('git', ['cat-file', 'blob', `develop:${path}`], { cwd: origin, encoding: 'utf8' });
 
 describe('release.ship', () => {
   it('makes one release commit on the working branch: changelog, bumped runner, identity, sign-off', async () => {
@@ -328,5 +350,126 @@ describe('release.ref_cleanup', () => {
     expect(schema.safeParse({ ...base, version: '1.4.0' }).success).toBe(true);
     expect(schema.safeParse({ ...base, version: '1.4.0/../../heads/develop' }).success).toBe(false);
     expect(schema.safeParse({ ...base, version: 'develop' }).success).toBe(false);
+  });
+});
+
+/**
+ * A fake biome in the clone's node_modules/.bin: logs its arguments; with --write it adds a missing final newline to
+ * every ./file argument; the verify run prints and exits as `<clone>/verify.sh` says (exit 0 when absent).
+ */
+function fakeBiome(clone: string) {
+  const bin = join(clone, 'node_modules', '.bin', 'biome');
+  mkdirSync(dirname(bin), { recursive: true });
+  writeFileSync(
+    bin,
+    `#!/bin/sh
+echo "$PWD|$*" >> "${join(clone, 'biome.log')}"
+case " $* " in
+  *" --write "*)
+    for a in "$@"; do
+      case "$a" in ./*) [ -n "$(tail -c1 "$a")" ] && printf '\\n' >> "$a" ;; esac
+    done
+    exit 0 ;;
+esac
+[ -f "${join(clone, 'verify.sh')}" ] && exec sh "${join(clone, 'verify.sh')}"
+exit 0
+`,
+  );
+  chmodSync(bin, 0o755);
+  return { log: () => readFileSync(join(clone, 'biome.log'), 'utf8').trim().split('\n') };
+}
+
+const realExec = async (cmd: string, args: string[], o: { cwd: string }) => {
+  try {
+    const stdout = execFileSync(cmd, args, { cwd: o.cwd, encoding: 'utf8', stdio: 'pipe' });
+    return { exitCode: 0, stdout, stderr: '', timedOut: false };
+  } catch (err) {
+    const e = err as { status?: number; stdout?: string; stderr?: string };
+    return { exitCode: e.status ?? 1, stdout: e.stdout ?? '', stderr: e.stderr ?? '', timedOut: false };
+  }
+};
+
+describe('release.ship byte-exact files', () => {
+  it('keeps the final newline of the version file: only the version differs; the CHANGELOG ends with one newline', async () => {
+    const s = setup();
+    const r = await ship(s);
+    expect(r.ok).toBe(true);
+    expect(originBlob(s.repo.origin, 'apps/runner/src/version.ts')).toBe(file('0.1.63'));
+    const md = originBlob(s.repo.origin, 'CHANGELOG.md');
+    expect(md.endsWith('- Old.\n')).toBe(true);
+    expect(md.endsWith('\n\n')).toBe(false);
+    expect(r.notices).toContain(
+      'Format check skipped: the repository has no biome or prettier configuration.',
+    );
+  });
+
+  it('keeps CRLF and adds no newline to a version file without one (no formatter)', async () => {
+    const s = setup({ versionText: "// head\r\nexport const RUNNER_VERSION = '0.1.62';\r\n" });
+    const r = await ship(s);
+    expect(r.ok).toBe(true);
+    expect(originBlob(s.repo.origin, 'apps/runner/src/version.ts')).toBe(
+      "// head\r\nexport const RUNNER_VERSION = '0.1.63';\r\n",
+    );
+    const t = setup({ versionText: "export const RUNNER_VERSION = '0.1.62';" });
+    expect((await ship(t)).ok).toBe(true);
+    expect(originBlob(t.repo.origin, 'apps/runner/src/version.ts')).toBe(
+      "export const RUNNER_VERSION = '0.1.63';",
+    );
+  });
+});
+
+describe('release.ship format check', () => {
+  it('runs the formatter on exactly the written files; a fixable problem is fixed in the release commit', async () => {
+    const s = setup({
+      versionText: "export const RUNNER_VERSION = '0.1.62';",
+      extra: { 'biome.json': '{}\n' },
+    });
+    const fake = fakeBiome(s.repo.clone);
+    const r = await ship(s, {}, { exec: realExec, toolPathDirs: [] });
+    expect(r.ok).toBe(true);
+    expect(originBlob(s.repo.origin, 'apps/runner/src/version.ts')).toBe(file('0.1.63'));
+    const calls = fake.log();
+    expect(calls).toHaveLength(2);
+    for (const c of calls) {
+      expect(c).toContain(`${s.integrationDir}`);
+      expect(c.endsWith(' ./apps/runner/src/version.ts ./CHANGELOG.md')).toBe(true);
+    }
+    const notice = r.notices.find((n) => n.startsWith('Format check:'));
+    expect(notice).toContain('biome ran on apps/runner/src/version.ts, CHANGELOG.md');
+    expect(notice).toContain('biome check --write');
+    expect(notice).toContain('it fixed apps/runner/src/version.ts');
+  });
+
+  it('an unfixable problem fails at commit naming the file and quoting the output; nothing pushed; Retry works', async () => {
+    const s = setup({ extra: { 'biome.json': '{}\n' } });
+    fakeBiome(s.repo.clone);
+    writeFileSync(
+      join(s.repo.clone, 'verify.sh'),
+      'echo "apps/runner/src/version.ts:1:1 lint/x  boom"\nexit 1\n',
+    );
+    const before = commitsOn(s.repo.origin);
+    const failed = await ship(s, {}, { exec: realExec });
+    expect(failed.ok).toBe(false);
+    expect(failed.step).toBe('commit');
+    expect(failed.error).toContain('the biome check failed on apps/runner/src/version.ts');
+    expect(failed.error).toContain('boom');
+    expect(failed.error).toContain('nothing was committed or pushed');
+    expect(commitsOn(s.repo.origin)).toBe(before);
+    expect(refs(s.repo.clone)).not.toContain('refs/guildwise/release/1.4.0');
+    expect(sh(s.repo.origin, 'git', ['tag', '--list'])).toBe('v1.3.0');
+    rmSync(join(s.repo.clone, 'verify.sh'));
+    const retried = await ship(s, {}, { exec: realExec });
+    expect(retried.ok).toBe(true);
+    expect(commitsOn(s.repo.origin)).toBe(before + 1);
+  });
+
+  it('skips when the formatter is configured but not installed, and says where it looked', async () => {
+    const s = setup({ extra: { 'biome.json': '{}\n' } });
+    const r = await ship(s, {}, { exec: realExec, toolPathDirs: [] });
+    expect(r.ok).toBe(true);
+    expect(r.notices.join('\n')).toContain(
+      'Format check skipped: biome.json is in the repository but no biome program',
+    );
+    expect(originBlob(s.repo.origin, 'apps/runner/src/version.ts')).toBe(file('0.1.63'));
   });
 });

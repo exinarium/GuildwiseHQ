@@ -84,14 +84,15 @@ export interface ReleaseChangelogInput {
 
 /**
  * Moves the Unreleased entries under `## [version] - date`, leaves an empty `## [Unreleased]` above it and extends the
- * intro line with one sentence per component. Every line outside the Unreleased block stays as it was.
+ * intro line with one sentence per component. Every line outside the Unreleased block stays as it was, except that the
+ * file ends with exactly one line ending (in the file's own style: CRLF stays CRLF).
  */
 export function releaseChangelog(md: string, input: ReleaseChangelogInput): ReleaseChangelogOutcome {
   const existing = releaseSectionOf(md, input.version);
   if (existing !== null) return { kind: 'already', section: existing };
   const split = splitUnreleased(md);
   if (!split) return { kind: 'error', message: 'CHANGELOG.md has no ## [Unreleased] section' };
-  const { lines, eol, trailing } = linesOf(md);
+  const { lines, eol } = linesOf(md);
   const section = composeReleaseSection(
     input.version,
     input.date,
@@ -107,7 +108,8 @@ export function releaseChangelog(md: string, input: ReleaseChangelogInput): Rele
     ...(tail.length > 0 ? [''] : []),
     ...tail,
   ];
-  return { kind: 'rewritten', md: out.join(eol) + (trailing ? eol : ''), section };
+  while (out.length > 0 && (out[out.length - 1] as string).trim() === '') out.pop();
+  return { kind: 'rewritten', md: out.join(eol) + eol, section };
 }
 
 /** A new CHANGELOG.md (the repository has none): the approved notes become the first release. */

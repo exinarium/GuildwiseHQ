@@ -26,6 +26,8 @@ export interface GitOptions {
   env?: Record<string, string>;
   /** Kill git after this long (network probes such as `ls-remote`). */
   timeoutMs?: number;
+  /** Keep stdout byte-exact: the final newline is not stripped (file contents read with `git show`). */
+  keepFinalNewline?: boolean;
 }
 
 /** git lost a race for a lock file (two operations in one clone at once); it did nothing and can simply be run again. */
@@ -183,6 +185,7 @@ export async function git(cwd: string, args: string[], opts: GitOptions = {}): P
       stdin: 'ignore',
       env: { ...GIT_HARDEN_ENV, ...opts.env },
       extendEnv: true,
+      stripFinalNewline: !opts.keepFinalNewline,
       ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}),
     });
     const res = { stdout: String(r.stdout ?? ''), stderr: String(r.stderr ?? ''), exitCode: r.exitCode ?? 1 };

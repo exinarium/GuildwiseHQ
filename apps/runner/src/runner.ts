@@ -2567,6 +2567,20 @@ export class Runner {
               appProbe: this.appProbe,
               integrationDir: this.paths.integration,
               auth: this.scopeFor(p.postAs).auth,
+              // The repository's own formatter on the files the release commit writes, with the toolchain PATH.
+              exec: async (cmd, args, o) => {
+                const tc = this.toolchains.resolve();
+                const r = await this.exec.run(cmd, args, {
+                  cwd: o.cwd,
+                  timeoutMs: o.timeoutMs,
+                  env: { ...tc.env, PATH: [...tc.pathDirs, process.env.PATH ?? ''].join(delimiter) },
+                });
+                return { ...r, timedOut: false };
+              },
+              toolPathDirs: [
+                ...this.toolchains.resolve().pathDirs,
+                ...(process.env.PATH ?? '').split(delimiter),
+              ],
             })
           : {
               ok: false,

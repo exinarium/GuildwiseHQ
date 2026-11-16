@@ -44,7 +44,8 @@ async function fileAt(repoPath: string, sha: string, path: string, max: number):
   const size = await git(repoPath, ['cat-file', '-s', `${sha}:${path}`]);
   if (size.exitCode !== 0) return null;
   if (Number(size.stdout.trim()) > max) return null;
-  const r = await git(repoPath, ['show', `${sha}:${path}`]);
+  // byte-exact: the release commit writes this text back, so its final newline (LF or CRLF) must survive
+  const r = await git(repoPath, ['show', `${sha}:${path}`], { keepFinalNewline: true });
   return r.exitCode === 0 ? r.stdout : null;
 }
 
