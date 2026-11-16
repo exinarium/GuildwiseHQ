@@ -174,7 +174,7 @@ export async function releaseDocsPrepAutoStart(ctx: Ctx, opts: { force?: boolean
     const work = await unreleasedWork(ctx.pool, await docsPrepRepos(ctx.pool, id));
     if (work.state === 'unknown') {
       for (const repoId of work.stale)
-        await requestReleaseFacts(ctx, repoId, 'release').catch(() => undefined);
+        await requestReleaseFacts(ctx, repoId, 'release', { unlessRecent: true }).catch(() => undefined);
       continue;
     }
     if (work.state === 'no') {

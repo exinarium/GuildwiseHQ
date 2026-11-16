@@ -75,7 +75,7 @@ async function setHead(sha: string, commits: unknown[] = REAL, at: Date = ctx().
   await q(
     `INSERT INTO repo_release_facts (project_repo_id, request_id, trigger, state, head_sha, facts, requested_at, updated_at)
      VALUES ($1, gen_random_uuid(), 'manual', 'ready', $2, $4::jsonb, $3, $3)
-     ON CONFLICT (project_repo_id) DO UPDATE SET state='ready', message=NULL, head_sha=$2, facts=$4::jsonb, updated_at=$3`,
+     ON CONFLICT (project_repo_id) DO UPDATE SET state='ready', message=NULL, head_sha=$2, facts=$4::jsonb, requested_at=$3, updated_at=$3`,
     [d.w.repoId, sha, at, JSON.stringify(facts)],
   );
 }
@@ -272,6 +272,49 @@ describe('after a release has shipped', () => {
     expect(await runs()).toHaveLength(0);
     const [f] = await q2(`SELECT trigger FROM repo_release_facts WHERE project_repo_id=$1`, [d.w.repoId]);
     expect(f.trigger).toBe('release');
+  });
+
+  it('stale facts: passes a minute apart ask once while the read is out or failing, and again after five minutes', async () => {
+    const factsCommands = async () =>
+      (
+        await q2(
+          `SELECT count(*)::int AS n FROM runner_commands WHERE workstation_id=$1 AND type='repo.release_facts'`,
+          [d.w.workstationId],
+        )
+      )[0].n;
+    await settings({ autoStart: true });
+    await ready();
+    await q(`UPDATE workstation_capabilities SET capabilities=$2 WHERE workstation_id=$1`, [
+      d.w.workstationId,
+      [RELEASE_DOCS_PREP_CAPABILITY, RELEASE_FACTS_CAPABILITY],
+    ]);
+    await setHead(HEAD, REAL, new Date(ctx().clock.now().getTime() - 120_000));
+    await published(new Date(ctx().clock.now().getTime() - 60_000));
+    await pass();
+    expect(await factsCommands()).toBe(1);
+    const [first] = await q2(`SELECT request_id FROM repo_release_facts WHERE project_repo_id=$1`, [
+      d.w.repoId,
+    ]);
+    await advance(d, 60_000);
+    await pass();
+    expect(await factsCommands()).toBe(1);
+    // the read still out keeps its request, so its answer is not dropped
+    const [still] = await q2(`SELECT request_id FROM repo_release_facts WHERE project_repo_id=$1`, [
+      d.w.repoId,
+    ]);
+    expect(still.request_id).toBe(first.request_id);
+    // a failed read is not fetched again on the next pass either
+    await q(`UPDATE repo_release_facts SET message='fetch failed', updated_at=$2 WHERE project_repo_id=$1`, [
+      d.w.repoId,
+      ctx().clock.now(),
+    ]);
+    await advance(d, 60_000);
+    await pass();
+    expect(await factsCommands()).toBe(1);
+    await advance(d, 5 * 60_000);
+    await pass();
+    expect(await factsCommands()).toBe(2);
+    expect(await runs()).toHaveLength(0);
   });
 
   it('a manual start with nothing since the release is refused; with a real change it starts', async () => {

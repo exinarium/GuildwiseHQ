@@ -49,7 +49,7 @@ export async function requestReleaseFacts(
   ctx: Ctx,
   repoId: string,
   trigger: FactsTrigger,
-  opts: { workstationId?: string; userId?: string } = {},
+  opts: { workstationId?: string; userId?: string; unlessRecent?: boolean } = {},
 ): Promise<RequestFactsOutcome> {
   const now = ctx.clock.now();
   const repo = await one(
@@ -67,12 +67,21 @@ export async function requestReleaseFacts(
 
   const prior = await one(
     ctx.pool,
-    'SELECT state, requested_at, updated_at FROM repo_release_facts WHERE project_repo_id=$1',
+    'SELECT state, message, requested_at, updated_at FROM repo_release_facts WHERE project_repo_id=$1',
     [repoId],
   );
   if (prior?.state === 'pending' && now.getTime() - new Date(prior.requested_at).getTime() < PENDING_MS)
     return { queued: false, reason: 'throttled' };
   if (trigger === 'sync' && prior && now.getTime() - new Date(prior.updated_at).getTime() < SYNC_MS)
+    return { queued: false, reason: 'throttled' };
+  // A repeating caller does not ask again within the pending window while a read is still in flight (a new request
+  // would drop its answer) or the last read failed (it would fetch every pass). An answered read asks again at once.
+  if (
+    opts.unlessRecent &&
+    prior?.requested_at &&
+    now.getTime() - new Date(prior.requested_at).getTime() < PENDING_MS &&
+    (new Date(prior.requested_at).getTime() > new Date(prior.updated_at).getTime() || prior.message)
+  )
     return { queued: false, reason: 'throttled' };
 
   const capable = (await one(

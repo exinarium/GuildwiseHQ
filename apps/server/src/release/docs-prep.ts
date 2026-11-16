@@ -385,7 +385,7 @@ async function startChecks(
   if (work.state === 'no')
     throw conflict(
       'nothing_since_release',
-      `${work.tag ?? 'The last release'} is released and ${branch} has no changes since; there is nothing to prepare.`,
+      `${work.tag ?? 'The last release'} is released and ${branch} has no changes since; there is nothing to prepare. If a change landed just now, refresh the release facts and try again.`,
     );
   const picked: Picked[] = [];
   for (const r of repos) {
