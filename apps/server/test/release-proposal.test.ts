@@ -1,6 +1,5 @@
-import { type ReleaseFacts, ReleaseFactsSchema } from '@aom/shared';
+import { compareSemver, type ReleaseFacts, ReleaseFactsSchema, tagVersion } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
-import { compareSemver, tagVersion } from '@aom/shared';
 import { baseVersion, buildProposal, previewSection, releaseBase } from '../src/release/proposal.ts';
 
 const rule = {
@@ -148,7 +147,10 @@ describe('buildProposal', () => {
       changelogVersion: '1.7.2',
     });
     expect(baseVersion(behind)).toBe('1.8.0');
-    expect(releaseBase(facts({ ...behind, changelog: null }))).toMatchObject({ version: '1.8.0', source: 'tag' });
+    expect(releaseBase(facts({ ...behind, changelog: null }))).toMatchObject({
+      version: '1.8.0',
+      source: 'tag',
+    });
   });
 
   it('recommends above the newest tag by commit type: feat 1.9.0, fix 1.8.1, breaking 2.0.0', () => {
@@ -188,7 +190,8 @@ describe('buildProposal', () => {
   });
 
   it('takes the highest dated changelog version, not the first, and ignores undated sections', () => {
-    const md = '# Changelog\n\n## [Unreleased]\n\n## [1.9.0]\n\n## [1.7.0] - 2026-01-01\n\n## [1.8.0] - 2026-02-01\n';
+    const md =
+      '# Changelog\n\n## [Unreleased]\n\n## [1.9.0]\n\n## [1.7.0] - 2026-01-01\n\n## [1.8.0] - 2026-02-01\n';
     expect(releaseBase(facts({ lastTag: null, existingTags: [], changelog: md }))).toEqual({
       version: '1.8.0',
       source: 'changelog',
@@ -198,7 +201,12 @@ describe('buildProposal', () => {
   });
 
   it('keeps the base when the changelog and the tags agree (the tag is the source)', () => {
-    expect(releaseBase(facts())).toEqual({ version: '1.3.0', source: 'tag', tag: 'v1.3.0', changelogVersion: '1.3.0' });
+    expect(releaseBase(facts())).toEqual({
+      version: '1.3.0',
+      source: 'tag',
+      tag: 'v1.3.0',
+      changelogVersion: '1.3.0',
+    });
     expect(buildProposal(facts(), [rule]).recommended.version).toBe('1.4.0');
   });
 
@@ -218,14 +226,25 @@ describe('buildProposal', () => {
 
   it('always recommends strictly above the newest tag', () => {
     const cases: Array<Partial<ReleaseFacts>> = [
-      { lastTag: { name: 'v1.7.2', sha: 'b'.repeat(40) }, existingTags: ['v1.8.0', 'v1.7.2'], changelog: null },
+      {
+        lastTag: { name: 'v1.7.2', sha: 'b'.repeat(40) },
+        existingTags: ['v1.8.0', 'v1.7.2'],
+        changelog: null,
+      },
       { lastTag: null, existingTags: ['v2.0.0-rc.1'], changelog: CL('1.9.0', '') },
-      { lastTag: { name: 'v1.8.0', sha: 'b'.repeat(40) }, existingTags: ['v1.8.0'], changelog: CL('1.9.0', '') },
+      {
+        lastTag: { name: 'v1.8.0', sha: 'b'.repeat(40) },
+        existingTags: ['v1.8.0'],
+        changelog: CL('1.9.0', ''),
+      },
       {},
     ];
     for (const c of cases) {
       for (const subject of ['fix: a', 'feat: a', 'feat!: a', 'chore: a']) {
-        const b = buildProposal(facts({ ...c, commits: [{ sha: 'c'.repeat(40), subject, breakingFooter: false }] }), []);
+        const b = buildProposal(
+          facts({ ...c, commits: [{ sha: 'c'.repeat(40), subject, breakingFooter: false }] }),
+          [],
+        );
         const tag = b.newestTag as string;
         expect(compareSemver(b.recommended.version, tagVersion(tag) as string)).toBeGreaterThan(0);
       }

@@ -63,7 +63,8 @@ export function releaseBase(facts: ReleaseFacts): ReleaseBase {
   if (tagV && changelogVersion && (compareSemver(changelogVersion, tagV) ?? 0) > 0)
     return { version: changelogVersion, source: 'changelog', tag, changelogVersion };
   if (tagV) return { version: tagV, source: 'tag', tag, changelogVersion };
-  if (changelogVersion) return { version: changelogVersion, source: 'changelog', tag: null, changelogVersion };
+  if (changelogVersion)
+    return { version: changelogVersion, source: 'changelog', tag: null, changelogVersion };
   return { version: '0.0.0', source: 'none', tag: null, changelogVersion: null };
 }
 

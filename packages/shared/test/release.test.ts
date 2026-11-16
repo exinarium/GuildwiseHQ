@@ -5,13 +5,13 @@ import {
   componentLine,
   composeReleaseSection,
   hasBreakingFooter,
+  newestReleaseTag,
   notesFromCommits,
   parseConventionalTitle,
   RELEASE_TAG_RE,
   recommendVersion,
   releaseIntro,
   tagVersion,
-  newestReleaseTag,
   validateReleaseVersion,
 } from '../src/index.ts';
 
@@ -142,7 +142,11 @@ describe('validateReleaseVersion', () => {
   });
   it('refuses equal and lower versions and existing tags', () => {
     const msg = '1.3.0 is not higher than the last release v1.3.0';
-    expect(validateReleaseVersion('1.3.0', 'v1.3.0', [])).toEqual({ ok: false, reason: 'not_higher', message: msg });
+    expect(validateReleaseVersion('1.3.0', 'v1.3.0', [])).toEqual({
+      ok: false,
+      reason: 'not_higher',
+      message: msg,
+    });
     expect(validateReleaseVersion('1.2.9', 'v1.3.0', []).ok).toBe(false);
     // an existing tag is never above the newest tag, so it is refused as not higher, naming the newest tag
     expect(validateReleaseVersion('1.4.1', 'v1.3.0', ['v1.4.1'])).toEqual({
@@ -164,9 +168,16 @@ describe('validateReleaseVersion', () => {
     for (const last of [null, 'v1.7.2']) {
       for (const v of ['1.8.0', '1.7.9']) {
         const r = validateReleaseVersion(v, last, ['v1.8.0', 'v1.7.2']);
-        expect(r).toEqual({ ok: false, reason: 'not_higher', message: `${v} is not higher than the last release v1.8.0` });
+        expect(r).toEqual({
+          ok: false,
+          reason: 'not_higher',
+          message: `${v} is not higher than the last release v1.8.0`,
+        });
       }
-      expect(validateReleaseVersion('1.8.1', last, ['v1.8.0', 'v1.7.2'])).toEqual({ ok: true, version: '1.8.1' });
+      expect(validateReleaseVersion('1.8.1', last, ['v1.8.0', 'v1.7.2'])).toEqual({
+        ok: true,
+        version: '1.8.1',
+      });
     }
   });
   it('floors on a newer CHANGELOG.md base, and ignores a base below the tag', () => {
@@ -186,7 +197,9 @@ describe('validateReleaseVersion', () => {
     expect(validateReleaseVersion('1.8.0', 'v1.8.0', ['v1.8.0'], { base: '1.8.0' })).toMatchObject({
       message: '1.8.0 is not higher than the last release v1.8.0',
     });
-    expect(validateReleaseVersion('0.9.0', null, [], { base: '1.0.0' })).toMatchObject({ reason: 'not_higher' });
+    expect(validateReleaseVersion('0.9.0', null, [], { base: '1.0.0' })).toMatchObject({
+      reason: 'not_higher',
+    });
   });
 });
 

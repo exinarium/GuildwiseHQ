@@ -27,7 +27,11 @@ export function validateReleaseVersion(
   if (floorTag && floor) {
     const c = compareSemver(raw, floor);
     if (c !== null && c <= 0)
-      return { ok: false, reason: 'not_higher', message: `${raw} is not higher than the last release ${floorTag}` };
+      return {
+        ok: false,
+        reason: 'not_higher',
+        message: `${raw} is not higher than the last release ${floorTag}`,
+      };
   }
   const base = opts.base?.trim().replace(/^v/, '');
   if (base && (floor === null || (compareSemver(base, floor) ?? 0) > 0)) {

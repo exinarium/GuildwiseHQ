@@ -80,7 +80,8 @@ export function componentBumps(
       };
     const current = head.version;
     const tagged = f.contentAtTag === null ? null : readComponentVersion(rule, f.contentAtTag);
-    const released = tagged?.ok && compareSemver(tagged.version, tagged.version) !== null ? tagged.version : null;
+    const released =
+      tagged?.ok && compareSemver(tagged.version, tagged.version) !== null ? tagged.version : null;
     // a head behind the released version is never shown or shipped: it is bumped from the release
     const behind = released !== null && (compareSemver(current, released) ?? 0) < 0;
     if (f.changedCount === 0 && !behind)

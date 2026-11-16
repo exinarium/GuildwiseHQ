@@ -11,6 +11,7 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 
 - The server refuses a video render worker older than itself. Every video worker now reports its version; the Video page shows each worker's version and marks one older than the server (or one that reports no version) as outdated, with both versions and what to do, and the super-admins get one mail about it. An outdated worker renders nothing and the server refuses the files it pushes; the render goes back to the queue and is picked up as soon as an updated worker reports in, with no manual step. **Update the render worker together with the server:** a worker from before this release is refused until it is updated.
 - The size estimate of `aom design --size --path` reaches the server. The runner's report check dropped it when it rebuilt the design report, so a project with a size unit refused every design; it now forwards the size in the repository and vault locations.
+- Ship release never recommends a version at or below the newest release tag. The base is the newest release tag of the repository, also one on the main branch that the working branch has not merged back yet, or a newer dated version in CHANGELOG.md; the item shows it ("Last release: v1.8.0"). A typed version at or below it is refused under the field and by the server (409), naming the tag, and component versions are never proposed below their released version. Runner 0.1.77.
 
 ## [1.9.0] - 2026-11-15
 

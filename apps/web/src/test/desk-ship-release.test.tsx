@@ -156,7 +156,9 @@ describe('Ship release desk item', () => {
     const user = userEvent.setup();
     wrap(
       <ShipReleaseItem
-        item={item(view({ lastTag: 'v1.8.0', base: '1.9.0', baseSource: 'changelog', existingTags: ['v1.8.0'] }))}
+        item={item(
+          view({ lastTag: 'v1.8.0', base: '1.9.0', baseSource: 'changelog', existingTags: ['v1.8.0'] }),
+        )}
       />,
     );
     const field = screen.getByTestId('ship-version');
@@ -173,9 +175,7 @@ describe('Ship release desk item', () => {
     expect(screen.getByTestId('ship-base')).toHaveTextContent('Last release: v1.8.0');
     unmount();
     const second = wrap(
-      <ShipReleaseItem
-        item={item(view({ lastTag: 'v1.8.0', base: '1.9.0', baseSource: 'changelog' }))}
-      />,
+      <ShipReleaseItem item={item(view({ lastTag: 'v1.8.0', base: '1.9.0', baseSource: 'changelog' }))} />,
     );
     expect(screen.getByTestId('ship-base')).toHaveTextContent(
       'Last release: 1.9.0 (from CHANGELOG.md; newest tag v1.8.0)',
@@ -193,7 +193,9 @@ describe('Ship release desk item', () => {
     const user = userEvent.setup();
     reply = () =>
       json(
-        { error: { code: 'version_not_higher', message: '1.8.0 is not higher than the last release v1.8.0' } },
+        {
+          error: { code: 'version_not_higher', message: '1.8.0 is not higher than the last release v1.8.0' },
+        },
         409,
       );
     wrap(<ShipReleaseItem item={item(view())} />);
