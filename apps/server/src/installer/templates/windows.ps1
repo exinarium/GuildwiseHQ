@@ -120,6 +120,43 @@ function Request-Restart([string]$Reason) {
 
 $WslFeatureNames = @('Microsoft-Windows-Subsystem-Linux', 'VirtualMachinePlatform')
 
+# Whether this PC can run the virtual machine WSL2 needs, read from Windows itself (never from wsl.exe: an older wsl.exe
+# looks fine on a PC with virtualization off). 'pass': a hypervisor runs, or the firmware has virtualization on.
+# 'off': no hypervisor although VirtualMachinePlatform is on and Windows restarted with it, and the firmware says off.
+# 'maybe-off': the same readings before VirtualMachinePlatform is on (the firmware flag alone is not trusted to stop).
+# 'unknown': could not read, or an ARM PC. Only 'off' stops the installer.
+function Get-Virtualization {
+  try {
+    $cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+    $cpus = @(Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop)
+    $vmp = [string](Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -ErrorAction Stop).State
+  } catch { return @{ State = 'unknown'; Detail = "could not read it: $($_.Exception.Message)" } }
+  $fw = @($cpus | ForEach-Object { $_.VirtualizationFirmwareEnabled })
+  $detail = "hypervisor running: $($cs.HypervisorPresent); on in firmware: $($fw -join ', '); VirtualMachinePlatform: $vmp"
+  if ($cs.HypervisorPresent -eq $true) { return @{ State = 'pass'; Detail = $detail } }
+  if (@($fw | Where-Object { $_ -eq $true }).Count -gt 0) { return @{ State = 'pass'; Detail = $detail } }
+  $arm = @($cpus | Where-Object { $_.Architecture -in 5, 12 }).Count -gt 0
+  $saysOff = ($cs.HypervisorPresent -eq $false) -and $fw.Count -gt 0 -and @($fw | Where-Object { $_ -ne $false }).Count -eq 0
+  if ($arm -or -not $saysOff) { return @{ State = 'unknown'; Detail = $detail } }
+  if ($vmp -eq 'Enabled') { return @{ State = 'off'; Detail = $detail } }
+  return @{ State = 'maybe-off'; Detail = $detail }
+}
+
+$script:VirtState = 'unknown'
+$VirtHelp = "$ServerUrl/help/install-troubleshooting#windows-virtualization"
+$VirtHint = 'Virtualization (Intel VT-x, AMD-V or SVM) may be off in the BIOS/UEFI settings of this PC (on a virtual machine: nested virtualization in its host).'
+$VirtErrorPattern = '0x80370102|0x80370114|HCS_E_HYPERV_NOT_INSTALLED|virtuali[sz]ation|Hyper-V|BIOS'
+
+# A later step that failed because WSL2 could not run: the BIOS hint goes right after the short first sentence and
+# before the raw output (clipped), so it survives the 400-character limit of the progress report.
+function Format-WslFailure([string]$Lead, [string]$Output = '') {
+  $out = (($Output -replace "`0", '') -replace '\s+', ' ').Trim()
+  if ($out.Length -gt 200) { $out = $out.Substring(0, 200) + '...' }
+  $hint = if ($script:VirtState -ne 'pass' -or $out -match $VirtErrorPattern) { " $VirtHint" } else { '' }
+  $tail = if ($out) { " Output: $out" } else { '' }
+  return "$Lead$hint$tail"
+}
+
 # WSL2 can be used when VirtualMachinePlatform is on and wsl.exe answers --status. The legacy feature does not decide:
 # the Store version of WSL runs without it. Pending is true when a feature waits for a restart.
 function Get-WslReadiness {
@@ -202,6 +239,19 @@ Start-Step 'Turning on WSL2 (Linux on Windows)'
 $wslRestarts = [int](Get-State).wslRestarts
 # Windows has not restarted since the last request (the answer was N): that request does not count.
 if ($wslRestarts -gt 0 -and -not (Test-RestartedSince)) { $wslRestarts--; Set-StateValue 'wslRestarts' $wslRestarts }
+$virt = Get-Virtualization
+$script:VirtState = $virt.State
+if ($virt.State -eq 'off') {
+  Set-StateValue 'wslRestarts' 0
+  Stop-Install "Virtualization is off in the BIOS/UEFI of this PC, so WSL2 cannot run. Turn on virtualization (Intel VT-x, AMD-V or SVM) in the BIOS/UEFI settings, restart the PC and run the installer again. ($($virt.Detail))" "How to turn it on: $VirtHelp   If the command has expired by then, create a new one on the Add a workstation page."
+} elseif ($virt.State -eq 'maybe-off') {
+  $msg = "Virtualization looks off in the BIOS/UEFI of this PC ($($virt.Detail)). WSL2 needs it: if the installer stops after the restart, turn on Intel VT-x, AMD-V or SVM in the BIOS/UEFI. Help: $VirtHelp"
+  Write-Warn $msg
+  Send-Report $script:CurrentStep 'warn' $msg
+} elseif ($virt.State -eq 'unknown') {
+  Write-Warn "Could not confirm that virtualization is on ($($virt.Detail)). Carrying on."
+  Send-Report $script:CurrentStep 'warn' "Could not confirm that virtualization is on: $($virt.Detail)"
+}
 $wsl = Get-WslReadiness
 if (-not $wsl.Ready) {
   $changed = $false
@@ -240,9 +290,9 @@ if (-not $wsl.Ready) {
       Set-StateValue 'wslRestarts' 0
       $detail = $wsl.Summary
       if ($script:WslEnableError) { $detail = "$detail; $($script:WslEnableError)" }
-      $todo = 'Turn on virtualization in the BIOS/UEFI of this PC, or open PowerShell and run: wsl --install   Then run the same command again.'
+      $todo = "Turn on virtualization in the BIOS/UEFI of this PC, or open PowerShell and run: wsl --install   Then run the same command again. Help: $VirtHelp"
       if ($wsl.Pending) { $todo = "Restart Windows first (a feature is waiting for it). $todo" }
-      Stop-Install "WSL2 is still not ready. $detail." $todo
+      Stop-Install "WSL2 is still not ready. $VirtHint $detail." $todo
     }
   }
 }
@@ -256,7 +306,9 @@ Start-Step 'Installing Ubuntu'
 $Distro = Get-Distros | Where-Object { $_ -like 'Ubuntu*' } | Select-Object -First 1
 if (-not $Distro) {
   Write-Info 'Downloading Ubuntu (this can take a few minutes) ...'
-  & wsl.exe --install -d Ubuntu --no-launch 2>&1 | Out-Host
+  $ubuntuOut = ''
+  & wsl.exe --install -d Ubuntu --no-launch 2>&1 | Tee-Object -Variable ubuntuOut | Out-Host
+  $ubuntuOut = ($ubuntuOut | Out-String) -replace "`0", ''
   $Distro = Get-Distros | Where-Object { $_ -like 'Ubuntu*' } | Select-Object -First 1
   if (-not $Distro) {
     $ubuntuExe = Get-Command ubuntu.exe -ErrorAction SilentlyContinue
@@ -267,15 +319,19 @@ if (-not $Distro) {
     if ((Get-State).ubuntuRestartRequested -and (Test-RestartedSince)) {
       Set-StateValue 'ubuntuRestartRequested' $false
       $listed = (& wsl.exe -l -q 2>&1 | Out-String) -replace "`0", ''
-      Stop-Install "Ubuntu is still not installed after a restart. wsl.exe -l -q returned: $($listed.Trim())" 'Open PowerShell and run: wsl --install -d Ubuntu   Then run the same command again.'
+      Stop-Install (Format-WslFailure 'Ubuntu is still not installed after a restart.' "$ubuntuOut $listed") "Open PowerShell and run: wsl --install -d Ubuntu   Then run the same command again. Help: $VirtHelp"
     }
     Set-StateValue 'ubuntuRestartRequested' $true
     Request-Restart 'to finish installing Ubuntu'
   }
-  # A Store distribution that was just installed still has to be registered: running a command does that.
-  & wsl.exe -d $Distro -u root -- true 2>&1 | Out-Null
 }
 Set-StateValue 'ubuntuRestartRequested' $false
+# A Store distribution that was just installed still has to be registered: running a command does that. It also shows
+# whether WSL2 can start at all: stop only on a virtualization error, so the user is not asked for an Ubuntu password first.
+$probe = (& wsl.exe -d $Distro -u root -- true 2>&1 | Out-String) -replace "`0", ''
+if ($LASTEXITCODE -ne 0 -and $probe -match $VirtErrorPattern) {
+  Stop-Install (Format-WslFailure 'Ubuntu could not start.' $probe) "Help: $VirtHelp"
+}
 $LinuxUser = (& wsl.exe -d $Distro -- whoami 2>$null | Out-String).Trim()
 if (-not $LinuxUser -or $LinuxUser -eq 'root') {
   Write-Host ''
@@ -288,7 +344,7 @@ if (-not $LinuxUser -or $LinuxUser -eq 'root') {
     $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
   } until ($plain)
   $made = Invoke-WslBash $Distro 'root' "id -u '$LinuxUser' >/dev/null 2>&1 || useradd -m -s /bin/bash -G sudo '$LinuxUser'; echo ready"
-  if ($made.Text -notmatch 'ready') { Stop-Install "Could not create the Ubuntu user: $($made.Text)" 'Run the command again.' }
+  if ($made.Text -notmatch 'ready') { Stop-Install (Format-WslFailure 'Could not create the Ubuntu user.' $made.Text) 'Run the command again.' }
   $pwB64 = ConvertTo-Base64Unix "$LinuxUser`:$plain"
   $null = & wsl.exe -d $Distro -u root -- bash -c "echo $pwB64 | base64 -d | chpasswd" 2>&1
   $plain = $null
@@ -317,7 +373,7 @@ fi
 if [ "`$changed" = 1 ]; then echo changed; else echo unchanged; fi
 "@
 $r = Invoke-WslBash $Distro 'root' $wslConf
-if ($r.Text -notmatch 'changed|unchanged') { Stop-Install "Could not set systemd=true in /etc/wsl.conf: $($r.Text)" 'Run the command again.' }
+if ($r.Text -notmatch 'changed|unchanged') { Stop-Install (Format-WslFailure 'Could not set systemd=true in /etc/wsl.conf.' $r.Text) 'Run the command again.' }
 if ($r.Text -match 'changed' -and $r.Text -notmatch 'unchanged') {
   & wsl.exe --terminate $Distro 2>&1 | Out-Null
   Write-Info 'systemd switched on; Ubuntu is restarting.'
