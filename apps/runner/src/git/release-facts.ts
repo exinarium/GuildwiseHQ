@@ -5,9 +5,9 @@ import {
   componentRuleApplies,
   hasBreakingFooter,
   isSafeGitRef,
+  RELEASE_TAG_RE,
   type ReleaseProjectRepo,
   type ReleaseSubmoduleFacts,
-  RELEASE_TAG_RE,
   type RepoReleaseFactsPayload,
   type RepoReleaseFactsResult,
 } from '@aom/shared';
@@ -222,7 +222,9 @@ export async function submodulePointersAt(
       out.push({ ...base, state: 'not_checked', reason: "not compared with the project's repositories" });
       continue;
     }
-    const repo = p.projectRepos.find((r) => r.remoteUrlNormalized === sub.normalized && r.repoId !== p.repoId);
+    const repo = p.projectRepos.find(
+      (r) => r.remoteUrlNormalized === sub.normalized && r.repoId !== p.repoId,
+    );
     if (!repo) {
       out.push({ ...base, state: 'not_checked', reason: 'points outside this project' });
       continue;
@@ -237,7 +239,11 @@ export async function submodulePointersAt(
       out.push(await classifyPointer(local.localPath, pointed, repo, input.auth));
     } catch (err) {
       const why = redactGitError(err instanceof Error ? err.message : String(err));
-      out.push({ ...pointed, state: 'unknown', reason: `could not check ${repo.name}: ${why}`.slice(0, 300) });
+      out.push({
+        ...pointed,
+        state: 'unknown',
+        reason: `could not check ${repo.name}: ${why}`.slice(0, 300),
+      });
     }
   }
   return out;
@@ -253,7 +259,11 @@ async function classifyPointer(
   auth: GitAuth | undefined,
 ): Promise<ReleaseSubmoduleFacts> {
   const { pinned } = pointed;
-  const unknown = (reason: string): ReleaseSubmoduleFacts => ({ ...pointed, state: 'unknown', reason: reason.slice(0, 300) });
+  const unknown = (reason: string): ReleaseSubmoduleFacts => ({
+    ...pointed,
+    state: 'unknown',
+    reason: reason.slice(0, 300),
+  });
   return withRepoLock(clone, async () => {
     const origin = (await git(clone, ['remote', 'get-url', 'origin'])).stdout.trim();
     const a = auth && origin ? await auth(origin) : { args: [], env: {} };
@@ -270,7 +280,8 @@ async function classifyPointer(
     const has = async () => (await git(clone, ['cat-file', '-e', `${pinned}^{commit}`])).exitCode === 0;
     if (!(await has())) {
       await git(clone, [...a.args, 'fetch', '--no-recurse-submodules', 'origin'], opts);
-      if (!(await has())) await git(clone, [...a.args, 'fetch', '--no-recurse-submodules', 'origin', pinned], opts);
+      if (!(await has()))
+        await git(clone, [...a.args, 'fetch', '--no-recurse-submodules', 'origin', pinned], opts);
       if (!(await has())) return unknown(`pinned commit ${pinned.slice(0, 7)} is not in ${repo.name}`);
     }
     const { all, newestFirst, last } = await releaseTagsAt(clone, pinned);
@@ -278,7 +289,11 @@ async function classifyPointer(
     if (!latest) return { ...pointed, state: 'not_checked', reason: `${repo.name} has no release tags` };
     const latestSha = await revParse(clone, `refs/tags/${latest}`);
     if (!latestSha) return unknown(`could not read the tag ${latest} of ${repo.name}`);
-    const known = { ...pointed, latestTag: { name: latest, sha: latestSha }, containsTag: last?.name ?? null };
+    const known = {
+      ...pointed,
+      latestTag: { name: latest, sha: latestSha },
+      containsTag: last?.name ?? null,
+    };
     if (latestSha === pinned) return { ...known, state: 'pinned' };
     const anc = await git(clone, ['merge-base', '--is-ancestor', latestSha, pinned]);
     if (anc.exitCode === 0) return { ...known, state: 'not_on_release_tag' };
@@ -286,7 +301,11 @@ async function classifyPointer(
     return {
       ...known,
       state: 'unknown',
-      reason: `could not compare with ${latest} of ${repo.name}: ${redactGitError(firstLine(anc.stderr) || `exit code ${anc.exitCode}`)}`.slice(0, 300),
+      reason:
+        `could not compare with ${latest} of ${repo.name}: ${redactGitError(firstLine(anc.stderr) || `exit code ${anc.exitCode}`)}`.slice(
+          0,
+          300,
+        ),
     };
   });
 }

@@ -89,9 +89,12 @@ export function ShipReleaseItem({ item }: { item: DeskItemDto }) {
   // Submodule pointers: the server refuses a pointer behind the latest release; the same reason is shown here in advance.
   const pointer = releasePointerGate(rel.submodules, rel.repoName);
   const pointerErr =
-    resolve.error instanceof ApiError && resolve.error.code === RELEASE_SUBMODULE_GATE_CODE ? resolve.error : undefined;
+    resolve.error instanceof ApiError && resolve.error.code === RELEASE_SUBMODULE_GATE_CODE
+      ? resolve.error
+      : undefined;
   const pointerMessage = pointer.blocked ? pointer.message : pointerErr?.message;
-  const serverMsg = resolve.error instanceof Error && !gateErr && !pointerErr ? resolve.error.message : undefined;
+  const serverMsg =
+    resolve.error instanceof Error && !gateErr && !pointerErr ? resolve.error.message : undefined;
   const reading = rel.factsState === 'pending';
 
   const approve = () =>

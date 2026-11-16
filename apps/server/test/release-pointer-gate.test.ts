@@ -123,8 +123,12 @@ describe('submodule pointer gate on approve (start ship)', () => {
     const res = await approve(item.id);
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('release_submodule_behind');
-    expect(res.body.error.message).toContain('core: behind - pinned abc1234 (contains 1.7.2), latest release 1.8.0');
-    expect(res.body.error.message).toContain('Bump the submodule core to v1.8.0 in toy and refresh the release.');
+    expect(res.body.error.message).toContain(
+      'core: behind - pinned abc1234 (contains 1.7.2), latest release 1.8.0',
+    );
+    expect(res.body.error.message).toContain(
+      'Bump the submodule core to v1.8.0 in toy and refresh the release.',
+    );
     expect(await commands()).toHaveLength(0);
     expect(await eventCount('ReleaseApproved')).toBe(approved);
     expect((await proposal()).state).toBe('proposed');
@@ -142,7 +146,10 @@ describe('submodule pointer gate on approve (start ship)', () => {
 
   it.each([
     ['pinned', [sub({ state: 'pinned', latestTag: { name: 'v1.8.0', sha: PIN }, containsTag: 'v1.8.0' })]],
-    ['not checked', [sub({ state: 'not_checked', repoId: undefined, reason: 'points outside this project' })]],
+    [
+      'not checked',
+      [sub({ state: 'not_checked', repoId: undefined, reason: 'points outside this project' })],
+    ],
     ['unknown', [sub({ state: 'unknown', reason: 'no clone of core on this workstation' })]],
     ['facts without the field', undefined],
   ])('ships as before when the pointer is %s', async (_label, subs) => {
@@ -195,7 +202,10 @@ describe('submodule pointer gate on Retry', () => {
     return (await q2(`SELECT * FROM desk_items WHERE subkind='release_failed' ORDER BY created_at`))[0];
   }
   const retry = (alertId: string) =>
-    w.t.req('POST', `/api/desk/${alertId}/resolve`, { cookie: w.owner.cookie, body: { resolution: 'approved' } });
+    w.t.req('POST', `/api/desk/${alertId}/resolve`, {
+      cookie: w.owner.cookie,
+      body: { resolution: 'approved' },
+    });
 
   it('refuses Retry of a stopped ship while the current facts show a behind pointer; a refresh to pinned clears it', async () => {
     const alert = await failedAt('push');
@@ -204,7 +214,9 @@ describe('submodule pointer gate on Retry', () => {
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('release_submodule_behind');
     expect(await commands()).toHaveLength(1);
-    await storeFacts(facts([sub({ state: 'pinned', latestTag: { name: 'v1.8.0', sha: PIN }, containsTag: 'v1.8.0' })]));
+    await storeFacts(
+      facts([sub({ state: 'pinned', latestTag: { name: 'v1.8.0', sha: PIN }, containsTag: 'v1.8.0' })]),
+    );
     await ok(retry(alert.id));
     expect(await commands()).toHaveLength(2);
   });

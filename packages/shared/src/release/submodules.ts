@@ -2,7 +2,13 @@ import { z } from 'zod';
 import { tagVersion } from './tags.ts';
 
 /** How a submodule pin compares with the latest release of the project repository it points to. */
-export const SubmodulePointerStateSchema = z.enum(['pinned', 'behind', 'not_on_release_tag', 'not_checked', 'unknown']);
+export const SubmodulePointerStateSchema = z.enum([
+  'pinned',
+  'behind',
+  'not_on_release_tag',
+  'not_checked',
+  'unknown',
+]);
 export type SubmodulePointerState = z.infer<typeof SubmodulePointerStateSchema>;
 
 /** One submodule of the released commit and how its pin compares with the pointed repository's latest release. */
@@ -14,7 +20,10 @@ export const ReleaseSubmoduleFactsSchema = z.object({
   /** The project repository it points to (absent: outside the project). */
   repoId: z.uuid().optional(),
   repoName: z.string().max(200).optional(),
-  latestTag: z.object({ name: z.string().max(100), sha: z.string().max(40) }).nullable().optional(),
+  latestTag: z
+    .object({ name: z.string().max(100), sha: z.string().max(40) })
+    .nullable()
+    .optional(),
   /** Newest release tag merged into the pinned commit ("contains 1.7.2"). */
   containsTag: z.string().max(100).nullable().optional(),
   state: SubmodulePointerStateSchema,

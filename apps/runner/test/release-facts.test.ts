@@ -175,7 +175,9 @@ describe('repo.release_facts submodule pointers', () => {
   ) =>
     readReleaseFacts({
       payload: payload(sup, {
-        projectRepos: [{ repoId: POINTED_ID, name: 'pointed', remoteUrlNormalized: pointed.remoteNormalized }],
+        projectRepos: [
+          { repoId: POINTED_ID, name: 'pointed', remoteUrlNormalized: pointed.remoteNormalized },
+        ],
         ...over,
       }),
       repoPath: sup.clone,
@@ -233,7 +235,12 @@ describe('repo.release_facts submodule pointers', () => {
     const p = pointedRepo();
     const sup = superWith(p.repo.origin, p.latest);
     const [outside] = (await read(sup, p.repo, p.repo.clone, { projectRepos: [] })).submodules ?? [];
-    expect(outside).toMatchObject({ path: 'core', pinned: p.latest, state: 'not_checked', reason: 'points outside this project' });
+    expect(outside).toMatchObject({
+      path: 'core',
+      pinned: p.latest,
+      state: 'not_checked',
+      reason: 'points outside this project',
+    });
     expect(outside?.repoId).toBeUndefined();
     const legacy = await readReleaseFacts({ payload: payload(sup), repoPath: sup.clone });
     expect(legacy.submodules?.[0]?.state).toBe('not_checked');
@@ -243,7 +250,11 @@ describe('repo.release_facts submodule pointers', () => {
     const p = pointedRepo(false);
     const sup = superWith(p.repo.origin, p.latest);
     const [s] = (await read(sup, p.repo, p.repo.clone)).submodules ?? [];
-    expect(s).toMatchObject({ state: 'not_checked', reason: 'pointed has no release tags', repoId: POINTED_ID });
+    expect(s).toMatchObject({
+      state: 'not_checked',
+      reason: 'pointed has no release tags',
+      repoId: POINTED_ID,
+    });
   });
 
   it('is unknown with the reason when the pointed repository cannot be resolved', async () => {

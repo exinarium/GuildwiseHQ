@@ -187,9 +187,16 @@ fi`,
   it('reads the file of a commit with `at`, not the working tree', async () => {
     const repo = deployRepo();
     const sha = sh(repo.clone, 'git', ['rev-parse', 'HEAD']);
-    writeFileSync(join(repo.clone, '.gitmodules'), '[submodule "other"]\n\tpath = other\n\turl = ../other.git\n');
-    expect((await readSubmodules(repo.clone, '', { at: sha })).map((s) => s.normalized)).toEqual([SUB_NORMALIZED]);
-    expect((await readSubmodules(repo.clone, 'git@github.com:acme/cloud.git')).map((s) => s.path)).toEqual(['other']);
+    writeFileSync(
+      join(repo.clone, '.gitmodules'),
+      '[submodule "other"]\n\tpath = other\n\turl = ../other.git\n',
+    );
+    expect((await readSubmodules(repo.clone, '', { at: sha })).map((s) => s.normalized)).toEqual([
+      SUB_NORMALIZED,
+    ]);
+    expect((await readSubmodules(repo.clone, 'git@github.com:acme/cloud.git')).map((s) => s.path)).toEqual([
+      'other',
+    ]);
     expect(await readSubmodules(repo.clone, '', { at: `${sha}~1` })).toEqual([]);
   });
 });

@@ -1,9 +1,9 @@
 import {
   compareSemver,
   RELEASE_SUBMODULE_GATE_CODE,
+  ReleaseFactsSchema,
   type ReleasePointerGate,
   type ReleaseSubmoduleFacts,
-  ReleaseFactsSchema,
   releasePointerGate,
   tagVersion,
 } from '@aom/shared';
@@ -75,13 +75,17 @@ export async function releasePointerGateFor(
 export async function assertReleasePointers(db: Queryable, repoId: string): Promise<void> {
   const { gate } = await releasePointerGateFor(db, repoId);
   if (!gate.blocked) return;
-  throw conflict(RELEASE_SUBMODULE_GATE_CODE, gate.message ?? 'a submodule points behind its latest release', {
-    repoId,
-    submodules: gate.blocking.map(({ path, pinned, latestTag, state }) => ({
-      path,
-      pinned,
-      latestTag: latestTag?.name ?? null,
-      state,
-    })),
-  });
+  throw conflict(
+    RELEASE_SUBMODULE_GATE_CODE,
+    gate.message ?? 'a submodule points behind its latest release',
+    {
+      repoId,
+      submodules: gate.blocking.map(({ path, pinned, latestTag, state }) => ({
+        path,
+        pinned,
+        latestTag: latestTag?.name ?? null,
+        state,
+      })),
+    },
+  );
 }

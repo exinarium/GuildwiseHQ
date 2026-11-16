@@ -26,7 +26,9 @@ const sub = (over: Partial<ReleaseSubmoduleFacts>): ReleaseSubmoduleFacts => ({
 
 describe('submoduleLine', () => {
   it('names the pinned commit, the contained release and the latest release when behind', () => {
-    expect(submoduleLine(sub({}))).toBe('core: behind - pinned abc1234 (contains 1.7.2), latest release 1.8.0');
+    expect(submoduleLine(sub({}))).toBe(
+      'core: behind - pinned abc1234 (contains 1.7.2), latest release 1.8.0',
+    );
   });
   it('says "contains no release" when no tag is merged into the pin', () => {
     expect(submoduleLine(sub({ containsTag: null }))).toBe(
@@ -39,7 +41,9 @@ describe('submoduleLine', () => {
     );
   });
   it('reads "pinned" with the release', () => {
-    expect(submoduleLine(sub({ state: 'pinned', containsTag: 'v1.8.0' }))).toBe('core: pinned - abc1234 is release 1.8.0');
+    expect(submoduleLine(sub({ state: 'pinned', containsTag: 'v1.8.0' }))).toBe(
+      'core: pinned - abc1234 is release 1.8.0',
+    );
   });
   it('shows the reason for not checked and unknown', () => {
     expect(submoduleLine(sub({ state: 'not_checked', reason: 'points outside this project' }))).toBe(
@@ -53,7 +57,12 @@ describe('submoduleLine', () => {
 
 describe('releasePointerGate', () => {
   it('is not blocked for an absent or empty list', () => {
-    expect(releasePointerGate(undefined, 'cloud')).toEqual({ blocked: false, message: null, blocking: [], warnings: [] });
+    expect(releasePointerGate(undefined, 'cloud')).toEqual({
+      blocked: false,
+      message: null,
+      blocking: [],
+      warnings: [],
+    });
     expect(releasePointerGate([], 'cloud').blocked).toBe(false);
   });
   it('never blocks on pinned, not checked or unknown; unknown is a warning', () => {
@@ -107,6 +116,8 @@ describe('schemas', () => {
     };
     expect(RepoReleaseFactsPayloadSchema.parse(payload).projectRepos).toBeUndefined();
     const repos = [{ repoId: REPO, name: 'Core', remoteUrlNormalized: 'github.com/acme/core' }];
-    expect(RepoReleaseFactsPayloadSchema.parse({ ...payload, projectRepos: repos }).projectRepos).toEqual(repos);
+    expect(RepoReleaseFactsPayloadSchema.parse({ ...payload, projectRepos: repos }).projectRepos).toEqual(
+      repos,
+    );
   });
 });

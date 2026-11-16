@@ -240,8 +240,14 @@ describe('Ship release submodule pointers', () => {
   });
 
   it('refuses a pointer that is not on a release tag', () => {
-    wrap(<ShipReleaseItem item={item(view({ submodules: [sub({ state: 'not_on_release_tag', containsTag: 'v1.8.0' })] }))} />);
-    expect(screen.getByTestId('ship-submodules')).toHaveTextContent('core: not on a release tag - pinned abc1234');
+    wrap(
+      <ShipReleaseItem
+        item={item(view({ submodules: [sub({ state: 'not_on_release_tag', containsTag: 'v1.8.0' })] }))}
+      />,
+    );
+    expect(screen.getByTestId('ship-submodules')).toHaveTextContent(
+      'core: not on a release tag - pinned abc1234',
+    );
     expect(screen.getByRole('button', { name: /Approve release 1.4.0/ })).toBeDisabled();
   });
 
@@ -262,7 +268,9 @@ describe('Ship release submodule pointers', () => {
     const list = screen.getByTestId('ship-submodules');
     expect(list).toHaveTextContent('core: pinned - abc1234 is release 1.8.0');
     expect(list).toHaveTextContent('vendor/x: not checked - points outside this project');
-    expect(list).toHaveTextContent('lib: unknown - no clone of core-repo on this workstation (not verified, does not block)');
+    expect(list).toHaveTextContent(
+      'lib: unknown - no clone of core-repo on this workstation (not verified, does not block)',
+    );
     expect(screen.queryByTestId('ship-submodule-blocked')).toBeNull();
     expect(screen.getByRole('button', { name: /Approve release 1.4.0/ })).toBeEnabled();
   });
