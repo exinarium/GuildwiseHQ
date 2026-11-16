@@ -28,7 +28,7 @@ export const DESIGN_GATE_REASONS: readonly DesignGateReason[] = ['high_risk', 'c
 
 export const DESIGN_GATE_REASON_TEXT: Record<DesignGateReason, string> = {
   high_risk:
-    'the design touches high-risk paths (authentication, permissions or secrets, data and migrations, tenancy or billing)',
+    'the design touches high-risk paths (authentication, permissions or secrets, data and migrations, tenancy or billing, or the configuration of the checks)',
   card: 'the design gate is switched on for this card',
   project: 'the project asks for the owner approval of every design',
   off: 'the design gate is off and the design touches no high-risk paths',

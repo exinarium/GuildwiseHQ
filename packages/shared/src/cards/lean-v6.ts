@@ -270,7 +270,7 @@ export interface OwnerApprovalDecision {
 
 export const OWNER_APPROVAL_REASON_TEXT: Record<OwnerApprovalReason, string> = {
   high_risk:
-    'the change touches high-risk paths (authentication, permissions or secrets, data and migrations, tenancy or billing)',
+    'the change touches high-risk paths (authentication, permissions or secrets, data and migrations, tenancy or billing, or the configuration of the checks)',
   reviewer_high_risk: 'the reviewer rated the change high risk',
   large: 'it is a large change',
   policy_always: 'the project asks for the owner approval of every change',

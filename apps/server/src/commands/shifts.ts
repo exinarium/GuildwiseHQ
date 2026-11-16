@@ -16,6 +16,7 @@ import {
   type DigestData,
   getOutcome,
   getStage,
+  highRiskNotice,
   highRiskPaths,
   highRiskSummary,
   type InvestigationData,
@@ -402,7 +403,7 @@ export async function applyShiftReport(
               card,
               { kind: 'system' },
               'system',
-              `${card.ref} touches high-risk paths (${highRiskSummary(built.highRiskPaths).labels.join('; ')}): it needs a second Opus review and the owner's approval.`,
+              `${card.ref} touches high-risk paths (${highRiskNotice(built.highRiskPaths)}): it needs a second Opus review and the owner's approval.`,
             ),
           );
       }

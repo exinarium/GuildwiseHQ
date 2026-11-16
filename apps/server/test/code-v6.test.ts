@@ -350,6 +350,21 @@ describe('high risk', () => {
     expect((await cardRow(card.id)).stage).toBe('owner_approval');
   });
 
+  it('a diff touching only check configuration is high risk and needs the owner approval', async () => {
+    await team({ reviewers: ['Rex', 'Ria'] });
+    const card = await cardInBuild();
+    await p.runAt('Bea', handoffEv(), leanAttach(SHA1, ['apps/web/tsconfig.json']), SHA1);
+    let row = await cardRow(card.id);
+    expect(row.high_risk).toBe(true);
+    expect(row.high_risk_paths).toEqual(['apps/web/tsconfig.json']);
+    await p.runAt('Pre', verdict('approve'), {}, SHA1);
+    await p.runAt('Rex', verdict('approve'), {}, SHA1);
+    const second = await p.runAt('Ria', verdict('approve'), {}, SHA1);
+    expect(second.start.brief.highRisk?.labels.join(' ')).toMatch(/check configuration/);
+    row = await cardRow(card.id);
+    expect(row).toMatchObject({ stage: 'owner_approval', owner_approval_reason: 'high_risk' });
+  });
+
   it('a diff with no risky path stays low: the flag is recomputed at every handoff', async () => {
     await team();
     const card = await cardInBuild();
