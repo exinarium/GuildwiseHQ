@@ -29,6 +29,7 @@ import {
 } from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import { componentFactsAt } from './release-facts.ts';
+import { formatNotice, formatReleaseFiles, type ReleaseExec } from './release-format.ts';
 import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
 
@@ -41,6 +42,10 @@ export interface ReleaseShipInput {
   /** Folder of the throwaway integration worktrees. */
   integrationDir: string;
   auth?: GitAuth;
+  /** Runs the repository's formatter on the files the release commit wrote (absent: that check is skipped). */
+  exec?: ReleaseExec;
+  /** Toolchain PATH folders, searched for the formatter after the clone's node_modules/.bin. */
+  toolPathDirs?: string[];
 }
 
 type Bumps = ReleaseShipResult['components'];
@@ -48,6 +53,9 @@ type Bumps = ReleaseShipResult['components'];
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const firstLine = (s: string): string => s.trim().slice(0, 3500);
+/** The kind of line ending a text ends with (not its last characters: a VERSION file may end with the version). */
+const finalEol = (s: string): 'crlf' | 'lf' | 'none' =>
+  s.endsWith('\r\n') ? 'crlf' : s.endsWith('\n') ? 'lf' : 'none';
 
 function fail(
   step: ReleaseShipStep,
@@ -226,6 +234,12 @@ async function commitRelease(
       if (text === null) return fail('components', `cannot read ${rule.versionFile}`);
       const out = replaceComponentVersion(rule, text, { version: b.to });
       if (!out.ok) return fail('components', `${rule.versionFile}: ${out.message}`);
+      // the only change may be the version value: same length delta and the same final line ending
+      if (
+        out.text.length - text.length !== out.to.length - out.from.length ||
+        finalEol(out.text) !== finalEol(text)
+      )
+        return fail('components', `${rule.versionFile}: the bump would change more than the version`);
       await writeFile(join(wt, rule.versionFile), out.text, 'utf8');
       written.push(rule.versionFile);
     }
@@ -247,15 +261,35 @@ async function commitRelease(
     const out = releaseChangelog(existing, { version: p.version, date: p.date, bumps });
     if (out.kind === 'error') return fail('changelog', out.message);
     section = out.section;
-    if (out.kind === 'rewritten') await writeFile(changelogPath, out.md, 'utf8');
+    if (out.kind === 'rewritten') {
+      await writeFile(changelogPath, out.md, 'utf8');
+      written.push('CHANGELOG.md');
+    }
   } else {
     if (!p.notes?.trim())
       return fail('changelog', 'the repository has no CHANGELOG.md and there are no release notes');
     const out = newChangelog(p.projectName, { version: p.version, date: p.date, bumps, notes: p.notes });
     section = out.section;
     await writeFile(changelogPath, out.md, 'utf8');
+    written.push('CHANGELOG.md');
   }
-  written.push('CHANGELOG.md');
+
+  // format check: the repository's own formatter on exactly the written files, before anything is committed
+  const fmt = await formatReleaseFiles({
+    worktree: wt,
+    files: written,
+    repoPath: input.repoPath,
+    pathDirs: input.toolPathDirs ?? [],
+    ...(input.exec ? { exec: input.exec } : {}),
+  });
+  if (fmt.state === 'failed')
+    return fail(
+      'commit',
+      `the ${fmt.tool} check failed on ${fmt.failing.join(', ')}; nothing was committed or pushed. ` +
+        `Fix it on ${p.workingBranch}, then Retry.\n$ ${fmt.commands.at(-1)}\n${fmt.output}`,
+      { notices },
+    );
+  notices.push(formatNotice(fmt));
 
   // commit
   const add = await git(wt, ['add', '--', ...written]);

@@ -57,6 +57,23 @@ describe('replaceComponentVersion', () => {
     expect(r).toMatchObject({ ok: true, from: '0.1.63', to: '0.1.64' });
     if (r.ok) expect(r.text).toBe(text.replace("RUNNER_VERSION = '0.1.63'", "RUNNER_VERSION = '0.1.64'"));
   });
+  it('keeps the final newline (LF or CRLF) and adds none to a file without one', () => {
+    for (const text of [
+      "export const RUNNER_VERSION = '0.1.63';\n",
+      "// a\r\nexport const RUNNER_VERSION = '0.1.63';\r\n",
+      "export const RUNNER_VERSION = '0.1.63';",
+      '{\n  "version": "1.0.0",\n  "x": 1\n}\n',
+    ]) {
+      const r = replaceComponentVersion(
+        { ...runner, pattern: text.startsWith('{') ? '"version": "(.*)"' : runner.pattern },
+        text,
+      );
+      expect(r.ok).toBe(true);
+      if (!r.ok) continue;
+      expect(r.text).toBe(text.replace(r.from, r.to));
+      expect(r.text.length - text.length).toBe(r.to.length - r.from.length);
+    }
+  });
   it('takes an explicit version', () => {
     const r = replaceComponentVersion(runner, file, { version: '0.2.0' });
     expect(r.ok && r.text).toBe("export const RUNNER_VERSION = '0.2.0';\n");

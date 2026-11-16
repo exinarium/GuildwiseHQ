@@ -91,6 +91,20 @@ describe('repo.release_facts', () => {
     expect(refs(repo.origin)).toBe(before);
   });
 
+  it('reads the version file byte-exact: the final newline (LF or CRLF) is kept', async () => {
+    const repo = tagged();
+    commit(
+      repo.clone,
+      'apps/runner/src/version.ts',
+      "// a\r\nexport const RUNNER_VERSION = '0.1.63';\r\n",
+      'chore: crlf',
+    );
+    sh(repo.clone, 'git', ['push', '-u', 'origin', 'develop']);
+    const r = await readReleaseFacts({ payload: payload(repo), repoPath: repo.clone });
+    expect(r.components[0]?.contentAtHead).toBe("// a\r\nexport const RUNNER_VERSION = '0.1.63';\r\n");
+    expect(r.components[0]?.contentAtTag).toBe("export const RUNNER_VERSION = '0.1.62';\n");
+  });
+
   it('reports every file as changed when there is no tag, and null for a missing CHANGELOG', async () => {
     const repo = makeRepo();
     sh(repo.clone, 'git', ['checkout', '-b', 'develop']);

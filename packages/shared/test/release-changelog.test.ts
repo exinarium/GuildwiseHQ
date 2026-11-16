@@ -104,6 +104,32 @@ describe('releaseChangelog', () => {
     expect(out.md).toContain('## [1.4.0] - 2026-11-01\r\n');
   });
 
+  it('ends with exactly one line ending: with none, one or several at the end, LF or CRLF', () => {
+    const base = MD.replace(/\n+$/, '');
+    for (const end of ['', '\n', '\n\n\n']) {
+      const out = releaseChangelog(base + end, { version: '1.4.0', date: '2026-11-01', bumps: [] });
+      expect(out.kind === 'rewritten' && out.md.endsWith('- Old.\n')).toBe(true);
+    }
+    const crlf = releaseChangelog(`${base.replace(/\n/g, '\r\n')}\r\n\r\n`, {
+      version: '1.4.0',
+      date: '2026-11-01',
+      bumps: [],
+    });
+    expect(crlf.kind === 'rewritten' && crlf.md.endsWith('- Old.\r\n')).toBe(true);
+    expect(crlf.kind === 'rewritten' && crlf.md.replace(/\r\n/g, '')).not.toContain('\n');
+  });
+
+  it('ends with one newline when the Unreleased block is the last thing in the file', () => {
+    const out = releaseChangelog('# C\n\n## [Unreleased]\n\n### Added\n\n- A.\n\n\n', {
+      version: '1.0.0',
+      date: '2026-11-01',
+      bumps: [],
+    });
+    expect(out.kind === 'rewritten' && out.md).toBe(
+      '# C\n\n## [Unreleased]\n\n## [1.0.0] - 2026-11-01\n\n### Added\n\n- A.\n',
+    );
+  });
+
   it('keeps unknown ### headings (Deprecated, Removed)', () => {
     const md = '# C\n\n## [Unreleased]\n\n### Deprecated\n\n- Old API.\n\n### Removed\n\n- Gone.\n';
     const out = releaseChangelog(md, { version: '1.0.1', date: '2026-11-01', bumps: [] });
@@ -174,5 +200,15 @@ describe('newChangelog', () => {
       '# Changelog\n\nAll notable changes to Acme are documented in this file.\n\n## [Unreleased]\n\n## [0.1.0] - 2026-11-01\n\n### Changed\n\n- First thing.\n- Second thing.\n',
     );
     expect(section.startsWith('## [0.1.0] - 2026-11-01')).toBe(true);
+  });
+
+  it('ends with exactly one newline even when the notes end with blank lines', () => {
+    const { md } = newChangelog('Acme', {
+      version: '0.1.0',
+      date: 'd',
+      bumps: [],
+      notes: '### Added\n\n- A.\n\n\n',
+    });
+    expect(md.endsWith('- A.\n')).toBe(true);
   });
 });
