@@ -28,7 +28,7 @@ import {
   requireCommitIdentity,
 } from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
-import { componentFactsAt } from './release-facts.ts';
+import { componentFactsAt, escapeRe } from './release-facts.ts';
 import { formatNotice, formatReleaseFiles, type ReleaseExec } from './release-format.ts';
 import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
@@ -51,7 +51,6 @@ export interface ReleaseShipInput {
 type Bumps = ReleaseShipResult['components'];
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const firstLine = (s: string): string => s.trim().slice(0, 3500);
 /** The kind of line ending a text ends with (not its last characters: a VERSION file may end with the version). */
 const finalEol = (s: string): 'crlf' | 'lf' | 'none' =>

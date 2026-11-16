@@ -7,6 +7,7 @@ import {
   RELEASE_PUBLISH_CAPABILITY,
   type ReleasePublishPayload,
   ReleasePublishPayloadSchema,
+  type ReleasePublishResult,
   ReleasePublishResultSchema,
   releaseTitle,
   streamId,
@@ -28,6 +29,16 @@ import { appendReleaseFailure } from './ship.ts';
 
 const FIRST_DAY_SECONDS = 180;
 const LATER_SECONDS = 3600;
+
+/** The desk line about main merged back into the working branch after tagging; null when there is nothing to say. */
+export function mergeBackLine(mb: ReleasePublishResult['mergeBack'], tag: string): string | null {
+  if (!mb) return null;
+  if (mb.state === 'fast-forward' || mb.state === 'merged')
+    return `The main branch was merged back into ${mb.branch}${mb.sha ? ` (${mb.sha.slice(0, 7)})` : ''}.`;
+  if (mb.state === 'failed')
+    return `Could not merge the main branch back into ${mb.branch}: ${mb.reason ?? 'unknown reason'}. Merge it by hand; the next release still starts from ${tag}.`;
+  return null;
+}
 
 /** A workstation with the clone that announces `release-publish:1`: the ship's own first, then the one seen last. */
 async function publishWorkstation(db: Queryable, ship: Row): Promise<string | null> {
@@ -354,6 +365,8 @@ export async function applyReleasePublishResult(
         ? pageText
         : `Release page ${rel.state === 'created' ? 'created' : 'already existed (not changed)'}: ${rel.url ?? ''}`,
       ...(rel.message && rel.state !== 'none' ? [rel.message] : []),
+      // display only: a merge-back push starts nothing (no deploy, no release prep)
+      mergeBackLine(r.mergeBack, tag),
     ];
     await ctx.store.append(
       [

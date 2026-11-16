@@ -1162,6 +1162,16 @@ export const ReleasePublishResultSchema = z.object({
       message: z.string().max(500).optional(),
     })
     .optional(),
+  /** The main branch merged back into the working branch after tagging; absent when the working branch is the main branch. */
+  mergeBack: z
+    .object({
+      branch: z.string(),
+      state: z.enum(['fast-forward', 'merged', 'already', 'failed']),
+      sha: z.string().optional(),
+      signedOff: z.boolean().optional(),
+      reason: z.string().max(2000).optional(),
+    })
+    .optional(),
 });
 export type ReleasePublishResult = z.infer<typeof ReleasePublishResultSchema>;
 

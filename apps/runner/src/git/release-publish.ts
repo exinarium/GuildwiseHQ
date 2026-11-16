@@ -18,7 +18,7 @@ import { forgeForUrl } from '../forge/index.ts';
 import type { ChangeState, ForgeEnv } from '../forge/types.ts';
 import { detectSignOff } from './dco.ts';
 import { appOfPlan, isProtectedBranchRejection, type PrCreator, withPushReport } from './gh.ts';
-import { git, hasRemote, revParse } from './git.ts';
+import { advanceLocalBranch, git, hasRemote, revParse } from './git.ts';
 import {
   type AppTokenProbe,
   boundPostAsFor,
@@ -31,6 +31,7 @@ import {
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import { isAncestor } from './merged.ts';
 import { resolveReleaseBase } from './release-pr.ts';
+import { pushFastForward } from './release-ship.ts';
 import { withRepoLock } from './repo-lock.ts';
 import type { GitAuth } from './worktrees.ts';
 
@@ -200,6 +201,9 @@ async function publishLocked(input: ReleasePublishInput): Promise<ReleasePublish
     state: decision.action === 'report' ? 'existed' : 'created',
     url: tagUrl,
   };
+
+  // 2b. main back into the working branch, so the working branch holds the tag: never fatal, reported in the result
+  if (p.workingBranch !== base) carry.mergeBack = await mergeBack(input, a, base, target);
 
   // 3. the forge release
   const hit = forgeForUrl(input.forgeEnv, url, p.forge);
@@ -444,4 +448,107 @@ async function landByMerge(
   );
   if (!made.ok) return { result: failed('land', made.error) };
   return made.value;
+}
+
+type MergeBack = NonNullable<ReleasePublishResult['mergeBack']>;
+
+/**
+ * Merges the tagged commit `target` of main back into the working branch and pushes it: nothing when the branch already
+ * holds it, a fast-forward when the branch did not move, otherwise a merge commit made with the configured identity and
+ * the sign-off rule of the landing merge. Never forces, never touches a tag and never throws: a conflict, a refused push
+ * or a missing identity comes back as `failed` with the reason (it is not retried; the release stays shipped).
+ */
+async function mergeBack(
+  input: ReleasePublishInput,
+  a: { args: string[]; env: Record<string, string> },
+  base: string,
+  target: string,
+): Promise<MergeBack> {
+  const { payload: p, repoPath } = input;
+  const wb = p.workingBranch;
+  const failedWith = (reason: string): MergeBack => ({
+    branch: wb,
+    state: 'failed',
+    reason: reason.slice(0, 2000),
+  });
+  const app = appOfPlan(p.postAs, p.remoteUrlNormalized);
+  try {
+    const fetched = await git(repoPath, [...a.args, 'fetch', '--', 'origin', wb], { env: a.env });
+    const tip = await revParse(repoPath, `refs/remotes/origin/${wb}`);
+    if (!tip)
+      return failedWith(
+        fetched.exitCode !== 0
+          ? `could not fetch ${wb}: ${(fetched.stderr || fetched.stdout).trim()}`
+          : `the working branch '${wb}' does not exist on origin`,
+      );
+    if (await isAncestor(repoPath, target, tip)) return { branch: wb, state: 'already', sha: tip };
+    if (await isAncestor(repoPath, tip, target)) {
+      const pushed = await pushFastForward(repoPath, target, wb, a, app);
+      if (!pushed.ok) return failedWith(pushed.report ? `${pushed.error}\n${pushed.report}` : pushed.error);
+      await advanceLocalBranch(repoPath, wb, target);
+      return { branch: wb, state: 'fast-forward', sha: target };
+    }
+
+    let identity: Awaited<ReturnType<typeof requireCommitIdentity>>;
+    try {
+      identity = await requireCommitIdentity(
+        repoPath,
+        p.commitAs,
+        boundPostAsFor(p.postAs, p.remoteUrlNormalized, input.appProbe),
+      );
+    } catch (err) {
+      return failedWith(
+        err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errText(err)),
+      );
+    }
+    const made = await withIntegrationWorktree(
+      {
+        repoPath,
+        dir: join(input.integrationDir, `merge-back-${p.repoId}`),
+        root: input.integrationDir,
+        tempBranch: integrationBranchName(`merge-back-${p.version}`),
+        startPoint: tip,
+      },
+      async (wt): Promise<MergeBack> => {
+        const signedOff =
+          p.land.mode === 'merge' && p.land.signoff !== undefined
+            ? p.land.signoff
+            : (await detectSignOff(wt)).required;
+        const merge = await git(
+          wt,
+          [
+            'merge',
+            '--no-ff',
+            ...(signedOff ? ['--signoff'] : []),
+            '-m',
+            `Merge ${base} into ${wb} after release ${p.version}`,
+            target,
+          ],
+          { env: commitEnv(identity) },
+        );
+        if (merge.exitCode !== 0) {
+          const files = (await git(wt, ['diff', '--name-only', '--diff-filter=U'])).stdout
+            .split('\n')
+            .map((l) => l.trim())
+            .filter(Boolean);
+          await git(wt, ['merge', '--abort']);
+          return failedWith(
+            files.length > 0
+              ? `merging ${base} back into ${wb} conflicts in ${files.join(', ')}: merge ${base} into ${wb} by hand`
+              : `merging ${base} back into ${wb} failed: ${(merge.stderr || merge.stdout).trim()}`,
+          );
+        }
+        const sha = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
+        const pushed = await pushFastForward(wt, sha, wb, a, app);
+        if (!pushed.ok) return failedWith(pushed.report ? `${pushed.error}\n${pushed.report}` : pushed.error);
+        return { branch: wb, state: 'merged', sha, signedOff };
+      },
+    );
+    if (!made.ok) return failedWith(made.error);
+    if (made.value.state === 'merged' && made.value.sha)
+      await advanceLocalBranch(repoPath, wb, made.value.sha);
+    return made.value;
+  } catch (err) {
+    return failedWith(errText(err));
+  }
 }

@@ -4,6 +4,7 @@ import type { ReleasePublishPayload } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { MemoryTokenStore } from '../src/forge/index.ts';
 import type { ForgeEnv } from '../src/forge/types.ts';
+import { readReleaseFacts } from '../src/git/release-facts.ts';
 import { publishRelease } from '../src/git/release-publish.ts';
 import type { ExecResult, Executor } from '../src/toolchain/exec.ts';
 import { cleanupTmp, makeRepo, sh, tmp } from './helpers.ts';
@@ -265,5 +266,132 @@ describe('release.publish', () => {
     mergeOnOrigin(s);
     const r = await run(s, { notesSource: 'commits', notes: 'From commit titles.' });
     expect(r.ok).toBe(true);
+  });
+
+  describe('merging main back into the working branch', () => {
+    const allRefs = (s: ReturnType<typeof setup>) =>
+      sh(s.repo.origin, 'git', ['for-each-ref', '--format=%(refname) %(objectname)']);
+    const isAncestorOnOrigin = (s: ReturnType<typeof setup>, a: string, b: string) => {
+      try {
+        sh(s.repo.origin, 'git', ['merge-base', '--is-ancestor', a, b]);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    /** One more commit on develop after the release commit, pushed; the clone goes back to main. */
+    const developMoves = (s: ReturnType<typeof setup>, path: string, text: string) => {
+      sh(s.repo.clone, 'git', ['checkout', 'develop']);
+      commit(s.repo.clone, path, text, `feat: ${path} on develop`);
+      sh(s.repo.clone, 'git', ['push', 'origin', 'develop']);
+      sh(s.repo.clone, 'git', ['checkout', 'main']);
+      return originRef(s, 'develop');
+    };
+    const nextFacts = (s: ReturnType<typeof setup>) =>
+      readReleaseFacts({
+        payload: {
+          requestId: '019e3f6a-7b1c-7a2d-8c3e-0123456789d3',
+          projectId: '019e3f6a-7b1c-7a2d-8c3e-0123456789d2',
+          repoId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a1',
+          remoteUrlNormalized: s.repo.remoteNormalized,
+          head: 'develop',
+          base: 'main',
+          components: [],
+        },
+        repoPath: s.repo.clone,
+      });
+
+    it('fast-forwards develop to the tagged merge commit, with no extra commit', async () => {
+      const s = setup();
+      const r = await run(s, { land: { mode: 'merge' } });
+      expect(r).toMatchObject({ ok: true, stage: 'done' });
+      const M = originRef(s, 'main');
+      expect(r.mergeBack).toEqual({ branch: 'develop', state: 'fast-forward', sha: M });
+      expect(originRef(s, 'develop')).toBe(M);
+      expect(isAncestorOnOrigin(s, 'v1.4.0', 'develop')).toBe(true);
+      // the local working branch follows
+      expect(sh(s.repo.clone, 'git', ['rev-parse', 'develop'])).toBe(M);
+    });
+
+    it('also merges back after a release PR merged on the forge', async () => {
+      const s = setup();
+      const M = mergeOnOrigin(s);
+      const r = await run(s);
+      expect(r.mergeBack).toMatchObject({ branch: 'develop', state: 'fast-forward', sha: M });
+      expect(isAncestorOnOrigin(s, 'v1.4.0', 'develop')).toBe(true);
+    });
+
+    it('makes a signed-off merge commit with the configured identity when develop moved on; a rerun changes nothing', async () => {
+      const s = setup({ dco: true });
+      const D = developMoves(s, 'other.txt', 'other');
+      const r = await run(s, { land: { mode: 'merge' } });
+      expect(r).toMatchObject({ ok: true, stage: 'done' });
+      const M = originRef(s, 'main');
+      const X = originRef(s, 'develop');
+      expect(r.mergeBack).toEqual({ branch: 'develop', state: 'merged', sha: X, signedOff: true });
+      expect(sh(s.repo.origin, 'git', ['rev-list', '--parents', '-n', '1', X]).split(' ')).toEqual([X, D, M]);
+      expect(sh(s.repo.origin, 'git', ['log', '-1', '--format=%an <%ae>|%cn <%ce>', X])).toBe(
+        'Release Owner <owner@example.test>|Release Owner <owner@example.test>',
+      );
+      expect(sh(s.repo.origin, 'git', ['log', '-1', '--format=%B', X])).toContain(
+        'Signed-off-by: Release Owner <owner@example.test>',
+      );
+      expect(isAncestorOnOrigin(s, 'v1.4.0', 'develop')).toBe(true);
+      const before = allRefs(s);
+      const again = await run(s, { land: { mode: 'merge' } });
+      expect(again.mergeBack).toMatchObject({ branch: 'develop', state: 'already', sha: X });
+      expect(allRefs(s)).toBe(before);
+    });
+
+    it('a conflict keeps the release shipped, reports the reason and leaves develop alone; the next facts still find the tag', async () => {
+      const s = setup();
+      const D = developMoves(s, 'notes.txt', 'develop notes');
+      commit(s.repo.clone, 'notes.txt', 'main notes', 'docs: notes on main');
+      sh(s.repo.clone, 'git', ['push', 'origin', 'main']);
+      const r = await run(s, { land: { mode: 'merge' } });
+      expect(r).toMatchObject({ ok: true, stage: 'done' });
+      expect(r.tag).toMatchObject({ name: 'v1.4.0', state: 'created' });
+      expect(tags(s)).toContain('v1.4.0');
+      expect(r.mergeBack?.state).toBe('failed');
+      expect(r.mergeBack?.reason).toContain('notes.txt');
+      expect(originRef(s, 'develop')).toBe(D);
+      expect(sh(s.repo.clone, 'git', ['worktree', 'list']).split('\n')).toHaveLength(1);
+      expect(sh(s.repo.clone, 'git', ['branch', '--list', 'guildwise/integration/merge-back-*'])).toBe('');
+      const facts = await nextFacts(s);
+      expect(facts.lastTag?.name).toBe('v1.4.0');
+      expect(facts.commits.map((c) => c.subject)).toEqual(['feat: notes.txt on develop']);
+    });
+
+    it('a protected working branch keeps the release shipped and says why; the next facts still find the tag', async () => {
+      const s = setup();
+      const hook = join(s.repo.origin, 'hooks', 'pre-receive');
+      writeFileSync(
+        hook,
+        '#!/bin/sh\nwhile read old new ref; do case "$ref" in refs/heads/develop) echo "protected branch hook declined" >&2; exit 1;; esac; done\n',
+      );
+      chmodSync(hook, 0o755);
+      const D = originRef(s, 'develop');
+      const r = await run(s, { land: { mode: 'merge' } });
+      expect(r).toMatchObject({ ok: true, stage: 'done' });
+      expect(tags(s)).toContain('v1.4.0');
+      expect(r.mergeBack?.state).toBe('failed');
+      expect(r.mergeBack?.reason).toContain('protected');
+      expect(originRef(s, 'develop')).toBe(D);
+      expect((await nextFacts(s)).lastTag?.name).toBe('v1.4.0');
+    });
+
+    it('does nothing extra when the working branch is main', async () => {
+      const s = setup();
+      mergeOnOrigin(s, true);
+      const before = allRefs(s);
+      const r = await run(s, { workingBranch: 'main' });
+      expect(r).toMatchObject({ ok: true, stage: 'done' });
+      expect(r.mergeBack).toBeUndefined();
+      const after = allRefs(s)
+        .split('\n')
+        .filter((l) => !l.startsWith('refs/tags/v1.4.0 '))
+        .join('\n');
+      expect(after).toBe(before);
+    });
   });
 });
