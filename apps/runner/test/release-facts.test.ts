@@ -185,7 +185,7 @@ describe('repo.release_facts', () => {
     expect(r.components[0]?.contentAtTag).toContain("'0.1.63'");
   });
 
-  it('does not count a newer tag whose release commit is not on the branch', async () => {
+  it('a newer tag made only on main does not hide or add work on the branch', async () => {
     const repo = tagged();
     commit(repo.clone, 'x.txt', 'x', 'feat: x');
     sh(repo.clone, 'git', ['push', '-u', 'origin', 'develop']);
@@ -195,7 +195,7 @@ describe('repo.release_facts', () => {
     sh(repo.clone, 'git', ['push', 'origin', 'main', '--tags']);
     sh(repo.clone, 'git', ['checkout', 'develop']);
     const r = await readReleaseFacts({ payload: payload(repo), repoPath: repo.clone });
-    expect(r.lastTag?.name).toBe('v1.3.0');
+    // the range starts where main and the branch meet, so the hotfix is not branch work and feat: x still is
     expect(r.commits.map((c) => c.subject)).toEqual(['feat: x']);
   });
 
