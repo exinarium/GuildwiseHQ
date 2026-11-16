@@ -5,9 +5,12 @@ import { join, resolve } from 'node:path';
 import type { VideoScript } from '@aom/shared';
 import Fastify from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { appVersion } from '../src/app-version.ts';
+import { beatHeartbeat, publishServerVersion, videoStatus } from '../src/commands/video-posts.ts';
 import type { Ctx } from '../src/context.ts';
 import { videoPushRoutes } from '../src/video/push.ts';
-import { type RenderFn, renderNext, videoTick } from '../src/video/sweep.ts';
+import { pushArtifacts } from '../src/video/push-client.ts';
+import { type RenderFn, renderNext, videoTick, videoWatch } from '../src/video/sweep.ts';
 import type { UploadSpec, YouTubeClient } from '../src/video/youtube.ts';
 import { createTestApp, type TestApp } from './helpers/app.ts';
 import { CaptureMailer, FakeSocial } from './helpers/blog.ts';
@@ -102,7 +105,10 @@ const clean = async () => {
   await q('DELETE FROM social_shares');
   await q('DELETE FROM video_renders');
   await q('DELETE FROM video_posts');
-  await q(`DELETE FROM platform_settings WHERE key LIKE 'video_worker_%' OR key='video_cleanup_at'`);
+  await q(
+    `DELETE FROM platform_settings WHERE key LIKE 'video_worker_%' OR key IN ('video_cleanup_at', 'server_version')
+        OR key LIKE 'video_alert:outdated:%'`,
+  );
 };
 
 beforeAll(async () => {
@@ -228,11 +234,13 @@ describe('push endpoint', () => {
         authorization: `Bearer ${TOKEN}`,
         'content-type': 'application/octet-stream',
         'x-content-sha256': sha(body),
+        'x-worker-version': '2.0.0',
         ...headers,
       },
     });
   beforeAll(async () => {
     await clean();
+    await publishServerVersion(t.app.ctx, '2.0.0');
     const p = await newPost('push-1');
     postId = p.id;
     await q(
@@ -441,6 +449,291 @@ describe('a missing file for a rendered video', () => {
     )[0];
     expect(s?.status).toBe('failed');
     expect(s?.error).toMatch(/video file was not found/);
+  });
+});
+
+describe('worker version', () => {
+  const SERVER = '2.0.0';
+  const sha = (b: string) => createHash('sha256').update(b).digest('hex');
+  const push = (renderId: string, version: string | null, body = 'WEBVTT\n') =>
+    t.app.inject({
+      method: 'PUT',
+      url: `/api/worker/video/renders/${renderId}/files/captions.vtt`,
+      payload: body,
+      headers: {
+        authorization: `Bearer ${TOKEN}`,
+        'content-type': 'application/octet-stream',
+        'x-content-sha256': sha(body),
+        ...(version !== null ? { 'x-worker-version': version } : {}),
+      },
+    });
+  const renderOf = async (postId: string) =>
+    (await q('SELECT id, status, attempts, error, lease_until FROM video_renders WHERE post_id=$1', [postId]))[0];
+  /** A rendering row, as if a worker had claimed it. */
+  const claimed = async (ref: string) => {
+    const p = await newPost(ref);
+    await q(
+      `UPDATE video_renders SET status='rendering', attempts=1, lease_until = now() + interval '1 hour' WHERE post_id=$1`,
+      [p.id],
+    );
+    return { postId: p.id, renderId: (await renderOf(p.id))?.id as string };
+  };
+  /** A ctx whose error log is captured (the logger keeps its prototype). */
+  const withLog = () => {
+    const errors: string[] = [];
+    const log = Object.create(t.app.ctx.log);
+    log.error = (a: unknown, b?: unknown) => {
+      errors.push(String(typeof a === 'string' ? a : b));
+    };
+    return { ctx: { ...t.app.ctx, log } as Ctx, errors };
+  };
+  const reset = async () => {
+    await clean();
+    await publishServerVersion(t.app.ctx, SERVER);
+  };
+  // the earlier suites move the clock on by hours: a fresh session
+  beforeAll(async () => {
+    sa = await t.superAdminSession();
+  });
+  afterAll(clean);
+
+  describe('the flag', () => {
+    for (const [version, outdated] of [
+      ['1.5.0', true],
+      [null, true],
+      ['2.0.0', false],
+      ['2.1.0', false],
+    ] as const)
+      it(`a worker on ${version ?? 'no version'} is ${outdated ? '' : 'not '}outdated against server ${SERVER}`, async () => {
+        await reset();
+        await videoTick(t.app.ctx, { render: mustNotRender, role: 'render', version });
+        const row = (await q(`SELECT value FROM platform_settings WHERE key='video_worker_render'`))[0];
+        expect(row?.value.version).toBe(version);
+        const st = await ok(api('GET', '/api/platform/video/status'));
+        expect(st.serverVersion).toBe(SERVER);
+        expect(st.render).toMatchObject({ running: true, version, outdated });
+        expect(st.publish).toMatchObject({ running: false, outdated: false }); // never beat: offline, not outdated
+        expect(st.worker).toEqual({ running: false, lastSeen: expect.any(String) }); // the combined view is unchanged
+      });
+
+    it('a heartbeat from before version reporting (no version key) reads as outdated and does not throw', async () => {
+      await reset();
+      await q(
+        `INSERT INTO platform_settings (key, value, updated_at) VALUES ('video_worker_render', $1::jsonb, now())`,
+        [JSON.stringify({ at: t.clock.now().toISOString() })],
+      );
+      const st = await videoStatus(t.app.ctx);
+      expect(st.render).toMatchObject({ running: true, version: null, outdated: true });
+    });
+
+    it('a keep-alive beat without a version keeps this build version', async () => {
+      await reset();
+      await beatHeartbeat(t.app.ctx, 'render', { busy: 'render' });
+      const row = (await q(`SELECT value FROM platform_settings WHERE key='video_worker_render'`))[0];
+      expect(row?.value).toMatchObject({ busy: 'render', version: appVersion() });
+    });
+
+    it('with no recorded server version the build version is the reference; an unknown one flags nobody', async () => {
+      await clean();
+      await beatHeartbeat(t.app.ctx, 'render', { version: null });
+      expect((await videoStatus(t.app.ctx)).serverVersion).toBe(appVersion());
+      await publishServerVersion(t.app.ctx, null);
+      const st = await videoStatus(t.app.ctx);
+      expect(st.serverVersion).toBeNull();
+      expect(st.render?.outdated).toBe(false);
+    });
+  });
+
+  describe('the refusal', () => {
+    for (const version of ['1.5.0', null] as const)
+      it(`a worker on ${version ?? 'no version'} claims no render, logs the reason once and keeps beating`, async () => {
+        await reset();
+        const p = await newPost(`old-${version ?? 'none'}`);
+        const { ctx, errors } = withLog();
+        expect(await videoTick(ctx, { render: mustNotRender, role: 'render', version })).toMatchObject({
+          rendered: false,
+        });
+        expect(await videoTick(ctx, { render: mustNotRender, role: 'render', version })).toMatchObject({
+          rendered: false,
+        });
+        expect(await renderOf(p.id)).toMatchObject({ status: 'queued', attempts: 0 });
+        const message = `video worker ${version ?? '(no version)'} is older than server ${SERVER}; update the worker`;
+        expect(errors.filter((e) => e === message)).toHaveLength(1);
+        const st = await ok(api('GET', '/api/platform/video/status'));
+        expect(st.render).toMatchObject({ running: true, outdated: true });
+      });
+
+    for (const version of ['2.0.0', '2.1.0'] as const)
+      it(`a worker on ${version} renders as today`, async () => {
+        await reset();
+        const p = await newPost(`current-${version}`);
+        expect(await videoTick(t.app.ctx, { render: fakeRender, role: 'render', version })).toMatchObject({
+          rendered: true,
+        });
+        expect((await renderOf(p.id))?.status).toBe('rendered');
+      });
+
+    for (const version of ['1.5.0', null] as const)
+      it(`a push from a worker on ${version ?? 'no version'} is refused naming both versions; the render goes back to the queue`, async () => {
+        await reset();
+        const { postId, renderId } = await claimed(`push-old-${version ?? 'none'}`);
+        const res = await push(renderId, version);
+        expect(res.statusCode).toBe(409);
+        const message = `video worker ${version ?? '(no version)'} is older than server ${SERVER}; update the worker`;
+        expect(res.json()).toEqual({ error: { code: 'worker_outdated', message } });
+        const row = await renderOf(postId);
+        expect(row).toMatchObject({ status: 'queued', attempts: 0, error: message });
+        expect(new Date(row?.lease_until).getTime()).toBeGreaterThan(t.clock.now().getTime());
+        expect(existsSync(join(videoDir, postId, '1', 'captions.vtt'))).toBe(false);
+      });
+
+    it('the version is checked after the token: a bad token never sees the versions', async () => {
+      await reset();
+      const { postId, renderId } = await claimed('push-old-token');
+      const res = await t.app.inject({
+        method: 'PUT',
+        url: `/api/worker/video/renders/${renderId}/files/captions.vtt`,
+        payload: 'x',
+        headers: { authorization: 'Bearer nope', 'x-content-sha256': sha('x'), 'x-worker-version': '1.5.0' },
+      });
+      expect(res.statusCode).toBe(401);
+      expect(res.body).not.toContain(SERVER);
+      expect((await renderOf(postId))?.status).toBe('rendering');
+    });
+
+    for (const version of ['2.0.0', '2.1.0'] as const)
+      it(`a push from a worker on ${version} is accepted`, async () => {
+        await reset();
+        const { postId, renderId } = await claimed(`push-current-${version}`);
+        const res = await push(renderId, version);
+        expect(res.statusCode).toBe(200);
+        expect((await renderOf(postId))?.status).toBe('rendering');
+        expect(readFileSync(join(videoDir, postId, '1', 'captions.vtt'), 'utf8')).toBe('WEBVTT\n');
+      });
+
+    it('the push client sends the version header and an outdated push fails with the message', async () => {
+      await reset();
+      const server = Fastify({ logger: false });
+      await server.register(videoPushRoutes(t.app.ctx));
+      const url = await server.listen({ port: 0, host: '127.0.0.1' });
+      const dir = mkdtempSync(join(tmpdir(), 'video-roles-version-'));
+      try {
+        const file = join(dir, 'captions.vtt');
+        writeFileSync(file, 'WEBVTT\n');
+        const { postId, renderId } = await claimed('client-old');
+        let calls = 0;
+        const counting: typeof fetch = async (input, init) => {
+          calls++;
+          return fetch(input, init);
+        };
+        await expect(
+          pushArtifacts({ baseUrl: url, token: TOKEN, version: '1.5.0' }, renderId, [file], {
+            ...instant,
+            fetch: counting,
+          }),
+        ).rejects.toThrow(/refused: HTTP 409 .*video worker 1\.5\.0 is older than server 2\.0\.0; update the worker/);
+        expect(calls).toBe(1); // a refusal is not retried
+        await q(`UPDATE video_renders SET status='rendering' WHERE id=$1`, [renderId]);
+        await pushArtifacts({ baseUrl: url, token: TOKEN, version: '2.0.0' }, renderId, [file], instant);
+        expect(readFileSync(join(videoDir, postId, '1', 'captions.vtt'), 'utf8')).toBe('WEBVTT\n');
+      } finally {
+        await server.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('a server upgraded during a render refuses the files; the worker logs it and the attempt is not counted', async () => {
+      await reset();
+      const server = Fastify({ logger: false });
+      await server.register(videoPushRoutes(t.app.ctx));
+      const url = await server.listen({ port: 0, host: '127.0.0.1' });
+      const localDir = mkdtempSync(join(tmpdir(), 'video-roles-upgrade-'));
+      try {
+        const p = await newPost('upgrade-mid-render');
+        const upgrading: RenderFn = async (s, opts) => {
+          await publishServerVersion(t.app.ctx, '2.5.0');
+          return fakeRender(s, opts);
+        };
+        const ctx: Ctx = {
+          ...t.app.ctx,
+          config: { ...t.app.ctx.config, videoDir: localDir, videoPushUrl: url, videoWorkerToken: TOKEN },
+        };
+        expect(await renderNext(ctx, { render: upgrading, push: instant, version: SERVER })).toBe(true);
+        expect(await renderOf(p.id)).toMatchObject({
+          status: 'queued',
+          attempts: 0,
+          error: 'video worker 2.0.0 is older than server 2.5.0; update the worker',
+        });
+        expect(existsSync(join(videoDir, p.id, '1', 'video.mp4'))).toBe(false);
+      } finally {
+        await server.close();
+        rmSync(localDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe('recovery', () => {
+    it('the next heartbeat of an updated worker clears the flag and renders, a refused render included', async () => {
+      await reset();
+      const { postId, renderId } = await claimed('recover');
+      expect((await push(renderId, '1.5.0')).statusCode).toBe(409); // back in the queue with a 10-minute wait
+      const { ctx, errors } = withLog();
+      expect((await videoTick(ctx, { render: mustNotRender, role: 'render', version: '1.5.0' })).rendered).toBe(
+        false,
+      );
+      expect((await videoStatus(t.app.ctx)).render?.outdated).toBe(true);
+      expect(errors).toHaveLength(1);
+
+      const out = await videoTick(ctx, { render: fakeRender, role: 'render', version: SERVER });
+      expect(out.rendered).toBe(true);
+      expect((await videoStatus(t.app.ctx)).render).toMatchObject({ version: SERVER, outdated: false });
+      expect(await renderOf(postId)).toMatchObject({ status: 'rendered', error: null });
+    });
+  });
+
+  describe('the watch', () => {
+    /** One entry per alert (each alert goes to every super-admin). */
+    const outdatedMails = (mailer: CaptureMailer) => [
+      ...new Set(
+        mailer.sent
+          .filter((m) => JSON.stringify(m).includes('is older than server'))
+          .map((m) => JSON.stringify({ ...m, to: undefined })),
+      ),
+    ];
+
+    for (const [version, mails] of [
+      ['1.5.0', 1],
+      [null, 1],
+      ['2.0.0', 0],
+      ['2.1.0', 0],
+    ] as const)
+      it(`a running render worker on ${version ?? 'no version'} raises ${mails} alert`, async () => {
+        await reset();
+        const mailer = t.app.ctx.mailer as CaptureMailer;
+        mailer.sent = [];
+        await beatHeartbeat(t.app.ctx, 'render', { version });
+        expect((await videoWatch(t.app.ctx)).alerts).toBe(mails);
+        expect(outdatedMails(mailer)).toHaveLength(mails);
+        if (mails) {
+          const text = JSON.stringify(outdatedMails(mailer)[0]);
+          expect(text).toContain(`video worker ${version ?? '(no version)'} is older than server ${SERVER}`);
+          expect(text).toContain('out of date');
+        }
+        // not repeated on the next run
+        expect((await videoWatch(t.app.ctx)).alerts).toBe(0);
+        expect(outdatedMails(mailer)).toHaveLength(mails);
+      });
+
+    it('a worker that missed another release is reported again', async () => {
+      await reset();
+      const mailer = t.app.ctx.mailer as CaptureMailer;
+      mailer.sent = [];
+      await beatHeartbeat(t.app.ctx, 'publish', { version: '1.5.0' });
+      expect((await videoWatch(t.app.ctx)).alerts).toBe(1);
+      await publishServerVersion(t.app.ctx, '2.1.0');
+      expect((await videoWatch(t.app.ctx)).alerts).toBe(1);
+      expect(outdatedMails(mailer)).toHaveLength(2);
+    });
   });
 });
 
