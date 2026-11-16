@@ -450,3 +450,42 @@ describe('aom design --tests-only (BLOCKERS.md section 2)', () => {
     expect(t.err.join('')).toContain('--tests-only is for `aom design`');
   });
 });
+
+describe('aom design --size / --path', () => {
+  it('sends the size and every path in order; none when not given', async () => {
+    const t = await setup();
+    expect(
+      await t.run(
+        'design',
+        '--report',
+        'docs/investigations/TOY-1.md',
+        '--summary',
+        's',
+        '--size',
+        '12',
+        '--path',
+        'apps/b',
+        '--path',
+        'apps/a',
+      ),
+    ).toBe(0);
+    expect(t.reports.at(-1)).toMatchObject({ data: { size: { estimate: 12, paths: ['apps/b', 'apps/a'] } } });
+    expect(await t.run('design', '--report', 'docs/investigations/TOY-1.md', '--summary', 's')).toBe(0);
+    expect((t.reports.at(-1) as { data: Record<string, unknown> }).data.size).toBeUndefined();
+  });
+
+  it('an invalid --size fails and sends nothing', async () => {
+    const t = await setup();
+    const before = t.reports.length;
+    expect(
+      await t.run('design', '--report', 'r.md', '--summary', 's', '--size', 'abc', '--path', 'apps/a'),
+    ).not.toBe(0);
+    expect(t.reports).toHaveLength(before);
+  });
+
+  it('investigate sends no size', async () => {
+    const t = await setup();
+    expect(await t.run('investigate', '--report', 'r.md', '--summary', 's')).toBe(0);
+    expect((t.reports.at(-1) as { data: Record<string, unknown> }).data.size).toBeUndefined();
+  });
+});

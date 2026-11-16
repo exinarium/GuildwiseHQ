@@ -7,6 +7,7 @@ All notable changes to Guildwise HQ are recorded here. The format follows [Keep 
 ### Fixed
 
 - A release is refused while a submodule points behind the latest release of the project repository it points to. The Ship release item lists each submodule's state (pinned, behind, not on a release tag, not checked, unknown); behind or not on a release tag greys out Approve with the reason and the fix (bump the submodule to the tag and refresh), and the server refuses approve and Retry the same way. Unknown is a warning and never blocks; repositories without project submodules ship as before.
+- The size estimate of `aom design --size --path` reaches the server. The runner's report check dropped it when it rebuilt the design report, so a project with a size unit refused every design; it now forwards the size in the repository and vault locations.
 
 ## [1.9.0] - 2026-11-15
 

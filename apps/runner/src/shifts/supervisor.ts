@@ -3038,10 +3038,7 @@ export class ShiftSupervisor {
           commit,
           // the design gate shows the full report to the owner (the card branch is not pushed yet)
           reportText: reportText.slice(0, REPORT_TEXT_MAX),
-          ...(data.assumptions ? { assumptions: data.assumptions } : {}),
-          ...(data.noAssumptions ? { noAssumptions: data.noAssumptions } : {}),
-          ...(data.review ? { review: data.review } : {}),
-          ...(data.testsOnly ? { testsOnly: true } : {}),
+          ...architectFields(data),
         },
       };
     }
@@ -3105,10 +3102,7 @@ export class ShiftSupervisor {
         reportPath: vaultPath,
         summary: data.summary,
         location: 'vault',
-        ...(data.assumptions ? { assumptions: data.assumptions } : {}),
-        ...(data.noAssumptions ? { noAssumptions: data.noAssumptions } : {}),
-        ...(data.review ? { review: data.review } : {}),
-        ...(data.testsOnly ? { testsOnly: true } : {}),
+        ...architectFields(data),
       },
     };
   }
@@ -3766,6 +3760,20 @@ export class ShiftSupervisor {
     );
     s.graceTimer.unref?.();
   }
+}
+
+/**
+ * The architect's own fields of a design report, copied into the data the runner forwards. The body, commit and report
+ * text are runner-owned and are not taken from the agent.
+ */
+function architectFields(data: InvestigationData): Partial<InvestigationData> {
+  return {
+    ...(data.assumptions ? { assumptions: data.assumptions } : {}),
+    ...(data.noAssumptions ? { noAssumptions: data.noAssumptions } : {}),
+    ...(data.review ? { review: data.review } : {}),
+    ...(data.size ? { size: data.size } : {}),
+    ...(data.testsOnly ? { testsOnly: true } : {}),
+  };
 }
 
 /** The note the architect's prompt gets about the merge of the latest main branch. */

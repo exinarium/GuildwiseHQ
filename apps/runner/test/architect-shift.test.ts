@@ -200,6 +200,69 @@ describe('architect shift: the investigation outcome', () => {
     expect(rep?.report).toMatchObject({ data: { reportPath: REPORT, location: 'repo', testsOnly: true } });
   });
 
+  it('aom design --size reaches the server on the repo-report path, paths in order; absent when not given', async () => {
+    const size = { estimate: 12, paths: ['apps/b', 'apps/a'], risk: 'high', seams: [] };
+    await start(async (i, ctl) => {
+      write(i.cwd, REPORT, '# TOY-1\n');
+      commit(i.cwd);
+      await ctl.post('/v1/report', handoff(data({ size })));
+    });
+    const first = await h!.runShift({ stage: 'investigate', briefExtra: { investigation: investigation() } });
+    const rep = h!.server.of('shift.report').find((r) => r.shiftId === first.shiftId);
+    expect((rep?.report as { data?: { size?: unknown } } | undefined)?.data?.size).toEqual(size);
+  });
+
+  it('aom design without --size forwards no size on the repo-report path', async () => {
+    await start(async (i, ctl) => {
+      write(i.cwd, REPORT, '# TOY-1\n');
+      commit(i.cwd);
+      await ctl.post('/v1/report', handoff(data()));
+    });
+    const { shiftId } = await h!.runShift({
+      stage: 'investigate',
+      briefExtra: { investigation: investigation() },
+    });
+    const rep = h!.server.of('shift.report').find((r) => r.shiftId === shiftId);
+    expect((rep?.report as { data?: { size?: unknown } } | undefined)?.data?.size).toBeUndefined();
+  });
+
+  it('aom design --size reaches the server on the vault-report path', async () => {
+    const size = { estimate: 3, paths: ['x', 'y'], seams: [] };
+    await start(async (i, ctl) => {
+      writeFileSync(join(i.sandbox.tmp, 'TOY-1-add-greeting.md'), '# vault report\n');
+      await ctl.post(
+        '/v1/report',
+        handoff(data({ reportPath: join(i.sandbox.tmp, 'TOY-1-add-greeting.md'), size })),
+      );
+    });
+    const vault = makeVault({ 'projects/toy/PROJECT.md': '# Toy\n' });
+    h!.server.send('command', {
+      commandId: 'cfg',
+      command: 'vault.configure',
+      payload: {
+        vaults: [
+          { vaultId: 'vault-1', kind: 'org', name: 'Org', remoteUrl: vault.origin, syncIntervalSec: 3600 },
+        ],
+        identity: IDENTITY,
+        workstationName: 'Desk',
+      },
+    });
+    expect((await h!.server.waitFor('command.result', (m) => m.commandId === 'cfg')).ok).toBe(true);
+    const { shiftId } = await h!.runShift({
+      stage: 'investigate',
+      briefExtra: {
+        investigation: investigation({
+          location: 'vault',
+          reportPath: 'docs/investigations/TOY-1-add-greeting.md',
+          folder: undefined,
+        }),
+      },
+      startExtra: { vault: { vaultId: 'vault-1', kind: 'org', folder: 'projects/toy' } },
+    });
+    const rep = h!.server.of('shift.report').find((r) => r.shiftId === shiftId);
+    expect((rep?.report as { data?: { size?: unknown } } | undefined)?.data?.size).toEqual(size);
+  });
+
   it('aom design --tests-only reaches the server on the vault-report path', async () => {
     let status = 0;
     await start(async (i, ctl) => {
