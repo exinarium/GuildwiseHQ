@@ -224,6 +224,7 @@ import { StorageService } from './storage/service.ts';
 import { selectDotnet } from './toolchain/dotnet.ts';
 import { ensureEnvironment } from './toolchain/ensure.ts';
 import { type Executor, realExecutor } from './toolchain/exec.ts';
+import { toolchainPathDirs, toolchainPathValue } from './toolchain/path-env.ts';
 import { ToolchainRegistry } from './toolchain/registry.ts';
 import type { Platform } from './toolchain/types.ts';
 import { VaultManager } from './vaults/manager.ts';
@@ -2577,14 +2578,11 @@ export class Runner {
                 const r = await this.exec.run(cmd, args, {
                   cwd: o.cwd,
                   timeoutMs: o.timeoutMs,
-                  env: { ...tc.env, PATH: [...tc.pathDirs, process.env.PATH ?? ''].join(delimiter) },
+                  env: { ...tc.env, PATH: toolchainPathValue(tc.pathDirs, process.env.PATH) },
                 });
                 return { ...r, timedOut: false };
               },
-              toolPathDirs: [
-                ...this.toolchains.resolve().pathDirs,
-                ...(process.env.PATH ?? '').split(delimiter),
-              ],
+              toolPathDirs: toolchainPathDirs(this.toolchains.resolve().pathDirs, process.env.PATH),
             })
           : {
               ok: false,
