@@ -74,13 +74,17 @@ export function resolveRelativeSubmoduleUrl(originRaw: string, rel: string): str
 
 /**
  * The submodules a `.gitmodules` file declares: name, path, the clonable url and its normalized form. A relative url
- * (`../core.git`) is resolved against the url of D's own origin, the way git does.
+ * (`../core.git`) is resolved against the url of D's own origin, the way git does. With `at`, the file is read from that
+ * commit instead of the working tree.
  */
 export async function readSubmodules(
   worktree: string,
   originUrl: string,
+  opts: { at?: string } = {},
 ): Promise<Array<{ name: string; path: string; url: string; normalized: string }>> {
-  const r = await git(worktree, ['config', '--file', '.gitmodules', '--list', '-z']);
+  // `at`: read the file of that commit (no checkout) instead of the working tree's.
+  const source = opts.at ? ['--blob', `${opts.at}:.gitmodules`] : ['--file', '.gitmodules'];
+  const r = await git(worktree, ['config', ...source, '--list', '-z']);
   if (r.exitCode !== 0) return [];
   const byName = new Map<string, { path?: string; url?: string }>();
   for (const entry of r.stdout.split('\0')) {

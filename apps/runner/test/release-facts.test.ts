@@ -137,3 +137,134 @@ describe('repo.release_facts', () => {
     expect(unsafe.error).toContain('unsafe');
   });
 });
+
+describe('repo.release_facts submodule pointers', () => {
+  const POINTED_ID = '019e3f6a-7b1c-7a2d-8c3e-0123456789c1';
+
+  /** A project repository with releases v1.7.2 and v1.8.0 and one untagged commit after v1.8.0. */
+  function pointedRepo(withTags = true) {
+    const repo = makeRepo();
+    commit(repo.clone, 'lib.ts', '1', 'feat: one');
+    if (withTags) sh(repo.clone, 'git', ['tag', '-a', 'v1.7.2', '-m', '1.7.2']);
+    const old = sh(repo.clone, 'git', ['rev-parse', 'HEAD']);
+    commit(repo.clone, 'lib.ts', '2', 'feat: two');
+    if (withTags) sh(repo.clone, 'git', ['tag', '-a', 'v1.8.0', '-m', '1.8.0']);
+    const latest = sh(repo.clone, 'git', ['rev-parse', 'HEAD']);
+    commit(repo.clone, 'lib.ts', '3', 'feat: three');
+    const ahead = sh(repo.clone, 'git', ['rev-parse', 'HEAD']);
+    sh(repo.clone, 'git', ['push', 'origin', 'main', '--tags']);
+    return { repo, old, latest, ahead };
+  }
+
+  /** The superproject's develop pins `core` (url = the pointed origin) at `sha`. */
+  function superWith(url: string, sha: string) {
+    const repo = tagged();
+    writeFileSync(join(repo.clone, '.gitmodules'), `[submodule "core"]\n\tpath = core\n\turl = ${url}\n`);
+    sh(repo.clone, 'git', ['add', '.gitmodules']);
+    sh(repo.clone, 'git', ['update-index', '--add', '--cacheinfo', `160000,${sha},core`]);
+    sh(repo.clone, 'git', ['commit', '-m', 'chore: pin core']);
+    sh(repo.clone, 'git', ['push', '-u', 'origin', 'develop']);
+    return repo;
+  }
+
+  const read = (
+    sup: { clone: string; remoteNormalized: string },
+    pointed: { remoteNormalized: string },
+    clone: string | undefined,
+    over: Partial<RepoReleaseFactsPayload> = {},
+  ) =>
+    readReleaseFacts({
+      payload: payload(sup, {
+        projectRepos: [{ repoId: POINTED_ID, name: 'pointed', remoteUrlNormalized: pointed.remoteNormalized }],
+        ...over,
+      }),
+      repoPath: sup.clone,
+      findRepo: async (n) => (n === pointed.remoteNormalized && clone ? { localPath: clone } : undefined),
+    });
+
+  it('reads pinned when the pin is the latest release tag commit', async () => {
+    const p = pointedRepo();
+    const sup = superWith(p.repo.origin, p.latest);
+    const r = await read(sup, p.repo, p.repo.clone);
+    expect(r.ok).toBe(true);
+    expect(r.submodules).toEqual([
+      {
+        path: 'core',
+        url: p.repo.remoteNormalized,
+        pinned: p.latest,
+        repoId: POINTED_ID,
+        repoName: 'pointed',
+        latestTag: { name: 'v1.8.0', sha: p.latest },
+        containsTag: 'v1.8.0',
+        state: 'pinned',
+      },
+    ]);
+  });
+
+  it('reads behind when the latest tag is not in the pinned commit', async () => {
+    const p = pointedRepo();
+    const sup = superWith(p.repo.origin, p.old);
+    const [s] = (await read(sup, p.repo, p.repo.clone)).submodules ?? [];
+    expect(s?.state).toBe('behind');
+    expect(s?.pinned).toBe(p.old);
+    expect(s?.latestTag?.name).toBe('v1.8.0');
+    expect(s?.containsTag).toBe('v1.7.2');
+  });
+
+  it('reads not_on_release_tag for an untagged pin ahead of the latest tag', async () => {
+    const p = pointedRepo();
+    const sup = superWith(p.repo.origin, p.ahead);
+    const [s] = (await read(sup, p.repo, p.repo.clone)).submodules ?? [];
+    expect(s?.state).toBe('not_on_release_tag');
+    expect(s?.containsTag).toBe('v1.8.0');
+  });
+
+  it('fetches the tags of the pointed clone before comparing', async () => {
+    const p = pointedRepo();
+    const clone = join(p.repo.root, 'second');
+    sh(p.repo.root, 'git', ['clone', '--no-tags', p.repo.origin, clone]);
+    expect(sh(clone, 'git', ['tag', '--list'])).toBe('');
+    const sup = superWith(p.repo.origin, p.latest);
+    const [s] = (await read(sup, p.repo, clone)).submodules ?? [];
+    expect(s?.state).toBe('pinned');
+  });
+
+  it('is not checked when the url points outside the project or no list was sent', async () => {
+    const p = pointedRepo();
+    const sup = superWith(p.repo.origin, p.latest);
+    const [outside] = (await read(sup, p.repo, p.repo.clone, { projectRepos: [] })).submodules ?? [];
+    expect(outside).toMatchObject({ path: 'core', pinned: p.latest, state: 'not_checked', reason: 'points outside this project' });
+    expect(outside?.repoId).toBeUndefined();
+    const legacy = await readReleaseFacts({ payload: payload(sup), repoPath: sup.clone });
+    expect(legacy.submodules?.[0]?.state).toBe('not_checked');
+  });
+
+  it('is not checked when the pointed repository has no release tags', async () => {
+    const p = pointedRepo(false);
+    const sup = superWith(p.repo.origin, p.latest);
+    const [s] = (await read(sup, p.repo, p.repo.clone)).submodules ?? [];
+    expect(s).toMatchObject({ state: 'not_checked', reason: 'pointed has no release tags', repoId: POINTED_ID });
+  });
+
+  it('is unknown with the reason when the pointed repository cannot be resolved', async () => {
+    const p = pointedRepo();
+    const sup = superWith(p.repo.origin, p.old);
+    const [noClone] = (await read(sup, p.repo, undefined)).submodules ?? [];
+    expect(noClone).toMatchObject({ state: 'unknown', reason: 'no clone of pointed on this workstation' });
+    const broken = join(p.repo.root, 'broken');
+    sh(p.repo.root, 'git', ['clone', p.repo.origin, broken]);
+    sh(broken, 'git', ['remote', 'set-url', 'origin', join(p.repo.root, 'missing.git')]);
+    const [noFetch] = (await read(sup, p.repo, broken)).submodules ?? [];
+    expect(noFetch?.state).toBe('unknown');
+    expect(noFetch?.reason).toMatch(/^could not fetch the tags of pointed: /);
+  });
+
+  it('leaves the field absent for a repository without submodules', async () => {
+    const repo = tagged();
+    commit(repo.clone, 'apps/runner/src/a.ts', 'a', 'feat: a');
+    sh(repo.clone, 'git', ['push', '-u', 'origin', 'develop']);
+    const r = await readReleaseFacts({ payload: payload(repo, { projectRepos: [] }), repoPath: repo.clone });
+    expect(r.ok).toBe(true);
+    expect('submodules' in r).toBe(false);
+  });
+});
