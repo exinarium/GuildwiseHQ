@@ -7,6 +7,7 @@ import {
   type ReleaseDocsPrepPayload,
   type ReleaseDocsPrepResult,
   type ReleaseDocsPrepSummary,
+  releasePrepCommitSubject,
 } from '@aom/shared';
 import { detectSignOff } from './dco.ts';
 import { appOfPlan } from './gh.ts';
@@ -528,7 +529,7 @@ async function commitPrepare(input: ReleaseDocsPrepInput, tip: string): Promise<
   }
   const sign =
     p.signOff === undefined ? await detectSignOff(repoPath) : { required: p.signOff, reason: 'requested' };
-  const subject = p.message ?? `docs(release): prepare the release documentation for ${p.releaseBranch}`;
+  const subject = p.message ?? releasePrepCommitSubject(p.releaseBranch);
   const message = sign.required
     ? `${subject}\n\nSigned-off-by: ${identity.name} <${identity.email}>\n`
     : `${subject}\n`;
