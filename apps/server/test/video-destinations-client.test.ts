@@ -209,7 +209,8 @@ describe('Instagram Reels', () => {
   });
 
   it('a timeout or a 5xx from Instagram is still a transient failure, not a file failure', async () => {
-    router = (c) => (path(c).endsWith('/ig-1/media') ? { status: 503, json: { error: { message: 'down' } } } : undefined);
+    router = (c) =>
+      path(c).endsWith('/ig-1/media') ? { status: 503, json: { error: { message: 'down' } } } : undefined;
     const err = await client.publish(payload('instagram', { accountId: 'ig-1' }), io()).catch((e) => e);
     expect(err).toMatchObject({ kind: 'retry' });
     expect(err.kind).not.toBe('file');

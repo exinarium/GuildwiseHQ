@@ -34,7 +34,9 @@ export const REELS_LIMITS = {
   maxSampleRate: 48_000,
   channels: { min: 1, max: 2 },
 } as const;
-export type ReelsLimits = typeof REELS_LIMITS;
+export type ReelsLimits = Omit<typeof REELS_LIMITS, 'fps'> & {
+  fps: { readonly min: number; readonly max: number };
+};
 
 export interface Mp4Structure {
   /** The major brand of the `ftyp` box, or null when there is none. */
@@ -184,7 +186,11 @@ export function parseStreamInfo(stderr: string): StreamInfo {
         codec: codec[1] as string,
         profile: codec[2] ?? null,
         pixelFormat: pix[1] as string,
-        progressive: flags.includes('progressive') ? true : flags.some((f) => INTERLACED.has(f)) ? false : null,
+        progressive: flags.includes('progressive')
+          ? true
+          : flags.some((f) => INTERLACED.has(f))
+            ? false
+            : null,
         width: Number(pix[3]),
         height: Number(pix[4]),
         fps: fps ? Number(fps[1]) : null,
@@ -232,9 +238,19 @@ export function evaluateReels(facts: ReelsFacts, limits: ReelsLimits = REELS_LIM
   const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
 
   if (!st.brand || !limits.containers.some((c) => c === st.brand))
-    fail('container', `container brand ${st.brand ?? 'missing'} is not MP4/MOV`, st.brand, limits.containers.join(', '));
+    fail(
+      'container',
+      `container brand ${st.brand ?? 'missing'} is not MP4/MOV`,
+      st.brand,
+      limits.containers.join(', '),
+    );
   if (!limits.editList && st.editListTracks.length > 0)
-    fail('edit_list', `edit list present (${st.editListTracks.join(', ')})`, st.editListTracks.join(', '), 'none');
+    fail(
+      'edit_list',
+      `edit list present (${st.editListTracks.join(', ')})`,
+      st.editListTracks.join(', '),
+      'none',
+    );
   if (limits.faststart && (!st.hasMoov || !st.moovBeforeMdat))
     fail(
       'faststart',
@@ -247,26 +263,61 @@ export function evaluateReels(facts: ReelsFacts, limits: ReelsLimits = REELS_LIM
   if (s.durationS !== null) {
     const sec = `${s.durationS.toFixed(1)} s`;
     if (s.durationS < limits.durationS.min)
-      fail('duration', `duration ${sec} < ${limits.durationS.min} s`, sec, `${limits.durationS.min}-${limits.durationS.max} s`);
+      fail(
+        'duration',
+        `duration ${sec} < ${limits.durationS.min} s`,
+        sec,
+        `${limits.durationS.min}-${limits.durationS.max} s`,
+      );
     else if (s.durationS > limits.durationS.max)
-      fail('duration', `duration ${sec} > ${limits.durationS.max} s`, sec, `${limits.durationS.min}-${limits.durationS.max} s`);
+      fail(
+        'duration',
+        `duration ${sec} > ${limits.durationS.max} s`,
+        sec,
+        `${limits.durationS.min}-${limits.durationS.max} s`,
+      );
   }
   if (!v) {
     fail('readable', 'no video stream could be read', null, 'one video stream');
   } else {
     if (!(limits.videoCodecs as readonly string[]).includes(v.codec))
-      fail('video_codec', `video codec ${v.codec} is not ${limits.videoCodecs.join('/')}`, v.codec, limits.videoCodecs.join(', '));
+      fail(
+        'video_codec',
+        `video codec ${v.codec} is not ${limits.videoCodecs.join('/')}`,
+        v.codec,
+        limits.videoCodecs.join(', '),
+      );
     if (v.codec === 'h264' && v.profile && !(limits.h264Profiles as readonly string[]).includes(v.profile))
-      fail('video_profile', `H.264 profile ${v.profile} not allowed`, v.profile, limits.h264Profiles.join(', '));
+      fail(
+        'video_profile',
+        `H.264 profile ${v.profile} not allowed`,
+        v.profile,
+        limits.h264Profiles.join(', '),
+      );
     if (v.pixelFormat && !(limits.pixelFormats as readonly string[]).includes(v.pixelFormat))
-      fail('pixel_format', `pixel format ${v.pixelFormat} is not 4:2:0`, v.pixelFormat, limits.pixelFormats.join(', '));
+      fail(
+        'pixel_format',
+        `pixel format ${v.pixelFormat} is not 4:2:0`,
+        v.pixelFormat,
+        limits.pixelFormats.join(', '),
+      );
     if (limits.progressive && v.progressive === false)
       fail('scan', 'video is interlaced', 'interlaced', 'progressive');
     if (v.fps !== null) {
       if (v.fps > limits.fps.max + 0.01)
-        fail('frame_rate', `frame rate ${v.fps} > ${limits.fps.max}`, String(v.fps), `${limits.fps.min}-${limits.fps.max}`);
+        fail(
+          'frame_rate',
+          `frame rate ${v.fps} > ${limits.fps.max}`,
+          String(v.fps),
+          `${limits.fps.min}-${limits.fps.max}`,
+        );
       else if (v.fps < limits.fps.min - 0.01)
-        fail('frame_rate', `frame rate ${v.fps} < ${limits.fps.min}`, String(v.fps), `${limits.fps.min}-${limits.fps.max}`);
+        fail(
+          'frame_rate',
+          `frame rate ${v.fps} < ${limits.fps.min}`,
+          String(v.fps),
+          `${limits.fps.min}-${limits.fps.max}`,
+        );
     }
     if (v.width > limits.maxWidth)
       fail('width', `width ${v.width} > ${limits.maxWidth}`, String(v.width), `<= ${limits.maxWidth}`);
@@ -283,15 +334,35 @@ export function evaluateReels(facts: ReelsFacts, limits: ReelsLimits = REELS_LIM
       warnings.push(`aspect ratio ${v.width / g}:${v.height / g} (9:16 recommended)`);
     }
     if (v.kbps !== null && v.kbps > limits.maxVideoKbps)
-      fail('video_bitrate', `video bitrate ${v.kbps} kb/s > ${limits.maxVideoKbps}`, `${v.kbps} kb/s`, `<= ${limits.maxVideoKbps} kb/s`);
+      fail(
+        'video_bitrate',
+        `video bitrate ${v.kbps} kb/s > ${limits.maxVideoKbps}`,
+        `${v.kbps} kb/s`,
+        `<= ${limits.maxVideoKbps} kb/s`,
+      );
   }
   if (a) {
     if (!(limits.audioCodecs as readonly string[]).includes(a.codec))
-      fail('audio_codec', `audio codec ${a.codec} is not ${limits.audioCodecs.join('/')}`, a.codec, limits.audioCodecs.join(', '));
+      fail(
+        'audio_codec',
+        `audio codec ${a.codec} is not ${limits.audioCodecs.join('/')}`,
+        a.codec,
+        limits.audioCodecs.join(', '),
+      );
     if (a.sampleRate !== null && a.sampleRate > limits.maxSampleRate)
-      fail('audio_sample_rate', `audio sample rate ${a.sampleRate} > ${limits.maxSampleRate}`, String(a.sampleRate), `<= ${limits.maxSampleRate}`);
+      fail(
+        'audio_sample_rate',
+        `audio sample rate ${a.sampleRate} > ${limits.maxSampleRate}`,
+        String(a.sampleRate),
+        `<= ${limits.maxSampleRate}`,
+      );
     if (a.channels !== null && (a.channels < limits.channels.min || a.channels > limits.channels.max))
-      fail('audio_channels', `audio channels ${a.channels} not ${limits.channels.min}-${limits.channels.max}`, String(a.channels), `${limits.channels.min}-${limits.channels.max}`);
+      fail(
+        'audio_channels',
+        `audio channels ${a.channels} not ${limits.channels.min}-${limits.channels.max}`,
+        String(a.channels),
+        `${limits.channels.min}-${limits.channels.max}`,
+      );
   }
   return {
     passed: failed.length === 0,

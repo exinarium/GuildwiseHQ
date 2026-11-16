@@ -912,9 +912,9 @@ describe('Core 5: destinations', () => {
     expect(within(card).queryByTestId('retry-instagram')).toBeNull();
     await user.click(within(card).getByTestId('rerender-instagram'));
     await waitFor(() =>
-      expect(calls.some((c) => c.method === 'POST' && c.url === `/api/platform/video/posts/${id}/rerender`)).toBe(
-        true,
-      ),
+      expect(
+        calls.some((c) => c.method === 'POST' && c.url === `/api/platform/video/posts/${id}/rerender`),
+      ).toBe(true),
     );
   });
 

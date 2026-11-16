@@ -10,12 +10,12 @@ import {
   findFfmpeg,
   mp4Structure,
   parseStreamInfo,
-  RENDER_ENCODERS,
   REELS_LIMITS,
+  RENDER_ENCODERS,
+  type ReelsFacts,
   runFfmpeg,
   toMp4Args,
   writeSilentWav,
-  type ReelsFacts,
 } from '../src/index.ts';
 
 const fx = (n: string) => join(dirname(fileURLToPath(import.meta.url)), 'fixtures/reels', n);
@@ -90,7 +90,13 @@ describe('parseStreamInfo', () => {
   });
 });
 
-const okStructure = { brand: 'isom', topLevel: ['ftyp', 'moov', 'mdat'], hasMoov: true, moovBeforeMdat: true, editListTracks: [] };
+const okStructure = {
+  brand: 'isom',
+  topLevel: ['ftyp', 'moov', 'mdat'],
+  hasMoov: true,
+  moovBeforeMdat: true,
+  editListTracks: [],
+};
 const facts = (over: Partial<ReelsFacts> = {}): ReelsFacts => ({
   bytes: 5_000_000,
   structure: okStructure,
@@ -167,9 +173,20 @@ describe.skipIf(!ffmpegAvailable())('checkReelsFile', () => {
   it('the final encode and toMp4 write files that pass (no edit list, moov first)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'aomv-reels-'));
     const ff = findFfmpeg(RENDER_ENCODERS);
-    runFfmpeg(['-f', 'lavfi', '-i', 'testsrc=size=1080x1920:rate=30:duration=4', '-c:v', 'libx264', join(dir, 's0.mp4')], {
-      bin: ff,
-    });
+    runFfmpeg(
+      [
+        '-f',
+        'lavfi',
+        '-i',
+        'testsrc=size=1080x1920:rate=30:duration=4',
+        '-c:v',
+        'libx264',
+        join(dir, 's0.mp4'),
+      ],
+      {
+        bin: ff,
+      },
+    );
     writeSilentWav(join(dir, 'voice.wav'), 4);
     const out = join(dir, 'short.mp4');
     runFfmpeg(

@@ -3,7 +3,8 @@ import { Button, Callout } from '../ui.tsx';
 
 /** An Instagram share whose file Instagram refused: only a new render helps, so there is no "retry" for it. */
 export const needsRerender = (s: Pick<VideoShare, 'status' | 'fileRejection'> | undefined): boolean =>
-  s?.status === 'failed' && (s.fileRejection === 'needs_rerender' || s.fileRejection === 'rejected_compliant');
+  s?.status === 'failed' &&
+  (s.fileRejection === 'needs_rerender' || s.fileRejection === 'rejected_compliant');
 
 /**
  * "Instagram needs a new render", with the reasons from the Reels check as visible text (no tooltip, nothing that needs

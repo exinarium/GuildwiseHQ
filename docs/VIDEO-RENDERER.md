@@ -39,6 +39,7 @@ Each scene still costs about 70 MB of peak memory in the final encode: a typical
 ## Needs
 
 The voice and a static ffmpeg: `e2e/video/setup-voice.sh` (installs into `~/.cache/aom-video`, `AOM_VIDEO_HOME`).
+`checkReelsFile(file)` (`packages/video/src/reels.ts`) checks a rendered MP4 against Instagram's Reels rules with that ffmpeg (no ffprobe needed); the publish sweep runs it after Instagram refuses a file.
 Playwright's Chromium (`playwright install chromium`, or `AOM_CHROMIUM_PATH`). Fonts: Liberation Sans or Inter on the
 machine. `AOM_FFMPEG` picks another ffmpeg, `AOM_MEDIA_VIDEOS_DIR` another folder of help videos, `--silent` renders with
 silent placeholder audio when the voice is missing (smoke tests only).

@@ -655,10 +655,9 @@ describe('errors', () => {
     expect((await share(p.id, 'instagram'))?.status).toBe('pending');
     const again = await api('POST', `/api/platform/video/posts/${p.id}/rerender`);
     expect([again.status, again.body.error.code]).toEqual([409, 'no_rerender_needed']);
-    const audit = await q(
-      `SELECT payload FROM events WHERE stream_id=$1 AND type='VideoRetryRequested'`,
-      [`video-${p.id}`],
-    );
+    const audit = await q(`SELECT payload FROM events WHERE stream_id=$1 AND type='VideoRetryRequested'`, [
+      `video-${p.id}`,
+    ]);
     expect(audit.map((x) => x.payload.what)).toEqual(['rerender']);
     t.clock.advance(5_000);
     reels.next = passedCheck;
@@ -666,7 +665,10 @@ describe('errors', () => {
     await tick();
     expect((await share(p.id, 'instagram'))?.status).toBe('sent');
     expect(igPosts()).toBe(2);
-    expect((await checkedEvents(p.id)).map((e) => e.payload.outcome)).toEqual(['needs_rerender', 'preflight_ok']);
+    expect((await checkedEvents(p.id)).map((e) => e.payload.outcome)).toEqual([
+      'needs_rerender',
+      'preflight_ok',
+    ]);
   });
 
   it('a re-rendered file that still fails the Reels check is not sent to Instagram', async () => {

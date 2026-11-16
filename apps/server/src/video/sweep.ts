@@ -860,9 +860,11 @@ async function runDestination(ctx: Ctx, share: Row, deps: SweepDeps = {}): Promi
             network: 'instagram',
             renderId,
             passed: check?.passed ?? false,
-            failed: (check?.failed.map((f) => ({ rule: f.rule, message: f.message })) ?? [
-              { rule: 'check', message: note ?? 'the check could not run' },
-            ]).slice(0, 20),
+            failed: (
+              check?.failed.map((f) => ({ rule: f.rule, message: f.message })) ?? [
+                { rule: 'check', message: note ?? 'the check could not run' },
+              ]
+            ).slice(0, 20),
             outcome,
           },
         },
@@ -893,14 +895,21 @@ async function runDestination(ctx: Ctx, share: Row, deps: SweepDeps = {}): Promi
       return void (await fail('the video file was not found (the video volume)', true));
     }
     if (network === 'instagram') {
-      const fp = { renderId: render.id as string, finishedAt: isoOrNull(render.finished_at), bytes: statSync(file).size };
+      const fp = {
+        renderId: render.id as string,
+        finishedAt: isoOrNull(render.finished_at),
+        bytes: statSync(file).size,
+      };
       const rej = readFileRejection(detail);
       ig = { file, fp, rej };
       if (rej && sameArtifact(rej.artifact, fp)) {
         // the same file Instagram refused: it is never sent again, however the share got back to pending
         if (rej.kind !== 'rejected_compliant' || rej.rejections >= 2)
           return void (await fail(
-            `Instagram refused this video file and it is not sent again; it needs a new render: ${rejectionReasons(rej)}`.slice(0, 480),
+            `Instagram refused this video file and it is not sent again; it needs a new render: ${rejectionReasons(rej)}`.slice(
+              0,
+              480,
+            ),
             false,
           ));
       } else if (rej) {
@@ -910,7 +919,11 @@ async function runDestination(ctx: Ctx, share: Row, deps: SweepDeps = {}): Promi
           return null;
         });
         if (check && !check.passed) {
-          const message = `The new video file does not meet the Instagram Reels rules; it needs a new render: ${check.failed.map((f) => f.message).join('; ')}`.slice(0, 480);
+          const message =
+            `The new video file does not meet the Instagram Reels rules; it needs a new render: ${check.failed.map((f) => f.message).join('; ')}`.slice(
+              0,
+              480,
+            );
           await checked(render.id, 'needs_rerender', check);
           return void (await fail(message, true, {
             kind: 'needs_rerender',
@@ -1007,7 +1020,10 @@ async function runDestination(ctx: Ctx, share: Row, deps: SweepDeps = {}): Promi
         // refused a second time although it meets every rule: the end of the bounded extra attempt
         const second: FileRejection = { ...rej, ...base, rejections: rej.rejections + 1 };
         return void (await fail(
-          `Instagram refused this file again although it meets the Reels rules; it is not sent again: ${message}`.slice(0, 480),
+          `Instagram refused this file again although it meets the Reels rules; it is not sent again: ${message}`.slice(
+            0,
+            480,
+          ),
           true,
           second,
         ));
@@ -1021,17 +1037,40 @@ async function runDestination(ctx: Ctx, share: Row, deps: SweepDeps = {}): Promi
       }
       if (!check) {
         await checked(fp.renderId, 'check_failed', null, checkError);
-        const text = `Instagram refused the video and the file could not be checked against the Reels rules (${checkError}): ${message}`.slice(0, 480);
-        return void (await fail(text, true, { kind: 'check_failed', ...base, rejections: 1, error: text, check: null }));
+        const text =
+          `Instagram refused the video and the file could not be checked against the Reels rules (${checkError}): ${message}`.slice(
+            0,
+            480,
+          );
+        return void (await fail(text, true, {
+          kind: 'check_failed',
+          ...base,
+          rejections: 1,
+          error: text,
+          check: null,
+        }));
       }
       if (!check.passed) {
-        const text = `Instagram could not process the video; it needs a new render: ${check.failed.map((f) => f.message).join('; ')}`.slice(0, 480);
+        const text =
+          `Instagram could not process the video; it needs a new render: ${check.failed.map((f) => f.message).join('; ')}`.slice(
+            0,
+            480,
+          );
         await checked(fp.renderId, 'needs_rerender', check);
-        return void (await fail(text, true, { kind: 'needs_rerender', ...base, rejections: 1, error: text, check }));
+        return void (await fail(text, true, {
+          kind: 'needs_rerender',
+          ...base,
+          rejections: 1,
+          error: text,
+          check,
+        }));
       }
       const rec: FileRejection = { kind: 'rejected_compliant', ...base, rejections: 1, check };
       await checked(fp.renderId, 'one_more_attempt', check);
-      ctx.log.warn({ postId: post.id, check }, 'Instagram rejected a file that meets the Reels rules; one more attempt');
+      ctx.log.warn(
+        { postId: post.id, check },
+        'Instagram rejected a file that meets the Reels rules; one more attempt',
+      );
       if (now.getTime() + FILE_RETRY_MS > deadline)
         return void (await fail(`gave up 6 hours after the slot: ${message}`, true, rec));
       const { dest: _dropped, ...rest } = detail;

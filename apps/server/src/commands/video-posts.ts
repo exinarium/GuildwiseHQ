@@ -1365,7 +1365,9 @@ export async function retryRender(ctx: Ctx, by: string, postId: string): Promise
  */
 export async function rerenderVideo(ctx: Ctx, by: string, postId: string): Promise<VideoPost> {
   const now = ctx.clock.now();
-  const p = await one(ctx.pool, 'SELECT status, revision, approved_render_id FROM video_posts WHERE id=$1', [postId]);
+  const p = await one(ctx.pool, 'SELECT status, revision, approved_render_id FROM video_posts WHERE id=$1', [
+    postId,
+  ]);
   if (!p) throw notFound('video post not found', 'video_post_not_found');
   if (p.status !== 'approved') throw conflict('not_scheduled', 'this video is not scheduled');
   const render = await one(
@@ -1462,7 +1464,10 @@ export async function retryShare(
   )
     throw conflict(
       'needs_rerender',
-      `Instagram refused this video file${rej.rejections >= 2 ? ' twice' : ''}: it needs a new render (${rejectionReasons(rej)}). Use Re-render.`.slice(0, 480),
+      `Instagram refused this video file${rej.rejections >= 2 ? ' twice' : ''}: it needs a new render (${rejectionReasons(rej)}). Use Re-render.`.slice(
+        0,
+        480,
+      ),
     );
   if (!uploaded && !art.video) {
     if (!share.render_id || share.library)

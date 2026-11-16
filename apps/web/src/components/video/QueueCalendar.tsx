@@ -21,8 +21,8 @@ import {
   slotLabel,
   slotTime,
 } from '../../lib/video-schedule.ts';
-import { needsRerender, RerenderNotice } from './RerenderNotice.tsx';
 import { Badge, Button, EmptyState, ErrorBox, Panel, Select, useToast } from '../ui.tsx';
+import { needsRerender, RerenderNotice } from './RerenderNotice.tsx';
 
 type ShareState = 'pending' | 'posting' | 'sent' | 'failed' | 'skipped' | 'locked_private';
 const ICON = {
@@ -48,7 +48,12 @@ export function destinationStates(
         rerender: false,
       };
     const s = p.shares.find((x) => x.network === dest);
-    return { dest, state: (s?.status ?? 'pending') as ShareState, url: s?.url ?? null, rerender: needsRerender(s) };
+    return {
+      dest,
+      state: (s?.status ?? 'pending') as ShareState,
+      url: s?.url ?? null,
+      rerender: needsRerender(s),
+    };
   });
 }
 
@@ -268,7 +273,10 @@ function ScheduledPost({
           share={s}
           loading={retry.isPending}
           onRerender={() =>
-            retry.mutate({ id: post.id, what: 'rerender' }, { onSuccess: () => toast.success('Queued: the video renders again') })
+            retry.mutate(
+              { id: post.id, what: 'rerender' },
+              { onSuccess: () => toast.success('Queued: the video renders again') },
+            )
           }
         />
       ))}
