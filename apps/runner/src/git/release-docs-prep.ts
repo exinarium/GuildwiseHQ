@@ -3,11 +3,11 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import {
   componentRuleApplies,
+  isReleaseCommit,
   isSafeGitRef,
   type ReleaseDocsPrepPayload,
   type ReleaseDocsPrepResult,
   type ReleaseDocsPrepSummary,
-  isReleaseCommit,
   releasePrepCommitSubject,
 } from '@aom/shared';
 import { detectSignOff } from './dco.ts';

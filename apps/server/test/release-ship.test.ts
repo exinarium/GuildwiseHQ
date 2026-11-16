@@ -8,7 +8,6 @@ import {
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { applyReleaseDocsPrepResult } from '../src/release/docs-prep.ts';
 import { reconcileReleaseProposal } from '../src/release/reconcile.ts';
-import { enqueueRunnerCommand } from '../src/runner-gateway/commands-queue.ts';
 import { applyReleaseShipResult } from '../src/release/ship.ts';
 import {
   RELEASE_SHIP_LOST_TEXT,
@@ -16,6 +15,7 @@ import {
   RELEASE_SHIP_STUCK_GRACE_SECONDS,
   releaseShipStuckChecks,
 } from '../src/release/ship-stuck.ts';
+import { enqueueRunnerCommand } from '../src/runner-gateway/commands-queue.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { freshState } from './helpers/shifts.ts';
 import { createWorld, markOnline, ok, type World } from './helpers/world.ts';
@@ -175,7 +175,10 @@ describe('release.ship on the server', () => {
        SELECT $1, org_id, id, 'development', 'running', '{}', 'manual', now(), now() FROM projects WHERE id=$2`,
       [runId, w.projectId],
     );
-    await enqueueRunnerCommand(w.t.app.ctx.pool, w.workstationId, 'release.docs_prep', { runId, step: 'commit' });
+    await enqueueRunnerCommand(w.t.app.ctx.pool, w.workstationId, 'release.docs_prep', {
+      runId,
+      step: 'commit',
+    });
     const proposed = await eventCount('ReleaseProposed');
     const good = { ok: true, step: 'push', commit: 'c'.repeat(40), components: [], notices: [] };
     await applyReleaseShipResult(w.t.app.ctx, w.workstationId, { shipId: id }, true, good, undefined);
@@ -193,7 +196,9 @@ describe('release.ship on the server', () => {
       { ok: true, state: 'passed', commit: 'e'.repeat(40), pushed: true },
       undefined,
     );
-    expect((await q2(`SELECT status FROM release_docs_prep_runs WHERE id=$1`, [runId]))[0].status).toBe('skipped');
+    expect((await q2(`SELECT status FROM release_docs_prep_runs WHERE id=$1`, [runId]))[0].status).toBe(
+      'skipped',
+    );
     expect(await eventCount('ReleaseProposed')).toBe(proposed);
   });
 

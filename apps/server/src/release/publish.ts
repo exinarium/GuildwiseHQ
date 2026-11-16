@@ -427,6 +427,5 @@ export async function applyReleasePublishResult(
     published.repoId = ship.repo_id;
   });
   // the facts are read again at once, so nothing waits on facts from before the release
-  if (published.repoId)
-    await requestReleaseFacts(ctx, published.repoId, 'release').catch(() => undefined);
+  if (published.repoId) await requestReleaseFacts(ctx, published.repoId, 'release').catch(() => undefined);
 }

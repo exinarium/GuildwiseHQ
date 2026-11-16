@@ -56,13 +56,22 @@ afterAll(async () => {
 
 const REAL = [{ sha: '3'.repeat(40), subject: 'feat: something new', breakingFooter: false }];
 const MACHINERY = [
-  { sha: '4'.repeat(40), subject: 'docs(release): prepare the release documentation for release/1.5.0', breakingFooter: false },
+  {
+    sha: '4'.repeat(40),
+    subject: 'docs(release): prepare the release documentation for release/1.5.0',
+    breakingFooter: false,
+  },
   { sha: '5'.repeat(40), subject: 'chore(release): 1.5.0', breakingFooter: false },
 ];
 
 /** Facts for the release branch at `sha`; by default with one real change since the last release. */
 async function setHead(sha: string, commits: unknown[] = REAL, at: Date = ctx().clock.now()) {
-  const facts = { headSha: sha, ahead: commits.length, lastTag: { name: 'v1.4.0', sha: '6'.repeat(40) }, commits };
+  const facts = {
+    headSha: sha,
+    ahead: commits.length,
+    lastTag: { name: 'v1.4.0', sha: '6'.repeat(40) },
+    commits,
+  };
   await q(
     `INSERT INTO repo_release_facts (project_repo_id, request_id, trigger, state, head_sha, facts, requested_at, updated_at)
      VALUES ($1, gen_random_uuid(), 'manual', 'ready', $2, $4::jsonb, $3, $3)
@@ -230,12 +239,13 @@ describe('after a release has shipped', () => {
   const ready = async () => {
     await healthyRun(d, 'local', HEAD, 45);
   };
-  const shippedFacts = (commits: unknown[]) => setHead(HEAD, commits).then(() =>
-    q(`UPDATE repo_release_facts SET facts = jsonb_set(facts, '{lastTag}', $2::jsonb) WHERE project_repo_id=$1`, [
-      d.w.repoId,
-      JSON.stringify({ name: 'v1.5.0', sha: '7'.repeat(40) }),
-    ]),
-  );
+  const shippedFacts = (commits: unknown[]) =>
+    setHead(HEAD, commits).then(() =>
+      q(
+        `UPDATE repo_release_facts SET facts = jsonb_set(facts, '{lastTag}', $2::jsonb) WHERE project_repo_id=$1`,
+        [d.w.repoId, JSON.stringify({ name: 'v1.5.0', sha: '7'.repeat(40) })],
+      ),
+    );
 
   it('starts no automatic run when the release commit or a prep docs commit is the new head', async () => {
     await settings({ autoStart: true });

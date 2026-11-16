@@ -245,7 +245,11 @@ describe('Ship release approval (resolveShipReleaseIn)', () => {
 
 describe('reconcile after a release (release machinery only)', () => {
   const machinery = [
-    { sha: 'e'.repeat(40), subject: 'docs(release): prepare the release documentation for development', breakingFooter: false },
+    {
+      sha: 'e'.repeat(40),
+      subject: 'docs(release): prepare the release documentation for development',
+      breakingFooter: false,
+    },
     { sha: 'f'.repeat(40), subject: 'chore(release): 1.4.0', breakingFooter: false },
   ];
   const released = {
@@ -301,7 +305,10 @@ describe('reconcile after a release (release machinery only)', () => {
     expect(await proposals()).toHaveLength(1);
     expect((await proposals())[0]).toMatchObject({ last_tag: 'v1.4.0' });
     const built = buildProposal(
-      facts({ ...released, commits: [{ sha: '1'.repeat(40), subject: 'feat: brand new', breakingFooter: false }, ...machinery] }),
+      facts({
+        ...released,
+        commits: [{ sha: '1'.repeat(40), subject: 'feat: brand new', breakingFooter: false }, ...machinery],
+      }),
       [],
     );
     expect(built.notes).toBe('- feat: brand new');
