@@ -557,8 +557,7 @@ export class Runner {
       findRepo: (n) => this.findRepo(n),
       busyWorktrees: () => this.supervisor.worktreePaths(),
       auth: (url, forge) => gitAuthFor(this.forgeEnv, url, forge),
-      send: (r) =>
-        void this.client.send('repo.sync_status', { status: toRepoSyncStatus(r) }),
+      send: (r) => void this.client.send('repo.sync_status', { status: toRepoSyncStatus(r) }),
       log: this.log,
     });
     this.claudeStore = new ClaudeCredentialStore(claudeFile(this.paths.secrets));

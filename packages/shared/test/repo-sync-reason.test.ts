@@ -65,6 +65,7 @@ describe('repo sync reason', () => {
   });
 
   it('has a non-empty fallback text for every code', () => {
-    for (const code of RepoSyncReasonSchema.options) expect(REPO_SYNC_REASON_TEXT[code].length).toBeGreaterThan(0);
+    for (const code of RepoSyncReasonSchema.options)
+      expect(REPO_SYNC_REASON_TEXT[code].length).toBeGreaterThan(0);
   });
 });

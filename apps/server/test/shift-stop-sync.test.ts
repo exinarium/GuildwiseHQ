@@ -196,6 +196,46 @@ describe('working branch sync', () => {
     r.close();
   });
 
+  it('stores the reason a sync left the branch alone, and a later status without one clears it', async () => {
+    await q(`UPDATE project_repos SET working_branch='dev' WHERE id=$1`, [w.repoId]);
+    const r = await w.connectRunner();
+    const message = 'dev is checked out in another worktree (~/wt2); it was left alone';
+    r.send('repo.sync_status', {
+      status: status({
+        reason: 'checked-out-elsewhere',
+        reasonMessage: `${message}; https://bot:s3cr3t@example.test/x.git`,
+      }),
+    });
+    await r.barrier();
+    const stored = await q('SELECT reason, reason_message FROM repo_sync_status WHERE project_repo_id=$1', [
+      w.repoId,
+    ]);
+    expect(stored[0]?.reason).toBe('checked-out-elsewhere');
+    expect(stored[0]?.reason_message).toContain(message);
+    expect(stored[0]?.reason_message).not.toContain('s3cr3t');
+    const list = await ok<any>(w.t.req('GET', '/api/workstations', { cookie: w.owner.cookie }));
+    const repo = list.workstations.find((x: any) => x.id === w.workstationId).repos[0];
+    expect(repo.sync).toMatchObject({ reason: 'checked-out-elsewhere' });
+    expect(repo.sync.reasonMessage).toContain('(~/wt2)');
+    const proj = await ok<any>(w.t.req('GET', `/api/projects/${w.projectId}`, { cookie: w.owner.cookie }));
+    expect(proj.repos[0].syncs[0]).toMatchObject({ reason: 'checked-out-elsewhere' });
+
+    // An update (or an older runner, which never sends the fields) clears the earlier reason.
+    r.send('repo.sync_status', { status: status({ state: 'updated', behind: 0 }) });
+    await r.barrier();
+    const cleared = await q(
+      'SELECT state, reason, reason_message FROM repo_sync_status WHERE project_repo_id=$1',
+      [w.repoId],
+    );
+    expect(cleared[0]).toMatchObject({ state: 'updated', reason: null, reason_message: null });
+    const after = await ok<any>(w.t.req('GET', '/api/workstations', { cookie: w.owner.cookie }));
+    const sync = after.workstations.find((x: any) => x.id === w.workstationId).repos[0].sync;
+    expect(sync.state).toBe('updated');
+    expect(sync.reason).toBeUndefined();
+    expect(sync.reasonMessage).toBeUndefined();
+    r.close();
+  });
+
   it('only the workstation owner can sync', async () => {
     const other = await w.t.userSession(`syncer-${Date.now()}@example.test`);
     const res = await w.t.req('POST', `/api/workstations/${w.workstationId}/repos/${w.repoId}/sync`, {

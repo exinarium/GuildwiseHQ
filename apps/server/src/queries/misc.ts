@@ -10,6 +10,7 @@ import {
   McpServerInfoSchema,
   type ProjectDetailResponse,
   type ProjectDto,
+  type RepoSyncReason,
   type RoleCatalogueEntrySchema,
   RUNNER_UPDATE_CHECK_CAPABILITY,
   RunnerUpdateCheckResultSchema,
@@ -527,6 +528,8 @@ export function syncDto(r: Row | undefined) {
     onBranch: !!r.on_branch,
     checkedOutBranch: (r.checked_out_branch as string | null) ?? null,
     ...(r.detail ? { detail: r.detail as string } : {}),
+    ...(r.reason ? { reason: r.reason as RepoSyncReason } : {}),
+    ...(r.reason_message ? { reasonMessage: r.reason_message as string } : {}),
     checkedAt: iso(r.checked_at) as string,
   };
 }

@@ -371,7 +371,10 @@ describe('syncWorkingBranch reasons', () => {
 describe('safeSyncText', () => {
   it('masks credentials, the home at a path boundary only, and cuts to 400', () => {
     const home = tmp();
-    const t = safeSyncText(`fatal: https://user:hunter2@example.test/x.git in ${home}/a and ${home}2/b`, home);
+    const t = safeSyncText(
+      `fatal: https://user:hunter2@example.test/x.git in ${home}/a and ${home}2/b`,
+      home,
+    );
     expect(t).not.toContain('hunter2');
     expect(t).toContain('~/a');
     expect(t).toContain(`${home}2/b`);
@@ -445,7 +448,11 @@ describe('SyncService reasons', () => {
       send: () => {},
       log,
     });
-    const t = { repoId: '019e3f6a-7b1c-7a2d-8c3e-0123456789c3', remoteUrlNormalized: 'x/y', workingBranch: 'w' };
+    const t = {
+      repoId: '019e3f6a-7b1c-7a2d-8c3e-0123456789c3',
+      remoteUrlNormalized: 'x/y',
+      workingBranch: 'w',
+    };
     const a = await none.sync(t);
     expectReason(a, 'no-clone');
     const home = tmp();

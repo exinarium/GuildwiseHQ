@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { RepoSyncLine, syncText } from '../components/RepoSync.tsx';
+import { RepoSyncLine, syncReason, syncText } from '../components/RepoSync.tsx';
 import { lastActivityAt, minutesWord, ShiftClock, ShiftStopControls } from '../components/ShiftStop.tsx';
 
 const ID = (n: number) => `0192f3a0-0000-7000-8000-${String(n).padStart(12, '0')}`;
@@ -136,5 +136,92 @@ describe('working branch sync line', () => {
   it('hides Sync now where the user may not sync', () => {
     wrap(<RepoSyncLine sync={sync()} workstationId={ID(7)} repoId={ID(8)} canSync={false} />);
     expect(screen.queryByTestId('sync-now')).toBeNull();
+  });
+
+  it('shows why a sync left the branch alone, with a warning badge rather than an error', () => {
+    wrap(
+      <RepoSyncLine
+        sync={
+          sync({
+            reason: 'checked-out-elsewhere',
+            reasonMessage: 'alex/dev is checked out in another worktree (~/wt2); it was left alone',
+          }) as never
+        }
+        workstationId={ID(7)}
+        repoId={ID(8)}
+        canSync
+      />,
+    );
+    const badge = screen.getByTestId('repo-sync-reason');
+    expect(badge).toHaveTextContent('Left unchanged: alex/dev is checked out in another worktree (~/wt2)');
+    expect(badge.className).toContain('bg-warning-soft');
+    expect(badge.className).not.toContain('danger');
+    expect(screen.getByText('alex/dev is 3 commits behind origin')).toBeInTheDocument();
+  });
+
+  it('shows no reason without one, after an update, or for a quiet code', () => {
+    const { unmount } = wrap(<RepoSyncLine sync={sync()} workstationId={ID(7)} repoId={ID(8)} canSync />);
+    expect(screen.queryByTestId('repo-sync-reason')).toBeNull();
+    unmount();
+    wrap(
+      <RepoSyncLine
+        sync={
+          sync({
+            state: 'updated',
+            behind: 0,
+            reason: 'checked-out-elsewhere',
+            reasonMessage: 'old',
+          }) as never
+        }
+        workstationId={ID(7)}
+        repoId={ID(8)}
+        canSync
+      />,
+    );
+    expect(screen.queryByTestId('repo-sync-reason')).toBeNull();
+    expect(screen.getByText('alex/dev is in sync with origin')).toBeInTheDocument();
+    expect(
+      syncReason(sync({ state: 'synced', behind: 0, reason: 'up-to-date', reasonMessage: 'x' }) as never),
+    ).toBeNull();
+    expect(
+      syncReason(sync({ state: 'ahead', ahead: 1, behind: 0, reason: 'local-ahead' }) as never),
+    ).toBeNull();
+  });
+
+  it('falls back to a fixed text when the message is missing, and uses a neutral tone for expected skips', () => {
+    expect(syncReason(sync({ reason: 'checked-out-elsewhere' }) as never)).toEqual({
+      text: 'checked out in another worktree, so it was left alone',
+      tone: 'warning',
+    });
+    expect(
+      syncReason(sync({ state: 'busy', reason: 'shift-running', reasonMessage: 'm' }) as never)?.tone,
+    ).toBe('neutral');
+  });
+
+  it('shows a line for no remote and a missing local branch, and does not repeat the detail next to a reason', () => {
+    expect(syncText(sync({ state: 'no_remote' }) as never)?.text).toMatch(/no origin remote/);
+    expect(syncText(sync({ state: 'missing_branch' }) as never)?.text).toMatch(/no local branch/);
+    wrap(
+      <RepoSyncLine
+        sync={sync({ state: 'no_remote' }) as never}
+        workstationId={ID(7)}
+        repoId={ID(8)}
+        canSync
+      />,
+    );
+    expect(screen.getByTestId('repo-sync')).toBeInTheDocument();
+    expect(
+      syncText(sync({ state: 'dirty', detail: 'uncommitted changes would be overwritten: c.txt' }) as never)
+        ?.text,
+    ).toMatch(/c\.txt/);
+    expect(
+      syncText(
+        sync({
+          state: 'dirty',
+          detail: 'uncommitted changes would be overwritten: c.txt',
+          reason: 'local-changes',
+        }) as never,
+      )?.text,
+    ).not.toMatch(/c\.txt/);
   });
 });

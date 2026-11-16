@@ -7,7 +7,12 @@ import {
   type RepoSyncStatus,
 } from '@aom/shared';
 import { type Logger, nullLogger } from '../log.ts';
-import { type SyncResult, safeSyncText, syncWorkingBranch, syncWorkingBranchUnlocked } from './sync-branch.ts';
+import {
+  type SyncResult,
+  safeSyncText,
+  syncWorkingBranch,
+  syncWorkingBranchUnlocked,
+} from './sync-branch.ts';
 import type { GitAuth } from './worktrees.ts';
 
 /** The repositories whose working branch the runner keeps in step with origin, with the branch the server confirmed. */

@@ -161,7 +161,13 @@ export async function syncWorkingBranchUnlocked(input: SyncInput): Promise<SyncR
           `could not fetch ${wb} from origin: ${fetchError.replace(/^git fetch failed: /, '')}`,
           fetchError,
         )
-      : early(withCheckout, 'error', 'origin-missing-branch', `origin has no branch ${wb}`, `origin has no branch ${wb}`);
+      : early(
+          withCheckout,
+          'error',
+          'origin-missing-branch',
+          `origin has no branch ${wb}`,
+          `origin has no branch ${wb}`,
+        );
   if (!local)
     return early(
       withCheckout,
@@ -177,7 +183,11 @@ export async function syncWorkingBranchUnlocked(input: SyncInput): Promise<SyncR
   let behind = behindN ?? 0;
   const dirty = (await changedFiles(repoPath)).length > 0;
   /** Every result from here on; `why` is required for anything but `updated`. */
-  const out = (state: SyncState, detail?: string, why?: { reason: RepoSyncReason; message: string }): SyncResult => {
+  const out = (
+    state: SyncState,
+    detail?: string,
+    why?: { reason: RepoSyncReason; message: string },
+  ): SyncResult => {
     const d = detail ?? fetchError;
     return {
       state,
