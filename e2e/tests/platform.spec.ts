@@ -178,7 +178,9 @@ test('an invitee starts an organization with the Business view as default: deliv
 });
 
 async function beatWorker(role: 'render' | 'publish', version: string | null): Promise<void> {
-  const value = JSON.stringify({ at: new Date().toISOString(), version });
+  // far in the future: the server clock may be ahead of this machine's (the test clock other specs advance), and a
+  // beat older than the stale limit would show the worker offline instead of outdated
+  const value = JSON.stringify({ at: '2099-01-01T00:00:00.000Z', version });
   await q(
     `INSERT INTO platform_settings (key, value, updated_at) VALUES ($1, $2::jsonb, now())
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
