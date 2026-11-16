@@ -15,7 +15,12 @@ import {
   type VideoCaptions,
   type VideoPostMeta,
   type VideoScript,
+  WORKER_OUTDATED_CODE,
+  WORKER_OUTDATED_LIKE,
+  workerOutdated,
+  workerOutdatedMessage,
 } from '@aom/shared';
+import { appVersion } from '../app-version.ts';
 import { decryptSecret } from '../auth/secrets.ts';
 import { hashtagPools } from '../blog/hashtag-pools.ts';
 import { SYSTEM_ACTOR } from '../commands/common.ts';
@@ -30,6 +35,7 @@ import {
   nextFreeSlotOf,
   renderDir,
   renderStart,
+  serverVersion,
   slipVideoPost,
   videoActive,
   videoPostStream,
@@ -92,6 +98,8 @@ export interface SweepDeps {
   push?: PushDeps;
   /** Overrides `AOM_VIDEO_ROLE`. */
   role?: 'render' | 'publish' | 'all';
+  /** This worker's application version; defaults to appVersion() (tests play an older worker with it). */
+  version?: string | null;
 }
 
 const defaultRender: RenderFn = async (script, opts) => {
@@ -208,8 +216,40 @@ async function claimRender(ctx: Ctx, previewsOnly = false): Promise<Row | undefi
   }
 }
 
+/** This worker's application version (deps.version in tests). */
+const workerVersionOf = (deps: SweepDeps): string | null =>
+  deps.version !== undefined ? deps.version : appVersion();
+
+/** The last "outdated" message this process logged: logged once per distinct message, not on every tick. */
+let loggedOutdated: string | null = null;
+function logOutdated(ctx: Ctx, message: string): void {
+  if (loggedOutdated === message) return;
+  loggedOutdated = message;
+  ctx.log.error({ code: WORKER_OUTDATED_CODE }, message);
+}
+function clearOutdated(ctx: Ctx, version: string | null): void {
+  if (loggedOutdated === null) return;
+  loggedOutdated = null;
+  ctx.log.info(`video worker ${version ?? '(no version)'} is up to date again; rendering resumes`);
+}
+
 /** Claims and renders one queued render (only previews with `previewsOnly`). Returns true when it did something. */
 export async function renderNext(ctx: Ctx, deps: SweepDeps = {}, previewsOnly = false): Promise<boolean> {
+  // a worker older than the server claims nothing: it logs why and keeps beating, so the flag stays visible
+  const mine = workerVersionOf(deps);
+  const server = await serverVersion(ctx);
+  if (workerOutdated(mine, server)) {
+    logOutdated(ctx, workerOutdatedMessage(mine, server as string));
+    return false;
+  }
+  clearOutdated(ctx, mine);
+  // renders a refused push put back with a wait are free again now that a current worker asks
+  await exec(
+    ctx.pool,
+    `UPDATE video_renders SET lease_until=NULL
+      WHERE status='queued' AND NOT library AND lease_until > $1 AND error LIKE $2`,
+    [ctx.clock.now(), WORKER_OUTDATED_LIKE],
+  );
   const r = await claimRender(ctx, previewsOnly);
   if (!r) return false;
   const post = await one(ctx.pool, 'SELECT * FROM video_posts WHERE id=$1', [r.post_id]);
@@ -217,7 +257,7 @@ export async function renderNext(ctx: Ctx, deps: SweepDeps = {}, previewsOnly = 
   const outDir = join(root, renderDir(r.post_id, r.revision));
   const lines: string[] = [];
   const beat = setInterval(() => {
-    void beatHeartbeat(ctx, 'render', { busy: 'render' }).catch(() => {});
+    void beatHeartbeat(ctx, 'render', { busy: 'render', version: mine }).catch(() => {});
     void exec(
       ctx.pool,
       `UPDATE video_renders SET lease_until=$2 WHERE id=$1 AND status='rendering' AND attempts=$3`,
@@ -263,7 +303,11 @@ export async function renderNext(ctx: Ctx, deps: SweepDeps = {}, previewsOnly = 
     if (pushing) {
       const files = Object.values(a).filter((f): f is string => !!f && existsSync(f));
       await pushArtifacts(
-        { baseUrl: ctx.config.videoPushUrl as string, token: ctx.config.videoWorkerToken as string },
+        {
+          baseUrl: ctx.config.videoPushUrl as string,
+          token: ctx.config.videoWorkerToken as string,
+          version: mine,
+        },
         r.id,
         files,
         deps.push,
@@ -1145,6 +1189,22 @@ export async function videoWatch(ctx: Ctx): Promise<{ slipped: number; alerts: n
         `"${p.title}" goes out at ${new Date(p.slot_at).toISOString()} but its render failed: ${p.error ?? 'unknown error'}. Fix the script or retry the render.`,
       );
   }
+  // 2b. a worker older than the server (the same path as "offline": one mail per worker version / server version pair,
+  // so a worker that misses another release is reported again)
+  const server = await serverVersion(ctx);
+  for (const role of ['render', 'publish'] as const) {
+    const b = await workerHeartbeat(ctx, role, server);
+    if (!b.running || !b.outdated || !server) continue;
+    await send(
+      `outdated:${role}:${b.version ?? 'none'}:${server}`,
+      `The video ${role} worker is out of date`,
+      `${workerOutdatedMessage(b.version, server)}. ${
+        role === 'render'
+          ? 'Until it is updated it renders nothing and the server refuses its files, so scheduled videos wait and may slip.'
+          : 'It runs older upload and posting code than the server.'
+      } Update the worker image and restart it; rendering resumes by itself on its next heartbeat.`,
+    );
+  }
   // 3. an empty slot while scripts wait
   for (const format of ['long', 'short'] as const) {
     const waiting = await one(
@@ -1335,8 +1395,9 @@ export async function videoTick(
   const role = deps.role ?? ctx.config.videoRole;
   const doRender = role !== 'publish';
   const doPublish = role !== 'render';
-  if (doRender) await beatHeartbeat(ctx, 'render');
-  if (doPublish) await beatHeartbeat(ctx, 'publish');
+  const beat = deps.version !== undefined ? { version: deps.version } : {};
+  if (doRender) await beatHeartbeat(ctx, 'render', beat);
+  if (doPublish) await beatHeartbeat(ctx, 'publish', beat);
   if (!(await videoActive(ctx))) {
     // no channel yet: a preview the owner asked for still renders (it uploads nothing), so the script can be checked
     // before YouTube is connected; scheduled renders wait for the channel
