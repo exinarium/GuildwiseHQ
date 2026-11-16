@@ -12,6 +12,7 @@ export * from './help-articles.ts';
 export * from './publish.ts';
 export * from './readiness.ts';
 export * from './recommend.ts';
+export * from './submodules.ts';
 export * from './tags.ts';
 export * from './user-guide.ts';
 export * from './validate.ts';

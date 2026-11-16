@@ -1660,6 +1660,16 @@ sends the raw file text; the server reads the version. It never pushes, tags, cr
 a missing clone, a missing branch or an unsafe ref come back as an answer (`ok: false` with the reason), not a failure.
 Runners announce the capability `release-facts:1`; the server asks only a runner that has it.
 
+When the working-branch head has a `.gitmodules`, the answer also lists `submodules`: for each declared submodule its
+path, normalized url and pinned commit (the gitlink at the head). The payload's `projectRepos` names the project's other
+repositories by normalized url; a submodule whose url matches one is compared with that repository's latest release tag
+(highest `vX.Y.Z`, pre-release tags count), read from the runner's own registered clone of it under that clone's lock with
+its origin's credentials (a tag fetch, and a fetch of the pinned commit when it is missing; these are the only writes, and
+only into that clone). The state is `pinned` (the pin is the latest tag's commit), `behind` (the latest tag is not in the
+pin), `not_on_release_tag` (an untagged commit after the latest tag), `not_checked` (outside the project, no release
+tags, or no `projectRepos` sent) or `unknown` with the reason (no clone on this workstation, the fetch failed, the pin is
+not in the clone). Only the normalized url is stored, never the raw url. Without a `.gitmodules` the field is absent.
+
 ### `release.ship`
 
 The release commit of an approved "Ship release". It runs under the per-clone lock, in a throwaway integration

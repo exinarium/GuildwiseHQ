@@ -4,7 +4,11 @@ import {
   componentLine,
   composeReleaseSection,
   type DeskItemDto,
+  RELEASE_SUBMODULE_GATE_CODE,
+  type ReleaseSubmoduleFacts,
   releaseIntro,
+  releasePointerGate,
+  submoduleLine,
   validateReleaseVersion,
 } from '@aom/shared';
 import { useMemo, useRef, useState } from 'react';
@@ -16,6 +20,13 @@ import { useIsMobile } from '../hooks/useIsMobile.ts';
 import { Button, Callout, ErrorBox, TextArea, TextInput } from './ui.tsx';
 
 const LEVELS: BumpLevel[] = ['patch', 'minor', 'major'];
+
+/** The text colour of a submodule line: refused states in danger, unverified ones in warning. */
+function pointerTone(s: ReleaseSubmoduleFacts): string {
+  if (s.state === 'behind' || s.state === 'not_on_release_tag') return 'text-danger-soft-fg';
+  if (s.state === 'unknown') return 'text-warning-soft-fg';
+  return 'text-subtle';
+}
 
 /** How old a read of the repository is, in plain words. */
 function age(at: string | null): string {
@@ -75,7 +86,15 @@ export function ShipReleaseItem({ item }: { item: DeskItemDto }) {
   // Release prep (docs and videos): the server refuses the ship; the same reason is shown here in advance.
   const gateMessage = rel.docsPrep?.blocked ? rel.docsPrep.message : gateErr?.message;
   const gateLink = rel.docsPrep?.link ?? `/releases?tab=prep#release-docs-prep-${rel.projectId}`;
-  const serverMsg = resolve.error instanceof Error && !gateErr ? resolve.error.message : undefined;
+  // Submodule pointers: the server refuses a pointer behind the latest release; the same reason is shown here in advance.
+  const pointer = releasePointerGate(rel.submodules, rel.repoName);
+  const pointerErr =
+    resolve.error instanceof ApiError && resolve.error.code === RELEASE_SUBMODULE_GATE_CODE
+      ? resolve.error
+      : undefined;
+  const pointerMessage = pointer.blocked ? pointer.message : pointerErr?.message;
+  const serverMsg =
+    resolve.error instanceof Error && !gateErr && !pointerErr ? resolve.error.message : undefined;
   const reading = rel.factsState === 'pending';
 
   const approve = () =>
@@ -121,6 +140,24 @@ export function ShipReleaseItem({ item }: { item: DeskItemDto }) {
           <Link to={gateLink} className="underline">
             See release prep
           </Link>
+        </Callout>
+      )}
+      {rel.submodules && rel.submodules.length > 0 && (
+        <div data-testid="ship-submodules">
+          <h4 className="text-sm font-medium">Submodules</h4>
+          <ul className="mt-1 flex flex-col gap-1">
+            {rel.submodules.map((s) => (
+              <li key={s.path} className={`font-mono text-xs break-words ${pointerTone(s)}`}>
+                {submoduleLine(s)}
+                {s.state === 'unknown' && <span className="font-sans"> (not verified, does not block)</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {pointerMessage && (
+        <Callout tone="warning" role="alert" data-testid="ship-submodule-blocked">
+          {pointerMessage} After the bump, press Refresh.
         </Callout>
       )}
 
@@ -233,7 +270,7 @@ export function ShipReleaseItem({ item }: { item: DeskItemDto }) {
         <Button
           variant="primary"
           className="min-h-11 sm:min-h-0"
-          disabled={!check.ok || reading || rel.docsPrep?.blocked === true}
+          disabled={!check.ok || reading || rel.docsPrep?.blocked === true || pointer.blocked}
           loading={resolve.isPending}
           onClick={approve}
         >

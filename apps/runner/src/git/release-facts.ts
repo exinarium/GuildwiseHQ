@@ -6,11 +6,16 @@ import {
   hasBreakingFooter,
   isSafeGitRef,
   RELEASE_TAG_RE,
+  type ReleaseProjectRepo,
+  type ReleaseSubmoduleFacts,
   type RepoReleaseFactsPayload,
   type RepoReleaseFactsResult,
 } from '@aom/shared';
 import { git, revParse } from './git.ts';
 import { resolveReleaseBase } from './release-pr.ts';
+import { withRepoLock } from './repo-lock.ts';
+import { type FindRepo, isSafeSubmodulePath, redactGitError } from './submodule-fill.ts';
+import { readSubmodules } from './submodule-pin.ts';
 import type { GitAuth } from './worktrees.ts';
 
 export interface ReleaseFactsInput {
@@ -18,12 +23,15 @@ export interface ReleaseFactsInput {
   /** Local clone of the repository. */
   repoPath: string;
   auth?: GitAuth;
+  /** The runner's registered clone of another repository (for the submodule pointer check). */
+  findRepo?: FindRepo;
 }
 
 const COMMITS_MAX = 1000;
 const TAGS_MAX = 500;
 const CHANGELOG_MAX = 1_048_576;
 const VERSION_FILE_MAX = 262_144;
+const SUBMODULES_MAX = 50;
 
 const nonEmpty = (s: string): string[] =>
   s
@@ -175,7 +183,131 @@ export async function readReleaseFacts(input: ReleaseFactsInput): Promise<RepoRe
     changedTotal: paths.length,
     components,
     changelog: await fileAt(repoPath, headSha, 'CHANGELOG.md', CHANGELOG_MAX),
+    ...(await submodulesField(repoPath, headSha, input)),
   };
+}
+
+/** `{ submodules }` only when `.gitmodules` exists at `headSha`, so facts of a repository without submodules stay as they were. */
+async function submodulesField(
+  repoPath: string,
+  headSha: string,
+  input: ReleaseFactsInput,
+): Promise<{ submodules?: ReleaseSubmoduleFacts[] }> {
+  if ((await git(repoPath, ['cat-file', '-e', `${headSha}:.gitmodules`])).exitCode !== 0) return {};
+  return { submodules: await submodulePointersAt(repoPath, headSha, input) };
+}
+
+/**
+ * Every submodule declared at `headSha` with its pinned commit, compared with the latest release tag of the project
+ * repository it points to (matched by normalized url against `payload.projectRepos`). The pointed repository's tags are
+ * read from the runner's own registered clone of it, under that clone's lock with its origin's auth; the superproject
+ * is only read. Never throws: anything that cannot be resolved is `unknown` with the reason.
+ */
+export async function submodulePointersAt(
+  repoPath: string,
+  headSha: string,
+  input: ReleaseFactsInput,
+): Promise<ReleaseSubmoduleFacts[]> {
+  const p = input.payload;
+  const origin = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
+  const declared = (await readSubmodules(repoPath, origin, { at: headSha })).slice(0, SUBMODULES_MAX);
+  const out: ReleaseSubmoduleFacts[] = [];
+  for (const sub of declared) {
+    if (!isSafeSubmodulePath(sub.path)) continue;
+    const entry = (await git(repoPath, ['ls-tree', '-z', headSha, '--', sub.path])).stdout;
+    const pinned = /^160000 commit ([0-9a-f]{40})\t/.exec(entry)?.[1];
+    if (!pinned) continue;
+    const base = { path: sub.path.slice(0, 500), url: sub.normalized.slice(0, 500), pinned };
+    if (!p.projectRepos) {
+      out.push({ ...base, state: 'not_checked', reason: "not compared with the project's repositories" });
+      continue;
+    }
+    const repo = p.projectRepos.find(
+      (r) => r.remoteUrlNormalized === sub.normalized && r.repoId !== p.repoId,
+    );
+    if (!repo) {
+      out.push({ ...base, state: 'not_checked', reason: 'points outside this project' });
+      continue;
+    }
+    const pointed = { ...base, repoId: repo.repoId, repoName: repo.name };
+    try {
+      const local = await input.findRepo?.(repo.remoteUrlNormalized).catch(() => undefined);
+      if (!local) {
+        out.push({ ...pointed, state: 'unknown', reason: `no clone of ${repo.name} on this workstation` });
+        continue;
+      }
+      out.push(await classifyPointer(local.localPath, pointed, repo, input.auth));
+    } catch (err) {
+      const why = redactGitError(err instanceof Error ? err.message : String(err));
+      out.push({
+        ...pointed,
+        state: 'unknown',
+        reason: `could not check ${repo.name}: ${why}`.slice(0, 300),
+      });
+    }
+  }
+  return out;
+}
+
+const firstLine = (s: string): string => s.split('\n').find((l) => l.trim() !== '') ?? '';
+
+/** Compares the pin with the newest release tag of the pointed repository's clone. */
+async function classifyPointer(
+  clone: string,
+  pointed: Omit<ReleaseSubmoduleFacts, 'state'>,
+  repo: ReleaseProjectRepo,
+  auth: GitAuth | undefined,
+): Promise<ReleaseSubmoduleFacts> {
+  const { pinned } = pointed;
+  const unknown = (reason: string): ReleaseSubmoduleFacts => ({
+    ...pointed,
+    state: 'unknown',
+    reason: reason.slice(0, 300),
+  });
+  return withRepoLock(clone, async () => {
+    const origin = (await git(clone, ['remote', 'get-url', 'origin'])).stdout.trim();
+    const a = auth && origin ? await auth(origin) : { args: [], env: {} };
+    const opts = { env: a.env, timeoutMs: 300_000 };
+    const tags = await git(
+      clone,
+      [...a.args, 'fetch', '--no-recurse-submodules', '--', 'origin', 'refs/tags/*:refs/tags/*'],
+      opts,
+    );
+    if (tags.exitCode !== 0)
+      return unknown(
+        `could not fetch the tags of ${repo.name}: ${redactGitError(firstLine(tags.stderr || tags.stdout) || `exit code ${tags.exitCode}`)}`,
+      );
+    const has = async () => (await git(clone, ['cat-file', '-e', `${pinned}^{commit}`])).exitCode === 0;
+    if (!(await has())) {
+      await git(clone, [...a.args, 'fetch', '--no-recurse-submodules', 'origin'], opts);
+      if (!(await has()))
+        await git(clone, [...a.args, 'fetch', '--no-recurse-submodules', 'origin', pinned], opts);
+      if (!(await has())) return unknown(`pinned commit ${pinned.slice(0, 7)} is not in ${repo.name}`);
+    }
+    const { all, newestFirst, last } = await releaseTagsAt(clone, pinned);
+    const latest = newestFirst(all)[0];
+    if (!latest) return { ...pointed, state: 'not_checked', reason: `${repo.name} has no release tags` };
+    const latestSha = await revParse(clone, `refs/tags/${latest}`);
+    if (!latestSha) return unknown(`could not read the tag ${latest} of ${repo.name}`);
+    const known = {
+      ...pointed,
+      latestTag: { name: latest, sha: latestSha },
+      containsTag: last?.name ?? null,
+    };
+    if (latestSha === pinned) return { ...known, state: 'pinned' };
+    const anc = await git(clone, ['merge-base', '--is-ancestor', latestSha, pinned]);
+    if (anc.exitCode === 0) return { ...known, state: 'not_on_release_tag' };
+    if (anc.exitCode === 1) return { ...known, state: 'behind' };
+    return {
+      ...known,
+      state: 'unknown',
+      reason:
+        `could not compare with ${latest} of ${repo.name}: ${redactGitError(firstLine(anc.stderr) || `exit code ${anc.exitCode}`)}`.slice(
+          0,
+          300,
+        ),
+    };
+  });
 }
 
 function fail(error: string, base?: string): RepoReleaseFactsResult {

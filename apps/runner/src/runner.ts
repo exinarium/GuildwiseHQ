@@ -2498,6 +2498,7 @@ export class Runner {
                 payload: p,
                 repoPath: repo.localPath,
                 auth: this.scopeFor(p.postAs).auth,
+                findRepo: (n) => this.findRepo(n),
               })
             : { ok: false, error: `no local clone for ${p.remoteUrlNormalized}` },
         );

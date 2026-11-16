@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ComponentRuleSchema } from '../repo/component-rules.ts';
 import { ReleaseDocsPrepGateViewSchema } from './docs-prep-dto.ts';
+import { ReleaseSubmodulesSchema } from './submodules.ts';
 
 export const BumpLevelSchema = z.enum(['patch', 'minor', 'major']);
 
@@ -41,6 +42,8 @@ export const ReleaseFactsSchema = z.object({
     )
     .default([]),
   changelog: z.string().max(1_048_576).nullable().default(null),
+  /** Submodules at headSha (absent: no .gitmodules, or a runner that does not report them). */
+  submodules: ReleaseSubmodulesSchema.optional(),
 });
 export type ReleaseFacts = z.infer<typeof ReleaseFactsSchema>;
 
@@ -77,6 +80,8 @@ export const ReleaseProposalViewSchema = z.object({
   existingTags: z.array(z.string()),
   /** Release prep (docs and videos): only present when the project's switch is on. */
   docsPrep: ReleaseDocsPrepGateViewSchema.optional(),
+  /** Submodule pointers of the released commit (absent: none reported). */
+  submodules: ReleaseSubmodulesSchema.optional(),
 });
 export type ReleaseProposalView = z.infer<typeof ReleaseProposalViewSchema>;
 
