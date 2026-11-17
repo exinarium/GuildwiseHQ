@@ -20,7 +20,7 @@ import type { Tx } from '../db/tx.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
-import { loadReleaseDocsPrepGate } from './docs-prep.ts';
+import { closeRunningPrepForRelease, loadReleaseDocsPrepGate } from './docs-prep.ts';
 import { assertReleasePointers } from './pointer-gate.ts';
 import { enqueueReleasePublish, planReleasePublish } from './publish.ts';
 import { loadComponentRules } from './rules.ts';
@@ -458,6 +458,8 @@ export async function applyReleaseShipResult(
         ],
         { tx },
       );
+      // a prep run still running belongs to the release that just shipped: close it, nothing more is committed
+      await closeRunningPrepForRelease(ctx, tx, ship.project_id, ship.version);
       // how the release reaches main, and the first look at whether it did
       deliver.to = await planReleasePublish(ctx, tx, ship.id);
       return;

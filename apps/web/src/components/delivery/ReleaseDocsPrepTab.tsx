@@ -208,6 +208,11 @@ function RunView({ run }: { run: ReleaseDocsPrepRunDto }) {
         {run.trigger === 'retry' ? ' · a retry' : ''}
         {run.skippedAt ? ` · skipped ${formatDate(run.skippedAt)}` : ''}
       </p>
+      {run.skipReason && (
+        <Callout tone="info" data-testid="release-docs-prep-skip-reason">
+          Skipped by the system: {run.skipReason}
+        </Callout>
+      )}
       {run.failed && (
         <Callout tone="danger" data-testid="release-docs-prep-failed" role="alert">
           Failed at {run.failed.step}

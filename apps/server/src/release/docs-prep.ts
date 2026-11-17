@@ -25,11 +25,13 @@ import {
   type ReleaseDocsPrepState,
   ReleaseDocsPrepSummarySchema,
   type RunSnapshot,
+  releaseChanges,
   releaseDocsPrepGate,
   releaseDocsPrepLink,
   releaseDocsPrepStep,
   releaseDocsPrepStepOn,
   releaseDocsPrepSteps,
+  releasePrepCommitSubject,
   stepPhaseIndex,
   stepPhases,
   streamId,
@@ -45,7 +47,7 @@ import {
 } from '../commands/commit-as.ts';
 import { projectScope, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
-import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
+import { exec, iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, HttpError, notFound } from '../errors.ts';
@@ -60,7 +62,7 @@ import {
   type ServerPhaseOutcome,
 } from './docs-prep-phases.ts';
 import { configuredGuidePaths, DOCS_PREP_STEP_HOOKS, guidePathFor } from './docs-prep-steps.ts';
-import { loadFacts, repoReleaseBranch, requestReleaseFacts } from './facts.ts';
+import { loadFacts, publishedShips, repoReleaseBranch, requestReleaseFacts } from './facts.ts';
 import { loadComponentRules } from './rules.ts';
 
 const NAME = 'Release prep (docs and videos)';
@@ -209,7 +211,7 @@ export async function setReleaseDocsPrepSettings(
 
 // ------------------------------------------------------------------------------------------------------------ repos
 
-interface PrepRepo {
+export interface PrepRepo {
   id: string;
   name: string;
   branch: string;
@@ -276,6 +278,56 @@ async function prepWorkstation(db: Queryable, repoId: string, userId: string | n
   return ws?.id ?? null;
 }
 
+// ------------------------------------------------------------------------------------------------------- unreleased
+
+export interface UnreleasedWork {
+  /** `yes`: some repository has work no release contains; `no`: none has (every one read after its last publish). */
+  state: 'yes' | 'no' | 'unknown';
+  /** The newest last tag of the repositories (for the sentence). */
+  tag: string | null;
+  /** The repositories whose facts were not read after their last publish (or not read at all). */
+  stale: string[];
+}
+
+/**
+ * Whether any repository of a run has work that no release contains yet, judged on facts read after that
+ * repository's last published release. A repository with no published release always has such work. A failed read also moves `updated_at`, so only a clean read counts as fresh.
+ */
+export async function unreleasedWork(db: Queryable, repos: PrepRepo[]): Promise<UnreleasedWork> {
+  let yes = false;
+  let tag: string | null = null;
+  const stale: string[] = [];
+  for (const r of repos) {
+    const f = await loadFacts(db, r.id);
+    const last = await one(
+      db,
+      `SELECT MAX(published_at) AS at FROM release_ships WHERE repo_id=$1 AND status='published'`,
+      [r.id],
+    );
+    const publishedAt = last?.at ? new Date(last.at) : null;
+    // Nothing published yet: no release can contain the work, so the start goes on as before.
+    if (!publishedAt) {
+      yes = true;
+      continue;
+    }
+    const fresh =
+      !!f?.facts &&
+      f.state === 'ready' &&
+      f.message === null &&
+      !!f.at &&
+      f.at.getTime() >= publishedAt.getTime();
+    if (!fresh || !f?.facts) {
+      stale.push(r.id);
+      continue;
+    }
+    const name = f.facts.lastTag?.name ?? null;
+    if (name && (!tag || name.localeCompare(tag, undefined, { numeric: true }) > 0)) tag = name;
+    const changes = releaseChanges(f.facts, await publishedShips(db, r.id));
+    if (changes.real > 0 && !changes.behindRelease) yes = true;
+  }
+  return { state: yes ? 'yes' : stale.length === 0 ? 'no' : 'unknown', tag, stale };
+}
+
 // ------------------------------------------------------------------------------------------------------------ start
 
 const timeOf = (d: Date | string): string => new Date(d).toISOString().slice(11, 16);
@@ -328,6 +380,12 @@ async function startChecks(
     throw conflict(
       'release_shipping',
       `A release is being shipped for ${branch}. ${NAME} belongs before the approval.`,
+    );
+  const work = await unreleasedWork(db, repos);
+  if (work.state === 'no')
+    throw conflict(
+      'nothing_since_release',
+      `${work.tag ?? 'The last release'} is released and ${branch} has no changes since; there is nothing to prepare. If a change landed just now, refresh the release facts and try again.`,
     );
   const picked: Picked[] = [];
   for (const r of repos) {
@@ -510,6 +568,61 @@ export async function skipReleaseDocsPrep(
       { tx },
     );
   });
+}
+
+/** The reason a run that was still running when its release shipped is closed with. */
+export const shippedWhilePreparing = (version: string): string =>
+  `Release ${version} was shipped while release prep was running; prep for it was stopped and nothing more is committed.`;
+
+/**
+ * Closes every running prep run of the project when a release ships: the run is skipped by the system with the reason
+ * the manager sees, and its commands that have not finished on a workstation are failed, so no late result attaches
+ * and no prepared docs commit is pushed onto the released branch. Runs in the caller's transaction.
+ */
+export async function closeRunningPrepForRelease(
+  ctx: Ctx,
+  tx: Tx,
+  projectId: string,
+  version: string,
+): Promise<number> {
+  const running = await rows(
+    tx,
+    `SELECT r.id, r.release_branch, p.org_id FROM release_docs_prep_runs r JOIN projects p ON p.id = r.project_id
+      WHERE r.project_id=$1 AND r.status='running' FOR UPDATE OF r`,
+    [projectId],
+  );
+  const reason = shippedWhilePreparing(version);
+  const now = ctx.clock.now();
+  for (const run of running) {
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.releaseDocsPrep(run.id),
+          event: {
+            type: 'ReleaseDocsPrepSkipped',
+            payload: {
+              runId: run.id,
+              projectId,
+              releaseBranch: run.release_branch,
+              skippedBy: null,
+              wasStatus: 'running',
+              reason,
+            },
+          },
+          actor: SYSTEM_ACTOR,
+          scope: projectScope(run.org_id, projectId),
+        },
+      ],
+      { tx },
+    );
+    await exec(
+      tx,
+      `UPDATE runner_commands SET status='failed', last_error=$2, done_at=$3
+        WHERE type='release.docs_prep' AND payload->>'runId' = $1 AND status IN ('pending','sent')`,
+      [run.id, reason, now],
+    );
+  }
+  return running.length;
 }
 
 /**
@@ -892,7 +1005,7 @@ export async function sendDocsPrepStepCommand(
     projectKey: o.projectKey,
     ...(summary?.success ? { summary: summary.data } : {}),
     ...(repo.base_sha ? { base: { sha: repo.base_sha, tag: repo.base_tag ?? null } } : {}),
-    message: `docs(release): prepare the release documentation for ${repo.branch}`,
+    message: releasePrepCommitSubject(repo.branch),
     commitAs: o.commitAs ?? null,
     ...(o.postAs ? { postAs: o.postAs } : {}),
     ...(o.changelog ? { changelog: o.changelog } : {}),
@@ -1018,7 +1131,7 @@ export async function applyReleaseDocsPrepResult(
   // The Ship release item must read the prep commit: ask for fresh facts of every repo that got one.
   if (committed && projectId)
     for (const id of repoIds)
-      await requestReleaseFacts(ctx, id, 'manual', { ...(userId ? { userId } : {}) }).catch(() => undefined);
+      await requestReleaseFacts(ctx, id, 'prep', { ...(userId ? { userId } : {}) }).catch(() => undefined);
 }
 
 // ------------------------------------------------------------------------------------------------------------- gate
@@ -1145,6 +1258,7 @@ async function runDto(db: Queryable, run: Row): Promise<ReleaseDocsPrepRunDto> {
       : null,
     skippedBy: run.skipped_by ?? null,
     skippedAt: iso(run.skipped_at),
+    skipReason: run.skip_reason ?? null,
     steps: run.steps,
     repos: repos.map((r) => {
       const sum = r.summary ? ReleaseDocsPrepSummarySchema.safeParse(r.summary) : null;

@@ -4,6 +4,7 @@ import {
   type BlogContent,
   buildDescription,
   buildHashtags,
+  cleanWorkerVersion,
   DEFAULT_VIDEO_SETTINGS,
   type EditVideoPostRequest,
   fitCaption,
@@ -54,7 +55,9 @@ import {
   type VideoTopicList,
   type VideoUpload,
   videoScriptIssues,
+  workerOutdated,
 } from '@aom/shared';
+import { appVersion } from '../app-version.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { hashtagPools } from '../blog/hashtag-pools.ts';
 import { loadReleases } from '../blog/releases.ts';
@@ -63,6 +66,7 @@ import { exec, iso, one, type Row, rows } from '../db/sql.ts';
 import { withTx } from '../db/tx.ts';
 import { badRequest, conflict, HttpError, notFound } from '../errors.ts';
 import { YOUTUBE_AUDIT_FORM_URL } from '../mail/blog-mail.ts';
+import { isoOrNull, readFileRejection, rejectionReasons, sameArtifact } from '../video/file-rejection.ts';
 import { LIBRARY_MARKER, type LibraryEntry, libraryCatalog, libraryFile } from '../video/library.ts';
 import { watchUrl } from '../video/youtube.ts';
 import type { Origin } from './blog.ts';
@@ -190,22 +194,55 @@ export async function videoActive(ctx: Ctx): Promise<boolean> {
 
 // ---- worker heartbeat
 
+const SERVER_VERSION_KEY = 'server_version';
+
+/**
+ * The app records its application version at boot (start.ts only: the video worker also calls createApp), so workers
+ * on other machines compare against the server's version and not their own. Written even when null, so a build without
+ * a changelog does not leave an older record behind.
+ */
+export async function publishServerVersion(ctx: Ctx, version: string | null = appVersion()): Promise<void> {
+  await putSetting(ctx, null, SERVER_VERSION_KEY, { version, at: ctx.clock.now().toISOString() });
+}
+
+/** The server's application version: the recorded one; before any server recorded one, this build's own. */
+export async function serverVersion(ctx: Ctx): Promise<string | null> {
+  const r = await one(ctx.pool, 'SELECT value FROM platform_settings WHERE key=$1', [SERVER_VERSION_KEY]);
+  if (!r) return appVersion();
+  return cleanWorkerVersion((r.value as { version?: unknown } | null)?.version);
+}
+
+/**
+ * Every heartbeat carries the worker's application version. The keep-alive beats replace the whole value, so the
+ * version defaults to this build's own: a beat that left it out would flip a current worker to "outdated".
+ */
 export async function beatHeartbeat(
   ctx: Ctx,
   role: VideoWorkerRole,
-  info: Record<string, unknown> = {},
+  info: { busy?: string; version?: string | null } = {},
 ): Promise<void> {
-  await putSetting(ctx, null, heartbeatKey(role), { at: ctx.clock.now().toISOString(), ...info });
+  const version = 'version' in info ? (info.version ?? null) : appVersion();
+  await putSetting(ctx, null, heartbeatKey(role), { at: ctx.clock.now().toISOString(), ...info, version });
 }
+
+/**
+ * A role's last heartbeat. `outdated`: the worker beat (lastSeen set) with a version older than the server's, or with
+ * none (a build from before version reporting). A role that never beat is offline, not outdated. `server`: the
+ * reference version when the caller already read it.
+ */
 export async function workerHeartbeat(
   ctx: Ctx,
   role: VideoWorkerRole,
-): Promise<{ running: boolean; lastSeen: string | null }> {
+  server?: string | null,
+): Promise<{ running: boolean; lastSeen: string | null; version: string | null; outdated: boolean }> {
   const r = await one(ctx.pool, 'SELECT value FROM platform_settings WHERE key=$1', [heartbeatKey(role)]);
-  const at = (r?.value as { at?: string } | undefined)?.at ?? null;
+  const value = (r?.value ?? undefined) as { at?: string; version?: unknown } | undefined;
+  const at = value?.at ?? null;
   const running =
     !!at && ctx.clock.now().getTime() - Date.parse(at) <= VIDEO_POST_LIMITS.heartbeatStaleSeconds * 1000;
-  return { running, lastSeen: at };
+  const version = cleanWorkerVersion(value?.version);
+  const ref = server === undefined ? await serverVersion(ctx) : server;
+  return { running, lastSeen: at, version, outdated: !!at && workerOutdated(version, ref) };
 }
 
 // ---- slots
@@ -398,6 +435,11 @@ async function toDtos(ctx: Ctx, ps: Row[]): Promise<VideoPost[]> {
         url: s.url ?? null,
         error: s.error ?? null,
         rerender: rerenderOf((s.detail ?? {}) as Record<string, any>),
+        // an Instagram file the network refused: only while the share is failed, so a retry after a re-render clears it
+        ...(() => {
+          const rej = s.status === 'failed' ? readFileRejection(s.detail) : undefined;
+          return { fileRejection: rej?.kind ?? null, reelsCheck: rej?.check ?? null };
+        })(),
       }));
     const cp = crossPosts.find((c) => c.ref === p.id);
     const crossPost: VideoCrossPost | null = cp
@@ -541,12 +583,13 @@ export async function offScheduleCount(ctx: Ctx): Promise<number> {
 }
 
 export async function videoStatus(ctx: Ctx): Promise<VideoStatus> {
+  const server = await serverVersion(ctx);
   const [settings, channel, renderBeat, publishBeat, capacity, long, short, pending, locked, used, off] =
     await Promise.all([
       videoSettings(ctx),
       youtubeChannel(ctx),
-      workerHeartbeat(ctx, 'render'),
-      workerHeartbeat(ctx, 'publish'),
+      workerHeartbeat(ctx, 'render', server),
+      workerHeartbeat(ctx, 'publish', server),
       videoCapacity(ctx),
       nextFreeSlotOf(ctx, 'long'),
       nextFreeSlotOf(ctx, 'short'),
@@ -574,6 +617,7 @@ export async function videoStatus(ctx: Ctx): Promise<VideoStatus> {
     },
     render: renderBeat,
     publish: publishBeat,
+    serverVersion: server,
     capacity,
     nextSlot: { long: long?.toISOString() ?? null, short: short?.toISOString() ?? null },
     storage: { usedBytes: used, maxBytes: ctx.config.videoMaxBytes },
@@ -1386,7 +1430,7 @@ export async function retryShare(
   if (!p) throw notFound('video post not found', 'video_post_not_found');
   const share = await one(
     ctx.pool,
-    `SELECT s.detail, s.status, r.id AS render_id, r.artifacts, r.library FROM social_shares s
+    `SELECT s.detail, s.status, r.id AS render_id, r.artifacts, r.library, r.finished_at, r.bytes FROM social_shares s
        JOIN video_posts p ON p.id = s.post_id
        LEFT JOIN video_renders r ON r.post_id = p.id AND r.revision = p.revision
       WHERE s.post_id=$1 AND s.network=$2 AND s.source='video'`,
@@ -1400,6 +1444,23 @@ export async function retryShare(
     throw conflict('not_failed', 'only a failed destination can be tried again');
   const uploaded = !!(share.detail as { videoId?: string } | null)?.videoId;
   const art = (share.artifacts ?? {}) as Record<string, unknown>;
+  const rej = network === 'instagram' ? readFileRejection(share.detail) : undefined;
+  if (
+    rej &&
+    art.video &&
+    sameArtifact(rej.artifact, {
+      renderId: share.render_id,
+      finishedAt: isoOrNull(share.finished_at),
+      bytes: Number(share.bytes ?? -1),
+    })
+  )
+    throw conflict(
+      'needs_rerender',
+      `Instagram refused this video file${rej.rejections >= 2 ? ' twice' : ''}: it needs a new render (${rejectionReasons(rej)}). Use Render again and retry.`.slice(
+        0,
+        480,
+      ),
+    );
   if (!uploaded && !art.video) {
     if (!share.render_id || share.library)
       throw conflict('video_purged', 'the video file is gone and cannot be made again');
@@ -1502,7 +1563,7 @@ export function renderAgainAndRetry(
             streamId: videoPostStream(postId),
             event: {
               type: 'VideoRetryRequested',
-              payload: { postId, what: 'render-again', by, network: dest, revision },
+              payload: { postId, what: 'rerender', by, network: dest, revision },
             },
             actor: userActor(by),
             scope: adminScope,

@@ -13,7 +13,11 @@ import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { reconcileReleaseProposal } from './reconcile.ts';
 import { loadComponentRules } from './rules.ts';
 
-export type FactsTrigger = 'release_pr' | 'sync' | 'manual';
+/**
+ * Why the facts are read. `release` (after a publish) and `prep` (after a release prep run) are not throttled and
+ * reconcile like `ahead`, so a proposal that was closed for the same last tag is not raised again.
+ */
+export type FactsTrigger = 'release_pr' | 'sync' | 'manual' | 'release' | 'prep';
 
 /**
  * The release branch of a repository: its own working branch, else the project's. A repository whose main branch is that
@@ -45,7 +49,7 @@ export async function requestReleaseFacts(
   ctx: Ctx,
   repoId: string,
   trigger: FactsTrigger,
-  opts: { workstationId?: string; userId?: string } = {},
+  opts: { workstationId?: string; userId?: string; unlessRecent?: boolean } = {},
 ): Promise<RequestFactsOutcome> {
   const now = ctx.clock.now();
   const repo = await one(
@@ -63,12 +67,21 @@ export async function requestReleaseFacts(
 
   const prior = await one(
     ctx.pool,
-    'SELECT state, requested_at, updated_at FROM repo_release_facts WHERE project_repo_id=$1',
+    'SELECT state, message, requested_at, updated_at FROM repo_release_facts WHERE project_repo_id=$1',
     [repoId],
   );
   if (prior?.state === 'pending' && now.getTime() - new Date(prior.requested_at).getTime() < PENDING_MS)
     return { queued: false, reason: 'throttled' };
   if (trigger === 'sync' && prior && now.getTime() - new Date(prior.updated_at).getTime() < SYNC_MS)
+    return { queued: false, reason: 'throttled' };
+  // A repeating caller does not ask again within the pending window while a read is still in flight (a new request
+  // would drop its answer) or the last read failed (it would fetch every pass). An answered read asks again at once.
+  if (
+    opts.unlessRecent &&
+    prior?.requested_at &&
+    now.getTime() - new Date(prior.requested_at).getTime() < PENDING_MS &&
+    (new Date(prior.requested_at).getTime() > new Date(prior.updated_at).getTime() || prior.message)
+  )
     return { queued: false, reason: 'throttled' };
 
   const capable = (await one(
@@ -183,8 +196,24 @@ export async function applyReleaseFactsResult(
       WHERE project_repo_id=$1 AND request_id=$2`,
     [repoId, requestId, facts.headSha, JSON.stringify(facts), now],
   );
+  // `release` and `prep` reconcile like `ahead`: a proposal closed for the same last tag is not raised again
   const trigger = row.trigger === 'release_pr' ? 'release_pr' : row.trigger === 'manual' ? 'manual' : 'ahead';
   await reconcileReleaseProposal(ctx, repoId, trigger);
+}
+
+/** The published releases of a repository (newest first): tag and release commit. */
+export async function publishedShips(
+  db: Queryable,
+  repoId: string,
+): Promise<Array<{ tag: string; commitSha: string }>> {
+  const found = await rows(
+    db,
+    `SELECT COALESCE(tag_name, tag) AS tag, commit_sha FROM release_ships
+      WHERE repo_id=$1 AND status='published' AND commit_sha IS NOT NULL
+      ORDER BY published_at DESC NULLS LAST LIMIT 20`,
+    [repoId],
+  );
+  return found.map((x) => ({ tag: String(x.tag), commitSha: String(x.commit_sha) }));
 }
 
 /** The stored facts of a repository, or null while nothing was read. */

@@ -2,6 +2,7 @@ import { createApp } from './app.ts';
 import { registerBuiltins } from './catalogue/boot.ts';
 import { ensureBusinessWorkflowsAtBoot } from './catalogue/business-workflows.ts';
 import { createClock } from './clock.ts';
+import { publishServerVersion } from './commands/video-posts.ts';
 import { loadConfig } from './config.ts';
 import { runDataMigrations } from './data-migrations/index.ts';
 import { migrate } from './db/migrate.ts';
@@ -50,6 +51,9 @@ export async function startServer(extensions: ServerExtension[] = []): Promise<v
   }
 
   const app = await createApp(config, { background: true, extensions });
+  // Video workers on other machines compare their version with this one (here and not in createApp: the video worker
+  // also calls createApp and must not overwrite the server's version with its own).
+  await publishServerVersion(app.ctx);
   const reg = await registerBuiltins(
     app.ctx,
     config.noLeanTeam ? (d) => !(d.key === 'code' && d.version >= 6) : undefined,

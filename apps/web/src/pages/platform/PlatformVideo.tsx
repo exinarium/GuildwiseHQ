@@ -37,7 +37,7 @@ import {
 } from '../../components/ui.tsx';
 import { QueueCalendar } from '../../components/video/QueueCalendar.tsx';
 import { ScheduleSettings } from '../../components/video/ScheduleSettings.tsx';
-import { StatusStrip, workerStates } from '../../components/video/StatusStrip.tsx';
+import { outdatedText, StatusStrip, workerStates } from '../../components/video/StatusStrip.tsx';
 import { VideoReview } from '../../components/video/VideoReview.tsx';
 import { ext } from '../../extension/index.ts';
 import { formatDateTime } from '../../lib/time.ts';
@@ -53,7 +53,14 @@ const TONE = { draft: 'neutral', in_review: 'warning', approved: 'success', reje
 
 /** Problems that stop the push, always visible above the tabs. */
 function Problems({ status }: { status: VideoStatus }) {
-  const down = workerStates(status).filter((w) => !w.running);
+  const workers = workerStates(status);
+  const down = workers.filter((w) => !w.running);
+  // an offline worker keeps its offline line and is not listed as outdated too
+  const outdated = workers.filter((w) => w.running && w.outdated);
+  const outdatedEffect = (label: string) =>
+    label === 'Publish worker'
+      ? 'It runs older upload and posting code than the server.'
+      : 'It renders nothing and the server refuses its files, so scheduled videos wait and may slip.';
   const effect = (label: string) =>
     label === 'Render worker'
       ? 'Scheduled videos are not rendered, so they slip to a later slot.'
@@ -72,6 +79,22 @@ function Problems({ status }: { status: VideoStatus }) {
             </span>
           ))}
           Start the worker (the Docker Compose profile <code>video</code>; see the deploy guide).
+        </Callout>
+      )}
+      {outdated.length > 0 && (
+        <Callout
+          tone="danger"
+          title="Video worker out of date"
+          role="alert"
+          data-testid="video-worker-outdated"
+        >
+          {outdated.map((w) => (
+            <span key={w.label} className="block">
+              {outdatedText(w)} {outdatedEffect(w.label)}
+            </span>
+          ))}
+          Update the worker image to {outdated[0]?.serverVersion ?? 'the server version'} or newer and restart
+          it; rendering resumes by itself on its next heartbeat.
         </Callout>
       )}
       {!status.channel.connected && (

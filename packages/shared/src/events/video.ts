@@ -73,16 +73,28 @@ export const videoEvents = [
   defineEvent('VideoPostRejected', z.object({ postId: Id, reason: z.string().min(1).max(2000), by: Id })),
   /** YouTube kept the uploaded video private although another privacy was requested (the audit is missing). */
   defineEvent('VideoUploadLockedPrivate', z.object({ postId: Id, videoId: z.string().max(40) })),
+  /** An Instagram rejection (ProcessingFailedError) or a check before posting a re-rendered file: the file was checked against the Reels rules. */
+  defineEvent(
+    'VideoFileChecked',
+    z.object({
+      postId: Id,
+      network: z.literal('instagram'),
+      renderId: Id,
+      passed: z.boolean(),
+      failed: z.array(z.object({ rule: z.string().max(40), message: z.string().max(300) })).max(20),
+      outcome: z.enum(['needs_rerender', 'one_more_attempt', 'check_failed', 'preflight_ok']),
+    }),
+  ),
   /** The owner asked for a render or an upload to be tried again, or said a locked upload was dealt with. */
   defineEvent(
     'VideoRetryRequested',
     z.object({
       postId: Id,
-      what: z.enum(['render', 'upload', 'resolve-locked', 'render-again']),
+      what: z.enum(['render', 'upload', 'resolve-locked', 'rerender']),
       by: Id,
-      /** render-again: the destination that is retried once the new render is done. */
+      /** rerender: the destination that is retried once the new render is done. */
       network: z.enum(VIDEO_DESTINATIONS).optional(),
-      /** render-again: the new revision of the approved post (its render is the new file). */
+      /** rerender: the new revision of the approved post (its render is the new file). Events without it are older and change nothing. */
       revision: z.number().int().min(2).optional(),
     }),
   ),

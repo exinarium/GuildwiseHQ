@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { posix } from 'node:path';
 import { FILES_TOKEN, type IntegrationSuite } from '@aom/shared';
 
@@ -89,4 +90,45 @@ export function failingTestFiles(output: string): string[] {
     if (!out.includes(f)) out.push(f);
   }
   return out;
+}
+
+export interface UnitCounts {
+  tests?: { failed: number; passed: number; total: number };
+  files?: { failed: number; passed: number; total: number };
+}
+
+const countsOf = (line: string): { failed: number; passed: number; total: number } | undefined => {
+  const failed = Number(/(\d+)\s+failed/.exec(line)?.[1] ?? 0);
+  const passed = Number(/(\d+)\s+passed/.exec(line)?.[1] ?? 0);
+  const total = Number(/\((\d+)\)\s*$/.exec(line)?.[1] ?? /(\d+)\s+total/.exec(line)?.[1] ?? Number.NaN);
+  if (!/\d+\s+(failed|passed)/.test(line)) return undefined;
+  return { failed, passed, total: Number.isNaN(total) ? failed + passed : total };
+};
+
+/**
+ * The real pass/fail counts a unit run printed: vitest (`Tests  1 failed | 11 passed (12)`, `Test Files  ...`) or jest
+ * (`Tests:       1 failed, 11 passed, 12 total`, `Test Suites: ...`). The last summary wins. Empty when nothing matched.
+ */
+export function unitCounts(output: string): UnitCounts {
+  const out: UnitCounts = {};
+  for (const raw of output.split(/\r?\n/)) {
+    const line = raw.trim();
+    const m = /^(Test Files|Test Suites:|Tests:?)\s+(.*)$/.exec(line);
+    if (!m) continue;
+    const c = countsOf(m[2] as string);
+    if (!c) continue;
+    if (m[1] === 'Test Files' || m[1] === 'Test Suites:') out.files = c;
+    else out.tests = c;
+  }
+  return out;
+}
+
+/**
+ * `AOM_TEST_RUN_ID` of one handoff unit run (GWP-248): `c` + 8 of the shift id + 8 of the head + 4 random hex, lowercase
+ * `[a-z0-9]` (21 characters), so a suite's per-run database name (`aom_test_<id>`) stays short and never collides with
+ * another shift's run, another run of the same shift, or the regression run (which has none).
+ */
+export function checkRunId(shiftId: string, sha: string): string {
+  const clean = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return `c${clean(shiftId).slice(0, 8)}${clean(sha).slice(0, 8)}${randomBytes(2).toString('hex')}`;
 }

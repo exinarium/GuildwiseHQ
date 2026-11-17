@@ -43,6 +43,9 @@ async function runLoop(intervalSeconds: number): Promise<void> {
  * `--loop` is the container's command (AOM_VIDEO_ROLE=render|publish|all picks which half runs; see video/sweep.ts): every few seconds a heartbeat, and (only when a YouTube channel is connected and
  * `videoPosts.enabled`) claim one queued render, upload one approved video a day, clean up old files (video/sweep.ts).
  * It shares the database, config and AOM_SECRET_KEY with the app and writes to AOM_VIDEO_DIR.
+ * Every heartbeat and every artifact push carries the worker's application version (the newest release in its bundled
+ * CHANGELOG). A worker older than the server (the version the app records at boot) claims no render, logs why, and keeps
+ * beating so the status shows it as outdated; it renders again by itself once it is updated.
  */
 async function main(): Promise<void> {
   const { values } = parseArgs({

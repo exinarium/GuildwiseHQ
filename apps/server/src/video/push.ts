@@ -4,10 +4,17 @@ import { mkdir, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import {
+  cleanWorkerVersion,
+  WORKER_OUTDATED_CODE,
+  WORKER_VERSION_HEADER,
+  workerOutdated,
+  workerOutdatedMessage,
+} from '@aom/shared';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { artifactKeyOf, renderDir } from '../commands/video-posts.ts';
+import { artifactKeyOf, renderDir, serverVersion } from '../commands/video-posts.ts';
 import type { Ctx } from '../context.ts';
-import { one } from '../db/sql.ts';
+import { exec, one } from '../db/sql.ts';
 import { badRequest, HttpError, notFound } from '../errors.ts';
 import { fastifyTrustProxy } from '../trust-proxy.ts';
 
@@ -18,6 +25,10 @@ import { fastifyTrustProxy } from '../trust-proxy.ts';
  *
  *   PUT /api/worker/video/renders/:renderId/files/:name
  *     Authorization: Bearer <AOM_VIDEO_WORKER_TOKEN>   x-content-sha256: <hex>   content-length: <bytes>
+ *     x-worker-version: <the worker's application version>
+ *
+ * A worker older than the server (or one that sends no version) gets 409 worker_outdated naming both versions, and the
+ * render goes back to the queue without counting the attempt.
  *
  * The name is one of the fixed artifact names. The body is streamed to a temp file next to the target, its size and
  * sha256 verified, then renamed into place, so a reader never sees a half-written file. Two pushes of the same name at once
@@ -26,6 +37,8 @@ import { fastifyTrustProxy } from '../trust-proxy.ts';
  */
 
 const NON_VIDEO_MAX_BYTES = 32 * 1024 * 1024;
+/** How long a render refused because its worker is outdated waits before an outdated worker may claim it again. */
+const OUTDATED_WAIT_MS = 10 * 60_000;
 
 const digest = (s: string) => createHash('sha256').update(s).digest();
 /** Constant-time token comparison (both sides hashed first so the lengths match). */
@@ -54,6 +67,23 @@ export function videoPushRoutes(ctx: Ctx) {
         const { renderId, name } = req.params;
         if (!artifactKeyOf(name)) throw notFound('unknown artifact name');
         if (!/^[0-9a-f-]{36}$/i.test(renderId)) throw notFound('render not found');
+        // a worker older than the server (or one that sends no version) delivers nothing; checked after the token, so
+        // an unauthenticated caller never sees the versions
+        const worker = cleanWorkerVersion(req.headers[WORKER_VERSION_HEADER]);
+        const server = await serverVersion(ctx);
+        if (workerOutdated(worker, server)) {
+          const message = workerOutdatedMessage(worker, server as string);
+          // the render goes back to the queue: the attempt does not count, and the wait keeps an old worker from
+          // re-rendering in a tight loop (a current worker clears it when it claims)
+          await exec(
+            ctx.pool,
+            `UPDATE video_renders SET status='queued', attempts=GREATEST(attempts-1,0), error=$2, lease_until=$3
+              WHERE id=$1 AND status='rendering' AND NOT library`,
+            [renderId, message, new Date(ctx.clock.now().getTime() + OUTDATED_WAIT_MS)],
+          );
+          ctx.log.warn({ renderId, worker, server }, message);
+          throw new HttpError(409, WORKER_OUTDATED_CODE, message);
+        }
         const sha = String(req.headers['x-content-sha256'] ?? '').toLowerCase();
         if (!/^[0-9a-f]{64}$/.test(sha))
           throw badRequest('bad_hash', 'x-content-sha256 must be 64 hex characters');

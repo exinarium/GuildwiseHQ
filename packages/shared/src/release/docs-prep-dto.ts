@@ -107,6 +107,8 @@ export const ReleaseDocsPrepRunDtoSchema = z.object({
     .nullable(),
   skippedBy: z.string().nullable(),
   skippedAt: z.string().nullable(),
+  /** Why the system closed the run (its release shipped while it was running); null for a manager's skip. */
+  skipReason: z.string().nullable().optional(),
   steps: z.array(z.string()),
   repos: z.array(
     z.object({

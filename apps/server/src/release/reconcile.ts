@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { type ReleaseFacts, streamId } from '@aom/shared';
+import { type ReleaseFacts, releaseChanges, streamId } from '@aom/shared';
 import { projectScope, SYSTEM_ACTOR } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
-import { buildProposal } from './proposal.ts';
+import { publishedShips } from './facts.ts';
+import { buildProposal, newestTagOf } from './proposal.ts';
 import { loadComponentRules } from './rules.ts';
 
 type Trigger = 'release_pr' | 'ahead' | 'manual';
@@ -14,7 +15,8 @@ type Trigger = 'release_pr' | 'ahead' | 'manual';
  * lock serialises two results, and the partial unique index `release_proposals_one_live` is the final guard).
  * 1. An approved proposal whose version is at or below the newest tag is released: closed.
  * 2. An open proposal with nothing ahead of main is closed and its desk item dismissed.
- * 3. No live proposal, something ahead and not suppressed: a desk item and `ReleaseProposed`.
+ * 3. No live proposal, something ahead that is not release machinery (the release commit, the release prep docs
+ *    commit) and not suppressed: a desk item and `ReleaseProposed`.
  * 4. An open proposal while the facts moved: nothing is appended; the desk item reads the facts live.
  */
 export async function reconcileReleaseProposal(ctx: Ctx, repoId: string, trigger: Trigger): Promise<void> {
@@ -97,6 +99,9 @@ export async function reconcileReleaseProposal(ctx: Ctx, repoId: string, trigger
       return;
     }
     if (facts.ahead === 0) return;
+    // Only release machinery since the last release (or facts that still list a published release): nothing to ship.
+    const changes = releaseChanges(facts, await publishedShips(tx, repoId));
+    if (changes.behindRelease || changes.real === 0) return;
     if (trigger === 'ahead') {
       const last = await one(
         tx,
@@ -104,7 +109,7 @@ export async function reconcileReleaseProposal(ctx: Ctx, repoId: string, trigger
           ORDER BY updated_at DESC LIMIT 1`,
         [repoId],
       );
-      const lastTag = facts.lastTag?.name ?? null;
+      const lastTag = newestTagOf(facts);
       if (last && last.closed_reason !== 'nothing_to_release' && (last.last_tag ?? null) === lastTag) return;
     }
     const built = buildProposal(facts, await loadComponentRules(tx, repoId));
@@ -148,7 +153,7 @@ export async function reconcileReleaseProposal(ctx: Ctx, repoId: string, trigger
               recommendedVersion: built.recommended.version,
               level: built.recommended.level,
               reason: built.recommended.reason,
-              lastTag: facts.lastTag?.name ?? null,
+              lastTag: newestTagOf(facts),
               headSha: facts.headSha,
             },
           },

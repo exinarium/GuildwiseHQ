@@ -272,3 +272,51 @@ export interface TestServicesSeen {
   at: string;
   decisions: TestServiceDecision[];
 }
+
+/**
+ * How a builder's handoff unit runs reach the declared test services (GWP-248): the runner bridges each allowed one into
+ * the check's own network namespace on the same loopback port (`runs/forward.ts startServiceForwards`, `CHECK_BRIDGE_SCRIPT`).
+ */
+export const CHECK_SERVICE_NOTE = `Handoff unit test runs reach the test services declared in ${TEST_SERVICES_SETTING} on the same loopback port, and no other port.`;
+
+export interface CheckServiceInput {
+  services: LocalTestService[] | undefined;
+  kind: string;
+  roleKey: string;
+  isDevops: boolean;
+  platform: NodeJS.Platform;
+  /** Ports the runner itself owns: its local HTTP port and every port of a run environment. Never bridged. */
+  runnerPorts: ReadonlySet<number>;
+}
+
+/**
+ * Which declared services a builder's handoff unit runs get, and why not for the rest (GWP-248). Unlike
+ * `decideTestServices` there is no Claude Code or runtime gate: the runner opens this route itself, outside the agent's
+ * sandbox. Empty for every shift but a builder's card shift (the only one whose handoff runs unit tests).
+ */
+export function decideCheckServices(i: CheckServiceInput): TestServiceDecision[] {
+  const services = i.services ?? [];
+  if (services.length === 0) return [];
+  if (i.kind !== 'card' || i.isDevops || i.roleKey !== 'builder') return [];
+  const refuse = (s: LocalTestService, reason: string): TestServiceDecision => ({
+    ...s,
+    state: 'refused',
+    reason,
+  });
+  return services.map((s): TestServiceDecision => {
+    if (!(TEST_SERVICE_HOSTS as readonly string[]).includes(s.host))
+      return refuse(s, 'only 127.0.0.1, ::1 and localhost can be opened');
+    if (!Number.isInteger(s.port) || s.port < 1 || s.port > 65535)
+      return refuse(s, `port ${s.port} is not valid`);
+    if (i.platform !== 'linux') return refuse(s, 'no network namespace for the checks on this platform');
+    if (i.runnerPorts.has(s.port))
+      return refuse(s, `port ${s.port} belongs to the runner (its local HTTP port or a run environment)`);
+    if (RESERVED_RUN_PORTS.includes(s.port)) return refuse(s, `port ${s.port} is used by the sandbox proxy`);
+    return { ...s, state: 'allowed' };
+  });
+}
+
+/** The allowed services of a decision list, without the decision fields. */
+export function allowedServices(d: TestServiceDecision[]): LocalTestService[] {
+  return d.filter((x) => x.state === 'allowed').map((x) => ({ name: x.name, host: x.host, port: x.port }));
+}

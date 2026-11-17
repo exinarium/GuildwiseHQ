@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { basename } from 'node:path';
+import { WORKER_VERSION_HEADER } from '@aom/shared';
 
 /**
  * The render worker's side of the artifact push (video/push.ts): PUT each finished file to
@@ -19,6 +20,8 @@ export interface PushDeps {
 export interface PushTarget {
   baseUrl: string;
   token: string;
+  /** The worker's application version, sent with each file; the server refuses files from a worker older than itself. */
+  version?: string | null;
 }
 
 export async function sha256File(path: string): Promise<string> {
@@ -53,6 +56,7 @@ export async function pushFile(
           'x-content-sha256': sha,
           'content-length': String(size),
           'content-type': 'application/octet-stream',
+          ...(target.version ? { [WORKER_VERSION_HEADER]: target.version } : {}),
         },
         body: createReadStream(path),
         duplex: 'half', // a streamed request body

@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { HASHTAG_POOLS, type VideoScript } from '@aom/shared';
+import { HASHTAG_POOLS, type ReelsCheck, type VideoScript } from '@aom/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { encryptSecret, signingKey } from '../src/auth/secrets.ts';
 import { slipVideoPost } from '../src/commands/video-posts.ts';
@@ -24,7 +24,7 @@ import { CaptureMailer } from './helpers/blog.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { ok } from './helpers/world.ts';
 
-type Step = 'ok' | 'auth' | 'retry' | 'final' | 'processing' | 'igfail';
+type Step = 'ok' | 'auth' | 'retry' | 'final' | 'processing' | 'igtransient' | 'igfile';
 
 /** Every destination at once, scripted per network. Nothing here reaches a real network. */
 class FakeDestinations implements VideoDestinationClient {
@@ -51,7 +51,13 @@ class FakeDestinations implements VideoDestinationClient {
     if (step === 'auth') throw new DestinationError('auth', 'HTTP 401: token expired');
     if (step === 'retry') throw new DestinationError('retry', 'HTTP 503: try later');
     if (step === 'final') throw new DestinationError('final', 'HTTP 400: the video is not acceptable');
-    if (step === 'igfail')
+    if (step === 'igfile')
+      throw new DestinationError(
+        'file',
+        'Instagram upload: HTTP 400: ProcessingFailedError',
+        'ig_processing_failed',
+      );
+    if (step === 'igtransient')
       throw new DestinationError(
         'retry',
         'Instagram upload: HTTP 400: ProcessingFailedError',
@@ -143,7 +149,26 @@ const dest = new FakeDestinations();
 const mail = new CaptureMailer();
 const api = (method: string, url: string, body?: unknown, cookie = sa.cookie) =>
   t.req(method, url, { cookie, ...(body !== undefined ? { body } : {}) });
-const tick = () => videoTick(t.app.ctx, { render: fakeRender });
+const failedCheck = (): ReelsCheck => ({
+  passed: false,
+  checkedAt: new Date().toISOString(),
+  failed: [
+    { rule: 'edit_list', message: 'edit list present (vide, soun)', measured: 'vide, soun', limit: 'none' },
+    { rule: 'frame_rate', message: 'frame rate 120 > 60', measured: '120', limit: '23-60' },
+  ],
+  warnings: [],
+  measured: { fps: 120 },
+});
+const passedCheck = (): ReelsCheck => ({ ...failedCheck(), passed: true, failed: [] });
+const reels = { calls: 0, next: failedCheck as () => ReelsCheck };
+const tick = () =>
+  videoTick(t.app.ctx, {
+    render: fakeRender,
+    reelsCheck: async () => {
+      reels.calls++;
+      return reels.next();
+    },
+  });
 const post = (id: string) => ok(api('GET', `/api/platform/video/posts/${id}`));
 const submit = (ref: string, extra: Record<string, unknown> = {}) =>
   ok(
@@ -200,6 +225,8 @@ const clean = async () => {
   t.clock.setOffset(0);
   mail.sent = [];
   dest.reset();
+  reels.calls = 0;
+  reels.next = failedCheck;
   await shortSettings({ tiktokAudited: false });
 };
 
@@ -516,8 +543,8 @@ describe('errors', () => {
     expect(s2.id).toBe(q2.id);
   });
 
-  it('an Instagram processing failure is retried with back-off, then posted', async () => {
-    dest.script.instagram = ['igfail', 'igfail'];
+  it('a transient Instagram failure before the file is sent is retried with back-off, then posted', async () => {
+    dest.script.instagram = ['igtransient', 'igtransient'];
     const { p } = await setup('ig-retry-ok', ['instagram']);
     await tick();
     const r1 = await share(p.id, 'instagram');
@@ -536,8 +563,8 @@ describe('errors', () => {
     expect(dest.payloads.filter((x) => x.network === 'instagram')).toHaveLength(3);
   });
 
-  it('an Instagram processing failure gives up after its number of attempts, with an alert', async () => {
-    dest.script.instagram = Array(10).fill('igfail');
+  it('a transient Instagram failure gives up after its number of attempts, with an alert', async () => {
+    dest.script.instagram = Array(10).fill('igtransient');
     const { p } = await setup('ig-retry-exhausted', ['instagram']);
     await tick();
     for (let i = 0; i < 10 && (await share(p.id, 'instagram'))?.status !== 'failed'; i++) {
@@ -551,6 +578,197 @@ describe('errors', () => {
     );
     expect(dest.payloads.filter((x) => x.network === 'instagram')).toHaveLength(IG_PROCESSING_ATTEMPTS);
     expect(mail.sent.filter((m) => /Posting videos to Instagram/.test(m.subject))).toHaveLength(1);
+  });
+
+  const igPosts = () => dest.payloads.filter((x) => x.network === 'instagram').length;
+  const igDetail = async (id: string) => (await share(id, 'instagram'))?.detail?.fileRejection;
+  const checkedEvents = async (id: string) =>
+    q(`SELECT payload FROM events WHERE stream_id=$1 AND type='VideoFileChecked' ORDER BY seq`, [
+      `video-${id}`,
+    ]);
+
+  it('Instagram refusing the file (ProcessingFailedError) is not retried: it is checked once and needs a re-render', async () => {
+    dest.script.instagram = Array(10).fill('igfile');
+    dest.script.bluesky = ['retry', 'ok'];
+    const { p } = await setup('ig-file', ['instagram', 'bluesky']);
+    expect(igPosts()).toBe(1);
+    const f = await share(p.id, 'instagram');
+    expect(f?.status).toBe('failed');
+    expect(f?.error).toMatch(/needs a new render: edit list present \(vide, soun\); frame rate 120 > 60/);
+    expect(await igDetail(p.id)).toMatchObject({
+      kind: 'needs_rerender',
+      rejections: 1,
+      check: { passed: false },
+    });
+    expect(reels.calls).toBe(1);
+    expect(mail.sent.filter((m) => /Posting videos to Instagram/.test(m.subject))).toHaveLength(1);
+    // N later ticks: no further Instagram call and no further check
+    for (let i = 0; i < 10; i++) {
+      t.clock.advance(31 * 60_000);
+      await tick();
+    }
+    expect(igPosts()).toBe(1);
+    expect(reels.calls).toBe(1);
+    // even a share put back to pending some other way is not sent with the same file
+    await q(
+      `UPDATE social_shares SET status='pending', next_attempt_at=NULL WHERE post_id=$1 AND network='instagram'`,
+      [p.id],
+    );
+    await tick();
+    expect(igPosts()).toBe(1);
+    expect((await share(p.id, 'instagram'))?.status).toBe('failed');
+    t.clock.setOffset(0); // the session ends when the clock moves on
+    // the other destination of the post still retries and posts as before
+    expect((await share(p.id, 'bluesky'))?.status).toBe('sent');
+    expect(dest.payloads.filter((x) => x.network === 'bluesky')).toHaveLength(2);
+    // the result is in the post's event stream and on the DTO
+    const ev = await checkedEvents(p.id);
+    expect(ev).toHaveLength(1);
+    expect(ev[0]?.payload).toMatchObject({
+      network: 'instagram',
+      passed: false,
+      outcome: 'needs_rerender',
+      failed: [{ rule: 'edit_list' }, { rule: 'frame_rate', message: 'frame rate 120 > 60' }],
+    });
+    const dto = await post(p.id);
+    const ig = dto.shares.find((x: { network: string }) => x.network === 'instagram');
+    expect(ig).toMatchObject({ status: 'failed', fileRejection: 'needs_rerender' });
+    expect(ig.reelsCheck.failed.map((x: { message: string }) => x.message)).toEqual([
+      'edit list present (vide, soun)',
+      'frame rate 120 > 60',
+    ]);
+    const bs = dto.shares.find((x: { network: string }) => x.network === 'bluesky');
+    expect(bs).toMatchObject({ fileRejection: null, reelsCheck: null });
+  });
+
+  it('a manual retry of the same refused file is a 409; after a re-render the new file is checked and posted', async () => {
+    dest.script.instagram = ['igfile'];
+    const { p } = await setup('ig-rerender', ['instagram']);
+    expect((await share(p.id, 'instagram'))?.status).toBe('failed');
+    const retry = await api('POST', `/api/platform/video/posts/${p.id}/shares/instagram/retry`);
+    expect([retry.status, retry.body.error.code]).toEqual([409, 'needs_rerender']);
+    expect(retry.body.error.message).toMatch(/new render/);
+    expect(retry.body.error.message).toMatch(/Render again and retry/);
+    expect(igPosts()).toBe(1);
+    // one action: the share stays failed (marked) until the new file exists
+    const first = await api('POST', `/api/platform/video/posts/${p.id}/shares/instagram/rerender`);
+    expect(first.status).toBe(200);
+    const marked = await share(p.id, 'instagram');
+    expect(marked?.status).toBe('failed');
+    expect(marked?.detail?.rerender).toBeTruthy();
+    const again = await api('POST', `/api/platform/video/posts/${p.id}/shares/instagram/rerender`);
+    expect([again.status, again.body.error.code]).toEqual([409, 'render_in_progress']);
+    const audit = await q(`SELECT payload FROM events WHERE stream_id=$1 AND type='VideoRetryRequested'`, [
+      `video-${p.id}`,
+    ]);
+    expect(audit.map((x) => x.payload.what)).toEqual(['rerender']);
+    t.clock.advance(5_000);
+    reels.next = passedCheck;
+    await tick(); // renders again
+    await tick();
+    await tick();
+    expect((await share(p.id, 'instagram'))?.status).toBe('sent');
+    expect(igPosts()).toBe(2);
+    expect((await checkedEvents(p.id)).map((e) => e.payload.outcome)).toEqual([
+      'needs_rerender',
+      'preflight_ok',
+    ]);
+    // the new file is the second revision's
+    expect(dest.payloads.filter((x) => x.network === 'instagram').at(-1)?.filePath).toContain(`/${p.id}/2/`);
+  });
+
+  it('a re-rendered file that still fails the Reels check is not sent to Instagram', async () => {
+    dest.script.instagram = ['igfile'];
+    const { p } = await setup('ig-rerender-bad', ['instagram']);
+    await ok(api('POST', `/api/platform/video/posts/${p.id}/shares/instagram/rerender`));
+    t.clock.advance(5_000);
+    await tick();
+    await tick();
+    expect(igPosts()).toBe(1);
+    const f = await share(p.id, 'instagram');
+    expect(f?.status).toBe('failed');
+    expect(f?.error).toMatch(/new video file does not meet/);
+    expect(await igDetail(p.id)).toMatchObject({ kind: 'needs_rerender', rejections: 0 });
+    // and a retry of that new file is refused too
+    const retry = await api('POST', `/api/platform/video/posts/${p.id}/shares/instagram/retry`);
+    expect(retry.status).toBe(409);
+  });
+
+  it('a file that meets every rule gets one extra attempt, then fails for good with an alert; it never loops', async () => {
+    reels.next = passedCheck;
+    dest.script.instagram = Array(10).fill('igfile');
+    const { p } = await setup('ig-compliant', ['instagram']);
+    const first = await share(p.id, 'instagram');
+    expect(first?.status).toBe('pending');
+    expect(await igDetail(p.id)).toMatchObject({ kind: 'rejected_compliant', rejections: 1 });
+    expect(Date.parse(first?.next_attempt_at) - t.clock.now().getTime()).toBeLessThanOrEqual(5 * 60_000);
+    expect(mail.sent.filter((m) => /Posting videos to Instagram/.test(m.subject))).toHaveLength(0);
+    await tick(); // not due yet
+    expect(igPosts()).toBe(1);
+    for (let i = 0; i < 10; i++) {
+      t.clock.advance(6 * 60_000);
+      await tick();
+    }
+    expect(igPosts()).toBe(2); // the first attempt plus one extra
+    t.clock.setOffset(0);
+    const f = await share(p.id, 'instagram');
+    expect(f?.status).toBe('failed');
+    expect(f?.error).toMatch(/refused this file again although it meets the Reels rules/);
+    expect(await igDetail(p.id)).toMatchObject({ kind: 'rejected_compliant', rejections: 2 });
+    expect(mail.sent.filter((m) => /Posting videos to Instagram/.test(m.subject))).toHaveLength(1);
+    expect((await checkedEvents(p.id)).map((e) => e.payload.outcome)).toEqual(['one_more_attempt']);
+    const retry = await api('POST', `/api/platform/video/posts/${p.id}/shares/instagram/retry`);
+    expect([retry.status, retry.body.error.code]).toEqual([409, 'needs_rerender']);
+    expect(retry.body.error.message).toMatch(/twice/);
+  });
+
+  it('a check that cannot run fails the share without a retry', async () => {
+    dest.script.instagram = ['igfile', 'igfile'];
+    reels.next = () => {
+      throw new Error('no ffmpeg');
+    };
+    const { p } = await setup('ig-check-fails', ['instagram']);
+    const f = await share(p.id, 'instagram');
+    expect(f?.status).toBe('failed');
+    expect(f?.error).toMatch(/could not be checked.*no ffmpeg/);
+    expect(await igDetail(p.id)).toMatchObject({ kind: 'check_failed' });
+    t.clock.advance(31 * 60_000);
+    await tick();
+    expect(igPosts()).toBe(1);
+  });
+
+  it('a share whose file could not be checked can be re-rendered, and is posted again with the new file', async () => {
+    dest.script.instagram = ['igfile'];
+    reels.next = () => {
+      throw new Error('no ffmpeg');
+    };
+    const { p } = await setup('ig-check-rerender', ['instagram']);
+    expect(await igDetail(p.id)).toMatchObject({ kind: 'check_failed' });
+    const retry = await api('POST', `/api/platform/video/posts/${p.id}/shares/instagram/retry`);
+    expect([retry.status, retry.body.error.code]).toEqual([409, 'needs_rerender']);
+    await ok(api('POST', `/api/platform/video/posts/${p.id}/shares/instagram/rerender`));
+    expect((await share(p.id, 'instagram'))?.status).toBe('failed');
+    expect((await share(p.id, 'instagram'))?.detail?.rerender).toBeTruthy();
+    t.clock.advance(5_000);
+    reels.next = passedCheck;
+    await tick();
+    await tick();
+    await tick();
+    expect((await share(p.id, 'instagram'))?.status).toBe('sent');
+    expect(igPosts()).toBe(2);
+  });
+
+  it('retrying a failed Instagram share that was not a file rejection works as before', async () => {
+    dest.script.instagram = ['final'];
+    const { p } = await setup('ig-plain-retry', ['instagram']);
+    expect((await share(p.id, 'instagram'))?.status).toBe('failed');
+    const r = await api('POST', `/api/platform/video/posts/${p.id}/shares/instagram/retry`);
+    expect(r.status).toBe(200);
+    await tick();
+    expect((await share(p.id, 'instagram'))?.status).toBe('sent');
+    // YouTube's upload retry is not affected by the Instagram guard
+    const up = await api('POST', `/api/platform/video/posts/${p.id}/retry-upload`);
+    expect([up.status, up.body.error?.code]).toEqual([409, 'not_failed']);
   });
 
   it('an Instagram error that cannot succeed on retry stays final at once', async () => {

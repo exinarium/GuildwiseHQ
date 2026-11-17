@@ -16,7 +16,7 @@ import {
   type TikTokTokens,
   type VideoDestinationClient,
 } from '../src/video/destinations.ts';
-import { cleanupVideos, type RenderFn, videoTick, videoWatch } from '../src/video/sweep.ts';
+import { cleanupVideos, type RenderFn, resumeRerenders, videoTick, videoWatch } from '../src/video/sweep.ts';
 import type { YouTubeClient } from '../src/video/youtube.ts';
 import { createTestApp, type TestApp } from './helpers/app.ts';
 import { CaptureMailer } from './helpers/blog.ts';
@@ -391,7 +391,7 @@ describe('render again and retry', () => {
         `SELECT summary, details FROM platform_audit_log WHERE action='VideoRetryRequested' ORDER BY seq DESC`,
       )
     )[0];
-    expect(row?.details).toMatchObject({ what: 'render-again', network: 'instagram', revision: 2 });
+    expect(row?.details).toMatchObject({ what: 'rerender', network: 'instagram', revision: 2 });
     expect(row?.summary).toMatch(/rendered again.*instagram/);
     // a rebuild replays the event: the projector brings the revision back, and replaying it twice changes nothing
     // (the full rebuild is not run here: it refuses on tables of the hosted build that this database also has)
@@ -400,7 +400,7 @@ describe('render again and retry', () => {
       createdAt: new Date(),
       event: {
         type: 'VideoRetryRequested',
-        payload: { postId: p.id, what: 'render-again', by: sa.id, network: 'instagram', revision: 2 },
+        payload: { postId: p.id, what: 'rerender', by: sa.id, network: 'instagram', revision: 2 },
       },
     };
     for (let i = 0; i < 2; i++)
@@ -419,6 +419,55 @@ describe('render again and retry', () => {
         } as never) as Promise<void>,
     );
     expect((await q('SELECT revision FROM video_posts WHERE id=$1', [p.id]))[0]?.revision).toBe(2);
+  });
+
+  it('keeps the refusal record on the share when it resumes, so the new file is checked before it is sent', async () => {
+    const p = await refused('rr-keeps-rejection');
+    const old = (await renders(p.id))[0];
+    const rejection = {
+      kind: 'needs_rerender',
+      artifact: { renderId: old?.id, finishedAt: new Date().toISOString(), bytes: 10 },
+      rejections: 1,
+      at: new Date().toISOString(),
+      error: 'ProcessingFailedError',
+      check: null,
+    };
+    await q(
+      `UPDATE social_shares SET detail = COALESCE(detail,'{}'::jsonb) || jsonb_build_object('fileRejection', $2::jsonb)
+        WHERE post_id=$1 AND network='instagram'`,
+      [p.id, JSON.stringify(rejection)],
+    );
+    await ok(rr(p.id, 'instagram'));
+    await q(`UPDATE video_renders SET status='rendered', finished_at=now() WHERE post_id=$1 AND revision=2`, [
+      p.id,
+    ]);
+    await resumeRerenders(t.app.ctx);
+    const ig = await share(p.id, 'instagram');
+    expect(ig?.status).toBe('pending');
+    expect(ig?.detail.rerender).toBeUndefined();
+    expect(ig?.detail.fileRejection).toMatchObject({
+      kind: 'needs_rerender',
+      artifact: { renderId: old?.id },
+    });
+  });
+
+  it('no longer has the post-level re-render route', async () => {
+    const p = await refused('rr-old-route');
+    const r = await api('POST', `/api/platform/video/posts/${p.id}/rerender`, undefined, sa.cookie);
+    expect(r.status).toBe(404);
+  });
+
+  it('ignores an older re-render event that names no revision', async () => {
+    const p = await refused('rr-old-event');
+    const e = {
+      createdAt: new Date(),
+      event: { type: 'VideoRetryRequested', payload: { postId: p.id, what: 'rerender', by: sa.id } },
+    };
+    await withTx(
+      t.app.ctx.pool,
+      (tx) => videoPostProjectors.VideoRetryRequested?.(tx, e as never) as Promise<void>,
+    );
+    expect((await q('SELECT revision FROM video_posts WHERE id=$1', [p.id]))[0]?.revision).toBe(1);
   });
 
   it('keeps the old file while a re-render is waiting, then lets the superseded purge take it', async () => {

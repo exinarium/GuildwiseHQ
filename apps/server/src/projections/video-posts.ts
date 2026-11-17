@@ -59,7 +59,7 @@ export const videoPostProjectors: Record<string, Projector> = {
   /** A destination was rendered again: the approved post moves to a new revision (its own render, its own folder). */
   VideoRetryRequested: async (tx, e) => {
     const p = (e.event as EventOf<'VideoRetryRequested'>).payload;
-    if (p.what !== 'render-again' || !p.revision) return;
+    if (p.what !== 'rerender' || !p.revision) return;
     await exec(
       tx,
       `UPDATE video_posts SET revision=$2, approved_render_id=NULL, updated_at=$3

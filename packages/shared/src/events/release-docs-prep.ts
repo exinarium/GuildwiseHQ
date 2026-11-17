@@ -139,8 +139,11 @@ export const releaseDocsPrepEvents = [
       runId: Id,
       projectId: Id,
       releaseBranch: z.string(),
-      skippedBy: Id,
+      /** null: the system closed the run (its release shipped while it was running). */
+      skippedBy: Id.nullable(),
       wasStatus: z.enum(['not_run', 'failed', 'running']),
+      /** Why the system closed the run, shown to the manager. */
+      reason: z.string().max(500).optional(),
     }),
   ),
 ] as const;

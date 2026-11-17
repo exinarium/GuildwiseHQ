@@ -75,7 +75,7 @@ import { addRelayIntegration, removeRelayIntegration } from './relay/config.ts';
 import { WhatsAppSecretStore } from './relay/whatsapp/store.ts';
 import { reviewerTokenStatusLines, setReviewerToken } from './review/reviewer-token-cli.ts';
 import { FileReviewerTokenStore } from './review/reviewer-tokens.ts';
-import type { TestServicesSeen } from './sandbox/test-services.ts';
+import { probeLocalPort, type TestServicesSeen } from './sandbox/test-services.ts';
 import { fileKeyOf, RunnerKeys } from './secrets/keys.ts';
 import { registerSecret } from './secrets/redact.ts';
 import { chromiumPdfRenderer } from './storage/pdf.ts';
@@ -465,7 +465,32 @@ async function doctor(opts: { dataDir?: string; pairing?: string }): Promise<voi
       : `\`${claudeBin}\` not found (only needed for the claude-code runtime)`,
   );
   const sbCfg = config?.runtimes['claude-code'] ?? RunnerConfigSchema.shape.runtimes.parse({})['claude-code'];
-  for (const l of sandboxDoctorLines(sandboxState(sbCfg), platform(), recordedTestServices(paths.status)))
+  // Handoff checks (GWP-248): probe each declared loopback service now, from outside any sandbox (1 s each).
+  const recorded = recordedTestServices(paths.status);
+  const live = recorded
+    ? Object.fromEntries(
+        await Promise.all(
+          Object.entries(recorded).map(async ([k, v]) => [
+            k,
+            {
+              ...v,
+              decisions: await Promise.all(
+                (v.decisions ?? []).map(async (d) => ({
+                  ...d,
+                  answering: await probeLocalPort(d.host, d.port).catch(() => false),
+                })),
+              ),
+            },
+          ]),
+        ),
+      )
+    : undefined;
+  const socat = await execa('socat', ['-V'], { reject: false, stdin: 'ignore', timeout: 10_000 }).catch(
+    () => undefined,
+  );
+  for (const l of sandboxDoctorLines(sandboxState(sbCfg), platform(), live, {
+    socat: !!socat && socat.exitCode === 0,
+  }))
     line(l.ok, l.name, l.detail);
   const d = await execa('docker', ['--version'], { reject: false, stdin: 'ignore', timeout: 10_000 }).catch(
     () => undefined,

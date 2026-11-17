@@ -12,6 +12,7 @@ import {
   type ReleaseShipResult,
   type ReleaseShipStep,
   releaseChangelog,
+  releaseCommitSubject,
   releaseSectionOf,
   replaceComponentVersion,
 } from '@aom/shared';
@@ -305,7 +306,7 @@ async function commitRelease(
     p.signOff === undefined ? await detectSignOff(wt) : { required: p.signOff, reason: 'requested' };
   const commit = await git(
     wt,
-    ['commit', '-m', `chore(release): ${p.version}`, ...(sign.required ? ['--signoff'] : [])],
+    ['commit', '-m', releaseCommitSubject(p.version), ...(sign.required ? ['--signoff'] : [])],
     { env: commitEnv(identity) },
   );
   if (commit.exitCode !== 0)

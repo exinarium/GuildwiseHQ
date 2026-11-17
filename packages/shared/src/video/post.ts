@@ -168,12 +168,62 @@ export const VIDEO_PHASES = [
 export type VideoPhase = (typeof VIDEO_PHASES)[number];
 export const VIDEO_PUBLISH_MODES = ['slot', 'now'] as const;
 
+export const REELS_RULE_IDS = [
+  'readable',
+  'container',
+  'edit_list',
+  'faststart',
+  'video_codec',
+  'video_profile',
+  'pixel_format',
+  'scan',
+  'frame_rate',
+  'width',
+  'aspect_ratio',
+  'video_bitrate',
+  'duration',
+  'file_size',
+  'audio_codec',
+  'audio_sample_rate',
+  'audio_channels',
+] as const;
+export type ReelsRuleId = (typeof REELS_RULE_IDS)[number];
+
+/** The result of checking a rendered MP4 against Instagram's Reels rules. */
+export const ReelsCheckSchema = z.object({
+  passed: z.boolean(),
+  checkedAt: IsoTime,
+  failed: z.array(
+    z.object({
+      rule: z.enum(REELS_RULE_IDS),
+      /** "edit list present (video, audio)", "moov not at start", "frame rate 120 > 60". */
+      message: z.string(),
+      measured: z.string().nullable(),
+      limit: z.string(),
+    }),
+  ),
+  warnings: z.array(z.string()),
+  measured: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
+  sha256: z.string().optional(),
+});
+export type ReelsCheck = z.infer<typeof ReelsCheckSchema>;
+
+/**
+ * Why an Instagram share that failed is not retried with the same file: `needs_rerender` (the check found failed rules),
+ * `rejected_compliant` (the file meets every rule, Instagram refused it anyway), `check_failed` (the check could not run).
+ */
+export const VIDEO_FILE_REJECTIONS = ['needs_rerender', 'rejected_compliant', 'check_failed'] as const;
+export type VideoFileRejection = (typeof VIDEO_FILE_REJECTIONS)[number];
+
 export const VideoShareSchema = z.object({
   network: z.enum(VIDEO_DESTINATIONS),
   status: z.enum(VIDEO_UPLOAD_STATUSES),
   url: z.string().nullable(),
   error: z.string().nullable(),
   rerender: VideoRerenderSchema.optional(),
+  /** Optional and nullable so that older payloads (and clients) without them stay valid; the server always sends them. */
+  fileRejection: z.enum(VIDEO_FILE_REJECTIONS).nullish(),
+  reelsCheck: ReelsCheckSchema.nullish(),
 });
 export type VideoShare = z.infer<typeof VideoShareSchema>;
 
@@ -262,6 +312,17 @@ export const VideoCapacitySchema = z.object({
 });
 export type VideoCapacity = z.infer<typeof VideoCapacitySchema>;
 
+/** One worker role's heartbeat as the status reports it. */
+export const VideoWorkerBeatSchema = z.object({
+  running: z.boolean(),
+  lastSeen: IsoTime.nullable(),
+  /** The application version the worker reported with its last heartbeat (null: a build that does not report one). */
+  version: z.string().nullable().optional(),
+  /** The worker reported a version older than the server's, or none. */
+  outdated: z.boolean().optional(),
+});
+export type VideoWorkerBeat = z.infer<typeof VideoWorkerBeatSchema>;
+
 export const VideoStatusSchema = z.object({
   settings: VideoSettingsSchema,
   /** A YouTube channel is connected and healthy. */
@@ -275,8 +336,10 @@ export const VideoStatusSchema = z.object({
   /** Both halves of the worker are running (the combined view; see `render` and `publish`). */
   worker: z.object({ running: z.boolean(), lastSeen: IsoTime.nullable() }),
   /** The render worker (AOM_VIDEO_ROLE=render) and the publish worker (AOM_VIDEO_ROLE=publish), each with its heartbeat. */
-  render: z.object({ running: z.boolean(), lastSeen: IsoTime.nullable() }).optional(),
-  publish: z.object({ running: z.boolean(), lastSeen: IsoTime.nullable() }).optional(),
+  render: VideoWorkerBeatSchema.optional(),
+  publish: VideoWorkerBeatSchema.optional(),
+  /** This server's application version (newest release in its CHANGELOG), the reference for `outdated`. */
+  serverVersion: z.string().nullable().optional(),
   capacity: VideoCapacitySchema,
   /** The next free slot per format (null while the schedule has no days). */
   nextSlot: z.object({ long: IsoTime.nullable(), short: IsoTime.nullable() }),

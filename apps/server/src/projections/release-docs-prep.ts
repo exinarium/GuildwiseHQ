@@ -229,10 +229,10 @@ export const releaseDocsPrepProjectors: Record<string, Projector> = {
     const p = ev<'ReleaseDocsPrepSkipped'>(e).payload;
     await exec(
       tx,
-      `INSERT INTO release_docs_prep_runs (id, org_id, project_id, release_branch, status, steps, trigger, started_by, started_at, finished_at, skipped_by, skipped_at, updated_at)
-       SELECT $1, pr.org_id, pr.id, $3, 'skipped', '{}', 'skip', $4, $5, $5, $4, $5, $5 FROM projects pr WHERE pr.id = $2
-       ON CONFLICT (id) DO UPDATE SET status='skipped', finished_at=$5, skipped_by=$4, skipped_at=$5, updated_at=$5`,
-      [p.runId, p.projectId, p.releaseBranch, p.skippedBy, e.createdAt],
+      `INSERT INTO release_docs_prep_runs (id, org_id, project_id, release_branch, status, steps, trigger, started_by, started_at, finished_at, skipped_by, skipped_at, skip_reason, updated_at)
+       SELECT $1, pr.org_id, pr.id, $3, 'skipped', '{}', 'skip', $4, $5, $5, $4, $5, $6, $5 FROM projects pr WHERE pr.id = $2
+       ON CONFLICT (id) DO UPDATE SET status='skipped', finished_at=$5, skipped_by=$4, skipped_at=$5, skip_reason=$6, updated_at=$5`,
+      [p.runId, p.projectId, p.releaseBranch, p.skippedBy, e.createdAt, p.reason ?? null],
     );
   },
 };

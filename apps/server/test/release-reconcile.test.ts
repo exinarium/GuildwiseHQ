@@ -1,5 +1,6 @@
 import { RELEASE_SHIP_CAPABILITY, type ReleaseFacts, ReleaseFactsSchema } from '@aom/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { buildProposal } from '../src/release/proposal.ts';
 import { reconcileReleaseProposal } from '../src/release/reconcile.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { addMember } from './helpers/members.ts';
@@ -26,7 +27,7 @@ const facts = (over: Partial<ReleaseFacts> = {}): ReleaseFacts =>
     ahead: 3,
     lastTag: { name: 'v1.3.0', sha: 'b'.repeat(40) },
     existingTags: ['v1.3.0'],
-    commits: [],
+    commits: [{ sha: 'd'.repeat(40), subject: 'feat: one', breakingFooter: false }],
     changedTotal: 4,
     components: [
       { name: 'runner', changedCount: 17, contentAtHead: file('0.1.63'), contentAtTag: file('0.1.62') },
@@ -194,13 +195,51 @@ describe('Ship release approval (resolveShipReleaseIn)', () => {
     expect(JSON.stringify(r.body)).toContain('proposal_changed');
   });
 
-  it('400 invalid_version for non-semver, equal and lower versions', async () => {
-    for (const version of ['next', '1.3.0', '1.2.9']) {
+  it('400 invalid_version for non-semver, 409 version_not_higher for equal and lower versions', async () => {
+    const bad = await approve({ version: 'next', components: [], factsHeadSha: HEAD });
+    expect(bad.status).toBe(400);
+    expect(JSON.stringify(bad.body)).toContain('invalid_version');
+    for (const version of ['1.3.0', '1.2.9']) {
       const r = await approve({ version, components: [], factsHeadSha: HEAD });
-      expect(r.status).toBe(400);
-      expect(JSON.stringify(r.body)).toContain('invalid_version');
+      expect(r.status).toBe(409);
+      expect(JSON.stringify(r.body)).toContain('version_not_higher');
+      expect(JSON.stringify(r.body)).toContain('v1.3.0');
     }
     expect((await proposals())[0].state).toBe('proposed');
+  });
+
+  it('floors on the newest tag when the facts last tag is older, and ships against that tag', async () => {
+    // the 1.8.0 layout on an older runner: the last tag is the newest merged one, a newer tag exists on main
+    await setFacts(facts({ existingTags: ['v1.4.0', 'v1.3.0'] }));
+    for (const version of ['1.4.0', '1.3.9']) {
+      const r = await approve({ version, components: [], factsHeadSha: HEAD });
+      expect(r.status).toBe(409);
+      expect(JSON.stringify(r.body)).toContain('version_not_higher');
+      expect(JSON.stringify(r.body)).toContain('not higher than the last release v1.4.0');
+    }
+    expect((await proposals())[0].state).toBe('proposed');
+    const ok = await approve({ version: '1.4.1', components: [], factsHeadSha: HEAD });
+    expect(ok.status).toBe(200);
+    // ReleaseApproved carries the newest tag and the projection stores it, so the ship uses it
+    expect((await proposals())[0]).toMatchObject({ state: 'approved', version: '1.4.1', last_tag: 'v1.4.0' });
+    const cmds = (await q(
+      `SELECT payload FROM runner_commands WHERE type='release.ship' ORDER BY created_at DESC LIMIT 1`,
+    )) as Rows;
+    expect(cmds[0].payload).toMatchObject({ lastTag: 'v1.4.0', version: '1.4.1' });
+  });
+
+  it('409 version_not_higher at or below a newer dated CHANGELOG.md version', async () => {
+    await setFacts(
+      facts({
+        changelog: `${CHANGELOG('### Added\n\n- One.\n\n')}`.replace(
+          '## [1.3.0] - 2026-10-20',
+          '## [1.4.0] - 2026-11-01\n\n- New.\n\n## [1.3.0] - 2026-10-20',
+        ),
+      }),
+    );
+    const r = await approve({ version: '1.4.0', components: [], factsHeadSha: HEAD });
+    expect(r.status).toBe(409);
+    expect(JSON.stringify(r.body)).toContain('the newest version in CHANGELOG.md');
   });
 
   it('400 for an unknown component', async () => {
@@ -239,5 +278,77 @@ describe('Ship release approval (resolveShipReleaseIn)', () => {
     const r = await approve({ version: '1.4.0', components: [], factsHeadSha: HEAD });
     expect(r.status).toBe(409);
     expect(JSON.stringify(r.body)).toContain('proposal_closed');
+  });
+});
+
+describe('reconcile after a release (release machinery only)', () => {
+  const machinery = [
+    {
+      sha: 'e'.repeat(40),
+      subject: 'docs(release): prepare the release documentation for development',
+      breakingFooter: false,
+    },
+    { sha: 'f'.repeat(40), subject: 'chore(release): 1.4.0', breakingFooter: false },
+  ];
+  const released = {
+    lastTag: { name: 'v1.4.0', sha: 'c'.repeat(40) },
+    existingTags: ['v1.4.0', 'v1.3.0'],
+    changelog: `# Changelog\n\n## [Unreleased]\n\n## [1.4.0] - 2026-11-15\n\n### Added\n\n- One.\n`,
+  };
+
+  it('raises no desk item when only release and prep commits follow the newest tag, whatever the trigger', async () => {
+    const before = await eventCount('ReleaseProposed');
+    await setFacts(facts({ ...released, ahead: 2, commits: machinery }));
+    await reconcile('ahead');
+    await reconcile('manual');
+    await reconcile('release_pr');
+    expect(await proposals()).toHaveLength(0);
+    expect(await shipItems()).toHaveLength(0);
+    expect(await eventCount('ReleaseProposed')).toBe(before);
+  });
+
+  it('raises no desk item for facts that still list the release commit of a published release', async () => {
+    await setFacts(facts());
+    await reconcile('manual');
+    const [p] = await proposals();
+    await q(`UPDATE release_proposals SET state='released', closed_reason='released' WHERE id=$1`, [p.id]);
+    await q(`DELETE FROM release_ships WHERE repo_id=$1`, [p.repo_id]);
+    await q(
+      `INSERT INTO release_ships (id, org_id, project_id, repo_id, version, tag, tag_name, release_date, payload, status,
+                                  commit_sha, published_at, created_at, updated_at)
+       VALUES (gen_random_uuid(), $1, $2, $3, '1.4.0', 'v1.4.0', 'v1.4.0', '2026-11-15', '{}'::jsonb, 'published',
+               $4, now(), now(), now())`,
+      [p.org_id, p.project_id, p.repo_id, 'f'.repeat(40)],
+    );
+    // an older runner: the last tag is still v1.3.0 and the shipped commits are listed again
+    await setFacts(
+      facts({
+        existingTags: ['v1.4.0', 'v1.3.0'],
+        commits: [...machinery, { sha: 'd'.repeat(40), subject: 'feat: one', breakingFooter: false }],
+      }),
+    );
+    await reconcile('manual');
+    expect(await proposals()).toHaveLength(1);
+  });
+
+  it('raises a proposal for one real change after the tag, with only that change in the notes', async () => {
+    await setFacts(
+      facts({
+        ...released,
+        ahead: 3,
+        commits: [{ sha: '1'.repeat(40), subject: 'feat: brand new', breakingFooter: false }, ...machinery],
+      }),
+    );
+    await reconcile('ahead');
+    expect(await proposals()).toHaveLength(1);
+    expect((await proposals())[0]).toMatchObject({ last_tag: 'v1.4.0' });
+    const built = buildProposal(
+      facts({
+        ...released,
+        commits: [{ sha: '1'.repeat(40), subject: 'feat: brand new', breakingFooter: false }, ...machinery],
+      }),
+      [],
+    );
+    expect(built.notes).toBe('- feat: brand new');
   });
 });

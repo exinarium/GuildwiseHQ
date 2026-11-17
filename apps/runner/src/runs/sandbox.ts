@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
-import { delimiter, join, resolve } from 'node:path';
+import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, statSync } from 'node:fs';
+import { delimiter, dirname, join, resolve as resolvePath, sep } from 'node:path';
 import { BROWSER_MASKED, DEVOPS_INHERITED_ENV, HOME_SECRETS, onPath } from '../adapters/claude-policy.ts';
 import { SECRETISH } from '../toolchain/registry.ts';
 
@@ -46,6 +46,10 @@ export interface SandboxSpec {
   extraMasked?: string[];
   /** `--die-with-parent`: the command's tree ends with the runner. Off by default (services outlive the runner). */
   dieWithParent?: boolean;
+  /** The resolver config to make reachable (default `/etc/resolv.conf`; injectable for tests). */
+  resolvConf?: string;
+  /** The system paths that are masked (default `BROWSER_MASKED`; injectable for tests). */
+  systemMasks?: string[];
 }
 
 /** The services' HOME inside the sandbox (inside the private `/tmp`). */
@@ -56,16 +60,20 @@ export const userSecretsDir = (realHome: string): string => join(realHome, '.mic
 
 /** Directories and files that stay out of reach, skipping the ones that do not exist (bwrap cannot create them). */
 export function maskedPaths(
-  spec: Pick<SandboxSpec, 'runnerRoot' | 'realHome' | 'uid' | 'extraMasked'>,
+  spec: Pick<SandboxSpec, 'runnerRoot' | 'realHome' | 'uid' | 'extraMasked' | 'systemMasks'>,
 ): string[] {
   const uid = spec.uid ?? process.getuid?.();
-  const all = [
+  return existingReal([
     ...(spec.extraMasked ?? []),
     spec.runnerRoot,
     ...HOME_SECRETS.map((p) => join(spec.realHome, p)),
-    ...BROWSER_MASKED,
+    ...(spec.systemMasks ?? BROWSER_MASKED),
     ...(uid !== undefined ? [`/run/user/${uid}`] : []),
-  ];
+  ]);
+}
+
+/** The real paths of the entries that exist, each once. */
+function existingReal(all: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const p of new Set(all)) {
@@ -84,8 +92,56 @@ export function maskedPaths(
   return out;
 }
 
+const under = (p: string, dir: string): boolean => p === dir || p.startsWith(dir + sep);
+
+/**
+ * What name resolution needs in a sandbox that masks system paths. On systemd-resolved hosts `/etc/resolv.conf` links
+ * into `/run/systemd/resolve/`, which the mask hides, so the link dangles and every lookup fails. When the file resolves
+ * to a regular file under a masked system path, exactly that file is bound read-only (never its folder, which holds
+ * resolved's sockets; never a file under the runner's root, home secrets or `/run/user`). A missing or dangling config
+ * gives a warning and no bind.
+ */
+export function resolverMount(
+  resolvConf: string,
+  systemMasked: string[],
+  otherMasked: string[],
+): { bind?: string; warning?: string } {
+  const unavailable = (why: string) => ({
+    warning: `run sandbox: DNS unavailable, ${resolvConf} ${why}`,
+  });
+  let real: string;
+  try {
+    real = realpathSync(resolvConf);
+  } catch {
+    try {
+      const target = resolvePath(dirname(resolvConf), readlinkSync(resolvConf));
+      const hidden = systemMasked.some((m) => under(target, m));
+      return unavailable(
+        hidden
+          ? `points into masked ${systemMasked.find((m) => under(target, m))} and the target is missing`
+          : `points at ${target}, which does not exist`,
+      );
+    } catch {
+      return unavailable('does not exist');
+    }
+  }
+  if (otherMasked.some((m) => under(real, m))) return unavailable(`points into a masked path (${real})`);
+  const dir = systemMasked.find((m) => under(real, m));
+  if (!dir) return {}; // a plain file or a link into the visible filesystem: nothing to do
+  try {
+    if (!statSync(real).isFile()) return unavailable(`points into masked ${dir} and is not a regular file`);
+  } catch {
+    return unavailable(`points into masked ${dir} and cannot be read`);
+  }
+  return { bind: real };
+}
+
 /** The bubblewrap arguments (without the command); the command follows `--`. */
 export function bwrapArgs(spec: SandboxSpec): string[] {
+  return bwrapSetup(spec).args;
+}
+
+function bwrapSetup(spec: SandboxSpec): { args: string[]; warning?: string } {
   const args = [
     '--ro-bind',
     '/',
@@ -109,6 +165,20 @@ export function bwrapArgs(spec: SandboxSpec): string[] {
       // gone meanwhile
     }
   }
+  // DNS: after the masks, so the one file shows through the tmpfs. Not for `none`: no network, no lookups to serve.
+  let warning: string | undefined;
+  if (spec.network !== 'none') {
+    const systemMasked = existingReal(spec.systemMasks ?? BROWSER_MASKED);
+    const uid = spec.uid ?? process.getuid?.();
+    const otherMasked = existingReal([
+      spec.runnerRoot,
+      ...HOME_SECRETS.map((p) => join(spec.realHome, p)),
+      ...(uid !== undefined ? [`/run/user/${uid}`] : []),
+    ]);
+    const m = resolverMount(spec.resolvConf ?? '/etc/resolv.conf', systemMasked, otherMasked);
+    if (m.bind) args.push('--ro-bind', m.bind, m.bind);
+    warning = m.warning;
+  }
   for (const g of spec.gitDirs ?? []) if (existsSync(g)) args.push('--ro-bind', g, g);
   args.push('--bind', spec.runTmp, '/tmp');
   for (const w of [...spec.worktrees, spec.cacheRoot]) args.push('--bind', w, w);
@@ -117,7 +187,7 @@ export function bwrapArgs(spec: SandboxSpec): string[] {
   const secrets = userSecretsDir(spec.realHome);
   if (spec.userSecrets !== false && existsSync(secrets))
     args.push('--ro-bind', secrets, `${SERVICE_HOME}/.microsoft/usersecrets`);
-  return args;
+  return { args, warning };
 }
 
 /** The clone's git dir a linked worktree points at (`<clone>/.git`), so a sandboxed `git` can read it. */
@@ -126,15 +196,19 @@ export function gitDirOf(worktree: string): string[] {
     const m = /^gitdir:\s*(.+)$/m.exec(readFileSync(join(worktree, '.git'), 'utf8'));
     if (!m) return [];
     // <clone>/.git/worktrees/<name>  ->  <clone>/.git
-    return [resolve(m[1] as string, '..', '..')];
+    return [resolvePath(m[1] as string, '..', '..')];
   } catch {
     return [];
   }
 }
 
 /** `bwrap <args> -- cmd...` */
-export function sandboxCommand(spec: SandboxSpec, argv: string[]): { cmd: string; args: string[] } {
-  return { cmd: 'bwrap', args: [...bwrapArgs(spec), '--', ...argv] };
+export function sandboxCommand(
+  spec: SandboxSpec,
+  argv: string[],
+): { cmd: string; args: string[]; warning?: string } {
+  const { args, warning } = bwrapSetup(spec);
+  return { cmd: 'bwrap', args: [...args, '--', ...argv], ...(warning ? { warning } : {}) };
 }
 
 /**
