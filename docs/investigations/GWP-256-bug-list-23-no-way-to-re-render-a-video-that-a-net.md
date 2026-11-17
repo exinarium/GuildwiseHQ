@@ -1,5 +1,10 @@
 # GWP-256: render a video again and retry a destination that a network refused
 
+> **Revision 2 (2026-11-17).** The Instagram file check (GWP-255) reached `development` after this branch was cut. It added
+> a second re-render action of its own (`rerenderVideo`, `POST /posts/:id/rerender`, a "Re-render" button). Section 8
+> merges the two into **one action, one event, one set of guards and one button**, and gives the rebase plan. Where
+> section 8 and sections 4-7 disagree, section 8 wins. Sections 4-7 were updated for the event name (`what: 'rerender'`).
+
 ## 1. Question
 
 When a network (Instagram, for example) refuses the uploaded MP4 for one destination of a video post, the screens offer
@@ -80,7 +85,8 @@ refuses it with 409.
 
 ### 2.5 GWP-255 (same group)
 
-GWP-255 (Instagram retried with the unchanged MP4) has no commits yet. Its branch is level with main. Its likely area is
+*(Written before GWP-255 was built. It has since merged into `development`, with a re-render action of its own; see
+section 8.)* GWP-255 (Instagram retried with the unchanged MP4) has no commits yet. Its branch is level with main. Its likely area is
 `video/destinations.ts` (`postToInstagram`, the `ProcessingFailedError` handling). This card adds no code there and does
 not depend on it. **No dependency is recorded.** The builder works the group in order. If GWP-255 lands first and changes
 how an Instagram processing failure ends (status or `error` text), this command still works, because it keys only on
@@ -129,11 +135,11 @@ defineEvent(
   'VideoRetryRequested',
   z.object({
     postId: Id,
-    what: z.enum(['render', 'upload', 'resolve-locked', 'render-again']),
+    what: z.enum(['render', 'upload', 'resolve-locked', 'rerender']), // 'rerender' is already on development
     by: Id,
-    /** render-again: the destination that is retried once the new render is done. */
+    /** rerender: the destination that is retried once the new render is done. */
     network: z.enum(VIDEO_DESTINATIONS).optional(),
-    /** render-again: the new revision of the approved post (its render is the new file). */
+    /** rerender: the new revision of the approved post (its render is the new file). */
     revision: z.number().int().min(2).optional(),
   }),
 ),
@@ -152,12 +158,13 @@ type check asks for it.
 
 ### 4.2 Projection: `apps/server/src/projections/video-posts.ts`
 
-New projector entry `VideoRetryRequested`. It acts only on `what === 'render-again'` and is idempotent on replay:
+New projector entry `VideoRetryRequested`. It acts only on `what === 'rerender'` **with** a `revision` (events written by the GWP-255 command have none and are a
+no-op) and is idempotent on replay:
 
 ```ts
 VideoRetryRequested: async (tx, e) => {
   const p = (e.event as EventOf<'VideoRetryRequested'>).payload;
-  if (p.what !== 'render-again' || !p.revision) return;
+  if (p.what !== 'rerender' || !p.revision) return;
   await exec(
     tx,
     `UPDATE video_posts SET revision=$2, approved_render_id=NULL, updated_at=$3
@@ -173,16 +180,16 @@ stays, and both run (registration order).
 
 ### 4.3 Audit: `apps/server/src/projections/platform-audit.ts`
 
-Extend the `what` map with `'render-again': 'rendered again and retried'`. When `p.network` is set, add it to the
-summary and details:
+One `rerender` entry in the `what` map (section 8.3): with `p.network` set it reads
+`rendered again and retried on <network>`, without it (old GWP-255 events) the existing text
+`render made again after a network rejected the file`.
 
-- Summary: `Video rendered again and retried on Instagram: <title>`
-- Details: `{ postId, what: 'render-again', network, revision }`
+- Summary: `Video rendered again and retried on instagram: <title>`
+- Details: `{ postId, what: 'rerender', network, revision }`
 
-The actor is already `userActor(by)`. This meets AC 8: actor, destination and the render-again marker.
+The actor is already `userActor(by)`. This meets AC 8: actor, destination and the re-render marker.
 
-`auditRetry` gets an optional `extra: { network, revision }` parameter (default none), so existing callers are
-unchanged.
+The command appends the event itself inside its transaction (section 4.4 step 8); `auditRetry` is not used for it.
 
 ### 4.4 Command: `apps/server/src/commands/video-posts.ts`, `renderAgainAndRetry`
 
@@ -220,7 +227,7 @@ Steps inside the lock, in this order (the 404s come first):
 7. Another share of the post has started with the current file (section 3 C) → 409 `share_in_progress`.
 8. One transaction (`withTx`):
    - `ctx.store.append([{ streamId: videoPostStream(postId), event: { type: 'VideoRetryRequested', payload: { postId,
-     what: 'render-again', by, network, revision: p.revision + 1 } }, actor: userActor(by), scope: adminScope }], { tx })`.
+     what: 'rerender', by, network, revision: p.revision + 1 } }, actor: userActor(by), scope: adminScope }], { tx })`.
      The projector bumps the revision.
    - `INSERT INTO video_renders (id, post_id, revision, status, attempts, created_at, not_before, preview) VALUES
      ($1,$2,$3,'queued',0,$4,NULL,false) ON CONFLICT (post_id, revision) DO NOTHING`. `not_before = NULL` means render
@@ -360,7 +367,7 @@ side), because it sits inside the `state === 'failed'` branch.
 | Render in progress / concurrent second request → 409, one render | 4.4 step 6 under the `video-post-edit` lock. Test: `Promise.all` of two calls → one 200, one 409 `render_in_progress`, exactly one new `video_renders` row. A queued render beforehand → 409. |
 | Unknown post or destination → 404 | 4.4 steps 1 and 2. The route schema takes `network` as a string (4.9). |
 | New render fails → failed render, "Retry render" works, destination failed with reason, old file not re-sent | 4.5 "Render failed" row. The marker keeps the share `failed`, so no upload happens. `retryRender` resets the new revision's row (unchanged code). After it renders, 4.5 retries with the new file. |
-| Audit entry with actor, destination, render-again marker | 4.1 event fields, 4.3 audit summary and details. Rebuild replays via 4.2 (idempotent). |
+| Audit entry with actor, destination, re-render marker | 4.1 event fields, 4.3 audit summary and details. Rebuild replays via 4.2 (idempotent). |
 | Same authorisation as the retry routes | 4.9 `requireSuperAdmin`. Member → 404, as in the existing retry test. |
 | Existing Retry render / destination retry unchanged | No edits to `retryRender`, `retryShare`, `retryUpload` or `ensureFinalRender`. Their existing tests stay green. A regression test runs `retryShare` on a failed share: same file path (same revision). |
 
@@ -383,7 +390,7 @@ New file `apps/server/test/video-rerender.test.ts`, in the style of `video-desti
 6. Render fails: `RenderFn` throws until `maxAttempts`. The render is `failed`, the share is `failed` with an error that
    starts with "the new render failed:", and no new Instagram payload is sent. Then `retry-render` → tick →
    Instagram is retried with the rev-2 file.
-7. Audit: a `platform_audit_log` row `VideoRetryRequested` with `details.what='render-again'`,
+7. Audit: a `platform_audit_log` row `VideoRetryRequested` with `details.what='rerender'`,
    `details.network='instagram'`, `details.revision=2`. Run `rebuildProjections`; afterwards `video_posts.revision` is
    still 2 and nothing throws.
 8. Purge: run `cleanupVideos(force)` with the old render more than a day old while the marker is present → the rev-1 MP4
@@ -401,3 +408,209 @@ Web (`apps/web/src/test/video-panel.test.tsx`, which already covers `retry-faceb
     response appears in the `ErrorBox`. Extend the URL regex at line ~198 to accept `/rerender`.
 
 Run only the server and web unit suites, not e2e.
+
+## 8. Merging with GWP-255 (revision 2)
+
+### 8.1 Situation
+
+- This branch (head `f6144fcb`) was cut from `development` at `5e85241c`. GWP-255 then merged into `development`
+  (`57a940b3`). A dry-run merge of `origin/development` into the branch (`git merge-tree`) conflicts in 7 files:
+  `apps/server/src/commands/video-posts.ts`, `apps/server/src/projections/platform-audit.ts`,
+  `apps/server/src/routes/video-platform.ts`, `apps/web/src/components/video/QueueCalendar.tsx`,
+  `apps/web/src/test/video-panel.test.tsx`, `packages/shared/src/events/video.ts`, `packages/shared/src/video/post.ts`.
+- `apps/server/src/video/sweep.ts` and `apps/runner/src/runner.ts` merge cleanly. The runner import is the same line on
+  both sides (`import { basename, delimiter, join } from 'node:path'`); keep it as it is on `development`, and keep this
+  branch's `apps/runner/test/runner-path-import.test.ts`.
+- After `57a940b3`, `development` also changed `video-posts.ts` and `sweep.ts` (worker version, GWP-263: `serverVersion`,
+  `renderNext` refuses on an outdated worker). These do not touch the re-render code; keep them as they are.
+- No release tag contains `57a940b3`, so the GWP-255 route `POST /api/platform/video/posts/:id/rerender` has never shipped.
+  It can be removed without a compatibility shim.
+
+### 8.2 The two actions side by side
+
+| | GWP-255 `rerenderVideo` (development) | GWP-256 `renderAgainAndRetry` (this branch) |
+|---|---|---|
+| Route | `POST /posts/:id/rerender` (post-level) | `POST /posts/:id/shares/:network/rerender` (one destination) |
+| Accepted for | Instagram shares with `detail.fileRejection`, render `rendered` | any `failed` destination, any render state except in progress |
+| New file | resets the **same** render row: `renderNext` deletes `<postId>/<rev>` before the new file exists | **new revision** `<postId>/<rev+1>`: the old file stays until the new one exists |
+| Share while rendering | set to `pending` at once; if the render fails it ends as "file not found" at its deadline | stays `failed` with `detail.rerender`; `resumeRerenders` sets it `pending` only once the new file exists, or writes "the new render failed: …" |
+| Concurrency | no lock; `WHERE status='rendered'` on the row | `video-post-edit:<postId>` lock, 409 `render_in_progress` |
+| Event | `VideoRetryRequested { what: 'rerender' }` (after the tx) | `VideoRetryRequested { what: 'render-again', network, revision }` (in the tx, projected) |
+| UI | `RerenderNotice` callout ("Re-render", `rerender-instagram`) in the queue and the review screen | "Render again and retry <Network>" (`rerender-<dest>`) in the queue |
+
+GWP-255's action breaks this card's constraints (old file deleted first, share pending without a file, Instagram only, no
+lock). GWP-256's action covers every GWP-255 case: a share with a `fileRejection` is a `failed` share. **Decision: the
+GWP-256 action is the one action. `rerenderVideo` and its route are removed.** Everything else GWP-255 added stays
+unchanged: the Reels check, `fileRejection`, `VideoFileChecked`, the `file` error kind, the pre-flight check in
+`runDestination`, and the `needs_rerender` guard in `retryShare`.
+
+### 8.3 One action, one event, one set of guards, one button
+
+**Action (server).** `renderAgainAndRetry(ctx, by, postId, network)` exactly as sections 4.4-4.9, at
+`POST /api/platform/video/posts/:id/shares/:network/rerender`, `requireSuperAdmin`. Delete `rerenderVideo` from
+`video-posts.ts`, its route and import in `video-platform.ts`, and `'rerender'` from the `auditRetry` union (no caller
+is left).
+
+**Event.** One value: `VideoRetryRequested.what = 'rerender'` (the value `development` already writes, so events in any
+`development` database keep parsing) with the optional `network` and `revision` of section 4.1. **Do not add
+`'render-again'`.** The enum stays `['render', 'upload', 'resolve-locked', 'rerender']`.
+
+- `projections/video-posts.ts`: the projector of section 4.2 keys on `p.what === 'rerender' && p.revision`. GWP-255
+  events have no `revision` and stay a no-op on replay. That is correct: they reset the render in place.
+- `projections/platform-audit.ts`: one map entry:
+  `rerender: p.network ? \`rendered again and retried on ${p.network}\` : 'render made again after a network rejected the file'`,
+  and keep this branch's `details` spread (`network`, `revision` when present). Keep `development`'s `VideoFileChecked`
+  projector beside it.
+
+**Guards** (in this order, inside the lock). They replace GWP-255's `no_rerender_needed` and `already_started` for this
+action. `already_started` stays in use by unschedule and move, which this card does not touch.
+
+| # | Code | When |
+|---|---|---|
+| 1 | 404 `video_post_not_found` | unknown post |
+| 2 | 404 `share_not_found` | network not in `VIDEO_DESTINATIONS`, or the post has no such share |
+| 3 | 409 `not_scheduled` | post not `approved` |
+| 4 | 409 `library_video` | no script (recorded help video) |
+| 5 | 409 `not_failed` | share not `failed` (sent, pending, posting, skipped, locked_private; also an Instagram share in its one extra attempt, which GWP-255 leaves `pending`) |
+| 6 | 409 `already_uploaded` | YouTube with `detail.videoId` and not rejected |
+| 7 | 409 `render_in_progress` | the current revision's render is `queued` or `rendering` (also the second of two concurrent calls) |
+| 8 | 409 `share_in_progress` | another share is `posting`, or `pending` with saved progress (covers GWP-255's `already_started`) |
+
+**One button.** The label is always **"Render again and retry <Network>"**, `data-testid="rerender-<dest>"`, and it calls
+`useRenderAgainShare({ id, network })`. Remove `'rerender'` from `VideoAction` and from `useRetryVideo`'s `what` union in
+`apps/web/src/api/queries/video.ts`.
+
+### 8.4 How the GWP-255 state works with the new revision
+
+- **The fingerprint does the work by itself.** `fileRejection.artifact.renderId` names the old render. The new revision has
+  a new render id, so `sameArtifact` is false for it: `retryShare`'s `needs_rerender` guard no longer applies, and
+  `runDestination`'s pre-flight runs `reelsCheck` on the new file before it is sent (`preflight_ok` or a new
+  `needs_rerender` with `rejections: 0`). No change to `file-rejection.ts` or the `runDestination` code is needed.
+- **`resumeRerenders` must keep `detail.fileRejection`** when it resets the share to `pending`. It already does, because it
+  copies `detail` and deletes only `rerender`, `dest` and the YouTube keys. Add a comment there saying so, and a test,
+  because dropping it would skip the pre-flight check.
+- **`toDtos`:** the share DTO carries both `fileRejection`/`reelsCheck` (GWP-255, only while `failed`) and `rerender` (this
+  card). Keep both. While the marker is set the share is `failed`, so `fileRejection` is still reported; the UI gives
+  the marker precedence (section 8.5).
+- **`packages/shared/src/video/post.ts`:** keep both additions. `VideoShareSchema` gets
+  `fileRejection: …nullish()`, `reelsCheck: …nullish()` and `rerender: VideoRerenderSchema.optional()`. Keep
+  `VideoRerenderSchema` and the `rerender` field on `VideoUploadSchema`. Keep `development`'s `REELS_RULE_IDS`,
+  `ReelsCheckSchema`, `VIDEO_FILE_REJECTIONS` and the worker-beat schemas.
+- **`retryShare` text only:** the `needs_rerender` message ends "Use Re-render." Change it to
+  "Use Render again and retry." so it names the one button. The code, the condition and the status stay the same.
+- **Other refused shares of the same post.** When the action runs for Facebook while Instagram also holds a
+  `fileRejection`, only Facebook is marked. Instagram stays `failed`. Its record now points at an older render, so its
+  own "Render again and retry Instagram" (blocked by `render_in_progress` until the new render finishes) or a plain
+  Retry after it (pre-flight check on the new file) recovers it. This is acceptable: one destination per action,
+  as the card asks.
+
+### 8.5 Web: one state rule per failed destination
+
+`destinationStates()` returns both flags, named so they cannot be confused:
+`needsRerender: needsRerender(s)` (GWP-255, from `RerenderNotice.tsx`; always `false` for YouTube) and
+`rerendering: !!s?.rerender` / `!!p.upload?.rerender` (this card). Rename `development`'s `rerender: boolean` and this
+branch's `rerender: boolean` to these two names.
+
+For each destination with `state === 'failed'`, in `ScheduledPost`:
+
+| # | Condition | Shows |
+|---|---|---|
+| 1 | `rerendering` and render `queued`/`rendering` | `<Badge tone="info">Rendering again for <Network></Badge>` (`rerender-progress-<dest>`), no buttons |
+| 2 | `rerendering` and render `failed` | `<Badge tone="danger">New render failed</Badge>` (`rerender-failed-<dest>`) and the share error; the existing "Retry render" button (`renderFailed`) |
+| 3 | `rerendering` otherwise (rendered, sweep not yet run) | `<Badge tone="info">Retrying <Network> with the new file</Badge>` (`rerender-retrying-<dest>`), no buttons. This fixes the review note that state 2 was shown here (use `post.render?.status === 'failed'`, not `!renderBusy`) |
+| 4 | `needsRerender` (Instagram file refused) | `RerenderNotice` with the reasons; its button is the one action (label "Render again and retry Instagram", `rerender-instagram`, `loading` from this destination's mutation). No plain Retry |
+| 5 | none of these | the existing `Retry <Network>` and "Render again and retry <Network>" (`canRerender` rule for YouTube) |
+
+- `RerenderNotice`: keep the component and its reasons list. Change only the button label to
+  `Render again and retry Instagram` (use `DESTINATION_LABEL[share.network]`) and let the caller pass `onRerender` and
+  `loading` as today. Render it in case 4 only, so the button is never shown twice.
+- Queue rendering: render cases 1-3 and 5 in the button row, as this branch does. Render the notices for case 4 below
+  the row, as `development` does, but only for shares with `!s.rerender`.
+- `Icons` label: `rerendering` → `rendering again`; else `needsRerender` → `needs re-render`; else `ICON[state].label`.
+- `ErrorBox`: `unschedule.error ?? retry.error ?? retryShare.error ?? rerender.error`.
+- `VideoReview.tsx` shares list: `needsRerender(s) && !s.rerender` → the notice, wired to `useRenderAgainShare` with
+  `{ id: post.id, network: s.network }` (instead of `run('rerender', …)`); `s.rerender` → the text
+  `rendering again` in place of the status. Remove `'rerender'` from its local action union.
+- Touch and small screens: no change in approach. The reasons stay visible text, the buttons are `size="sm"` in the
+  wrapping row, nothing depends on hover.
+
+### 8.6 Docs
+
+`docs/BLOG-API.md` (~l.445-447): replace "the video review screens offer **Re-render**
+(`POST /api/platform/video/posts/:id/rerender`)" with "**Render again and retry Instagram**
+(`POST /api/platform/video/posts/:id/shares/instagram/rerender`, which renders a new revision and retries only that
+destination once the new file exists)". Add one short paragraph on the general action: any failed destination, the
+409 codes of section 8.3, and that the old file is kept until the new render finishes.
+
+### 8.7 Tests to reconcile
+
+Server, `apps/server/test/video-destinations.test.ts` (GWP-255 tests that call the removed route, ~l.644-760). Switch them
+to `POST /shares/instagram/rerender`, and change on purpose what the unified action does differently:
+
+- "a manual retry of the same refused file is a 409; after a re-render …": after the POST the share is still `failed`
+  with `rerender` set (not `pending`); the second POST answers 409 `render_in_progress` (not `no_rerender_needed`); the
+  audit `what` list stays `['rerender']`; after the ticks Instagram is `sent`, `igPosts()` is 2, the checked outcomes are
+  `['needs_rerender', 'preflight_ok']`, and the last Instagram payload `filePath` is under `/<postId>/2/`.
+- "a re-rendered file that still fails the Reels check …": same switch. Unchanged expectations: no second Instagram call,
+  `needs_rerender` with `rejections: 0`, retry → 409.
+- "a share whose file could not be checked can be re-rendered …": same switch; after the POST the share is `failed` with
+  the marker, then `sent` after the ticks.
+- Keep every other GWP-255 test as it is, and the existing `needs_rerender` 409 on `retryShare` (assert the message now
+  matches `/Render again and retry/` as well as `/new render/`).
+
+Server, `apps/server/test/video-rerender.test.ts` (this branch): change `what: 'render-again'` to `'rerender'` (l.~394,
+~403). Add:
+
+- `resumeRerenders` keeps `detail.fileRejection` on the reset share (Instagram with a `needs_rerender` record → POST →
+  render → the share is `pending`/`sent` and a `VideoFileChecked` `preflight_ok` event exists for the new render id).
+- `POST /api/platform/video/posts/:id/rerender` now answers 404 (the route is gone).
+- The projector ignores a `VideoRetryRequested { what: 'rerender' }` without `revision` (a GWP-255 event): the revision
+  is unchanged.
+
+Web, `apps/web/src/test/video-panel.test.tsx`: take both sides' tests. Change GWP-255's notice tests to expect the POST to
+`/shares/instagram/rerender` and the label "Render again and retry Instagram". Add: a failed Instagram share with
+`fileRejection` **and** `rerender` set shows the progress badge and neither the notice nor any button; a share with the
+marker and a `rendered` render shows "Retrying … with the new file", not "New render failed".
+
+Run the server, shared and web unit suites (not e2e) and name the test for each AC in the handoff, including GWP-255's
+ACs 1-10 (their tests must stay green).
+
+### 8.8 Build plan
+
+1. Merge `origin/development` into the card branch (`aom git merge-main` / the runner's merge; the builder does not rebase
+   by hand if the tooling merges). Resolve the 7 files with sections 8.3-8.5:
+   - `video-posts.ts`: keep `development`'s imports (`file-rejection.ts`, `withTx`, worker version), its `toDtos`
+     `fileRejection`/`reelsCheck`, and its `retryShare` guard (message text per 8.4). Add this branch's `rerenderOf`,
+     `uploadDto.rerender`, share `rerender` and `renderAgainAndRetry` (event `what: 'rerender'`). Delete `rerenderVideo`.
+   - `video-platform.ts`: keep only the `shares/:network/rerender` route.
+   - `platform-audit.ts`, `events/video.ts`, `post.ts`: per 8.3/8.4.
+   - `QueueCalendar.tsx`, `video-panel.test.tsx`: per 8.5/8.7. Also edit `RerenderNotice.tsx`, `VideoReview.tsx` and
+     `queries/video.ts`, which merge cleanly but must change.
+2. Update `projections/video-posts.ts` (`'rerender'`), `video-rerender.test.ts`, `video-destinations.test.ts` and
+   `docs/BLOG-API.md`.
+3. Type-check (`pnpm -r --if-present typecheck`), then the unit suites.
+
+### 8.9 Risks added by the merge
+
+- **Events already in a `development` database.** Only `what: 'rerender'` without `revision` exists there. Keeping the
+  value and making `network`/`revision` optional means they parse, and the projector ignores them. A schema that dropped
+  `'rerender'` would break `rebuildProjections` on those databases; that is why the GWP-255 value wins over
+  `'render-again'`.
+- **A plain Retry on another destination while the re-render runs.** `retryShare` on a failed share whose current render
+  has no file yet (the new revision is `queued`) takes its "purged" path and resets that render row. That is existing
+  `retryShare` behaviour, and this card must not change it. The render is queued again and still produces the new file,
+  so nothing is lost. Recorded here, not changed.
+- Size: the merge is mostly deletion (`rerenderVideo`, its route and hook union) plus the UI state table and test edits.
+  The card stays marked large.
+
+### 8.10 Acceptance criteria after the merge
+
+All ten ACs keep the mapping in section 6. Changes from the merge:
+
+| AC | Change |
+|---|---|
+| 1 (rejected Instagram → new file) | Also covered by the reconciled GWP-255 test: refused file → one action → pre-flight → `sent` with the rev-2 path |
+| 4 (not shown / 409 for published, scheduled, pending) | Also: an Instagram share inside GWP-255's extra attempt (`pending`) → 409 `not_failed` |
+| 5 (409 in progress / concurrent) | GWP-255's double call now answers `render_in_progress` |
+| 8 (audit) | `details.what = 'rerender'` with `network` and `revision` |
+| 10 (existing retries unchanged) | `retryRender`, `retryShare` (including GWP-255's `needs_rerender` guard, only its message text names the new button) and `retryUpload` unchanged |
