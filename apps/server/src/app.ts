@@ -46,6 +46,7 @@ import type { Ctx } from './context.ts';
 import { createCostStampInterceptor } from './costs/stamp.ts';
 import { createPool } from './db/pool.ts';
 import { one, rows } from './db/sql.ts';
+import { CommitProbeHub } from './delivery/commit-probe.ts';
 import { LogRing } from './diagnostics/log-ring.ts';
 import { Dispatcher } from './dispatcher/dispatcher.ts';
 import { Reaper } from './dispatcher/reaper.ts';
@@ -598,6 +599,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   ctx.services.chat = new ChatRelay(ctx);
   ctx.services.webhookRelay = new RelayHub(ctx);
   ctx.services.webhookRelay.start();
+  ctx.services.commitProbe = new CommitProbeHub(ctx);
   ctx.services.formsOffline = createFormsOfflineService(ctx);
   ctx.services.storage = new StorageRelay({
     config: ctx.config.storage,

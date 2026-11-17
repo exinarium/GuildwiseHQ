@@ -25,6 +25,8 @@ export function toRunDto(r: Row): DeployRunDto {
     targetName: r.target_name,
     targetId: r.target_id ?? null,
     commit: r.commit ?? null,
+    commitSource: r.commit_source ?? null,
+    commitSourceDetail: r.commit_source_detail ?? null,
     deployedCommit: r.deployed_commit ?? null,
     status: r.status,
     waitingFor: r.waiting_for ?? null,

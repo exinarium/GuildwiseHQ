@@ -17,6 +17,7 @@ import {
   CommandPayloadSchemas,
   DELEGATE_GRANTS_FEATURE,
   DELIVERY_CAPABILITY,
+  DEPLOY_COMMIT_PROBE_CAPABILITY,
   DEPLOY_CONNECT_CAPABILITY,
   DEPLOY_DIRECT_CAPABILITY,
   DEPLOY_MOVE_CAPABILITY,
@@ -120,6 +121,7 @@ import { ChatManager } from './chat/chat.ts';
 import { loadConfig, type RunnerConfig, saveConfig } from './config.ts';
 import { type BackoffOptions, RunnerClient, toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
 import { Outbox } from './connection/outbox.ts';
+import { probeCommit } from './delivery/commit-probe.ts';
 import { DeployConnector } from './delivery/connect.ts';
 import { DeployKeys } from './delivery/deploy-keys.ts';
 import { DeployExecutor } from './delivery/exec.ts';
@@ -1757,6 +1759,8 @@ export class Runner {
         RUNNER_PIN_CAPABILITY,
         RUNNER_UPDATE_CHECK_CAPABILITY,
         DELIVERY_CAPABILITY,
+        // Reads the tip of a working branch, or checks a commit, for a deploy request
+        DEPLOY_COMMIT_PROBE_CAPABILITY,
         // Guided deploy setup: `deploy.probe` and `recipe.write` (docs/design/deploy-run-ux-design.md section 6)
         DEPLOY_SETUP_CAPABILITY,
         // Finds stacks from container labels and home folders, reports where it looked, new update methods, key forget on remove
@@ -2239,6 +2243,11 @@ export class Runner {
             if (p) this.client.send('relay.response', { ...p });
           })
           .catch(() => this.log.warn(`relay request ${msg.requestId} could not be answered`));
+        break;
+      case 'repo.commit.probe':
+        void probeCommit({ findRepo: (n) => this.findRepo(n) }, msg)
+          .then((r) => this.client.send('repo.commit.probe.result', { ...r }))
+          .catch(() => this.log.warn(`commit probe ${msg.requestId} could not be answered`));
         break;
       case 'relay.serve.result':
         for (const r of msg.refused)

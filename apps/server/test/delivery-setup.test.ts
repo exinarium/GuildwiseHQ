@@ -26,7 +26,15 @@ const q = async (sql: string, params?: unknown[]): Promise<any[]> => (await rawQ
 
 let d: DeliveryWorld;
 let r: FakeRunner;
-const CAPS = ['ceo:1', 'delivery:1', DEPLOY_SETUP_CAPABILITY, 'runs:1', 'runs:2', SETUP_SCAN_CAPABILITY];
+const CAPS = [
+  'ceo:1',
+  'delivery:1',
+  'deploy-commit-probe:1',
+  DEPLOY_SETUP_CAPABILITY,
+  'runs:1',
+  'runs:2',
+  SETUP_SCAN_CAPABILITY,
+];
 
 beforeAll(async () => {
   d = await deliveryWorld();

@@ -1127,6 +1127,7 @@ export async function requestRollback(
     targets: req.targets ?? [run.target_name],
     trigger: 'request',
     rollback: { runId: run.id, commit },
+    commitSource: 'rollback',
     requester: { kind: role, id: user.id, name: user.displayName, provenance: 'session' },
   });
 }

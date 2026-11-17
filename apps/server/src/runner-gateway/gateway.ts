@@ -91,6 +91,7 @@ export class RunnerGateway {
       // frames of the in-order chain, so it is handled at once.
       const live = conn as RunnerConn | null;
       if (live && this.relayAnswer(live, data.toString())) return;
+      if (live && this.probeAnswer(live, data.toString())) return;
       if (live && this.storageAnswer(live, data.toString())) return;
       chain = chain.then(async () => {
         const c = conn as RunnerConn | null;
@@ -129,6 +130,7 @@ export class RunnerGateway {
       // Requests waiting on this runner end as "offline" now, not after their timeout.
       const gone = conn as RunnerConn | null;
       if (gone) void ctx.services.webhookRelay.disconnected(gone);
+      if (gone) ctx.services.commitProbe.onDisconnect(gone.workstationId);
       if (gone) ctx.services.storage.onDisconnect(gone.workstationId);
       if (gone) ctx.services.direct.onDisconnect(gone.workstationId);
       chain = chain.then(async () => {
@@ -181,6 +183,32 @@ export class RunnerGateway {
       return true;
     }
     if (parsed.data.type === 'relay.response') this.ctx.services.webhookRelay.onResponse(conn, parsed.data);
+    return true;
+  }
+
+  /** The fast path of `repo.commit.probe.result`: a deploy request waits for it, so it does not queue behind slow frames. */
+  private probeAnswer(conn: RunnerConn, text: string): boolean {
+    if (!text.slice(0, 160).includes('"repo.commit.probe.result"')) return false;
+    let json: unknown;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      return false;
+    }
+    if ((json as { type?: unknown } | null)?.type !== 'repo.commit.probe.result') return false;
+    const parsed = RunnerToServerSchema.safeParse(json);
+    if (!parsed.success) {
+      this.ctx.log.warn(
+        {
+          type: 'repo.commit.probe.result',
+          paths: parsed.error.issues.slice(0, 3).map((i) => i.path.join('.')),
+        },
+        'invalid runner message',
+      );
+      return true;
+    }
+    if (parsed.data.type === 'repo.commit.probe.result')
+      this.ctx.services.commitProbe.onResult(conn, parsed.data);
     return true;
   }
 

@@ -66,6 +66,13 @@ export const SetDeploySecretRequestSchema = z.object({
 });
 export type SetDeploySecretRequest = z.infer<typeof SetDeploySecretRequestSchema>;
 
+/** Where the commit of a deploy came from. `rollback` is only ever recorded on a run, never previewed. */
+export const DEPLOY_COMMIT_SOURCES = ['explicit', 'release', 'promoted', 'working-branch'] as const;
+export const DeployCommitSourceSchema = z.enum(DEPLOY_COMMIT_SOURCES);
+export type DeployCommitSource = z.infer<typeof DeployCommitSourceSchema>;
+export const DeployRunCommitSourceSchema = z.enum([...DEPLOY_COMMIT_SOURCES, 'rollback']);
+export type DeployRunCommitSource = z.infer<typeof DeployRunCommitSourceSchema>;
+
 export const DeployRunDtoSchema = z.object({
   id: z.uuid(),
   projectId: z.uuid(),
@@ -74,6 +81,9 @@ export const DeployRunDtoSchema = z.object({
   targetName: z.string(),
   targetId: z.uuid().nullable(),
   commit: z.string().nullable(),
+  /** Why this commit: the source it was resolved from, and a short human detail ("release 1.9.0"). */
+  commitSource: DeployRunCommitSourceSchema.nullable(),
+  commitSourceDetail: z.string().nullable(),
   deployedCommit: z.string().nullable(),
   status: z.enum([
     'requested',
@@ -134,15 +144,42 @@ export const ReleaseQueueItemSchema = z.object({
 export type ReleaseQueueItem = z.infer<typeof ReleaseQueueItemSchema>;
 
 export const ReleaseRequestSchema = z.object({ runIds: z.array(z.uuid()).min(1).max(30) });
+const Sha = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[0-9a-f]{7,64}$/, 'a commit is 7 to 64 hex characters');
+
 export const DeployRequestSchema = z.object({
   env: z.string().min(1).max(40),
-  commit: z
-    .string()
-    .regex(/^[0-9a-f]{7,64}$/)
-    .optional(),
+  commit: Sha.optional(),
+  /** The commit the preview showed: refused with 409 `commit_moved` when the default now resolves to another one. */
+  expectCommit: Sha.optional(),
   /** Target names; absent: every target of the environment. */
   targets: z.array(z.string().max(80)).max(20).optional(),
 });
+/** GET /api/projects/:id/delivery/deploy/preview */
+export const DeployCommitPreviewQuerySchema = z.object({
+  env: z.string().min(1).max(40),
+  commit: Sha.optional(),
+  target: z.string().max(80).optional(),
+});
+export type DeployCommitPreviewQuery = z.infer<typeof DeployCommitPreviewQuerySchema>;
+export const DeployCommitPreviewSchema = z.object({
+  env: z.string(),
+  repo: z.string().nullable(),
+  branch: z.string().nullable(),
+  sha: z.string(),
+  shortSha: z.string(),
+  subject: z.string().nullable(),
+  author: z.string().nullable(),
+  committedAt: IsoTime.nullable(),
+  source: DeployCommitSourceSchema,
+  /** e.g. "release 1.9.0", "what test runs", "tip of release/1.9.0" */
+  sourceDetail: z.string().nullable(),
+});
+export type DeployCommitPreview = z.infer<typeof DeployCommitPreviewSchema>;
+
 export type DeployRequest = z.infer<typeof DeployRequestSchema>;
 
 export const DeployRunOutcomeSchema = z.object({

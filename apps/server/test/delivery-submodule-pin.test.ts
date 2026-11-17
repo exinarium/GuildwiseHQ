@@ -15,7 +15,7 @@ import {
   parseFixture,
   setWeekday,
 } from './helpers/delivery.ts';
-import type { FakeRunner } from './helpers/fake-runner.ts';
+import { DEFAULT_TIP, type FakeRunner } from './helpers/fake-runner.ts';
 import { ok, until } from './helpers/world.ts';
 
 /**
@@ -169,7 +169,7 @@ describe('a merge into a submodule moves the pin, then deploys the repository th
     expect(pins().at(-1)!.payload).toMatchObject({ commit: hex('6') });
   });
 
-  it('a repository that does not hold the merged one as a submodule is deployed as it is, with no commit of the other', async () => {
+  it('a repository that does not hold the merged one as a submodule is deployed as it is (its own branch tip), with no commit of the other', async () => {
     const before = execs().length;
     const cmds = pins().length;
     await mergeIn(X, hex('9'));
@@ -181,7 +181,7 @@ describe('a merge into a submodule moves the pin, then deploys the repository th
       error: 'github.com/acme/cloud does not contain github.com/acme/toy as a submodule',
     });
     await until(async () => execs().length === before + 1, 4000, 'deploy of D as it is');
-    expect(execs().at(-1)!.payload).toMatchObject({ commit: null, repo: { repoId: D } });
+    expect(execs().at(-1)!.payload).toMatchObject({ commit: DEFAULT_TIP, repo: { repoId: D } });
     expect(await notices()).toHaveLength(0);
   });
 
@@ -227,7 +227,7 @@ describe('a merge into a submodule moves the pin, then deploys the repository th
     await settle();
     await until(async () => execs().length === before + 1, 4000, 'deploy');
     expect(pins()).toHaveLength(cmds);
-    expect(execs().at(-1)!.payload).toMatchObject({ commit: null, repo: { repoId: D } });
+    expect(execs().at(-1)!.payload).toMatchObject({ commit: DEFAULT_TIP, repo: { repoId: D } });
     const [n] = await notices();
     expect(n!.title).toContain('pin');
     expect(n!.body).toContain(MIN_RUNNER_FOR_SUBMODULE_PIN);
@@ -260,7 +260,7 @@ describe('a merge is only deployed in its own repository', () => {
     expect(res.runs[0]).toMatchObject({ status: 'refused', refusal: 'commit_not_allowed' });
   });
 
-  it('a deploy that names no commit gets the newest merge of its own repository, never a newer one of another', async () => {
+  it('a deploy that names no commit gets the tip of its own repository, never a merge of another', async () => {
     await mergeIn(X, hex('4')); // X has merged after D
     const before = execs().length;
     const res = await requestDeployRun(ctx(), {
@@ -271,7 +271,10 @@ describe('a merge is only deployed in its own repository', () => {
     });
     expect(res.runs[0]).toMatchObject({ status: 'queued' });
     await until(async () => execs().length === before + 1, 4000, 'deploy.exec');
-    expect(execs().at(-1)!.payload).toMatchObject({ commit: hex('2'), repo: { repoId: D, name: 'cloud' } });
+    expect(execs().at(-1)!.payload).toMatchObject({
+      commit: DEFAULT_TIP,
+      repo: { repoId: D, name: 'cloud' },
+    });
   });
 });
 

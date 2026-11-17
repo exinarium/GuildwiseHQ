@@ -1,6 +1,7 @@
 import {
   ApproveRecipeRequestSchema,
   ConnectRequestSchema,
+  DeployCommitPreviewQuerySchema,
   DeployRequestSchema,
   HostKeyScanRequestSchema,
   IdParamsSchema,
@@ -76,7 +77,13 @@ import {
 import { listProbeDtos, requestProbe } from '../delivery/probes.ts';
 import { deliverySettings, listBindings, listPresets, releaseQueue, toRunDto } from '../delivery/queries.ts';
 import { approveRecipe, rejectRecipe, requestRecipeInspect, setDeliveryMode } from '../delivery/recipes.ts';
-import { cancelRun, listDeployRuns, releaseFromQueue, requestDeployRun } from '../delivery/runs.ts';
+import {
+  cancelRun,
+  listDeployRuns,
+  previewDeployCommit,
+  releaseFromQueue,
+  requestDeployRun,
+} from '../delivery/runs.ts';
 import {
   getSetupState,
   previewSetup,
@@ -549,10 +556,27 @@ export function deliveryRoutes(ctx: Ctx) {
           projectId: project.id,
           env: req.body.env,
           commit: req.body.commit,
+          expectCommit: req.body.expectCommit,
           targets: req.body.targets,
           trigger: 'request',
           requester: { kind: role, id: s.user.id, name: s.user.displayName, provenance: 'session' },
         });
+      },
+    );
+
+    /**
+     * The commit a deploy of this environment would build right now, before anyone presses Deploy: read-only (no run, no
+     * event, no queued command), through the same resolution the deploy itself uses.
+     */
+    app.get(
+      '/api/projects/:id/delivery/deploy/preview',
+      { schema: { params: IdParamsSchema, querystring: DeployCommitPreviewQuerySchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        const project = await loadVisibleProject(ctx.pool, s.user.id, req.params.id);
+        const role = await orgRoleOf(ctx.pool, s.user.id, project.org_id);
+        if (role !== 'owner' && role !== 'admin') throw forbidden('only an Owner or an Admin deploys');
+        return previewDeployCommit(ctx, project.id, req.query);
       },
     );
 

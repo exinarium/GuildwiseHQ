@@ -397,8 +397,8 @@ export const deliveryProjectors: Record<string, Projector> = {
       tx,
       `INSERT INTO deploy_runs (id, org_id, project_id, recipe_id, env, target_id, target_name, workstation_id, hash,
          vault_commit, commit, trigger, requested_by, origin, status, released_by_policy, trial, dry_run,
-         phase_followup_id, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,'requested',$15,$16,$17,$18,$19,$19)
+         phase_followup_id, commit_source, commit_source_detail, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,'requested',$15,$16,$17,$18,$19,$20,$21,$21)
        ON CONFLICT (id) DO NOTHING`,
       [
         p.runId,
@@ -419,6 +419,8 @@ export const deliveryProjectors: Record<string, Projector> = {
         p.trial,
         p.dryRun,
         p.phaseFollowupId ?? null,
+        p.commitSource ?? null,
+        p.commitSourceDetail ?? null,
         e.createdAt,
       ],
     );
@@ -477,8 +479,8 @@ export const deliveryProjectors: Record<string, Projector> = {
       await exec(
         tx,
         `INSERT INTO deploy_runs (id, org_id, project_id, recipe_id, env, target_id, target_name, hash, commit, trigger,
-           requested_by, origin, status, released_by_policy, trial, refusal, refusal_detail, missing, phase_followup_id, created_at, finished_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,'refused',$13,$14,$15,$16,$17::jsonb,$19,$18,$18,$18)
+           requested_by, origin, status, released_by_policy, trial, refusal, refusal_detail, missing, phase_followup_id, commit_source, commit_source_detail, created_at, finished_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,'refused',$13,$14,$15,$16,$17::jsonb,$19,$20,$21,$18,$18,$18)
          ON CONFLICT (id) DO NOTHING`,
         [
           p.runId,
@@ -500,6 +502,8 @@ export const deliveryProjectors: Record<string, Projector> = {
           j(p.missing),
           e.createdAt,
           r.phaseFollowupId ?? null,
+          r.commitSource ?? null,
+          r.commitSourceDetail ?? null,
         ],
       );
     await exec(

@@ -339,6 +339,16 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
     status: 200,
     body: 'MTIz',
   },
+  'repo.commit.probe.result': {
+    ...env('repo.commit.probe.result'),
+    requestId: '11111111-1111-4111-8111-111111111111',
+    ok: true,
+    sha: 'a'.repeat(40),
+    shortSha: 'aaaaaaa',
+    subject: 'chore(release): 1.9.0',
+    author: 'Dev',
+    committedAt: '2026-11-14T10:00:00.000Z',
+  },
   ack: { ...env('ack'), ackOf: U.d },
 };
 
@@ -455,6 +465,14 @@ const serverToRunner: Record<string, Record<string, unknown>> = {
     headers: [['content-type', 'text/plain']],
     body: 'MTIz',
     deadlineMs: 4750,
+  },
+  'repo.commit.probe': {
+    ...env('repo.commit.probe'),
+    requestId: '11111111-1111-4111-8111-111111111111',
+    remoteUrlNormalized: 'github.com/acme/toy',
+    branch: 'main',
+    sha: 'abc1234',
+    deadlineMs: 24000,
   },
   command: {
     ...env('command'),

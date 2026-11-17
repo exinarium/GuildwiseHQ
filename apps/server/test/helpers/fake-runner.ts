@@ -26,6 +26,23 @@ export interface HelloOptions {
   integrationsVersion?: number;
 }
 
+/**
+ * What a runner with a clone answers to `repo.commit.probe`. Default: the tip is `DEFAULT_TIP` and every commit asked for
+ * exists (padded to a full sha). `strict`: only `known` commits exist; `ambiguous` ones answer `ambiguous`; `offlineFor`
+ * is not used (close the runner instead).
+ */
+export interface ProbeScript {
+  tip: string | null;
+  known: Record<string, { subject?: string; author?: string; committedAt?: string }>;
+  strict: boolean;
+  ambiguous: string[];
+  /** Every probe asked, in order (sha is null for the tip). */
+  asked: Array<{ sha: string | null; branch: string | null }>;
+  /** Answer nothing at all (a runner that hangs). */
+  silent: boolean;
+}
+export const DEFAULT_TIP = '0123456789abcdef0123456789abcdef01234567';
+
 /** In-process runner speaking the shared protocol; auto-acks server messages that need it. */
 export class FakeRunner {
   readonly received: Frame[] = [];
@@ -33,6 +50,14 @@ export class FakeRunner {
   closed: { code: number; reason: string } | null = null;
   private waiters: Array<{ pred: (f: Frame) => boolean; resolve: (f: Frame) => void }> = [];
   private closeWaiters: Array<(c: { code: number; reason: string }) => void> = [];
+  readonly probe: ProbeScript = {
+    tip: DEFAULT_TIP,
+    known: {},
+    strict: false,
+    ambiguous: [],
+    asked: [],
+    silent: false,
+  };
 
   private constructor(readonly ws: WebSocket) {
     ws.on('message', (data) => {
@@ -43,6 +68,7 @@ export class FakeRunner {
       const f = parsed.data;
       this.received.push(f);
       if (f.type === 'shift.stop') this.send('ack', { ackOf: f.id });
+      if (f.type === 'repo.commit.probe') this.answerProbe(f);
       for (const w of [...this.waiters]) {
         if (w.pred(f)) {
           this.waiters = this.waiters.filter((x) => x !== w);
@@ -55,6 +81,34 @@ export class FakeRunner {
       for (const w of this.closeWaiters) w(this.closed);
     });
     ws.on('error', () => {});
+  }
+
+  private answerProbe(f: Extract<Frame, { type: 'repo.commit.probe' }>): void {
+    const p = this.probe;
+    p.asked.push({ sha: f.sha ?? null, branch: f.branch });
+    if (p.silent) return;
+    const meta = (sha: string, extra: { subject?: string; author?: string; committedAt?: string } = {}) =>
+      this.send('repo.commit.probe.result', {
+        requestId: f.requestId,
+        ok: true,
+        sha,
+        shortSha: sha.slice(0, 7),
+        subject: extra.subject ?? `commit ${sha.slice(0, 7)}`,
+        author: extra.author ?? 'Dev',
+        committedAt: extra.committedAt ?? '2026-11-14T10:00:00.000Z',
+      });
+    const fail = (error: 'not_found' | 'ambiguous' | 'no_branch', message: string) =>
+      this.send('repo.commit.probe.result', { requestId: f.requestId, ok: false, error, message });
+    if (!f.sha) {
+      if (p.tip) meta(p.tip, p.known[p.tip]);
+      else fail('no_branch', 'no such branch');
+      return;
+    }
+    if (p.ambiguous.some((a) => a.startsWith(f.sha as string))) return void fail('ambiguous', 'ambiguous');
+    const hit = Object.keys(p.known).find((k) => k.startsWith(f.sha as string));
+    if (hit) return void meta(hit, p.known[hit]);
+    if (p.strict) return void fail('not_found', 'not found');
+    meta(f.sha.padEnd(40, '0'));
   }
 
   static async connect(
