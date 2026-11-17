@@ -1,8 +1,18 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { RepoReport } from '@aom/shared';
+import {
+  isQuietRepoSyncReason,
+  REPO_SYNC_REASON_MESSAGE_MAX,
+  type RepoReport,
+  type RepoSyncStatus,
+} from '@aom/shared';
 import { type Logger, nullLogger } from '../log.ts';
-import { type SyncResult, syncWorkingBranch, syncWorkingBranchUnlocked } from './sync-branch.ts';
+import {
+  type SyncResult,
+  safeSyncText,
+  syncWorkingBranch,
+  syncWorkingBranchUnlocked,
+} from './sync-branch.ts';
 import type { GitAuth } from './worktrees.ts';
 
 /** The repositories whose working branch the runner keeps in step with origin, with the branch the server confirmed. */
@@ -19,6 +29,25 @@ export interface SyncStatusReport extends SyncResult {
   checkedAt: string;
 }
 
+/** The wire form of a sync result (`repo.sync_status` and the `repo.sync` answer). */
+export function toRepoSyncStatus(r: SyncStatusReport): RepoSyncStatus {
+  const cut = (s: string) => s.slice(0, REPO_SYNC_REASON_MESSAGE_MAX);
+  return {
+    repoId: r.repoId,
+    workingBranch: r.workingBranch,
+    state: r.state,
+    ahead: r.ahead,
+    behind: r.behind,
+    dirty: r.dirty,
+    onBranch: r.onBranch,
+    checkedOutBranch: r.checkedOutBranch,
+    ...(r.detail ? { detail: cut(r.detail) } : {}),
+    ...(r.reason ? { reason: r.reason } : {}),
+    ...(r.reasonMessage ? { reasonMessage: cut(r.reasonMessage) } : {}),
+    checkedAt: r.checkedAt,
+  };
+}
+
 export interface SyncServiceDeps {
   /** Persisted targets (so the periodic check works after a restart, before any shift or hygiene run). */
   file: string;
@@ -29,6 +58,8 @@ export interface SyncServiceDeps {
   send: (status: SyncStatusReport) => void;
   log?: Logger;
   now?: () => Date;
+  /** The home folder masked as `~` in messages (default: the user's home). */
+  home?: string;
 }
 
 /** Light check every 10 minutes: fetch the working branch, measure ahead/behind, fast-forward when it is safe. */
@@ -97,6 +128,7 @@ export class SyncService {
             ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
             ...(opts.readOnly ? { readOnly: true } : {}),
             ...(this.deps.auth ? { auth: this.deps.auth } : {}),
+            ...(this.deps.home ? { home: this.deps.home } : {}),
           })
         : {
             state: 'error',
@@ -106,8 +138,14 @@ export class SyncService {
             onBranch: false,
             checkedOutBranch: null,
             detail: 'no local clone on this workstation',
+            reason: 'no-clone',
+            reasonMessage: 'there is no local clone of this repository on this workstation',
           };
     } catch (err) {
+      const why = safeSyncText(
+        (err instanceof Error ? err.message : String(err)).slice(0, 300),
+        this.deps.home,
+      );
       result = {
         state: 'error',
         ahead: 0,
@@ -115,10 +153,18 @@ export class SyncService {
         dirty: false,
         onBranch: false,
         checkedOutBranch: null,
-        detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
+        detail: why,
+        reason: 'sync-failed',
+        reasonMessage: safeSyncText(`the sync failed: ${why}`, this.deps.home),
       };
     }
     const report: SyncStatusReport = { ...t, ...result, checkedAt };
+    if (result.reason && !isQuietRepoSyncReason(result.reason))
+      this.log.info(
+        `working branch sync left ${t.workingBranch} unchanged in ${t.remoteUrlNormalized} ` +
+          `(reason=${result.reason}): ${result.reasonMessage ?? ''}`,
+        { repoId: t.repoId, state: result.state },
+      );
     this.deps.send(report);
     return report;
   }

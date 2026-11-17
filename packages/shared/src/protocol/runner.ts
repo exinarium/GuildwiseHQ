@@ -1278,6 +1278,51 @@ export const RepoSyncStateSchema = z.enum([
   'error',
 ]);
 export type RepoSyncState = z.infer<typeof RepoSyncStateSchema>;
+/** Why a working-branch sync left the branch unchanged. A fixed set, so the web can map each code. */
+export const RepoSyncReasonSchema = z.enum([
+  'unsafe-branch', // the branch name is not a safe git ref
+  'no-clone', // no git clone at the path, or none on this workstation
+  'no-remote', // the clone has no origin
+  'origin-missing-branch', // origin has no such branch
+  'fetch-failed', // the fetch failed and nothing more specific applies
+  'no-local-branch', // no local branch of that name
+  'up-to-date', // quiet: already the same as origin
+  'local-ahead', // quiet: only local commits
+  'diverged',
+  'read-only', // measured only
+  'shift-running', // a card shift works in this clone
+  'local-changes', // a fast-forward would overwrite uncommitted changes
+  'fast-forward-failed',
+  'checked-out-elsewhere', // the branch is checked out in another worktree
+  'ref-update-failed',
+  'sync-failed', // an unexpected error
+]);
+export type RepoSyncReason = z.infer<typeof RepoSyncReasonSchema>;
+/** Reasons the state already says by itself: not logged and not shown as a separate message. */
+export const QUIET_REPO_SYNC_REASONS: readonly RepoSyncReason[] = ['up-to-date', 'local-ahead'];
+export const isQuietRepoSyncReason = (r: RepoSyncReason | null | undefined): boolean =>
+  !!r && QUIET_REPO_SYNC_REASONS.includes(r);
+/** Max length of `reasonMessage` and `detail` (a longer one would make the whole status invalid). */
+export const REPO_SYNC_REASON_MESSAGE_MAX = 400;
+/** Fallback text for a reason that arrives without a message. */
+export const REPO_SYNC_REASON_TEXT: Record<RepoSyncReason, string> = {
+  'unsafe-branch': 'the working branch name is not a safe git branch name',
+  'no-clone': 'there is no git clone of this repository on the workstation',
+  'no-remote': 'the clone has no origin remote, so there is nothing to sync from',
+  'origin-missing-branch': 'origin has no such branch',
+  'fetch-failed': 'could not fetch the branch from origin',
+  'no-local-branch': 'there is no local branch of that name',
+  'up-to-date': 'already up to date with origin',
+  'local-ahead': 'has commits origin does not have; a sync never pushes',
+  diverged: 'local and origin have diverged; the branch is never forced',
+  'read-only': 'measured only; nothing was changed',
+  'shift-running': 'a card shift is running in this repository; it catches up after it ends',
+  'local-changes': 'uncommitted changes would be overwritten',
+  'fast-forward-failed': 'the fast-forward failed',
+  'checked-out-elsewhere': 'checked out in another worktree, so it was left alone',
+  'ref-update-failed': 'the branch could not be updated',
+  'sync-failed': 'the sync failed',
+};
 export const RepoSyncStatusSchema = z.object({
   /** The project repository (the server knows the workstation from the connection). */
   repoId: z.uuid(),
@@ -1289,6 +1334,10 @@ export const RepoSyncStatusSchema = z.object({
   onBranch: z.boolean(),
   checkedOutBranch: z.string().max(200).nullable(),
   detail: z.string().max(400).optional(),
+  /** Why the branch was left unchanged (absent: it was updated, or an older runner). An unknown code is dropped. */
+  reason: RepoSyncReasonSchema.optional().catch(undefined),
+  /** Short human-readable reason, with the home folder shown as `~`. */
+  reasonMessage: z.string().max(REPO_SYNC_REASON_MESSAGE_MAX).optional().catch(undefined),
   checkedAt: z.iso.datetime(),
 });
 export type RepoSyncStatus = z.infer<typeof RepoSyncStatusSchema>;

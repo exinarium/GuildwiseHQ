@@ -1,4 +1,4 @@
-import { type RepoSyncStatus, RepoSyncStatusSchema } from '@aom/shared';
+import { maskSecrets, type RepoSyncStatus, RepoSyncStatusSchema } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, rows } from '../db/sql.ts';
@@ -15,7 +15,10 @@ import { postAsFieldFor } from './commit-as.ts';
 /** How old a stored check may be before the hello-time pass asks the runner again. */
 const FRESH_MS = 10 * 60_000;
 
-/** `repo.sync_status` (periodic check) or the result of `repo.sync`: stores the latest state. Invalid input is dropped. */
+/**
+ * `repo.sync_status` (periodic check) or the result of `repo.sync`: stores the latest state. Invalid input is dropped.
+ * The reason is always written, so a status without one (an update, or an older runner) clears the earlier reason.
+ */
 export async function applyRepoSyncStatus(ctx: Ctx, workstationId: string, raw: unknown): Promise<void> {
   const p = RepoSyncStatusSchema.safeParse(raw);
   if (!p.success) return;
@@ -25,12 +28,12 @@ export async function applyRepoSyncStatus(ctx: Ctx, workstationId: string, raw: 
   await exec(
     ctx.pool,
     `INSERT INTO repo_sync_status (workstation_id, project_repo_id, working_branch, state, ahead, behind, dirty,
-                                   on_branch, checked_out_branch, detail, checked_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                                   on_branch, checked_out_branch, detail, checked_at, reason, reason_message)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
      ON CONFLICT (workstation_id, project_repo_id) DO UPDATE SET working_branch=EXCLUDED.working_branch,
        state=EXCLUDED.state, ahead=EXCLUDED.ahead, behind=EXCLUDED.behind, dirty=EXCLUDED.dirty,
        on_branch=EXCLUDED.on_branch, checked_out_branch=EXCLUDED.checked_out_branch, detail=EXCLUDED.detail,
-       checked_at=EXCLUDED.checked_at`,
+       checked_at=EXCLUDED.checked_at, reason=EXCLUDED.reason, reason_message=EXCLUDED.reason_message`,
     [
       workstationId,
       s.repoId,
@@ -41,8 +44,10 @@ export async function applyRepoSyncStatus(ctx: Ctx, workstationId: string, raw: 
       s.dirty,
       s.onBranch,
       s.checkedOutBranch,
-      s.detail ?? null,
+      s.detail ? maskSecrets(s.detail) : null,
       s.checkedAt,
+      s.reason ?? null,
+      s.reasonMessage ? maskSecrets(s.reasonMessage) : null,
     ],
   );
   // The heartbeat doubles as the "working branch ahead of main" trigger (throttled to 30 minutes per repository).
