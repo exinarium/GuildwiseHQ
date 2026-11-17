@@ -40,7 +40,7 @@ import {
   rejectVideoPost,
   rejectVideoTopic,
   releasesNeedingVideo,
-  rerenderVideo,
+  renderAgainAndRetry,
   resolveLockedUpload,
   retryRender,
   retryShare,
@@ -198,14 +198,6 @@ export function videoPlatformRoutes(ctx: Ctx) {
       },
     );
     app.post(
-      '/api/platform/video/posts/:id/rerender',
-      { schema: { params: IdParamsSchema } },
-      async (req) => {
-        const s = await requireSuperAdmin(ctx, req);
-        return rerenderVideo(ctx, s.user.id, req.params.id);
-      },
-    );
-    app.post(
       '/api/platform/video/posts/:id/retry-upload',
       { schema: { params: IdParamsSchema } },
       async (req) => {
@@ -220,6 +212,15 @@ export function videoPlatformRoutes(ctx: Ctx) {
       async (req) => {
         const s = await requireSuperAdmin(ctx, req);
         return retryShare(ctx, s.user.id, req.params.id, req.params.network);
+      },
+    );
+    /** Renders the video again (a new file) and then tries this one failed destination with it. */
+    app.post(
+      '/api/platform/video/posts/:id/shares/:network/rerender',
+      { schema: { params: z.object({ id: z.uuid(), network: z.string().min(1).max(40) }) } },
+      async (req) => {
+        const s = await requireSuperAdmin(ctx, req);
+        return renderAgainAndRetry(ctx, s.user.id, req.params.id, req.params.network);
       },
     );
     app.post(

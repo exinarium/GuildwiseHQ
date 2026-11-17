@@ -4,6 +4,7 @@ import { CheckCircle2, Clock, Loader2, Lock, MinusCircle, XCircle } from 'lucide
 import { useMemo, useState } from 'react';
 import {
   useMoveVideo,
+  useRenderAgainShare,
   useRetryShare,
   useRetryVideo,
   useSwapVideo,
@@ -35,9 +36,16 @@ const ICON = {
 } as const;
 
 /** The state of each destination of a post: YouTube is the upload, the others are shares. */
-export function destinationStates(
-  p: VideoPost,
-): Array<{ dest: VideoDestination; state: ShareState; url: string | null; rerender: boolean }> {
+export function destinationStates(p: VideoPost): Array<{
+  dest: VideoDestination;
+  state: ShareState;
+  url: string | null;
+  error: string | null;
+  /** Instagram refused the file (needs a new render); never true for YouTube. */
+  needsRerender: boolean;
+  /** "Render again and retry" was asked for and is not finished. */
+  rerendering: boolean;
+}> {
   const dests = p.destinations.length ? p.destinations : (['youtube'] as VideoDestination[]);
   return dests.map((dest) => {
     if (dest === 'youtube')
@@ -45,14 +53,18 @@ export function destinationStates(
         dest,
         state: (p.upload?.status ?? 'pending') as ShareState,
         url: p.upload?.url ?? null,
-        rerender: false,
+        error: p.upload?.error ?? null,
+        needsRerender: false,
+        rerendering: !!p.upload?.rerender,
       };
     const s = p.shares.find((x) => x.network === dest);
     return {
       dest,
       state: (s?.status ?? 'pending') as ShareState,
       url: s?.url ?? null,
-      rerender: needsRerender(s),
+      error: s?.error ?? null,
+      needsRerender: needsRerender(s),
+      rerendering: !!s?.rerender,
     };
   });
 }
@@ -68,9 +80,9 @@ export function canChangeSlot(p: VideoPost): boolean {
 function Icons({ post }: { post: VideoPost }) {
   return (
     <ul className="flex flex-wrap gap-1.5" aria-label="Destinations">
-      {destinationStates(post).map(({ dest, state, rerender }) => {
+      {destinationStates(post).map(({ dest, state, needsRerender: refused, rerendering }) => {
         const { Icon, cls } = ICON[state];
-        const label = rerender ? 'needs re-render' : ICON[state].label;
+        const label = rerendering ? 'rendering again' : refused ? 'needs re-render' : ICON[state].label;
         return (
           <li
             key={dest}
@@ -192,11 +204,24 @@ function ScheduledPost({
   const unschedule = useUnscheduleVideo();
   const retry = useRetryVideo();
   const retryShare = useRetryShare();
+  const rerender = useRenderAgainShare();
   const toast = useToast();
   const change = canChangeSlot(post);
-  const failedDestinations = destinationStates(post).filter((d) => d.state === 'failed' && !d.rerender);
-  const rerenderShares = post.shares.filter((s) => needsRerender(s));
+  const failedDestinations = destinationStates(post).filter((d) => d.state === 'failed');
+  const rerenderShares = post.shares.filter((s) => needsRerender(s) && !s.rerender);
   const renderFailed = post.render?.status === 'failed';
+  const renderBusy = post.render?.status === 'queued' || post.render?.status === 'rendering';
+  // YouTube keeps a video that was uploaded: only a rejected one is made again (the server decides)
+  const canRerender = (dest: VideoDestination, error: string | null) =>
+    dest !== 'youtube' || !post.upload?.videoId || (error ?? '').startsWith('YouTube rejected the video');
+  const renderAgain = (dest: VideoDestination) =>
+    rerender.mutate(
+      { id: post.id, network: dest },
+      {
+        onSuccess: () =>
+          toast.success(`Rendering again; ${DESTINATION_LABEL[dest]} is retried when it is done`),
+      },
+    );
   return (
     <div className="flex flex-col gap-1.5" data-testid={`queue-post-${post.id}`}>
       <p className="text-sm font-medium text-fg">{post.title}</p>
@@ -236,22 +261,59 @@ function ScheduledPost({
             </Button>
           </>
         )}
-        {failedDestinations.map(({ dest }) => (
-          <Button
-            key={dest}
-            size="sm"
-            loading={retryShare.isPending}
-            data-testid={`retry-${dest}`}
-            onClick={() =>
-              retryShare.mutate(
-                { id: post.id, network: dest },
-                { onSuccess: () => toast.success('Queued again') },
-              )
-            }
-          >
-            Retry {DESTINATION_LABEL[dest]}
-          </Button>
-        ))}
+        {failedDestinations.map(({ dest, error, needsRerender: refused, rerendering }) => {
+          if (rerendering) {
+            if (renderBusy)
+              return (
+                <Badge key={dest} tone="info" data-testid={`rerender-progress-${dest}`}>
+                  Rendering again for {DESTINATION_LABEL[dest]}
+                </Badge>
+              );
+            if (renderFailed)
+              return (
+                <span key={dest} className="flex flex-wrap items-center gap-1.5">
+                  <Badge tone="danger" data-testid={`rerender-failed-${dest}`}>
+                    New render failed
+                  </Badge>
+                  {error && <span className="text-xs text-muted">{error}</span>}
+                </span>
+              );
+            return (
+              <Badge key={dest} tone="info" data-testid={`rerender-retrying-${dest}`}>
+                Retrying {DESTINATION_LABEL[dest]} with the new file
+              </Badge>
+            );
+          }
+          // a refused Instagram file has its own notice below, with the one action; a plain retry would send the same file
+          if (refused) return null;
+          return (
+            <span key={dest} className="flex flex-wrap gap-1.5">
+              <Button
+                size="sm"
+                loading={retryShare.isPending}
+                data-testid={`retry-${dest}`}
+                onClick={() =>
+                  retryShare.mutate(
+                    { id: post.id, network: dest },
+                    { onSuccess: () => toast.success('Queued again') },
+                  )
+                }
+              >
+                Retry {DESTINATION_LABEL[dest]}
+              </Button>
+              {canRerender(dest, error) && (
+                <Button
+                  size="sm"
+                  loading={rerender.isPending && rerender.variables?.network === dest}
+                  data-testid={`rerender-${dest}`}
+                  onClick={() => renderAgain(dest)}
+                >
+                  Render again and retry {DESTINATION_LABEL[dest]}
+                </Button>
+              )}
+            </span>
+          );
+        })}
         {renderFailed && (
           <Button
             size="sm"
@@ -271,16 +333,11 @@ function ScheduledPost({
         <RerenderNotice
           key={s.network}
           share={s}
-          loading={retry.isPending}
-          onRerender={() =>
-            retry.mutate(
-              { id: post.id, what: 'rerender' },
-              { onSuccess: () => toast.success('Queued: the video renders again') },
-            )
-          }
+          loading={rerender.isPending && rerender.variables?.network === s.network}
+          onRerender={() => renderAgain(s.network as VideoDestination)}
         />
       ))}
-      <ErrorBox error={unschedule.error ?? retry.error ?? retryShare.error} />
+      <ErrorBox error={unschedule.error ?? retry.error ?? retryShare.error ?? rerender.error} />
       {mode === 'move' && <MoveForm post={post} onDone={() => setMode(null)} />}
       {mode === 'swap' && <SwapForm post={post} others={others} onDone={() => setMode(null)} />}
     </div>

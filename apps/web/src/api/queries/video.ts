@@ -79,7 +79,6 @@ export type VideoAction =
   | 'reject'
   | 'retry-render'
   | 'retry-upload'
-  | 'rerender'
   | 'resolve-locked'
   | 'crosspost';
 export const useVideoAction = (id: string) =>
@@ -184,8 +183,13 @@ export const useRetryShare = () =>
   useVideoMutation((v: { id: string; network: VideoDestination }) =>
     post<VideoPost>(`/platform/video/posts/${v.id}/shares/${v.network}/retry`, undefined, VideoPostSchema),
   );
+/** Renders the video again and then retries one failed destination with the new file. */
+export const useRenderAgainShare = () =>
+  useVideoMutation((v: { id: string; network: VideoDestination }) =>
+    post<VideoPost>(`/platform/video/posts/${v.id}/shares/${v.network}/rerender`, undefined, VideoPostSchema),
+  );
 export const useRetryVideo = () =>
-  useVideoMutation((v: { id: string; what: 'retry-render' | 'retry-upload' | 'rerender' }) =>
+  useVideoMutation((v: { id: string; what: 'retry-render' | 'retry-upload' }) =>
     post<VideoPost>(`/platform/video/posts/${v.id}/${v.what}`, undefined, VideoPostSchema),
   );
 /** Re-flow: every approved post that has not started takes the slots of the current schedule, in order. */

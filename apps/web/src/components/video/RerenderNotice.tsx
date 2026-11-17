@@ -1,4 +1,5 @@
-import type { VideoShare } from '@aom/shared';
+import type { VideoDestination, VideoShare } from '@aom/shared';
+import { DESTINATION_LABEL } from '../../lib/video-schedule.ts';
 import { Button, Callout } from '../ui.tsx';
 
 /** An Instagram share whose file Instagram refused: only a new render helps, so there is no "retry" for it. */
@@ -10,7 +11,7 @@ export const needsRerender = (s: Pick<VideoShare, 'status' | 'fileRejection'> | 
 
 /**
  * "Instagram needs a new render", with the reasons from the Reels check as visible text (no tooltip, nothing that needs
- * hover: it reads the same on a touch screen) and the Re-render action.
+ * hover: it reads the same on a touch screen) and the one "Render again and retry" action.
  */
 export function RerenderNotice({
   share,
@@ -29,7 +30,7 @@ export function RerenderNotice({
       data-testid="needs-rerender"
       actions={
         <Button size="sm" loading={loading} onClick={onRerender} data-testid="rerender-instagram">
-          Re-render
+          Render again and retry {DESTINATION_LABEL[share.network as VideoDestination] ?? share.network}
         </Button>
       }
     >

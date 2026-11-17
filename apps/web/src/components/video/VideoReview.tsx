@@ -1,5 +1,6 @@
 import {
   buildDescription,
+  type VideoDestination,
   type VideoPost,
   type VideoPrivacy,
   type VideoScene,
@@ -7,7 +8,13 @@ import {
 } from '@aom/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { useSocialPostAction } from '../../api/queries/blog.ts';
-import { useEditVideo, useVideoAction, useVideoPost, videoFileUrl } from '../../api/queries/video.ts';
+import {
+  useEditVideo,
+  useRenderAgainShare,
+  useVideoAction,
+  useVideoPost,
+  videoFileUrl,
+} from '../../api/queries/video.ts';
 import { formatDateTime } from '../../lib/time.ts';
 import { PHASE_LABEL, PHASE_TONE, safeHref } from '../../lib/video-schedule.ts';
 import {
@@ -89,6 +96,7 @@ export function VideoReview({
   const toast = useToast();
   const edit = useEditVideo(post.id);
   const act = useVideoAction(post.id);
+  const renderAgain = useRenderAgainShare();
   const [title, setTitle] = useState(post.meta.title);
   const [description, setDescription] = useState(post.meta.description);
   const [tags, setTags] = useState(post.meta.tags.join(', '));
@@ -165,7 +173,6 @@ export function VideoReview({
       | 'reject'
       | 'retry-render'
       | 'retry-upload'
-      | 'rerender'
       | 'resolve-locked'
       | 'crosspost',
     done: string,
@@ -228,7 +235,7 @@ export function VideoReview({
           {post.kind} · {post.ref} · revision {post.revision} · from {post.origin ?? 'the platform'}
         </span>
       </div>
-      <ErrorBox error={edit.error ?? act.error} />
+      <ErrorBox error={edit.error ?? act.error ?? renderAgain.error} />
       {post.rejectionReason && (
         <Callout tone="danger" title="Rejected">
           {post.rejectionReason}. Edit it to send it back to review.
@@ -418,14 +425,19 @@ export function VideoReview({
         <ul className="text-sm text-muted" data-testid="video-shares">
           {post.shares.map((s) => (
             <li key={s.network}>
-              {s.network}: {needsRerender(s) ? 'needs re-render' : s.status}
-              {s.error && !needsRerender(s) ? ` (${s.error})` : ''}
-              {needsRerender(s) && (
+              {s.network}: {s.rerender ? 'rendering again' : needsRerender(s) ? 'needs re-render' : s.status}
+              {s.error && !needsRerender(s) && !s.rerender ? ` (${s.error})` : ''}
+              {needsRerender(s) && !s.rerender && (
                 <div className="mt-1">
                   <RerenderNotice
                     share={s}
-                    loading={act.isPending}
-                    onRerender={() => run('rerender', 'Queued: the video renders again')}
+                    loading={renderAgain.isPending}
+                    onRerender={() =>
+                      renderAgain.mutate(
+                        { id: post.id, network: s.network as VideoDestination },
+                        { onSuccess: () => toast.success('Queued: the video renders again') },
+                      )
+                    }
                   />
                 </div>
               )}

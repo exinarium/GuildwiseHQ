@@ -606,12 +606,19 @@ export const platformAuditProjectors: Record<string, Projector> = {
       render: 'render tried again',
       upload: 'upload tried again',
       'resolve-locked': 'private upload marked as dealt with',
-      rerender: 'render made again after a network rejected the file',
+      rerender: p.network
+        ? `rendered again and retried on ${p.network}`
+        : 'render made again after a network rejected the file',
     }[p.what];
     return {
       action: e.event.type,
       summary: `Video ${what}: ${post?.title ?? p.postId}`,
-      details: { postId: p.postId, what: p.what },
+      details: {
+        postId: p.postId,
+        what: p.what,
+        ...(p.network ? { network: p.network } : {}),
+        ...(p.revision ? { revision: p.revision } : {}),
+      },
     };
   }),
   VideoUploadLockedPrivate: always(async (_tx, e) => {

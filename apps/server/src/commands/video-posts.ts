@@ -24,6 +24,7 @@ import {
   type SocialNetwork,
   type SubmitVideoPostRequest,
   slotsFrom,
+  VIDEO_DESTINATIONS,
   VIDEO_LIBRARY_PREFIX,
   VIDEO_LIMITS,
   VIDEO_POST_LIMITS,
@@ -383,6 +384,13 @@ export function phaseOf(
   return 'scheduled';
 }
 
+function rerenderOf(d: Record<string, any>): { revision: number; requestedAt: string } | null {
+  const m = d.rerender;
+  return m && typeof m.revision === 'number'
+    ? { revision: m.revision, requestedAt: String(m.requestedAt) }
+    : null;
+}
+
 function uploadDto(r: Row): VideoUpload {
   const d = (r.detail ?? {}) as Record<string, any>;
   return {
@@ -395,6 +403,7 @@ function uploadDto(r: Row): VideoUpload {
     publishAt: d.publishAt ?? null,
     privacy: d.privacy ?? null,
     warnings: Array.isArray(d.warnings) ? d.warnings : [],
+    rerender: rerenderOf(d),
   };
 }
 
@@ -425,6 +434,7 @@ async function toDtos(ctx: Ctx, ps: Row[]): Promise<VideoPost[]> {
         status: s.status,
         url: s.url ?? null,
         error: s.error ?? null,
+        rerender: rerenderOf((s.detail ?? {}) as Record<string, any>),
         // an Instagram file the network refused: only while the share is failed, so a retry after a re-render clears it
         ...(() => {
           const rej = s.status === 'failed' ? readFileRejection(s.detail) : undefined;
@@ -1365,7 +1375,7 @@ export async function rejectVideoPost(
 async function auditRetry(
   ctx: Ctx,
   postId: string,
-  what: 'render' | 'upload' | 'resolve-locked' | 'rerender',
+  what: 'render' | 'upload' | 'resolve-locked',
   by: string,
 ): Promise<void> {
   await ctx.store.append([
@@ -1392,62 +1402,6 @@ export async function retryRender(ctx: Ctx, by: string, postId: string): Promise
   );
   if (!n) throw conflict('not_failed', 'only a failed render can be tried again');
   await auditRetry(ctx, postId, 'render', by);
-  return getVideoPost(ctx, postId);
-}
-
-/**
- * A rendered video that Instagram refused (the file did not pass its processing) is rendered again: the render goes back to
- * the queue, the Instagram share waits for the new file and is checked against the Reels rules before it is sent. The
- * other destinations are not touched. 404 unknown post; 409 `not_scheduled`, `library_video`, `no_rerender_needed` (no
- * Instagram share with a refused file, or the render is not `rendered`), `already_started` (a destination is posting).
- */
-export async function rerenderVideo(ctx: Ctx, by: string, postId: string): Promise<VideoPost> {
-  const now = ctx.clock.now();
-  const p = await one(ctx.pool, 'SELECT status, revision, approved_render_id FROM video_posts WHERE id=$1', [
-    postId,
-  ]);
-  if (!p) throw notFound('video post not found', 'video_post_not_found');
-  if (p.status !== 'approved') throw conflict('not_scheduled', 'this video is not scheduled');
-  const render = await one(
-    ctx.pool,
-    p.approved_render_id
-      ? 'SELECT id, status, library FROM video_renders WHERE id=$1'
-      : 'SELECT id, status, library FROM video_renders WHERE post_id=$1 AND revision=$2',
-    p.approved_render_id ? [p.approved_render_id] : [postId, p.revision],
-  );
-  if (render?.library) throw conflict('library_video', 'a recorded help video cannot be rendered again');
-  const shares = await rows(
-    ctx.pool,
-    `SELECT network, status, detail FROM social_shares WHERE post_id=$1 AND source='video'`,
-    [postId],
-  );
-  const refused = shares.filter((s) => {
-    const rej = s.status === 'failed' ? readFileRejection(s.detail) : undefined;
-    return rej;
-  });
-  if (!render || render.status !== 'rendered' || refused.length === 0)
-    throw conflict('no_rerender_needed', 'no destination needs this video to be rendered again');
-  if (shares.some((s) => s.status === 'posting'))
-    throw conflict('already_started', 'a destination is posting this video right now; try again in a moment');
-  await withTx(ctx.pool, async (tx) => {
-    const n = await exec(
-      tx,
-      `UPDATE video_renders SET status='queued', attempts=0, error=NULL, lease_until=NULL, purged_at=NULL,
-              artifacts='{}'::jsonb, bytes=NULL, duration_s=NULL, finished_at=NULL, not_before=NULL, preview=false
-        WHERE id=$1 AND status='rendered'`,
-      [render.id],
-    );
-    if (!n) throw conflict('no_rerender_needed', 'no destination needs this video to be rendered again');
-    for (const s of refused)
-      await exec(
-        tx,
-        `UPDATE social_shares SET status='pending', attempts=0, error=NULL, next_attempt_at=$3, updated_at=$3,
-                detail=(COALESCE(detail,'{}'::jsonb) - 'dest') || jsonb_build_object('retryAt', $4::text)
-          WHERE post_id=$1 AND network=$2 AND source='video' AND status='failed'`,
-        [postId, s.network, now, now.toISOString()],
-      );
-  });
-  await auditRetry(ctx, postId, 'rerender', by);
   return getVideoPost(ctx, postId);
 }
 
@@ -1502,7 +1456,7 @@ export async function retryShare(
   )
     throw conflict(
       'needs_rerender',
-      `Instagram refused this video file${rej.rejections >= 2 ? ' twice' : ''}: it needs a new render (${rejectionReasons(rej)}). Use Re-render.`.slice(
+      `Instagram refused this video file${rej.rejections >= 2 ? ' twice' : ''}: it needs a new render (${rejectionReasons(rej)}). Use Render again and retry.`.slice(
         0,
         480,
       ),
@@ -1533,6 +1487,106 @@ export async function retryShare(
   );
   await auditRetry(ctx, postId, 'upload', by);
   return getVideoPost(ctx, postId);
+}
+
+/**
+ * A destination the network refused (failed) gets a NEW file: the approved post moves to a new revision, that revision is
+ * rendered through the normal worker path, and only once it is rendered is this destination tried again with it (the
+ * sweep's resumeRerenders). The old render and its file stay until then. Destinations already sent are never touched;
+ * pending ones follow the current revision as always.
+ * 404 unknown post or destination; 409 not_scheduled, library_video, not_failed, already_uploaded, render_in_progress,
+ * share_in_progress.
+ */
+export function renderAgainAndRetry(
+  ctx: Ctx,
+  by: string,
+  postId: string,
+  network: string,
+): Promise<VideoPost> {
+  return withLock(ctx, `video-post-edit:${postId}`, async () => {
+    const p = await one(ctx.pool, 'SELECT id, status, revision, script FROM video_posts WHERE id=$1', [
+      postId,
+    ]);
+    if (!p) throw notFound('video post not found', 'video_post_not_found');
+    const dest = (VIDEO_DESTINATIONS as readonly string[]).includes(network)
+      ? (network as VideoDestination)
+      : null;
+    const share = dest
+      ? await one(
+          ctx.pool,
+          `SELECT status, error, detail FROM social_shares WHERE post_id=$1 AND network=$2 AND source='video'`,
+          [postId, dest],
+        )
+      : null;
+    if (!dest || !share) throw notFound('this video has no such destination', 'share_not_found');
+    if (p.status !== 'approved') throw conflict('not_scheduled', 'this video is not scheduled');
+    if (!p.script) throw conflict('library_video', 'a recorded help video cannot be rendered again');
+    if (share.status !== 'failed')
+      throw conflict('not_failed', 'only a failed destination can be rendered again');
+    const detail = (share.detail ?? {}) as Record<string, any>;
+    if (
+      dest === 'youtube' &&
+      detail.videoId &&
+      !detail.rejected &&
+      !String(share.error ?? '').startsWith('YouTube rejected the video')
+    )
+      throw conflict('already_uploaded', 'the video is on YouTube already; use Retry');
+    const current = await one(ctx.pool, `SELECT status FROM video_renders WHERE post_id=$1 AND revision=$2`, [
+      postId,
+      p.revision,
+    ]);
+    if (current && ['queued', 'rendering'].includes(current.status))
+      throw conflict('render_in_progress', 'this video is being rendered already');
+    const started = await rows(
+      ctx.pool,
+      `SELECT network, status, detail FROM social_shares
+        WHERE post_id=$1 AND source='video' AND network <> $2 AND status IN ('posting','pending')`,
+      [postId, dest],
+    );
+    const busy = started.some((s) => {
+      if (s.status === 'posting') return true;
+      const d = (s.detail ?? {}) as Record<string, any>;
+      const dst = d.dest && typeof d.dest === 'object' ? Object.keys(d.dest).length > 0 : false;
+      return dst || !!d.sessionUri || !!d.videoId;
+    });
+    if (busy)
+      throw conflict(
+        'share_in_progress',
+        'another destination is still uploading the current file; try again when it has finished',
+      );
+    const now = ctx.clock.now();
+    const revision = (p.revision as number) + 1;
+    await withTx(ctx.pool, async (tx) => {
+      await ctx.store.append(
+        [
+          {
+            streamId: videoPostStream(postId),
+            event: {
+              type: 'VideoRetryRequested',
+              payload: { postId, what: 'rerender', by, network: dest, revision },
+            },
+            actor: userActor(by),
+            scope: adminScope,
+          },
+        ],
+        { tx },
+      );
+      await exec(
+        tx,
+        `INSERT INTO video_renders (id, post_id, revision, status, attempts, created_at, not_before, preview)
+         VALUES ($1,$2,$3,'queued',0,$4,NULL,false) ON CONFLICT (post_id, revision) DO NOTHING`,
+        [randomUUID(), postId, revision, now],
+      );
+      await exec(
+        tx,
+        `UPDATE social_shares SET detail = COALESCE(detail,'{}'::jsonb) || jsonb_build_object('rerender',
+                jsonb_build_object('revision', $3::int, 'requestedAt', $4::text, 'by', $5::text)), updated_at=$6
+          WHERE post_id=$1 AND network=$2 AND source='video' AND status='failed'`,
+        [postId, dest, revision, now.toISOString(), by, now],
+      );
+    });
+    return getVideoPost(ctx, postId);
+  });
 }
 
 /** The owner dealt with a video YouTube kept private (made it public by hand, or asked for the audit): uploads go on. */

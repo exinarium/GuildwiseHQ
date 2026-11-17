@@ -648,13 +648,16 @@ describe('errors', () => {
     const retry = await api('POST', `/api/platform/video/posts/${p.id}/shares/instagram/retry`);
     expect([retry.status, retry.body.error.code]).toEqual([409, 'needs_rerender']);
     expect(retry.body.error.message).toMatch(/new render/);
+    expect(retry.body.error.message).toMatch(/Render again and retry/);
     expect(igPosts()).toBe(1);
-    // a destination that is not Instagram has nothing to re-render
-    const other = await api('POST', `/api/platform/video/posts/${p.id}/rerender`);
-    expect(other.status).toBe(200);
-    expect((await share(p.id, 'instagram'))?.status).toBe('pending');
-    const again = await api('POST', `/api/platform/video/posts/${p.id}/rerender`);
-    expect([again.status, again.body.error.code]).toEqual([409, 'no_rerender_needed']);
+    // one action: the share stays failed (marked) until the new file exists
+    const first = await api('POST', `/api/platform/video/posts/${p.id}/shares/instagram/rerender`);
+    expect(first.status).toBe(200);
+    const marked = await share(p.id, 'instagram');
+    expect(marked?.status).toBe('failed');
+    expect(marked?.detail?.rerender).toBeTruthy();
+    const again = await api('POST', `/api/platform/video/posts/${p.id}/shares/instagram/rerender`);
+    expect([again.status, again.body.error.code]).toEqual([409, 'render_in_progress']);
     const audit = await q(`SELECT payload FROM events WHERE stream_id=$1 AND type='VideoRetryRequested'`, [
       `video-${p.id}`,
     ]);
@@ -663,18 +666,21 @@ describe('errors', () => {
     reels.next = passedCheck;
     await tick(); // renders again
     await tick();
+    await tick();
     expect((await share(p.id, 'instagram'))?.status).toBe('sent');
     expect(igPosts()).toBe(2);
     expect((await checkedEvents(p.id)).map((e) => e.payload.outcome)).toEqual([
       'needs_rerender',
       'preflight_ok',
     ]);
+    // the new file is the second revision's
+    expect(dest.payloads.filter((x) => x.network === 'instagram').at(-1)?.filePath).toContain(`/${p.id}/2/`);
   });
 
   it('a re-rendered file that still fails the Reels check is not sent to Instagram', async () => {
     dest.script.instagram = ['igfile'];
     const { p } = await setup('ig-rerender-bad', ['instagram']);
-    await ok(api('POST', `/api/platform/video/posts/${p.id}/rerender`));
+    await ok(api('POST', `/api/platform/video/posts/${p.id}/shares/instagram/rerender`));
     t.clock.advance(5_000);
     await tick();
     await tick();
@@ -740,10 +746,12 @@ describe('errors', () => {
     expect(await igDetail(p.id)).toMatchObject({ kind: 'check_failed' });
     const retry = await api('POST', `/api/platform/video/posts/${p.id}/shares/instagram/retry`);
     expect([retry.status, retry.body.error.code]).toEqual([409, 'needs_rerender']);
-    await ok(api('POST', `/api/platform/video/posts/${p.id}/rerender`));
-    expect((await share(p.id, 'instagram'))?.status).toBe('pending');
+    await ok(api('POST', `/api/platform/video/posts/${p.id}/shares/instagram/rerender`));
+    expect((await share(p.id, 'instagram'))?.status).toBe('failed');
+    expect((await share(p.id, 'instagram'))?.detail?.rerender).toBeTruthy();
     t.clock.advance(5_000);
     reels.next = passedCheck;
+    await tick();
     await tick();
     await tick();
     expect((await share(p.id, 'instagram'))?.status).toBe('sent');

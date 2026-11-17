@@ -443,11 +443,19 @@ against the Reels rules (`REELS_LIMITS` in `packages/video/src/reels.ts`: no edi
 23 to 60 fps, width at most 1920, 3 s to 15 min, at most 300 MB, AAC at most 48 kHz with 1 or 2 channels; the numbers live in that
 one file). The result (each failed rule with its measured value) is stored in `social_shares.detail.fileRejection` and written to the
 post's event stream as `VideoFileChecked`. If a rule fails, the destination stays `failed` and shows "needs re-render"; the video
-review screens offer **Re-render** (`POST /api/platform/video/posts/:id/rerender`) and no retry for that file, and
+review screens offer **Render again and retry Instagram** (`POST /api/platform/video/posts/:id/shares/instagram/rerender`, which
+renders a new revision and retries only that destination once the new file exists) and no retry for that file, and
 `POST /shares/instagram/retry` answers `409 needs_rerender` while the file is unchanged. After the re-render the new file is checked
 before it is sent. If the file meets every rule and Instagram still refuses it, one extra attempt follows after 5 minutes (logged); a
 second refusal fails the destination for good with an alert. Other destinations are not affected. The rendered MP4 is written
 without edit lists (`-use_editlist 0`, `+faststart`), so only files rendered before that need the re-render.
+
+**Render again and retry (any failed destination).** `POST /api/platform/video/posts/:id/shares/:network/rerender` (super admin, like
+the other retries) starts a new render of an approved post (a new revision, a new file) and retries only that failed destination with
+it once it exists. Published destinations are not posted again, and the old file is kept until the new render has finished. If the
+new render fails the destination stays failed with the reason and `Retry render` applies. Errors: `404` unknown post or destination;
+`409` `not_scheduled`, `library_video`, `not_failed`, `already_uploaded` (YouTube video that was uploaded and not rejected),
+`render_in_progress` (also a second concurrent call), `share_in_progress` (another destination is uploading the current file).
 
 **No double posts.** A destination's progress (upload session, container, media or publish id) is kept in `social_shares.detail.dest`;
 a share that holds progress counts as started, so unscheduling, moving, slipping and re-flowing that post are refused
