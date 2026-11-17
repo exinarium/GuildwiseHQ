@@ -1,5 +1,6 @@
 import type {
   DeliverySettingsResponse,
+  DeployCommitPreview,
   DeployRequest,
   DeployResult,
   DeployRunDto,
@@ -13,7 +14,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCanManageOrg } from '../../lib/orgRole.ts';
 import { countOpenShipReleases, countWaitingReleases } from '../../lib/releaseCounts.ts';
 import { encryptForRunner } from '../../lib/runner-seal.ts';
-import { del, get, post, put } from '../client.ts';
+import { ApiError, del, get, post, put } from '../client.ts';
 import { useDesk } from './desk.ts';
 
 /**
@@ -75,6 +76,40 @@ export const useDeploy = (projectId: string) =>
   useDeliveryMutation(projectId, (v: DeployRequest) =>
     post<DeployResult>(`/projects/${projectId}/delivery/deploy`, v),
   );
+
+export const deployPreviewKey = (projectId: string, env: string, commit: string | null) =>
+  ['deploy-preview', projectId, env, commit] as const;
+
+/**
+ * The commit a deploy of `env` would build, resolved by the server with the same code as the deploy itself. Without `commit`
+ * it is the server's default; with one, that commit or the server's error.
+ */
+export function useDeployPreview(projectId: string, env: string, commit: string | null, enabled = true) {
+  return useQuery({
+    enabled,
+    queryKey: deployPreviewKey(projectId, env, commit),
+    retry: false,
+    staleTime: 0,
+    queryFn: async () => {
+      const q = new URLSearchParams({ env, ...(commit ? { commit } : {}) });
+      try {
+        const p = await get<DeployCommitPreview>(`/projects/${projectId}/delivery/deploy/preview?${q}`);
+        // Never let an owner confirm on an answer that does not name a commit.
+        if (!p || typeof p.sha !== 'string' || !p.sha)
+          throw new Error('The server did not say which commit it would build.');
+        return p;
+      } catch (e) {
+        if (e instanceof ApiError && e.code === 'validation_error')
+          throw new ApiError(
+            e.status,
+            e.code,
+            'That is not a commit SHA: use 7 to 40 characters 0-9 and a-f.',
+          );
+        throw e;
+      }
+    },
+  });
+}
 
 /** One recipe secret, encrypted in the browser for the runner of the chosen workstation: only ciphertext is sent. */
 export const useSetDeploySecret = (projectId: string) =>

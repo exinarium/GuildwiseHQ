@@ -1,8 +1,11 @@
 import type { DeployResult } from '@aom/shared';
 import { useState } from 'react';
-import { useDeploy, useRelease } from '../../api/queries/delivery.ts';
+import { ApiError } from '../../api/client.ts';
+import { useDeploy, useDeployPreview, useRelease } from '../../api/queries/delivery.ts';
 import { useEnvStatus } from '../../api/queries/environments.ts';
-import { Button, Dialog, ErrorBox, Spinner, useToast } from '../ui.tsx';
+import { useDebounced } from '../../lib/useDebounced.ts';
+import { Button, Dialog, ErrorBox, Spinner, TextInput, useToast } from '../ui.tsx';
+import { commitSourceText, DeployCommitPreview } from './DeployCommitPreview.tsx';
 
 /**
  * Releasing to a site (docs/design/environments-ux.md journey I): the version, what changed, which places, the facts (a backup
@@ -47,14 +50,41 @@ export function ReleaseSheet({
     toast.success(`Releasing to ${started.join(', ')}`);
     setRefused(no.map((x) => `${x.target || label}: ${x.detail ?? x.refusal ?? 'refused'}`));
   };
+  // (A) a run waits for release: its commit is fixed. (B) otherwise a deploy, where the owner may enter a commit.
+  const releasePath = !!w && places.length > 0;
+  const waitingCommit = w?.commit || null;
+  const [typed, setTyped] = useState('');
+  const entered = typed.replace(/\s+/g, '').toLowerCase() || null;
+  const [settled, flush] = useDebounced(entered, 400);
+  const settling = !releasePath && entered !== settled;
+  const asked = releasePath ? waitingCommit : (settled ?? waitingCommit);
+  const preview = useDeployPreview(projectId, env, asked, !status.isPending);
+  const showsWaiting = !!asked && asked === waitingCommit && !settled;
+  const previewBlocked = status.isPending || settling || preview.isPending || preview.isError;
+  const pe = preview.error;
+  const retryable = pe instanceof ApiError ? pe.status >= 500 || pe.status === 409 : !!pe;
   const go = () => {
     setRefused(null);
-    if (w && places.length > 0)
+    if (releasePath) {
       release.mutate(
         chosen.map((p) => p.runId),
         { onSuccess: answered },
       );
-    else deploy.mutate({ env, ...(w?.commit ? { commit: w.commit } : {}) }, { onSuccess: answered });
+      return;
+    }
+    const p = preview.data;
+    if (!p) return;
+    const body = settled
+      ? { env, commit: p.sha }
+      : waitingCommit
+        ? { env, commit: waitingCommit }
+        : { env, expectCommit: p.sha };
+    deploy.mutate(body, {
+      onSuccess: answered,
+      onError: (e) => {
+        if (e instanceof ApiError && e.code === 'commit_moved') void preview.refetch();
+      },
+    });
   };
   const reason = blocked
     ? `Waiting for: ${w?.waitingFor.join('; ') || 'the rules to hold'}.`
@@ -76,7 +106,7 @@ export function ReleaseSheet({
             variant="primary"
             onClick={go}
             loading={pending}
-            disabled={!!reason || status.isPending}
+            disabled={!!reason || previewBlocked}
             data-testid="release-now"
           >
             Release now
@@ -89,11 +119,55 @@ export function ReleaseSheet({
           <Spinner label="Loading" />
         ) : (
           <>
-            <section aria-label="Version">
+            <section aria-label="Version" className="flex flex-col gap-2">
               <h3 className="font-semibold text-fg">Version</h3>
-              <p className="font-mono text-base text-fg" data-testid="release-version">
-                {w?.version ?? (w?.commit ? w.commit.slice(0, 7) : 'the latest approved version')}
-              </p>
+              {preview.isPending && <Spinner inline label="Checking the commit" />}
+              {preview.data && (
+                <DeployCommitPreview
+                  preview={preview.data}
+                  sourceText={commitSourceText(preview.data, showsWaiting)}
+                />
+              )}
+              {!releasePath && (
+                <TextInput
+                  label="Commit (optional)"
+                  hint="Leave empty to build the commit shown above. Enter a SHA to build that commit instead."
+                  value={typed}
+                  onChange={(e) => {
+                    setTyped(e.target.value);
+                    setRefused(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      flush();
+                      e.currentTarget.blur();
+                    }
+                  }}
+                  className="font-mono"
+                  inputMode="text"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  enterKeyHint="done"
+                  maxLength={64}
+                  aria-describedby={preview.isError ? 'release-commit-error' : undefined}
+                  aria-invalid={preview.isError && settled ? true : undefined}
+                  data-testid="release-commit-input"
+                />
+              )}
+              {preview.isError && (
+                <div id="release-commit-error" data-testid="release-commit-error">
+                  <ErrorBox error={pe} onRetry={retryable ? () => void preview.refetch() : undefined} />
+                </div>
+              )}
+              {releasePath && (
+                <p className="text-xs text-muted" data-testid="release-commit-fixed">
+                  This release was prepared for this commit. To build another one, cancel it under Releases,
+                  then deploy again.
+                </p>
+              )}
             </section>
             {w && w.cards.length > 0 && (
               <section aria-label="What changed">
@@ -150,6 +224,11 @@ export function ReleaseSheet({
                   </p>
                 )}
               </section>
+            )}
+            {!reason && previewBlocked && !preview.isError && (
+              <p role="status" className="text-xs text-subtle">
+                Checking which commit will be built…
+              </p>
             )}
             {reason && (
               <p role="status" className="text-xs text-subtle" data-testid="release-disabled-reason">

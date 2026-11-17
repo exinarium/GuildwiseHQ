@@ -149,6 +149,32 @@ export const releaseHandlers = [
       generatedAt: ago(0),
     }),
   ),
+  http.get(`${A}/projects/:id/delivery/deploy/preview`, ({ request }) => {
+    const commit = new URL(request.url).searchParams.get('commit');
+    if (commit && !/^[0-9a-f]{7,64}$/.test(commit))
+      return HttpResponse.json(
+        { error: { code: 'validation_error', message: 'request validation failed' } },
+        { status: 400 },
+      );
+    if (commit === 'deadbee')
+      return HttpResponse.json(
+        { error: { code: 'commit_unknown', message: 'commit deadbee is not in web' } },
+        { status: 422 },
+      );
+    const sha = (commit ?? 'a1b2c3d4e5f6').padEnd(40, '0');
+    return HttpResponse.json({
+      env: 'production',
+      repo: 'web',
+      branch: 'main',
+      sha,
+      shortSha: sha.slice(0, 7),
+      subject: 'Release 0.9.4',
+      author: 'Sam',
+      committedAt: ago(30),
+      source: commit ? 'explicit' : 'working-branch',
+      sourceDetail: commit ? null : 'tip of main',
+    });
+  }),
   http.get(`${A}/delivery/queue`, () => HttpResponse.json({ items: queueItems() })),
   http.get(`${A}/delivery/runs`, () =>
     HttpResponse.json({
