@@ -122,11 +122,34 @@ const status = (rulesMet: boolean) => ({
   generatedAt: ago(0),
 });
 
+const previewBody = (commit: string | null) => {
+  const sha = (commit ?? '9f8e7d6c5b4a').padEnd(40, '0');
+  return {
+    env: 'production',
+    repo: 'web',
+    branch: 'main',
+    sha,
+    shortSha: sha.slice(0, 7),
+    subject: 'Fix the footer',
+    author: 'Sam',
+    committedAt: ago(30),
+    source: commit ? 'explicit' : 'working-branch',
+    sourceDetail: commit ? null : 'tip of main',
+  };
+};
+const errBody = (code: string, message: string, status: number) => json({ error: { code, message } }, status);
+const noWaiting = () => {
+  const st = status(true);
+  return { ...st, environments: [{ ...st.environments[0], waitingRelease: null }] };
+};
+
 function route(
   over: {
     queue?: unknown;
     status?: unknown;
     release?: () => unknown;
+    preview?: (commit: string | null) => Response;
+    deploy?: () => Response;
     desk?: unknown[];
     prep?: unknown[];
   } = {},
@@ -136,6 +159,11 @@ function route(
     const method = init?.method ?? 'GET';
     calls.push({ url: u, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (u === '/api/org/live') return json({ rows: live });
+    if (u.includes('/delivery/deploy/preview')) {
+      const commit = new URL(u, 'http://x').searchParams.get('commit');
+      return over.preview ? over.preview(commit) : json(previewBody(commit));
+    }
+    if (u.endsWith('/delivery/deploy') && method === 'POST' && over.deploy) return over.deploy();
     if (u === '/api/delivery/release' && over.release) return json(over.release());
     if (u === '/api/delivery/queue') return json({ items: over.queue ?? [queueItem(false)] });
     if (u.startsWith('/api/desk') && over.desk)
@@ -377,7 +405,12 @@ describe('ReleaseSheet', () => {
     expect(await screen.findByTestId('release-waiting-for')).toHaveTextContent(
       'Waiting for: test site healthy for 3 more minutes',
     );
-    expect(screen.getByTestId('release-version')).toHaveTextContent('a1b2c3d');
+    expect(await screen.findByTestId('release-version')).toHaveTextContent('a1b2c3d');
+    expect(screen.getByTestId('release-commit-source')).toHaveTextContent('Waiting for release');
+    expect(screen.queryByTestId('release-commit-input')).toBeNull();
+    expect(calls.some((c) => c.url.includes('deploy/preview') && c.url.includes('commit=a1b2c3d4e5f6'))).toBe(
+      true,
+    );
     expect(screen.getByTestId('release-backup')).toHaveTextContent('backup');
     expect(screen.getByTestId('release-now')).toBeDisabled();
     expect(screen.getByTestId('release-disabled-reason')).toBeInTheDocument();
@@ -471,6 +504,119 @@ describe('ReleaseSheet', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(screen.queryByTestId('release-refused')).toBeNull();
     expect(n).toBe(2);
+  });
+
+  describe('deploy path (nothing waiting)', () => {
+    const open = () => {
+      route({ status: noWaiting(), queue: [], ...over });
+      wrap(<ReleaseSheet projectId={U(1)} env="production" label="Live site" onClose={() => undefined} />);
+    };
+    let over: Parameters<typeof route>[0] = {};
+    beforeEach(() => {
+      over = {};
+    });
+    const deployPosts = () => calls.filter((c) => c.method === 'POST' && c.url.endsWith('/delivery/deploy'));
+
+    it('shows the commit before confirm turns on', async () => {
+      open();
+      expect(screen.getByTestId('release-now')).toBeDisabled();
+      const v = await screen.findByTestId('release-version');
+      expect(v).toHaveTextContent('9f8e7d6');
+      expect(v).toHaveAttribute('title', '9f8e7d6c5b4a'.padEnd(40, '0'));
+      expect(screen.getByTestId('release-commit-subject')).toHaveTextContent('Fix the footer');
+      expect(screen.getByTestId('release-commit-date')).toBeInTheDocument();
+      expect(screen.getByTestId('release-commit-source')).toHaveTextContent('Working branch tip (main)');
+      await waitFor(() => expect(screen.getByTestId('release-now')).toBeEnabled());
+    });
+
+    it.each([
+      ['500', () => errBody('internal', 'boom', 500)],
+      ['409 commit_unresolved', () => errBody('commit_unresolved', 'workstation offline', 409)],
+    ])('a preview error (%s) keeps confirm off and offers Try again', async (_n, preview) => {
+      over = { preview };
+      open();
+      const box = await screen.findByTestId('release-commit-error');
+      expect(within(box).getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+      expect(screen.getByTestId('release-now')).toBeDisabled();
+    });
+
+    it('shows the server error inline for a bad or unknown SHA, and recovers when cleared', async () => {
+      over = {
+        preview: (c) =>
+          c === 'zz12'
+            ? errBody('validation_error', 'request validation failed', 400)
+            : c === 'deadbee'
+              ? errBody('commit_unknown', 'commit deadbee is not in web', 422)
+              : json(previewBody(c)),
+      };
+      open();
+      const input = await screen.findByTestId('release-commit-input');
+      await waitFor(() => expect(screen.getByTestId('release-now')).toBeEnabled());
+      await userEvent.type(input, 'zz12');
+      const box = await screen.findByTestId('release-commit-error', undefined, { timeout: 2000 });
+      expect(box).toHaveTextContent('That is not a commit SHA');
+      expect(within(box).queryByRole('button', { name: 'Try again' })).toBeNull();
+      expect(screen.getByTestId('release-now')).toBeDisabled();
+      await userEvent.clear(input);
+      await userEvent.type(input, 'deadbee');
+      await waitFor(
+        () => expect(screen.getByTestId('release-commit-error')).toHaveTextContent('is not in web'),
+        {
+          timeout: 2000,
+        },
+      );
+      expect(screen.getByTestId('release-now')).toBeDisabled();
+      await userEvent.clear(input);
+      await waitFor(() => expect(screen.getByTestId('release-now')).toBeEnabled(), { timeout: 2000 });
+      expect(screen.queryByTestId('release-commit-error')).toBeNull();
+    });
+
+    it('an entered commit is normalised, previewed, and deployed as the full SHA', async () => {
+      open();
+      const input = await screen.findByTestId('release-commit-input');
+      await waitFor(() => expect(screen.getByTestId('release-now')).toBeEnabled());
+      await userEvent.type(input, ' A1B2C3D ');
+      expect(screen.getByTestId('release-now')).toBeDisabled(); // still typing
+      await waitFor(
+        () => expect(screen.getByTestId('release-commit-source')).toHaveTextContent('Commit you entered'),
+        {
+          timeout: 2000,
+        },
+      );
+      expect(calls.some((c) => c.url.includes('deploy/preview') && c.url.endsWith('commit=a1b2c3d'))).toBe(
+        true,
+      );
+      const btn = screen.getByTestId('release-now');
+      await waitFor(() => expect(btn).toBeEnabled());
+      await userEvent.click(btn);
+      await waitFor(() => expect(deployPosts()).toHaveLength(1));
+      expect(deployPosts()[0]?.body).toEqual({ env: 'production', commit: 'a1b2c3d'.padEnd(40, '0') });
+    });
+
+    it('an empty field sends no commit, only the previewed SHA as expectCommit', async () => {
+      open();
+      const btn = await screen.findByTestId('release-now');
+      await waitFor(() => expect(btn).toBeEnabled());
+      await userEvent.click(btn);
+      await waitFor(() => expect(deployPosts()).toHaveLength(1));
+      expect(deployPosts()[0]?.body).toEqual({
+        env: 'production',
+        expectCommit: '9f8e7d6c5b4a'.padEnd(40, '0'),
+      });
+    });
+
+    it('commit_moved shows the message and asks for the preview again', async () => {
+      over = { deploy: () => errBody('commit_moved', 'the commit to deploy is now 1234567', 409) };
+      open();
+      const btn = await screen.findByTestId('release-now');
+      await waitFor(() => expect(btn).toBeEnabled());
+      const before = calls.filter((c) => c.url.includes('deploy/preview')).length;
+      await userEvent.click(btn);
+      expect(await screen.findByText(/the commit to deploy is now 1234567/)).toBeInTheDocument();
+      await waitFor(() =>
+        expect(calls.filter((c) => c.url.includes('deploy/preview')).length).toBeGreaterThan(before),
+      );
+    });
   });
 });
 

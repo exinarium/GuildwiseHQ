@@ -38,6 +38,7 @@ import {
   toggleStep,
   unknownClaims,
 } from '../../lib/role-builder.ts';
+import { useDebounced } from '../../lib/useDebounced.ts';
 import { SkillPicker } from '../capabilities/SkillPicker.tsx';
 import { ListInput } from '../org/ListInput.tsx';
 import { RoleEditor } from '../org/RoleEditor.tsx';
@@ -52,15 +53,6 @@ const SECTIONS: Array<{ id: RoleSection | 'preview'; title: string }> = [
   { id: 'steps', title: 'Steps it can take' },
   { id: 'preview', title: 'Preview what the agent is told' },
 ];
-
-function useDebounced<T>(value: T, ms: number): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}
 
 const parseLines = (t: string) =>
   t
@@ -238,7 +230,7 @@ export function RoleBuilder({
         : null,
     [previewOpen, value, previewSeniority, pwf, pstage],
   );
-  const debounced = useDebounced(request, 500);
+  const [debounced] = useDebounced(request, 500);
   const preview = useRolePreview(debounced, projectId);
 
   if (advanced) {

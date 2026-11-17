@@ -246,6 +246,7 @@ On each environment card after any change: `Saved > Tried (dry run) > Approved` 
 
 - A release is "ready" when the test site updated and the rules hold. The Live site card shows **Release 0.9.4** (primary) plus "Rules: the test site has been healthy on this version for 10 minutes (7 minutes to go)" in text, not as a lint message.
 - Pressing **Release** opens a sheet: commit/version, what changed (list of merged cards), which place(s) (tick if several), "Back up first" shown as a fact, **Release now**. Refused releases show the missing rules by name ("Waiting for: test site healthy for 3 more minutes").
+- The sheet shows the commit that will be built before the button can be pressed: short SHA (full SHA on hover and Copy), subject, date and where it came from, as the server resolves it. When nothing waits, an optional **Commit** field takes a specific SHA; the commit shown follows it, or the server's error shows under the field and the button stays off.
 - The same action exists in **Releases > Waiting for you** (org-wide) and on the desk item.
 
 ### J. Seeing what is live
