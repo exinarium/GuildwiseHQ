@@ -338,7 +338,8 @@ module.exports = {
     ${behaviour === 'refuse' ? "throw new Error('the compose config is outside the allowlist: privileged');" : ''}
     return { hash: ${JSON.stringify(HASH)}, pinned: { services: { web: {} } } };
   },
-  formatAppConf: ({ source, hash }) => '# written by guildwise-admin approve-app\\nsource=' + source + '\\nhash=' + hash + '\\n',
+  formatAppConf: ({ source, hash, owner, group }) =>
+    '# written by guildwise-admin approve-app\\nsource=' + source + '\\nhash=' + hash + '\\nowner=' + owner + '\\ngroup=' + group + '\\n',
 };
 `;
     writeFileSync(join(dir, 'deploy-compose'), body, { mode: 0o755 });
@@ -356,11 +357,18 @@ module.exports = {
     const c = f.calls();
     expect(c.app).toBe('shop');
     expect(c.folder).toBe(join(f.root, '/home/guildwise-runner/src/shop'));
-    expect(c.opts).toMatchObject({ dropPrivileges: true, readerCommand: [admin.NODE_PATH, f.helperFile] });
+    expect(c.opts).toMatchObject({
+      dropPrivileges: true,
+      readerUid: RUNNER.uid,
+      readerGid: RUNNER.gid,
+      readerCommand: [admin.NODE_PATH, f.helperFile],
+    });
     const confFile = join(f.root, admin.APPS_CONF_DIR, 'shop.conf');
     expect(admin.parseAppConf(readFileSync(confFile, 'utf8'))).toEqual({
       source: '/home/guildwise-runner/src/shop',
       hash: HASH,
+      owner: String(RUNNER.uid),
+      group: String(RUNNER.gid),
     });
     expect(statSync(confFile).mode & 0o777).toBe(0o644);
     for (const d of ['/etc/guildwise-runner', admin.APPS_CONF_DIR, '/var/lib/guildwise'])
@@ -445,9 +453,13 @@ module.exports = {
       expect(typeof dc.prepare).toBe('function');
       expect(() => dc.checkAppName('a'.repeat(48))).not.toThrow();
       expect(() => dc.checkAppName('a'.repeat(49))).toThrow();
-      const text = dc.formatAppConf({ source: '/home/guildwise-runner/src/shop', hash: HASH });
-      expect(dc.parseAppConf(text)).toEqual({ source: '/home/guildwise-runner/src/shop', hash: HASH });
-      expect(admin.parseAppConf(text)).toEqual({ source: '/home/guildwise-runner/src/shop', hash: HASH });
+      const source = '/home/guildwise-runner/src/shop';
+      const text = dc.formatAppConf({ source, hash: HASH, owner: 1001, group: 1001 });
+      expect(dc.parseAppConf(text)).toEqual({ source, hash: HASH, owner: 1001, group: 1001 });
+      expect(admin.parseAppConf(text)).toEqual({ source, hash: HASH, owner: '1001', group: '1001' });
+      // the approval never names root as the reader
+      expect(() => dc.formatAppConf({ source, hash: HASH, owner: 0, group: 1001 })).toThrow(/non-root uid/);
+      expect(() => dc.formatAppConf({ source, hash: HASH, owner: 1001, group: 0 })).toThrow(/non-root gid/);
     },
   );
 });

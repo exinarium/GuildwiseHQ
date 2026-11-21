@@ -795,6 +795,9 @@ async function approveApp(sys, app, opts = {}) {
     res = await helper.prepare(app, P(sys, source), {
       rootUid: sys.rootUid ?? 0,
       dropPrivileges: true,
+      // W10 [B1]: the freeze reader runs as the runner user this approval names, recorded in the conf below
+      readerUid: u.uid,
+      readerGid: u.gid,
       homeDir: rootHome,
       readerCommand: [sys.execPath, P(sys, DEPLOY_COMPOSE)],
       ...(sys.root === '/' ? {} : { confDir: P(sys, APPS_CONF_DIR), stateDir: P(sys, `${STATE_DIR}/apps`) }),
@@ -822,7 +825,12 @@ async function approveApp(sys, app, opts = {}) {
       return { approved: false, hash: res.hash };
     }
   }
-  writeRootFile(sys, confPath, helper.formatAppConf({ source, hash: res.hash }), 0o644);
+  writeRootFile(
+    sys,
+    confPath,
+    helper.formatAppConf({ source, hash: res.hash, owner: u.uid, group: u.gid }),
+    0o644,
+  );
   note(sys, `Approved ${app}: ${confPath}.`);
   return { approved: true, hash: res.hash };
 }
