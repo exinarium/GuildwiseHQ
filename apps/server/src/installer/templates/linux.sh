@@ -230,6 +230,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 Environment="PATH=$(service_path)"
+$([ -n "${RUNNER_CA}" ] && printf 'Environment="NODE_EXTRA_CA_CERTS=%s"' "${RUNNER_CA}")
 ExecStart="${RUNNER_ROOT}/current/aom-runner" start
 Restart=always
 RestartSec=10
@@ -257,6 +258,7 @@ write_fallback_launcher() {
 #!/bin/sh
 # Starts the ${APP_NAME} runner in the background (used when systemd is not available).
 export PATH="$(service_path)"
+$([ -n "${RUNNER_CA}" ] && printf 'export NODE_EXTRA_CA_CERTS="%s"' "${RUNNER_CA}")
 mkdir -p "${DATA_DIR}/logs"
 if [ -f "${DATA_DIR}/status.json" ] && kill -0 "\$(sed -n 's/.*"pid": *\\([0-9]*\\).*/\\1/p' "${DATA_DIR}/status.json")" 2>/dev/null; then exit 0; fi
 nohup "${RUNNER_ROOT}/current/aom-runner" start >>"${DATA_DIR}/logs/service.log" 2>&1 &
@@ -285,7 +287,7 @@ stop_legacy_services() {
 stop_dedicated_service() { as_root systemctl stop guildwise-runner.service >/dev/null 2>&1 || true; }
 
 install_dedicated_service() {
-  as_root "${ADMIN}" service install --runner-root "${RUNNER_ROOT}" --start ||
+  as_root "${ADMIN}" service install --runner-root "${RUNNER_ROOT}" ${RUNNER_CA:+--ca-file "${RUNNER_CA}"} --start ||
     die "guildwise-admin could not install the guildwise-runner service." "Run: sudo ${ADMIN} service install --runner-root ${RUNNER_ROOT} --start   to see why, then run the command again."
   as_root systemctl restart guildwise-runner.service ||
     die "The service could not be started." "Run \`sudo systemctl status guildwise-runner\` to see why, then run the command again."

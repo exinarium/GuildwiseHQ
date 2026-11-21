@@ -1,6 +1,7 @@
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { FileAuthority } from '../src/policy/authority.ts';
 import { approve, defaultCliDeps } from '../src/policy/cli.ts';
@@ -23,6 +24,7 @@ const RELEASE = '0190a000-0000-7000-8000-000000000020';
 const TARGET = '0190a000-0000-7000-8000-000000000021';
 const REPO = '0190a000-0000-7000-8000-000000000022';
 const pubLine = (pub: string) => pub.split('\n')[1] as string;
+const CORE_REPO = resolve(import.meta.dirname, '..', '..', '..');
 
 function realAuthority(over: Record<string, unknown> = {}) {
   const dir = tmp('aom-policy-');
@@ -48,6 +50,7 @@ describe('release.prepare (R30, W14)', () => {
   it('is held, then packages with the target key in a clean worktree and reports the exact manifest text', async () => {
     const a = realAuthority();
     let seen: string[] = [];
+    let check: { status: number | null; stdout: string; stderr: string } | undefined;
     h = await startHarness(
       {},
       {
@@ -57,6 +60,12 @@ describe('release.prepare (R30, W14)', () => {
         // the repository's package step, stubbed: it writes the manifest where --out says, embedding the key it got
         prepareExec: async (_cmd, args, o) => {
           seen = args;
+          // the real package-runner.sh accepts this exact command line and lists the pinned Node runtime (UAT R25 F5)
+          check = spawnSync(
+            'bash',
+            [join(CORE_REPO, 'scripts/package-runner.sh'), ...args.slice(1), '--check'],
+            { encoding: 'utf8', env: { ...o.env, AOM_RUNNER_NODE_RUNTIME: '' } },
+          );
           const out = args[args.indexOf('--out') + 1] as string;
           const key = readFileSync(args[args.indexOf('--pubkey') + 1] as string, 'utf8');
           mkdirSync(out, { recursive: true });
@@ -108,6 +117,8 @@ describe('release.prepare (R30, W14)', () => {
     expect(report.artefactSha256).toBe(createHash('sha256').update(onDisk).digest('hex'));
     expect(onDisk).toContain(pubLine(TEST_PUB)); // packaged with the target's public key
     expect(seen).toContain('--pubkey');
+    expect(check?.status, check?.stderr).toBe(0);
+    expect(check?.stdout).toContain(`node runtime ${join(CORE_REPO, 'scripts/node-runtime.json')}`);
     const result = await h.server.waitFor('command.result', (m) => m.commandId === 'c-prep');
     expect(result.ok).toBe(true);
     expect(new ArtefactIndex(a.dir).find(RELEASE, TARGET)?.sha256).toBe(report.artefactSha256);

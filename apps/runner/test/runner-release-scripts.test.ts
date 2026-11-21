@@ -231,3 +231,88 @@ describe('package-runner.sh keeps a per-version manifest', () => {
     expect(sh).toMatch(/cp "\$OUT\/manifest\.json" "\$OUT\/manifest-\$VERSION\.json"/);
   });
 });
+
+describe('package-runner.sh always lists the pinned Node runtime (UAT R25 F5)', () => {
+  // The real script, with --check (options and runtime resolved, nothing built) or a refusal that stops before the build.
+  const out = () => mkdtempSync(join(tmpdir(), 'aom-pkg-'));
+  const env = { AOM_RUNNER_NODE_RUNTIME: '' };
+  const PINNED = join(REPO, 'scripts/node-runtime.json');
+  const PLATFORMS = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64'];
+
+  it('pins Node 22 for every installer platform, from nodejs.org, with the sha256 QA verified for linux-x64', () => {
+    const r = JSON.parse(readFileSync(PINNED, 'utf8')) as Record<string, { url: string; sha256: string }>;
+    expect(Object.keys(r).sort()).toEqual(PLATFORMS);
+    for (const [k, v] of Object.entries(r)) {
+      expect(v.url).toBe(`https://nodejs.org/dist/v22.23.4/node-v22.23.4-${k}.tar.xz`);
+      expect(v.sha256).toMatch(/^[0-9a-f]{64}$/);
+    }
+    expect(r['linux-x64']?.sha256).toBe('1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce');
+  });
+
+  it('without --node-runtime (the release.prepare and pnpm package:runner command lines) it uses the pinned file', () => {
+    for (const extra of [[], ['--pubkey', join(FIXTURES, 'test.pub')]]) {
+      const r = run('bash', [script('package-runner.sh'), ...extra, '--out', out(), '--check'], { env });
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout).toContain(`package-runner: node runtime ${PINNED}`);
+    }
+  });
+
+  it('the manifest of a build with the pinned file lists all four platforms', () => {
+    const dir = out();
+    const tgz = join(dir, 'aom-runner-1.10.0.tgz');
+    writeFileSync(tgz, 'x');
+    const r = run('node', [script('runner-manifest.mjs'), tgz, '1.10.0', '1.10.0', PINNED]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(Object.keys(JSON.parse(r.stdout).nodeRuntime).sort()).toEqual(PLATFORMS);
+  });
+
+  it('a tree without the pinned file refuses to build without --node-runtime', () => {
+    // a minimal copy of the repository: the script, the two version files, no scripts/node-runtime.json
+    const root = out();
+    mkdirSync(join(root, 'scripts'));
+    mkdirSync(join(root, 'apps/runner/src/update'), { recursive: true });
+    copyFileSync(script('package-runner.sh'), join(root, 'scripts/package-runner.sh'));
+    for (const f of ['apps/runner/src/version.ts', 'apps/runner/src/update/floor.ts'])
+      copyFileSync(join(REPO, f), join(root, f));
+    const r = run('bash', [join(root, 'scripts/package-runner.sh'), '--out', join(root, 'release')], { env });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('--node-runtime <file.json> is required');
+  });
+
+  it('refuses a runtime file without an https url and sha256 for every installer platform', () => {
+    const dir = out();
+    const f = join(dir, 'node-runtime.json');
+    const ok = {
+      url: 'https://nodejs.org/dist/v22.23.4/node-v22.23.4-linux-x64.tar.xz',
+      sha256: 'a'.repeat(64),
+    };
+    writeFileSync(f, JSON.stringify({ 'linux-x64': ok, 'linux-arm64': ok, 'darwin-x64': { url: ok.url } }));
+    const r = run('bash', [script('package-runner.sh'), '--out', dir, '--node-runtime', f, '--check'], {
+      env,
+    });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('needs an https url and a sha256 for darwin-x64, darwin-arm64');
+    const missing = run(
+      'bash',
+      [script('package-runner.sh'), '--out', dir, '--node-runtime', join(dir, 'nope.json'), '--check'],
+      { env },
+    );
+    expect(missing.status).toBe(2);
+    expect(missing.stderr).toContain('does not exist');
+  });
+
+  it('--no-node-runtime is explicit and excludes --node-runtime', () => {
+    const r = run(
+      'bash',
+      [script('package-runner.sh'), '--no-node-runtime', '--node-runtime', '/x.json', '--out', out()],
+      { env },
+    );
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('exclude each other');
+    const dev = run('bash', [script('package-runner.sh'), '--no-node-runtime', '--out', out(), '--check'], {
+      env,
+    });
+    expect(dev.status, dev.stderr).toBe(0);
+    expect(dev.stdout).toContain('package-runner: node runtime none');
+  });
+});

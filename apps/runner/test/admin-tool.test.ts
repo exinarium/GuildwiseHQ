@@ -200,6 +200,51 @@ describe('service install [R18-P]', () => {
     expect(existsSync(join(f.root, admin.SYSTEMD_UNIT))).toBe(false);
   });
 
+  it('--ca-file: a root-owned copy of the CA, NODE_EXTRA_CA_CERTS in the unit, TLS checks left on (UAT R25 F4)', async () => {
+    const f = fakeSystem({ users: [RUNNER] });
+    const src = join(RUNNER.home, '.local/share/guildwise/runner/ca.pem');
+    mkdirSync(join(f.root, RUNNER.home, '.local/share/guildwise/runner'), { recursive: true });
+    const pem = '-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----\n';
+    writeFileSync(join(f.root, src), pem);
+    expect(await admin.main(['service', 'install', '--ca-file', src, '--start'], f.sys)).toBe(0);
+    expect(readFileSync(join(f.root, admin.RUNNER_CA_FILE), 'utf8')).toBe(pem);
+    expect(statSync(join(f.root, admin.RUNNER_CA_FILE)).mode & 0o777).toBe(0o644);
+    const unit = readFileSync(join(f.root, admin.SYSTEMD_UNIT), 'utf8');
+    expect(unit).toContain('Environment="NODE_EXTRA_CA_CERTS=/etc/guildwise-runner/ca.pem"\n');
+    expect(unit).not.toContain('NODE_TLS_REJECT_UNAUTHORIZED');
+    // a later install without the option keeps the CA
+    expect(await admin.main(['service', 'install'], f.sys)).toBe(0);
+    expect(readFileSync(join(f.root, admin.SYSTEMD_UNIT), 'utf8')).toContain('NODE_EXTRA_CA_CERTS=');
+    // without any CA: no line
+    const g = fakeSystem({ users: [RUNNER] });
+    expect(await admin.main(['service', 'install'], g.sys)).toBe(0);
+    expect(readFileSync(join(g.root, admin.SYSTEMD_UNIT), 'utf8')).not.toContain('NODE_EXTRA_CA_CERTS');
+  });
+
+  it('--ca-file refuses a missing file, a non-certificate and a private key', async () => {
+    const f = fakeSystem({ users: [RUNNER] });
+    mkdirSync(join(f.root, 'tmp'), { recursive: true });
+    writeFileSync(join(f.root, 'tmp/not.pem'), 'hello\n');
+    writeFileSync(
+      join(f.root, 'tmp/key.pem'),
+      '-----BEGIN CERTIFICATE-----\nx\n-----END CERTIFICATE-----\n-----BEGIN PRIVATE KEY-----\ny\n',
+    );
+    for (const file of ['/tmp/missing.pem', '/tmp/not.pem', '/tmp/key.pem']) {
+      expect(await admin.main(['service', 'install', '--ca-file', file], f.sys)).toBe(1);
+    }
+    expect(existsSync(join(f.root, admin.RUNNER_CA_FILE))).toBe(false);
+    expect(existsSync(join(f.root, admin.SYSTEMD_UNIT))).toBe(false);
+  });
+
+  it('macOS: the LaunchDaemon gets NODE_EXTRA_CA_CERTS with a CA', () => {
+    const u = { name: 'guildwise-runner', uid: 497, gid: 20, home: '/var/guildwise-runner' };
+    const root = '/var/guildwise-runner/.local/share/guildwise/runner';
+    expect(admin.plistText(u, root, '/etc/guildwise-runner/ca.pem')).toContain(
+      '<key>NODE_EXTRA_CA_CERTS</key><string>/etc/guildwise-runner/ca.pem</string>',
+    );
+    expect(admin.plistText(u, root)).not.toContain('NODE_EXTRA_CA_CERTS');
+  });
+
   it('macOS: a LaunchDaemon with UserName guildwise-runner', () => {
     const plist = admin.plistText(
       { name: 'guildwise-runner', uid: 497, gid: 20, home: '/var/guildwise-runner' },

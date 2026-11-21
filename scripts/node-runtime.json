@@ -1,0 +1,18 @@
+{
+  "linux-x64": {
+    "url": "https://nodejs.org/dist/v22.23.4/node-v22.23.4-linux-x64.tar.xz",
+    "sha256": "1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce"
+  },
+  "linux-arm64": {
+    "url": "https://nodejs.org/dist/v22.23.4/node-v22.23.4-linux-arm64.tar.xz",
+    "sha256": "6287aa46b6c375d816e63ae66d024fbbfd70404825aabdfdf898a970871d2f4b"
+  },
+  "darwin-x64": {
+    "url": "https://nodejs.org/dist/v22.23.4/node-v22.23.4-darwin-x64.tar.xz",
+    "sha256": "f42abca7aaac61efc57d49fb42ea84fc53bbeba9a749cb03a291ce6e4e7a69c1"
+  },
+  "darwin-arm64": {
+    "url": "https://nodejs.org/dist/v22.23.4/node-v22.23.4-darwin-arm64.tar.xz",
+    "sha256": "037650d0839f457747396f052073fb48333d31bf5abd3c98b74da20d89ebb1ad"
+  }
+}

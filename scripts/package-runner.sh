@@ -5,13 +5,18 @@
 # Contents of the tgz: aom-runner/{aom-runner, aom-runner.cmd, guildwise-runner.cmd, dist/ (with dist/grammars), node_modules/,
 # package.json, README.md, THIRD_PARTY_NOTICES}
 #
-#   scripts/package-runner.sh [--pubkey <file.pub>] [--out <dir>] [--node-runtime <file.json>]
+#   scripts/package-runner.sh [--pubkey <file.pub>] [--out <dir>] [--node-runtime <file.json> | --no-node-runtime] [--check]
 #
 # --pubkey        compile THIS minisign public key in as the release key the runner trusts (own-key and per-target builds,
 #                 e.g. --pubkey ~/.config/guildwise/signing/uat/guildwise-uat.pub --out release/uat/). Default: the official
 #                 key in apps/runner/release-key/ (a placeholder until the owner runs scripts/set-runner-release-key.sh).
 # --out           where to write (default release/).
-# --node-runtime  the pinned Node builds for the root-owned admin tools, {"<platform>-<arch>": {"url", "sha256"}} [rv7-12].
+# --node-runtime  the pinned Node builds for the root-owned admin tools, {"<platform>-<arch>": {"url", "sha256"}} [rv7-12],
+#                 for linux-x64, linux-arm64, darwin-x64 and darwin-arm64 (also AOM_RUNNER_NODE_RUNTIME). Default: the pinned
+#                 scripts/node-runtime.json (Node 22, sha256 from nodejs.org SHASUMS256.txt). A build never gets an empty
+#                 nodeRuntime by accident: without one `--runner-user dedicated` cannot install (UAT R25 F5).
+# --no-node-runtime  build without one anyway (dev and test builds: the dedicated runner user cannot install from it).
+# --check         check the options and print the Node runtime file that would be used; builds nothing.
 #
 # Signing is a separate step on the machine that holds the secret key (scripts/sign-runner-release.sh, or the release-flow
 # `release.sign`): this script never signs and never reads a secret key. Any machine may run it.
@@ -24,15 +29,41 @@ FLOOR="$(sed -n "s/.*MIN_TRUSTED_RUNNER = '\(.*\)'.*/\1/p" apps/runner/src/updat
 [ -n "$VERSION" ] && [ -n "$FLOOR" ] || { echo "package-runner: cannot read RUNNER_VERSION or MIN_TRUSTED_RUNNER" >&2; exit 1; }
 OUT="$ROOT/release"
 PUBKEY_FILE=""
-NODE_RUNTIME=""
+NODE_RUNTIME="${AOM_RUNNER_NODE_RUNTIME:-}"
+NO_NODE_RUNTIME=0
+CHECK_ONLY=0
+USAGE="usage: $0 [--pubkey <file.pub>] [--out <dir>] [--node-runtime <file.json> | --no-node-runtime] [--check]"
 while [ $# -gt 0 ]; do
   case "$1" in
     --pubkey) PUBKEY_FILE="${2:?--pubkey needs a file}"; shift 2 ;;
     --out) OUT="${2:?--out needs a directory}"; shift 2 ;;
     --node-runtime) NODE_RUNTIME="${2:?--node-runtime needs a file}"; shift 2 ;;
-    *) echo "usage: $0 [--pubkey <file.pub>] [--out <dir>] [--node-runtime <file.json>]" >&2; exit 2 ;;
+    --no-node-runtime) NO_NODE_RUNTIME=1; shift ;;
+    --check) CHECK_ONLY=1; shift ;;
+    *) echo "$USAGE" >&2; exit 2 ;;
   esac
 done
+# Checked before anything is built: a release without the pinned Node cannot install the dedicated runner user.
+if [ -z "$NODE_RUNTIME" ] && [ "$NO_NODE_RUNTIME" = 0 ] && [ -f "$ROOT/scripts/node-runtime.json" ]; then
+  NODE_RUNTIME="$ROOT/scripts/node-runtime.json"
+fi
+if [ "$NO_NODE_RUNTIME" = 1 ]; then
+  [ -z "$NODE_RUNTIME" ] || { echo "package-runner: --node-runtime and --no-node-runtime exclude each other" >&2; exit 2; }
+  echo "package-runner: WARNING: --no-node-runtime: this release lists no Node runtime; \`--runner-user dedicated\` cannot install from it (dev and test builds only)" >&2
+elif [ -z "$NODE_RUNTIME" ]; then
+  echo "package-runner: no scripts/node-runtime.json here, and --node-runtime <file.json> is required (the pinned Node 22 builds with their sha256 for linux-x64, linux-arm64, darwin-x64 and darwin-arm64); without it a dedicated runner install fails. A dev or test build: --no-node-runtime." >&2
+  echo "$USAGE" >&2
+  exit 2
+else
+  [ -f "$NODE_RUNTIME" ] || { echo "package-runner: --node-runtime $NODE_RUNTIME does not exist" >&2; exit 2; }
+  # shellcheck disable=SC2016 # JavaScript, expanded by node
+  node -e '
+const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+const bad = ["linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64"].filter(
+  (k) => !r[k] || !/^https:\/\//.test(String(r[k].url)) || !/^[0-9a-f]{64}$/.test(String(r[k].sha256)));
+if (bad.length) { console.error(`package-runner: --node-runtime needs an https url and a sha256 for ${bad.join(", ")}`); process.exit(2); }
+' "$NODE_RUNTIME" || exit 2
+fi
 case "$OUT" in /*) ;; *) OUT="$ROOT/$OUT" ;; esac
 
 BUILD_PUBKEY=""
@@ -40,6 +71,10 @@ if [ -n "$PUBKEY_FILE" ]; then
   # a minisign PUBLIC key only: "untrusted comment:" then one base64 line of 42 bytes starting with "Ed"
   BUILD_PUBKEY="$(node "$ROOT/scripts/runner-key-check.mjs" "$PUBKEY_FILE")" || exit 1
   echo "package-runner: this build trusts release key $(node "$ROOT/scripts/runner-key-check.mjs" --id "$PUBKEY_FILE")"
+fi
+if [ "$CHECK_ONLY" = 1 ]; then
+  echo "package-runner: node runtime ${NODE_RUNTIME:-none}"
+  exit 0
 fi
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT

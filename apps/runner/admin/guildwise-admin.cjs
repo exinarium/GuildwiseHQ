@@ -42,6 +42,9 @@ const RUNNER_FLOOR = '1.10.0';
 const SUDOERS_SUDO = '/etc/sudoers.d/guildwise-runner';
 const SUDOERS_DOCKER = '/etc/sudoers.d/guildwise-runner-docker';
 const APPS_CONF_DIR = '/etc/guildwise-runner/apps';
+/** `service install --ca-file`: the root-owned copy of a private CA the runner service trusts (NODE_EXTRA_CA_CERTS). */
+const RUNNER_CA_FILE = '/etc/guildwise-runner/ca.pem';
+const MAX_CA_FILE = 256 * 1024;
 const STATE_DIR = '/var/lib/guildwise';
 const MIGRATE_MARKER = `${STATE_DIR}/migrate-user.json`;
 const SYSTEMD_UNIT = '/etc/systemd/system/guildwise-runner.service';
@@ -466,9 +469,10 @@ function sudoersForDocker(user) {
 
 // ----------------------------------------------------------------------------------------------- service
 
-function unitText(u, runnerRoot) {
+function unitText(u, runnerRoot, caFile = null) {
   checkSafeAbs(runnerRoot, '--runner-root');
   checkSafeAbs(u.home, 'the runner HOME');
+  if (caFile) checkSafeAbs(caFile, 'the CA file');
   return [
     '# Written by guildwise-admin (R20, R18-P). The runner runs as its own unprivileged user.',
     '[Unit]',
@@ -482,6 +486,8 @@ function unitText(u, runnerRoot) {
     `WorkingDirectory=${u.home}`,
     `Environment="HOME=${u.home}"`,
     `Environment="PATH=${u.home}/.local/bin:/usr/local/bin:/usr/bin:/bin"`,
+    // a private CA in addition to the system ones; TLS verification stays on
+    ...(caFile ? [`Environment="NODE_EXTRA_CA_CERTS=${caFile}"`] : []),
     `ExecStart="${runnerRoot}/current/aom-runner" start`,
     'Restart=always',
     'RestartSec=10',
@@ -499,9 +505,10 @@ function unitText(u, runnerRoot) {
   ].join('\n');
 }
 
-function plistText(u, runnerRoot) {
+function plistText(u, runnerRoot, caFile = null) {
   checkSafeAbs(runnerRoot, '--runner-root');
   checkSafeAbs(u.home, 'the runner HOME');
+  if (caFile) checkSafeAbs(caFile, 'the CA file');
   const s = (v) => `<string>${v}</string>`;
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -517,6 +524,7 @@ function plistText(u, runnerRoot) {
     '  <dict>',
     `    <key>HOME</key>${s(u.home)}`,
     `    <key>PATH</key>${s(`${u.home}/.local/bin:/usr/local/bin:/usr/bin:/bin`)}`,
+    ...(caFile ? [`    <key>NODE_EXTRA_CA_CERTS</key>${s(caFile)}`] : []),
     '  </dict>',
     '  <key>RunAtLoad</key><true/>',
     // launchd has no "do not restart on exit 78": restart after a crash only, so the start-up refusal cannot loop
@@ -534,11 +542,33 @@ function defaultRunnerRoot(u) {
   return path.posix.join(u.home, '.local/share/guildwise/runner');
 }
 
+/**
+ * `--ca-file <pem>`: copies the certificate(s) to a root-owned RUNNER_CA_FILE (a snapshot: the runner cannot change what
+ * its service trusts). Without the option a copy installed before is kept. Returns the path for the service, or null.
+ */
+function installRunnerCa(sys, caFile) {
+  if (caFile) {
+    checkSafeAbs(caFile, '--ca-file');
+    const pem = readOwnedFile(sys, caFile, undefined, MAX_CA_FILE);
+    if (pem === null) throw new AdminError(`--ca-file ${caFile} does not exist`);
+    if (!pem.includes('-----BEGIN CERTIFICATE-----'))
+      throw new AdminError(`--ca-file ${caFile} holds no PEM certificate`);
+    if (/PRIVATE KEY/.test(pem))
+      throw new AdminError(`--ca-file ${caFile} holds a private key: give the certificate only`);
+    writeRootFile(sys, RUNNER_CA_FILE, pem, 0o644);
+    note(sys, `Wrote ${RUNNER_CA_FILE} (the runner service trusts this certificate authority as well).`);
+    return RUNNER_CA_FILE;
+  }
+  return fs.existsSync(P(sys, RUNNER_CA_FILE)) ? RUNNER_CA_FILE : null;
+}
+
 function serviceInstall(sys, opts = {}) {
   const u = requireUser(sys, opts.user || RUNNER_USER, 'run `guildwise-admin user create` first');
   const runnerRoot = opts.runnerRoot || defaultRunnerRoot(u);
+  checkSafeAbs(runnerRoot, '--runner-root');
+  const ca = installRunnerCa(sys, opts.caFile);
   if (sys.platform === 'darwin') {
-    writeRootFile(sys, LAUNCHD_PLIST, plistText(u, runnerRoot), 0o644);
+    writeRootFile(sys, LAUNCHD_PLIST, plistText(u, runnerRoot, ca), 0o644);
     ensureOwnedDir(sys, path.posix.join(u.home, 'Library'), u, 0o700);
     ensureOwnedDir(sys, path.posix.join(u.home, 'Library/Logs'), u, 0o700);
     note(sys, `Wrote ${LAUNCHD_PLIST} (LaunchDaemon, UserName ${u.name}).`);
@@ -549,7 +579,7 @@ function serviceInstall(sys, opts = {}) {
     }
     return;
   }
-  writeRootFile(sys, SYSTEMD_UNIT, unitText(u, runnerRoot), 0o644);
+  writeRootFile(sys, SYSTEMD_UNIT, unitText(u, runnerRoot, ca), 0o644);
   note(sys, `Wrote ${SYSTEMD_UNIT} (system unit, User=${u.name}).`);
   mustRun(sys, 'systemctl', ['daemon-reload']);
   mustRun(
@@ -1543,7 +1573,7 @@ async function apply(sys, o) {
   let user = RUNNER_USER;
   if (runnerUser === 'dedicated') {
     userCreate(sys);
-    serviceInstall(sys, { runnerRoot: o['runner-root'], start: o.start });
+    serviceInstall(sys, { runnerRoot: o['runner-root'], caFile: o['ca-file'], start: o.start });
   } else {
     user = o.user || sys.env.SUDO_USER;
     if (!user) throw new AdminError('with --runner-user current, name the user: --user <name>');
@@ -1582,14 +1612,14 @@ async function apply(sys, o) {
 
 const USAGE = `usage: sudo ${SELF_PATH} <command> [options]
   user create
-  service install [--runner-root <dir>] [--start] | service remove
+  service install [--runner-root <dir>] [--ca-file <pem>] [--start] | service remove
   sudo on|off [--data-dir <dir>]
   docker none|narrow|group [--user <name>] [--accept-root-equivalent]
   approve-app <app> --source <folder> [--yes]
   readers add|remove <user> [--path <clones folder>]
   migrate-user [--from <user>] [--to <user>] [--data-dir <dir>] | migrate-user --finish
   apply --yes | --runner-user dedicated|current [--sudo on|off] [--docker none|narrow|group]
-        [--accept-root-equivalent] [--approve-app <app>=<folder>]... [--runner-root <dir>] [--start]
+        [--accept-root-equivalent] [--approve-app <app>=<folder>]... [--runner-root <dir>] [--ca-file <pem>] [--start]
   verify
 every command: --dry-run (print what would change; changes nothing)`;
 
@@ -1601,6 +1631,7 @@ const OPTIONS = {
   to: { type: 'string' },
   'data-dir': { type: 'string' },
   'runner-root': { type: 'string' },
+  'ca-file': { type: 'string' },
   start: { type: 'boolean' },
   source: { type: 'string' },
   path: { type: 'string' },
@@ -1638,7 +1669,12 @@ async function main(argv, sys = realSystem()) {
     const [cmd, sub, arg] = pos;
     if (cmd === 'user' && sub === 'create') userCreate(sys, { name: o.user });
     else if (cmd === 'service' && sub === 'install')
-      serviceInstall(sys, { user: o.user, runnerRoot: o['runner-root'], start: o.start });
+      serviceInstall(sys, {
+        user: o.user,
+        runnerRoot: o['runner-root'],
+        caFile: o['ca-file'],
+        start: o.start,
+      });
     else if (cmd === 'service' && sub === 'remove') serviceRemove(sys);
     else if (cmd === 'sudo' && sub === 'on') sudoOn(sys, { user: o.user, dataDir: o['data-dir'] });
     else if (cmd === 'sudo' && sub === 'off') sudoOff(sys, { user: o.user, dataDir: o['data-dir'] });
@@ -1686,6 +1722,7 @@ module.exports = {
   MIGRATE_MARKER,
   SYSTEMD_UNIT,
   LAUNCHD_PLIST,
+  RUNNER_CA_FILE,
   MIN_FETCH_GIT,
   AdminError,
   main,

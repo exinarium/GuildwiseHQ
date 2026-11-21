@@ -32,6 +32,7 @@ import { mcpServerCandidates } from '../commands/mcp-servers.ts';
 import { loadPrReviewStatus } from '../commands/pr-only.ts';
 import { sizeStatusDtoOf } from '../commands/pr-size-status.ts';
 import { UPDATE_CHECK_MIN_INTERVAL_MS, UPDATE_CHECK_TIMEOUT_MS } from '../commands/update-check.ts';
+import { RUNNER_NOT_STARTED } from '../commands/workstation-setup.ts';
 import type { Ctx } from '../context.ts';
 import { budgetDto, canEditBudget, monthSpendByProject, orgCostCtx, seesAmounts } from '../costs/index.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
@@ -718,7 +719,10 @@ export async function workstationDtos(
     if (!keys.has(w.id))
       return {
         state: 'unsupported' as const,
-        message: `This runner${w.runner_version ? ` (${w.runner_version})` : ''} is too old to check rights. Update the runner on the machine, then press Verify now.`,
+        // A runner announces its key when it connects: one that never connected has not started yet (UAT R25 F6).
+        message: w.last_seen_at
+          ? `This runner${w.runner_version ? ` (${w.runner_version})` : ''} is too old to check rights. Update the runner on the machine, then press Verify now.`
+          : RUNNER_NOT_STARTED,
         requestedAt,
       };
     if (!c || c.status === 'done') return { state: 'idle' as const, message: null, requestedAt };

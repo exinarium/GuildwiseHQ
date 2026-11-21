@@ -23,6 +23,10 @@ import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { postAsFieldFor } from './commit-as.ts';
 import { projectScope, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
 
+/** The rights check of a runner that never connected (it announces its key when it does): it has not started yet. */
+export const RUNNER_NOT_STARTED =
+  'This runner has not started yet: it has never connected to the server. Start it on the machine (the installer prints why it did not), then press Verify now.';
+
 /**
  * What the DevOps engineer does on a workstation when a project changes (docs/RUNNER.md "Repository setup, toolchain
  * and rights"): put a repository added to a project on the project's workstations, make the toolchain ready before
@@ -498,16 +502,19 @@ export async function verifyRightsNow(
 ): Promise<void> {
   const ws = await one(
     ctx.pool,
-    `SELECT id, devops_access FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`,
+    `SELECT id, devops_access, last_seen_at FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`,
     [workstationId, user.id],
   );
   if (!ws) throw notFound('workstation not found');
-  // A runner that never announced its key is older than the rights check: say so instead of queueing into the void.
+  // A runner that never announced its key is older than the rights check, or has never connected (it announces the key
+  // when it does): say so instead of queueing into the void.
   if (!(await one(ctx.pool, 'SELECT 1 FROM workstation_keys WHERE workstation_id=$1', [workstationId])))
-    throw conflict(
-      'runner_outdated',
-      'This workstation runner is too old to check rights. Update the runner on the machine, then try again.',
-    );
+    throw ws.last_seen_at
+      ? conflict(
+          'runner_outdated',
+          'This workstation runner is too old to check rights. Update the runner on the machine, then try again.',
+        )
+      : conflict('runner_not_started', RUNNER_NOT_STARTED);
   // An earlier check that never got an answer is replaced by this one.
   await exec(
     ctx.pool,
@@ -563,7 +570,7 @@ export async function setSudoPassword(
   await withAppendTx(ctx.pool, async (tx) => {
     const ws = await one(
       tx,
-      `SELECT id, devops_access FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`,
+      `SELECT id, devops_access, last_seen_at FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`,
       [workstationId, user.id],
     );
     if (!ws) throw notFound('workstation not found');

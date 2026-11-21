@@ -96,7 +96,7 @@ stop_legacy_services() {
 stop_dedicated_service() { as_root launchctl bootout "system/${LABEL}" >/dev/null 2>&1 || true; }
 
 install_dedicated_service() {
-  as_root "${ADMIN}" service install --runner-root "${RUNNER_ROOT}" --start ||
+  as_root "${ADMIN}" service install --runner-root "${RUNNER_ROOT}" ${RUNNER_CA:+--ca-file "${RUNNER_CA}"} --start ||
     die "guildwise-admin could not install the runner's LaunchDaemon." "Run: sudo ${ADMIN} service install --runner-root ${RUNNER_ROOT} --start   to see why, then run the command again."
   as_root launchctl kickstart -k "system/${LABEL}" >/dev/null 2>&1 || true
   good "The runner starts at boot as ${RUNNER_NAME} (LaunchDaemon ${LABEL})"
@@ -123,6 +123,7 @@ install_service() {
   <dict>
     <key>PATH</key>
     <string>$(service_path)</string>
+$([ -n "${RUNNER_CA}" ] && printf '    <key>NODE_EXTRA_CA_CERTS</key>\n    <string>%s</string>' "${RUNNER_CA}")
   </dict>
   <key>RunAtLoad</key>
   <true/>

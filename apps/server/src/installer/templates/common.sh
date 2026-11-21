@@ -3,6 +3,10 @@
 # Everything below runs as your own user. Administrator rights (sudo) are used to install system packages and, for the
 # dedicated runner user, to run the root-owned tool guildwise-admin, copied from the verified runner release.
 # ---------------------------------------------------------------------------------------------------------------------
+# Everything this installer creates (the runner tree above all) is writable by its owner only: the runner's start-up check
+# refuses a runner whose files another user can change, and a stock Ubuntu account has umask 0002 (UAT R25 F3). Only the
+# group and other write bits are added: a stricter umask (077) stays as strict.
+umask "$(printf '%04o' $(( 8#$(umask) | 8#022 )))"
 STEP_N=0
 STEP_TOTAL=0
 WARNINGS=()
@@ -141,10 +145,14 @@ OPT_DEPLOY="${GUILDWISE_DEPLOY:-}"
 OPT_DEPLOY_PIN_COMMIT="${GUILDWISE_DEPLOY_PIN_COMMIT:-0}"
 OPT_ALLOW_UNSIGNED_FROM="${GUILDWISE_ALLOW_UNSIGNED_FROM:-}"
 OPT_FROM_FILE="${GUILDWISE_FROM_FILE:-}"
+# A private certificate authority (PEM) the runner service trusts besides the system ones, for a server with its own CA
+# (Caddy `tls internal`, a company CA): Node's NODE_EXTRA_CA_CERTS. TLS checks stay on.
+OPT_CA_FILE="${GUILDWISE_CA_FILE:-}"
+RUNNER_CA=""
 SUDO_PASSWORD=""
 
 bad_flag() {
-  die "$1" "Options: --yes, --runner-user dedicated|current, --legacy quarantine|remove, --accept-root-equivalent, --devops-orgs none|<id,...>, --sudo off|on, --sudo-password-stdin, --docker none|narrow|group, --approve-app <app>=<folder>, --deploy ask|off, --deploy-pin-commit, --allow-unsigned-from <origin>, --from-file <folder>, --choose-folders."
+  die "$1" "Options: --yes, --runner-user dedicated|current, --legacy quarantine|remove, --accept-root-equivalent, --devops-orgs none|<id,...>, --sudo off|on, --sudo-password-stdin, --docker none|narrow|group, --approve-app <app>=<folder>, --deploy ask|off, --deploy-pin-commit, --allow-unsigned-from <origin>, --from-file <folder>, --ca-file <pem file>, --choose-folders."
 }
 
 set_flag() {
@@ -158,6 +166,7 @@ set_flag() {
     --deploy) OPT_DEPLOY="$2" ;;
     --allow-unsigned-from) OPT_ALLOW_UNSIGNED_FROM="$2" ;;
     --from-file) OPT_FROM_FILE="$2" ;;
+    --ca-file) OPT_CA_FILE="$2" ;;
     *) bad_flag "Unknown option: $1" ;;
   esac
 }
@@ -175,7 +184,7 @@ parse_flags() {
       --accept-root-equivalent) OPT_ACCEPT_ROOT_EQ=1 ;;
       --deploy-pin-commit) OPT_DEPLOY_PIN_COMMIT=1 ;;
       --sudo-password-stdin) OPT_SUDO_PW_STDIN=1 ;;
-      --runner-user|--legacy|--devops-orgs|--sudo|--docker|--approve-app|--deploy|--allow-unsigned-from|--from-file)
+      --runner-user|--legacy|--devops-orgs|--sudo|--docker|--approve-app|--deploy|--allow-unsigned-from|--from-file|--ca-file)
         [ "$#" -gt 0 ] || bad_flag "${a} needs a value."
         set_flag "${a}" "$1"; shift ;;
       --*=*) set_flag "${a%%=*}" "${a#*=}" ;;
@@ -217,6 +226,10 @@ validate_flags() {
   if [ -n "${OPT_FROM_FILE}" ] && [ ! -f "${OPT_FROM_FILE}/manifest.json" ]; then
     bad_flag "--from-file is a folder holding manifest.json, manifest.json.minisig and the runner .tgz (no manifest.json in ${OPT_FROM_FILE})."
   fi
+  if [ -n "${OPT_CA_FILE}" ]; then
+    [ -f "${OPT_CA_FILE}" ] && [ -r "${OPT_CA_FILE}" ] || bad_flag "--ca-file is a readable PEM certificate file (cannot read ${OPT_CA_FILE})."
+    grep -q -- '-----BEGIN CERTIFICATE-----' "${OPT_CA_FILE}" || bad_flag "--ca-file holds no PEM certificate (-----BEGIN CERTIFICATE-----): ${OPT_CA_FILE}."
+  fi
   if [ "${OPT_SUDO_PW_STDIN}" = 1 ]; then
     IFS= read -r SUDO_PASSWORD || true
     [ -n "${SUDO_PASSWORD}" ] || bad_flag "--sudo-password-stdin was given, but no password came on standard input."
@@ -235,11 +248,14 @@ runner_path() { printf '%s' "${RUNNER_HOME}/.local/bin:${BUNDLED_NODE_BIN}:/usr/
 # as_runner <command...>: runs it as the runner's account (yourself in "current" mode), in its home, with its PATH.
 # shellcheck disable=SC2016 # the inner sh expands $HOME and $@ itself
 as_runner() {
-  if [ -z "${RUNNER_AS}" ]; then "$@"; return; fi
+  if [ -z "${RUNNER_AS}" ]; then
+    if [ -n "${RUNNER_CA}" ]; then NODE_EXTRA_CA_CERTS="${RUNNER_CA}" "$@"; else "$@"; fi
+    return
+  fi
   if [ "$(id -u)" -eq 0 ] && have runuser; then
-    runuser -u "${RUNNER_AS}" -- env HOME="${RUNNER_HOME}" PATH="$(runner_path)" sh -c 'cd "${HOME}" 2>/dev/null || cd /; exec "$@"' guildwise "$@"
+    runuser -u "${RUNNER_AS}" -- env HOME="${RUNNER_HOME}" PATH="$(runner_path)" ${RUNNER_CA:+NODE_EXTRA_CA_CERTS="${RUNNER_CA}"} sh -c 'cd "${HOME}" 2>/dev/null || cd /; exec "$@"' guildwise "$@"
   else
-    sudo -u "${RUNNER_AS}" -H env HOME="${RUNNER_HOME}" PATH="$(runner_path)" sh -c 'cd "${HOME}" 2>/dev/null || cd /; exec "$@"' guildwise "$@"
+    sudo -u "${RUNNER_AS}" -H env HOME="${RUNNER_HOME}" PATH="$(runner_path)" ${RUNNER_CA:+NODE_EXTRA_CA_CERTS="${RUNNER_CA}"} sh -c 'cd "${HOME}" 2>/dev/null || cd /; exec "$@"' guildwise "$@"
   fi
 }
 
@@ -718,6 +734,8 @@ place_runner_release() {
     report "Runner" info "existing runner ${before}"
     if version_newer "${before}" "${STAGE_VERSION}"; then
       step_ok "The installed runner ${before} is newer than this server's ${STAGE_VERSION}: kept as it is"
+      install_runner_ca
+      repair_runner_tree
       link_runner_commands
       return
     fi
@@ -734,12 +752,33 @@ place_runner_release() {
     else step_ok "Runner ${STAGE_VERSION} installed"; fi
   fi
   keep_release_proof
+  install_runner_ca
+  repair_runner_tree
   as_runner env RUNNER_ROOT="${RUNNER_ROOT}" bash -c "$(declare -f switch_current); switch_current \"\$1\"" guildwise "${target}/aom-runner" ||
     die "Could not switch to runner ${STAGE_VERSION}." "Run the command again."
   link_runner_commands
 }
 
 runner() { as_runner "${RUNNER_ROOT}/current/aom-runner" "$@"; }
+
+# A tree made by an earlier installer under umask 0002 is repaired: no group or other write anywhere in it (UAT R25 F3).
+repair_runner_tree() {
+  as_runner chmod -R go-w "${RUNNER_ROOT}" ||
+    die "Could not remove group and other write access from ${RUNNER_ROOT}." "Run: chmod -R go-w ${RUNNER_ROOT}   then run the command again."
+}
+
+# --ca-file: a copy in the runner root, readable by the runner (pairing and the service use it as NODE_EXTRA_CA_CERTS; the
+# dedicated user's system service gets a root-owned copy from guildwise-admin). A re-run without the flag keeps a copy
+# installed before.
+install_runner_ca() {
+  local dest="${RUNNER_ROOT}/ca.pem"
+  if [ -n "${OPT_CA_FILE}" ]; then
+    { write_as_runner "${dest}" <"${OPT_CA_FILE}" && as_runner chmod 644 "${dest}"; } ||
+      die "Could not copy ${OPT_CA_FILE} to ${dest}." "Run the command again."
+    good "The runner trusts the certificate authority in ${OPT_CA_FILE} (copied to ${dest})"
+  fi
+  if as_runner test -f "${dest}"; then RUNNER_CA="${dest}"; fi
+}
 
 is_paired() {
   as_runner grep -q '"runnerToken"' "${DATA_DIR}/config.json" 2>/dev/null

@@ -305,6 +305,38 @@ describe('Verify now (POST verify-rights) never fails silently', () => {
     expect((await workstation()).rightsCheck.state).toBe('idle');
   });
 
+  it('a runner that never connected has not started yet (not too old): 409 runner_not_started (UAT R25 F6)', async () => {
+    const saved = await q('SELECT * FROM workstation_keys');
+    const [ws] = await q('SELECT last_seen_at, runner_version FROM workstations WHERE id=$1', [
+      w.workstationId,
+    ]);
+    await q('DELETE FROM workstation_keys');
+    await q(`UPDATE workstations SET last_seen_at=NULL, runner_version='1.10.0' WHERE id=$1`, [
+      w.workstationId,
+    ]);
+    try {
+      const res = await verify();
+      expect(res.status).toBe(409);
+      expect(res.body).toMatchObject({ error: { code: 'runner_not_started' } });
+      expect(res.body.error.message).toContain('has not started yet');
+      const check = (await workstation()).rightsCheck;
+      expect(check.state).toBe('unsupported');
+      expect(check.message).toContain('This runner has not started yet');
+      expect(check.message).not.toContain('too old');
+    } finally {
+      await q('UPDATE workstations SET last_seen_at=$2, runner_version=$3 WHERE id=$1', [
+        w.workstationId,
+        ws?.last_seen_at ?? new Date(),
+        ws?.runner_version ?? null,
+      ]);
+      for (const k of saved)
+        await q(
+          'INSERT INTO workstation_keys (workstation_id, key_id, public_key, updated_at) VALUES ($1,$2,$3,$4)',
+          [k.workstation_id, k.key_id, k.public_key, k.updated_at],
+        );
+    }
+  });
+
   it('a runner that never announced its key is too old: 409 runner_outdated, state unsupported', async () => {
     const saved = await q('SELECT * FROM workstation_keys');
     await q('DELETE FROM workstation_keys');

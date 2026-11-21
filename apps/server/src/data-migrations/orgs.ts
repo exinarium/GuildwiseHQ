@@ -91,9 +91,20 @@ async function orgIdsInUse(db: Queryable, tables: string[]): Promise<Map<string,
     ...tables.map((t) => `SELECT org_id, count(*) AS n FROM ${t} WHERE org_id IS NOT NULL GROUP BY org_id`),
   ];
   sources.push('SELECT org_id, count(*) AS n FROM events WHERE org_id IS NOT NULL GROUP BY org_id');
+  // An organization removed since (an abandoned or reclaimed sign-up, SignupAbandoned) keeps its events: its id is
+  // neither an organization nor a user any more, and nothing is left to migrate for it.
+  const removed = new Set(
+    (
+      await rows<{ org_id: string }>(
+        db,
+        `SELECT DISTINCT payload->>'orgId' AS org_id FROM events WHERE type = 'SignupAbandoned'`,
+      )
+    ).map((r) => r.org_id),
+  );
   for (const sql of sources) {
     for (const r of await rows<{ org_id: string; n: string }>(db, sql)) {
       if (r.org_id === NIL_ORG_ID) continue; // the ALL_ORGS sentinel is not an org_id in use
+      if (removed.has(r.org_id)) continue;
       counts.set(r.org_id, (counts.get(r.org_id) ?? 0) + Number(r.n));
     }
   }
@@ -194,6 +205,22 @@ export async function migrateOrgs(
   opts: { dryRun?: boolean } = {},
 ): Promise<OrgMigrationReport> {
   const { pool, store, log } = env;
+  // Recorded as complete: a boot skips it (every organization since is created with its owner, and the plan's
+  // consistency check must not stop a restart over data written after the migration).
+  if (
+    !opts.dryRun &&
+    (await hasSchema(pool)) &&
+    (await one(pool, 'SELECT 1 FROM data_migrations WHERE name=$1', [ORGS_MIGRATION]))
+  )
+    return {
+      orgs: [],
+      guests: [],
+      constraints: [],
+      alreadyDone: true,
+      dryRun: false,
+      created: 0,
+      validated: 0,
+    };
   const plan = await planOrgMigration(pool);
   if (opts.dryRun) return { ...plan, dryRun: true, created: 0, validated: 0 };
 
