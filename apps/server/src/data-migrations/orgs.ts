@@ -21,6 +21,9 @@ export interface DataMigrationEnv {
   inboundDomain?: string | undefined;
   /** `projectGraphs.enabled`: false skips the project-vaults data migration (it runs once the setting is on). */
   projectGraphs?: boolean | undefined;
+  /** `AOM_SECRET_KEY` and `AOM_TWO_FACTOR_KEY`, for the data migration that re-seals the two-factor seeds (R11). */
+  secretKey?: string | undefined;
+  twoFactorKey?: string | undefined;
 }
 
 export interface OrgMigrationPlan {

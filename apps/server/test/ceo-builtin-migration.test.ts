@@ -175,6 +175,11 @@ describe('ceo-builtin data migration', () => {
       [e, `hash-${e}`],
     );
     const ws = (await q(`SELECT id FROM workstations WHERE user_id=$1`, [e]))[0]!.id;
+    // R9: the workstation-org-serving migration (earlier in the boot order) switched on the org the user owns
+    await q(
+      `INSERT INTO workstation_org_serving (workstation_id, org_id, serving, set_at) VALUES ($1,$2,true,now())`,
+      [ws, e],
+    );
     await migrateCeoBuiltin(env());
     expect((await liveCeos(e))[0]!.workstation_id).toBe(ws);
   });

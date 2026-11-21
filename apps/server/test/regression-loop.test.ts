@@ -426,6 +426,35 @@ describe('loop on', () => {
     expect(alerts[0].body).toContain('no DevOps engineer');
   });
 
+  it("never asks another organization's engineer on the workstation (1.10.0, R18-D)", async () => {
+    await freshState();
+    await ok(setLoop(true));
+    const run = await regression();
+    await p.run('Tess', failWith(`${UNKNOWN}\nBug: Search returns nothing\nnone`));
+    // Another organization's engineer on the same machine; the project organization's own one is retired.
+    const other = await w.t.createOrg(w.owner.id, `Other ${run.id.slice(0, 4)}`);
+    await q(
+      `INSERT INTO agents SELECT (jsonb_populate_record(NULL::agents, to_jsonb(a) || jsonb_build_object(
+          'id', gen_random_uuid(), 'org_id', $2::uuid, 'name', 'Other engineer'))).*
+         FROM agents a WHERE a.is_devops AND a.status='active' AND a.workstation_id=$1 AND a.org_id=$3
+       ON CONFLICT DO NOTHING`,
+      [w.workstationId, other, w.owner.id],
+    );
+    expect(
+      await q(
+        `SELECT 1 FROM agents WHERE is_devops AND status='active' AND org_id=$1 AND workstation_id=$2`,
+        [other, w.workstationId],
+      ),
+    ).toHaveLength(1);
+    await q(`UPDATE agents SET status='retired' WHERE is_devops AND org_id=$1`, [w.owner.id]);
+    for (const b of await bugsOf(run.id)) await merge(b.id);
+    await pass();
+    await q(`UPDATE agents SET status='retired' WHERE is_devops AND org_id=$1`, [other]);
+    await q(`UPDATE agents SET status='active' WHERE is_devops AND org_id=$1`, [w.owner.id]);
+    expect(await loopRow(run.id)).toMatchObject({ state: 'stopped', stop_reason: 'no_devops' });
+    expect(await requests()).toHaveLength(0);
+  });
+
   it('a recipe project whose run names a recipe environment target stops instead of a prose deploy', async () => {
     await freshState();
     await ok(setLoop(true));

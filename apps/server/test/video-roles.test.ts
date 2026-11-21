@@ -10,7 +10,9 @@ import { beatHeartbeat, publishServerVersion, videoStatus } from '../src/command
 import type { Ctx } from '../src/context.ts';
 import { videoPushRoutes } from '../src/video/push.ts';
 import { pushArtifacts } from '../src/video/push-client.ts';
-import { type RenderFn, renderNext, videoTick, videoWatch } from '../src/video/sweep.ts';
+import { signedQuery, uploadPath } from '../src/video/render-io.ts';
+import { addRenderWorker } from '../src/video/render-workers.ts';
+import { type RenderFn, videoTick, videoWatch } from '../src/video/sweep.ts';
 import type { UploadSpec, YouTubeClient } from '../src/video/youtube.ts';
 import { createTestApp, type TestApp } from './helpers/app.ts';
 import { CaptureMailer, FakeSocial } from './helpers/blog.ts';
@@ -81,6 +83,16 @@ const mustNotRender: RenderFn = async () => {
 };
 const instant = { sleep: async () => {}, backoffMs: [0, 0] };
 
+/**
+ * R16: the push route takes a render worker's own token plus a signed link for the render, attempt and name; the shared
+ * AOM_VIDEO_WORKER_TOKEN only switches the endpoint on. `worker` is created in beforeAll.
+ */
+let worker: { id: string; token: string };
+/** The claim's upload expiry: every signed link of a claim carries it, and the claimed row keeps it (`artifacts.uploadExp`). */
+const UPLOAD_EXP = Date.now() + 365 * 86_400_000;
+const signedUpload = async (renderId: string, name: string, attempt = 1) =>
+  `${uploadPath(renderId, name)}?${await signedQuery(t.app.ctx, { method: 'PUT', renderId, attempt, name }, 0, UPLOAD_EXP)}`;
+
 let t: TestApp;
 let videoDir: string;
 let sa: { cookie: string };
@@ -125,6 +137,12 @@ beforeAll(async () => {
   t.app.ctx.mailer = new CaptureMailer();
   t.app.ctx.social = new FakeSocial();
   sa = await t.superAdminSession();
+  const w = await addRenderWorker(
+    t.app.ctx,
+    (await q(`SELECT id FROM users WHERE kind='super_admin' LIMIT 1`))[0]?.id,
+    'test worker',
+  );
+  worker = { id: w.worker.id, token: w.token };
   await ok(
     api('PUT', '/api/platform/social/channels/youtube', { refreshToken: '1//0g-refresh-token-value' }),
   );
@@ -225,13 +243,13 @@ describe('push endpoint', () => {
   const sha = (b: string) => createHash('sha256').update(b).digest('hex');
   let renderId: string;
   let postId: string;
-  const put = (name: string, body: string, headers: Record<string, string> = {}, id = () => renderId) =>
+  const put = async (name: string, body: string, headers: Record<string, string> = {}, id = () => renderId) =>
     t.app.inject({
       method: 'PUT',
-      url: `/api/worker/video/renders/${id()}/files/${name}`,
+      url: await signedUpload(id(), name),
       payload: body,
       headers: {
-        authorization: `Bearer ${TOKEN}`,
+        authorization: `Bearer ${worker.token}`,
         'content-type': 'application/octet-stream',
         'x-content-sha256': sha(body),
         'x-worker-version': '2.0.0',
@@ -244,8 +262,9 @@ describe('push endpoint', () => {
     const p = await newPost('push-1');
     postId = p.id;
     await q(
-      `UPDATE video_renders SET status='rendering', lease_until = now() + interval '1 hour' WHERE post_id=$1`,
-      [p.id],
+      `UPDATE video_renders SET status='rendering', attempts=1, worker_id=$2, lease_until = now() + interval '1 hour',
+              artifacts = jsonb_build_object('uploadExp', $3::bigint) WHERE post_id=$1`,
+      [p.id, worker.id, UPLOAD_EXP],
     );
     renderId = (await q('SELECT id FROM video_renders WHERE post_id=$1', [p.id]))[0]?.id;
   });
@@ -265,15 +284,16 @@ describe('push endpoint', () => {
     await app.close();
   });
 
-  it('refuses a missing or wrong token', async () => {
+  it('refuses a missing or wrong token, and the shared AOM_VIDEO_WORKER_TOKEN is no credential (R16)', async () => {
     expect((await put('video.mp4', 'abc', { authorization: 'Bearer nope' })).statusCode).toBe(401);
     expect((await put('video.mp4', 'abc', { authorization: '' })).statusCode).toBe(401);
+    expect((await put('video.mp4', 'abc', { authorization: `Bearer ${TOKEN}` })).statusCode).toBe(401);
     expect(existsSync(join(videoDir, postId))).toBe(false);
   });
 
   it('refuses names outside the whitelist, and traversal', async () => {
     for (const name of ['constructor', '__proto__', 'evil.sh', '..%2F..%2Fx.mp4', '%2E%2E%2Fvideo.mp4'])
-      expect([400, 404], name).toContain((await put(name, 'abc')).statusCode);
+      expect([400, 403, 404], name).toContain((await put(name, 'abc')).statusCode);
     expect(existsSync(join(videoDir, postId, '1', 'evil.sh'))).toBe(false);
   });
 
@@ -298,10 +318,17 @@ describe('push endpoint', () => {
     expect(readFileSync(join(videoDir, postId, '1', 'captions.srt'), 'utf8')).toBe('');
   });
 
-  it('two pushes of one name at once: each is verified on its own, the last rename wins, no temp file is left', async () => {
+  it('one upload slot per name and attempt: the same bytes again are accepted, different bytes refused, no temp file left', async () => {
     const [a, b] = await Promise.all([put('script.json', '{"a":1}'), put('script.json', '{"a":1}')]);
-    expect([a.statusCode, b.statusCode]).toEqual([200, 200]);
+    // two at once: the second is refused while the first runs, or accepted as a repeat once it finished
+    expect([a.statusCode, b.statusCode].sort()).toEqual(expect.arrayContaining([200]));
+    expect([a.statusCode, b.statusCode].every((c) => c === 200 || c === 409)).toBe(true);
     const dir = join(videoDir, postId, '1');
+    expect(readFileSync(join(dir, 'script.json'), 'utf8')).toBe('{"a":1}');
+    expect((await put('script.json', '{"a":1}')).json()).toMatchObject({ ok: true, repeated: true });
+    const swap = await put('script.json', '{"a":2}');
+    expect(swap.statusCode).toBe(409);
+    expect(swap.json().error.code).toBe('already_uploaded');
     expect(readFileSync(join(dir, 'script.json'), 'utf8')).toBe('{"a":1}');
     expect((await import('node:fs')).readdirSync(dir).filter((f) => f.endsWith('.tmp'))).toEqual([]);
   });
@@ -331,85 +358,6 @@ describe('push endpoint', () => {
     expect(
       existsSync(dir) && (await import('node:fs')).readdirSync(dir).filter((f) => f.endsWith('.tmp')),
     ).toEqual([]);
-  });
-});
-
-describe('the render worker pushes', () => {
-  let server: ReturnType<typeof Fastify>;
-  let url: string;
-  let localDir: string;
-  let renderCtx: Ctx;
-  beforeAll(async () => {
-    server = Fastify({ logger: false });
-    await server.register(videoPushRoutes(t.app.ctx));
-    url = await server.listen({ port: 0, host: '127.0.0.1' });
-    localDir = mkdtempSync(join(tmpdir(), 'video-roles-local-'));
-    renderCtx = {
-      ...t.app.ctx,
-      config: { ...t.app.ctx.config, videoDir: localDir, videoPushUrl: url, videoWorkerToken: TOKEN },
-    };
-  });
-  afterAll(async () => {
-    await server.close();
-    rmSync(localDir, { recursive: true, force: true });
-  });
-
-  it('marks the render rendered only after every push is acknowledged, then deletes the local copy', async () => {
-    await clean();
-    const p = await newPost('push-ok');
-    const seen: string[] = [];
-    const spy: typeof fetch = async (input, init) => {
-      const row = (await q(`SELECT status FROM video_renders WHERE post_id=$1`, [p.id]))[0];
-      seen.push(`${String(input).split('/').pop()}:${row?.status}`);
-      return fetch(input, init);
-    };
-    expect(await renderNext(renderCtx, { render: fakeRender, push: { ...instant, fetch: spy } })).toBe(true);
-    expect(seen).toHaveLength(7);
-    expect(seen.every((s) => s.endsWith(':rendering'))).toBe(true);
-    expect((await q(`SELECT status, artifacts FROM video_renders WHERE post_id=$1`, [p.id]))[0]?.status).toBe(
-      'rendered',
-    );
-    const dir = join(videoDir, p.id, '1');
-    expect(readFileSync(join(dir, 'video.mp4'), 'utf8')).toBe('fake mp4 bytes'.repeat(100));
-    expect(existsSync(join(localDir, p.id))).toBe(false);
-  });
-
-  it('retries a failed push, and a push that never succeeds leaves the render unfinished', async () => {
-    await clean();
-    const p = await newPost('push-retry');
-    let flaky = 0;
-    const retrying: typeof fetch = async (input, init) => {
-      if (String(input).endsWith('thumb.png') && flaky++ < 2) return new Response('busy', { status: 503 });
-      return fetch(input, init);
-    };
-    await renderNext(renderCtx, { render: fakeRender, push: { ...instant, fetch: retrying } });
-    expect(flaky).toBe(3);
-    expect((await q(`SELECT status FROM video_renders WHERE post_id=$1`, [p.id]))[0]?.status).toBe(
-      'rendered',
-    );
-
-    await clean();
-    const p2 = await newPost('push-down');
-    const down: typeof fetch = async () => {
-      throw new Error('connection refused');
-    };
-    await renderNext(renderCtx, { render: fakeRender, push: { ...instant, fetch: down } });
-    const row = (await q(`SELECT status, error FROM video_renders WHERE post_id=$1`, [p2.id]))[0];
-    expect(row?.status).toBe('queued'); // not rendered: it will be tried again
-    expect(row?.error).toMatch(/push of .* failed/);
-  });
-
-  it('a refused push (bad token) is not retried', async () => {
-    await clean();
-    await newPost('push-refused');
-    let calls = 0;
-    const counting: typeof fetch = async (input, init) => {
-      calls++;
-      return fetch(input, init);
-    };
-    const bad = { ...renderCtx, config: { ...renderCtx.config, videoWorkerToken: `${TOKEN}-wrong` } };
-    await renderNext(bad, { render: fakeRender, push: { ...instant, fetch: counting } });
-    expect(calls).toBe(1);
   });
 });
 
@@ -455,13 +403,13 @@ describe('a missing file for a rendered video', () => {
 describe('worker version', () => {
   const SERVER = '2.0.0';
   const sha = (b: string) => createHash('sha256').update(b).digest('hex');
-  const push = (renderId: string, version: string | null, body = 'WEBVTT\n') =>
+  const push = async (renderId: string, version: string | null, body = 'WEBVTT\n') =>
     t.app.inject({
       method: 'PUT',
-      url: `/api/worker/video/renders/${renderId}/files/captions.vtt`,
+      url: await signedUpload(renderId, 'captions.vtt'),
       payload: body,
       headers: {
-        authorization: `Bearer ${TOKEN}`,
+        authorization: `Bearer ${worker.token}`,
         'content-type': 'application/octet-stream',
         'x-content-sha256': sha(body),
         ...(version !== null ? { 'x-worker-version': version } : {}),
@@ -475,8 +423,9 @@ describe('worker version', () => {
   const claimed = async (ref: string) => {
     const p = await newPost(ref);
     await q(
-      `UPDATE video_renders SET status='rendering', attempts=1, lease_until = now() + interval '1 hour' WHERE post_id=$1`,
-      [p.id],
+      `UPDATE video_renders SET status='rendering', attempts=1, worker_id=$2, lease_until = now() + interval '1 hour',
+              artifacts = jsonb_build_object('uploadExp', $3::bigint) WHERE post_id=$1`,
+      [p.id, worker.id, UPLOAD_EXP],
     );
     return { postId: p.id, renderId: (await renderOf(p.id))?.id as string };
   };
@@ -594,7 +543,7 @@ describe('worker version', () => {
       const { postId, renderId } = await claimed('push-old-token');
       const res = await t.app.inject({
         method: 'PUT',
-        url: `/api/worker/video/renders/${renderId}/files/captions.vtt`,
+        url: await signedUpload(renderId, 'captions.vtt'),
         payload: 'x',
         headers: { authorization: 'Bearer nope', 'x-content-sha256': sha('x'), 'x-worker-version': '1.5.0' },
       });
@@ -628,8 +577,12 @@ describe('worker version', () => {
           calls++;
           return fetch(input, init);
         };
+        const urlOf = (name: string) => `${url}${uploadPathSigned[name]}`;
+        const uploadPathSigned: Record<string, string> = {
+          'captions.vtt': await signedUpload(renderId, 'captions.vtt'),
+        };
         await expect(
-          pushArtifacts({ baseUrl: url, token: TOKEN, version: '1.5.0' }, renderId, [file], {
+          pushArtifacts({ urlOf, token: worker.token, version: '1.5.0' }, [file], {
             ...instant,
             fetch: counting,
           }),
@@ -637,41 +590,12 @@ describe('worker version', () => {
           /refused: HTTP 409 .*video worker 1\.5\.0 is older than server 2\.0\.0; update the worker/,
         );
         expect(calls).toBe(1); // a refusal is not retried
-        await q(`UPDATE video_renders SET status='rendering' WHERE id=$1`, [renderId]);
-        await pushArtifacts({ baseUrl: url, token: TOKEN, version: '2.0.0' }, renderId, [file], instant);
+        await q(`UPDATE video_renders SET status='rendering', attempts=1 WHERE id=$1`, [renderId]);
+        await pushArtifacts({ urlOf, token: worker.token, version: '2.0.0' }, [file], instant);
         expect(readFileSync(join(videoDir, postId, '1', 'captions.vtt'), 'utf8')).toBe('WEBVTT\n');
       } finally {
         await server.close();
         rmSync(dir, { recursive: true, force: true });
-      }
-    });
-
-    it('a server upgraded during a render refuses the files; the worker logs it and the attempt is not counted', async () => {
-      await reset();
-      const server = Fastify({ logger: false });
-      await server.register(videoPushRoutes(t.app.ctx));
-      const url = await server.listen({ port: 0, host: '127.0.0.1' });
-      const localDir = mkdtempSync(join(tmpdir(), 'video-roles-upgrade-'));
-      try {
-        const p = await newPost('upgrade-mid-render');
-        const upgrading: RenderFn = async (s, opts) => {
-          await publishServerVersion(t.app.ctx, '2.5.0');
-          return fakeRender(s, opts);
-        };
-        const ctx: Ctx = {
-          ...t.app.ctx,
-          config: { ...t.app.ctx.config, videoDir: localDir, videoPushUrl: url, videoWorkerToken: TOKEN },
-        };
-        expect(await renderNext(ctx, { render: upgrading, push: instant, version: SERVER })).toBe(true);
-        expect(await renderOf(p.id)).toMatchObject({
-          status: 'queued',
-          attempts: 0,
-          error: 'video worker 2.0.0 is older than server 2.5.0; update the worker',
-        });
-        expect(existsSync(join(videoDir, p.id, '1', 'video.mp4'))).toBe(false);
-      } finally {
-        await server.close();
-        rmSync(localDir, { recursive: true, force: true });
       }
     });
   });
@@ -742,17 +666,22 @@ describe('worker version', () => {
 });
 
 describe('configuration', () => {
-  it('AOM_VIDEO_PUSH_URL needs AOM_VIDEO_WORKER_TOKEN: the server refuses to start without it', async () => {
-    const { loadConfig } = await import('../src/config.ts');
+  it('AOM_VIDEO_PUSH_URL is retired (R16): the app only warns and still boots', async () => {
+    const { configWarnings, loadConfig } = await import('../src/config.ts');
     const base = {
       ...process.env,
       AOM_VIDEO_PUSH_URL: 'https://video.example.com',
       AOM_VIDEO_WORKER_TOKEN: undefined,
     };
-    expect(() => loadConfig(base)).toThrow(/AOM_VIDEO_WORKER_TOKEN/);
-    expect(() => loadConfig({ ...base, AOM_VIDEO_WORKER_TOKEN: TOKEN })).not.toThrow();
-    expect(() =>
-      loadConfig({ ...process.env, AOM_VIDEO_PUSH_URL: undefined, AOM_VIDEO_WORKER_TOKEN: undefined }),
-    ).not.toThrow();
+    const config = loadConfig(base);
+    expect(configWarnings(config).join('\n')).toMatch(
+      /AOM_VIDEO_PUSH_URL is set but no longer used.*video-worker --remote/,
+    );
+    const without = loadConfig({
+      ...process.env,
+      AOM_VIDEO_PUSH_URL: undefined,
+      AOM_VIDEO_WORKER_TOKEN: undefined,
+    });
+    expect(configWarnings(without).join('\n')).not.toMatch(/AOM_VIDEO_PUSH_URL/);
   });
 });

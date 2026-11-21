@@ -2,6 +2,7 @@ import { RelayIntegrationCreateSchema } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireOrg } from '../auth/guards.ts';
+import { requireStepUp } from '../auth/step-up.ts';
 import {
   createRelayIntegration,
   listRelayIntegrations,
@@ -45,6 +46,7 @@ export function relayIntegrationRoutes(ctx: Ctx) {
 
     app.post('/api/relay/integrations/:id/rotate', { schema: { params: IdParams } }, async (req) => {
       const a = await requireOrg(ctx, req, { min: 'admin' });
+      requireStepUp(ctx, a.session);
       return rotateRelayIntegration(ctx, a.session.user.id, a.orgId, req.params.id);
     });
 

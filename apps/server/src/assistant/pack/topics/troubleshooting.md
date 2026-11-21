@@ -17,3 +17,10 @@ Day-to-day problems: offline workstations, missing handoffs, vault conflicts, mi
 - Working branch could not be created or pushed: A card shows Last attempt failed: working branch 'X' could not be created or pushed or names a reason like "protected repository".
 - An agent says it cannot read a repository: In a chat or on a card, the agent says it cannot find or read a code repository (for example to compare two or look up how something is used elsewhere).
 - A project says "Paused until ...": The Claude subscription behind the project reached its session or weekly usage limit. Nothing is broken: cards wait in their queue without penalty and work continues by itself when the limit resets (shown on the board and the project page, in your time zone).…
+- The runner will not start (exit 78): The runner refused to start (exit code 78); the workstation page shows why.
+- "Reinstall required": The server has Only signed runners on, and this workstation's runner is unsigned or older than Guildwise 1.10.0.
+- "Too many attempts": Your account or address is locked after wrong answers (429 too_many_attempts).
+- "Set up two-factor login to continue": The server requires two-factor login (403 two_factor_setup_required) and your account has none.
+- "Confirm it's you" keeps appearing: A sensitive action needs a fresh confirmation (step_up_required).
+- "member_has_other_access": The member also has access in another organization, so you cannot reset them (409 member_has_other_access).
+- A deploy says "runner_signature_required": The deploy target needs a runner signed with its key (409 runner_signature_required).

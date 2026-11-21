@@ -134,9 +134,70 @@ export type PasswordResetRequest = z.infer<typeof PasswordResetRequestSchema>;
 export const PasswordResetConfirmSchema = z.object({
   token: z.string().min(16).max(200),
   password: PasswordSchema,
+  /**
+   * 1.10.0 (R3): a 6-digit code from the authenticator app or a recovery code. Required when the account uses
+   * two-factor login (400 `second_factor_required`); five wrong codes end the link.
+   */
+  code: z.string().trim().min(6).max(32).optional(),
 });
 export type PasswordResetConfirm = z.infer<typeof PasswordResetConfirmSchema>;
 export const PasswordResetTokenParamsSchema = z.object({ token: z.string().min(16).max(200) });
+/** `GET /api/auth/password-reset/:token`: whether the link still works and whether it needs a second factor (R3). */
+export const PasswordResetLinkStateSchema = z.object({ valid: z.boolean(), secondFactor: z.boolean() });
+export type PasswordResetLinkState = z.infer<typeof PasswordResetLinkStateSchema>;
+
+// ---------------------------------------------------------------- platform Security page (R2, R4)
+
+/** `GET /api/platform/security/failed-sign-ins`: newest first, from `login_failures` (kept 90 days). */
+export const FailedSignInSchema = z.object({
+  id: z.string(),
+  at: IsoTime,
+  email: z.string().nullable(),
+  /** The account the address belongs to (null: unknown address). */
+  userId: z.string().nullable(),
+  displayName: z.string().nullable(),
+  ip: z.string().nullable(),
+  /** Browser family plus OS (never the full user agent). */
+  uaFamily: z.string().nullable(),
+  reason: z.string(),
+});
+export type FailedSignIn = z.infer<typeof FailedSignInSchema>;
+export const FailedSignInsResponseSchema = z.object({
+  items: z.array(FailedSignInSchema),
+  /** Addresses and IPs locked right now. */
+  locks: z.array(
+    z.object({
+      scope: z.enum(['account', 'ip']),
+      key: z.string(),
+      until: IsoTime,
+      failures: z.number().int(),
+    }),
+  ),
+});
+export type FailedSignInsResponse = z.infer<typeof FailedSignInsResponseSchema>;
+
+/** `GET /api/platform/security/sign-ins`: newest first, from `sign_ins` (`SessionStarted`). */
+export const SignInRowSchema = z.object({
+  seq: z.string(),
+  at: IsoTime,
+  userId: z.string(),
+  email: z.string().nullable(),
+  displayName: z.string().nullable(),
+  kind: z.string().nullable(),
+  method: z.string(),
+  ip: z.string().nullable(),
+  uaFamily: z.string().nullable(),
+  newDevice: z.boolean(),
+});
+export type SignInRow = z.infer<typeof SignInRowSchema>;
+export const SignInsResponseSchema = z.object({ items: z.array(SignInRowSchema) });
+export type SignInsResponse = z.infer<typeof SignInsResponseSchema>;
+/** Query of both lists: an address or IP filter, and a page size. */
+export const SecurityLogQuerySchema = z.object({
+  q: z.string().trim().max(320).optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+});
+export type SecurityLogQuery = z.infer<typeof SecurityLogQuerySchema>;
 /** `POST /api/platform/users/:id/send-password-reset`: who the link went to and until when it works. */
 export const PasswordResetSentSchema = z.object({ sentTo: z.string(), expiresAt: IsoTime });
 export type PasswordResetSent = z.infer<typeof PasswordResetSentSchema>;

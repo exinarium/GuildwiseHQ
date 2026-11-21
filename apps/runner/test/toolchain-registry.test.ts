@@ -185,6 +185,8 @@ describe('env.ensure for .NET against the chosen root', () => {
       root: rootRunner,
       findRepo: async () => ({ localPath: repo }),
       installDependencies: true,
+      // the repository's owner allowed its install scripts locally (R18-S): dotnet restore runs
+      installScriptsAllowed: () => true,
       dotnet: () => selectDotnet({ home: tmp(), systemRoots: [root], env: { PATH: '' } }),
     };
     const payload: EnvEnsurePayload = {

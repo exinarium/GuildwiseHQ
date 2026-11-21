@@ -91,6 +91,7 @@ import { deliveryRoutes } from './routes/delivery.ts';
 import { designerRoutes } from './routes/designer.ts';
 import { deskRoutes } from './routes/desk.ts';
 import { devopsRoutes } from './routes/devops.ts';
+import { devopsAuditRoutes } from './routes/devops-audit.ts';
 import { digestRoutes } from './routes/digests.ts';
 import { discoveryRoutes } from './routes/discovery.ts';
 import { documentRoutes } from './routes/documents.ts';
@@ -116,7 +117,9 @@ import { orgChartRoutes } from './routes/org-chart.ts';
 import { orgProviderRoutes } from './routes/org-providers.ts';
 import { orgRoutes } from './routes/orgs.ts';
 import { outboundRoutes } from './routes/outbound.ts';
+import { ownershipTransferRoutes } from './routes/ownership-transfer.ts';
 import { packRoutes } from './routes/packs.ts';
+import { passkeyRoutes } from './routes/passkeys.ts';
 import { phaseRoutes } from './routes/phases.ts';
 import { platformRoutes } from './routes/platform.ts';
 import { platformSettingsRoutes } from './routes/platform-settings.ts';
@@ -131,10 +134,13 @@ import { pushRoutes } from './routes/push.ts';
 import { qaRoutes } from './routes/qa.ts';
 import { relayIntegrationRoutes } from './routes/relay-integrations.ts';
 import { releaseDocsPrepRoutes } from './routes/release-docs-prep.ts';
+import { releaseSigningRoutes } from './routes/release-signing.ts';
+import { renderJobRoutes } from './routes/render-jobs.ts';
 import { reportingRoutes } from './routes/reporting.ts';
 import { researchRoutes } from './routes/research.ts';
 import { runRoutes } from './routes/runs.ts';
 import { scheduleRoutes } from './routes/schedules.ts';
+import { securityRoutes } from './routes/security.ts';
 import { sessionRoutes } from './routes/sessions.ts';
 import { setupChecklistRoutes } from './routes/setup-checklist.ts';
 import { sharingRoutes } from './routes/sharing.ts';
@@ -143,8 +149,10 @@ import { storageRoutes } from './routes/storage.ts';
 import { testingRoutes } from './routes/testing.ts';
 import { threadRoutes } from './routes/threads.ts';
 import { tiktokPlatformRoutes } from './routes/tiktok-platform.ts';
+import { twoFactorRecoveryRoutes } from './routes/two-factor-recovery.ts';
 import { vaultRoutes } from './routes/vaults.ts';
 import { videoPlatformRoutes } from './routes/video-platform.ts';
+import { workstationServingRoutes } from './routes/workstation-serving.ts';
 import { workstationRoutes } from './routes/workstations.ts';
 import { RunnerGateway } from './runner-gateway/gateway.ts';
 import { RunnerRegistry } from './runner-gateway/registry.ts';
@@ -166,6 +174,8 @@ import { relayPublicRoutes } from './webhook-relay/route.ts';
 export interface BuildOptions {
   /** Start dispatcher/reaper timers (production). Tests drive them explicitly. */
   background?: boolean;
+  /** Runs once the app is built and before the background services start (boot steps such as the signed-runner sweep). */
+  beforeBackground?: (ctx: Ctx) => Promise<void>;
   mailer?: Mailer;
   /** The Anthropic client of the landing-page assistant (tests pass a fake; default: the real SDK when a key is set). */
   assistantClient?: AnthropicLike | null;
@@ -227,7 +237,8 @@ const DESK_LINK_TOKEN =
 /**
  * Secrets that travel in URLs: invitation tokens (`/api/invitations/<t>`, `/invite/<t>`), pairing codes and the one-time
  * desk links of push notifications (`/api/m/desk/<t>`, `/api/m/desk/<t>/apply`, `/m/desk/<t>`, also inside a login `next=`)
- * and the secret of a journey hook called in the path form (`/api/hooks/<id>/<secret>`).
+ * and the secret of a journey hook called in the path form (`/api/hooks/<id>/<secret>`). Password-reset and email
+ * verification links (`/api/auth/password-reset/<t>`, `/reset-password/<t>`, `/verify-email/<t>`, R13) too.
  */
 export function redactUrl(url: string): string {
   return (
@@ -239,7 +250,15 @@ export function redactUrl(url: string): string {
       .replace(/(\/api\/public\/forms\/)[^/?#\s]+/gi, '$1[redacted]')
       .replace(DESK_LINK_TOKEN, '$1[redacted]')
       .replace(/(\/(?:api\/invitations|invite)\/)[^/?#\s]+/gi, '$1[redacted]')
+      // reset and verification links (R13): the token segment, not the fixed `request`/`confirm` endpoints
+      .replace(
+        /(\/api\/auth\/password-reset\/)(?!(?:request|confirm)(?:[/?#\s]|$))[^/?#\s]+/gi,
+        '$1[redacted]',
+      )
+      .replace(/(\/(?:reset-password|verify-email)\/)[^/?#\s]+/gi, '$1[redacted]')
       .replace(/([?&](?:token|code|invite|pairing[_-]?code)=)[^&#\s]*/gi, '$1[redacted]')
+      // the signed links of the render job API (R16): the signature and its expiry
+      .replace(/([?&](?:sig|exp)=)[^&#\s]*/gi, '$1[redacted]')
       // a journey hook called as `/api/hooks/<id>/<secret>`: keep the id, hide the secret
       .replace(/(\/api\/hooks\/[^/?#\s]+\/)[^/?#\s]+/gi, '$1[redacted]')
   );
@@ -292,6 +311,29 @@ export function contentSecurityPolicy(
   ].join('; ');
 }
 
+/** Field names whose value is a secret wherever they appear in a logged object (top level or one level down, R13). */
+const SECRET_LOG_FIELDS = [
+  'password',
+  'passwordHash',
+  'token',
+  'secret',
+  'apiKey',
+  'refreshToken',
+  'accessToken',
+  'secretEnc',
+  'privateKey',
+  'databaseUrl',
+  'smtpUrl',
+  'secretKey',
+  'twoFactorKey',
+  // the config's other credentials
+  'anthropicApiKey',
+  'linkedinClientSecret',
+  'youtubeClientSecret',
+  'tiktokClientSecret',
+  'videoWorkerToken',
+];
+
 /** pino `redact` options: a sealed envelope of the Integrations page never reaches a log line, whatever object holds it. */
 export const LOG_REDACT = {
   paths: [
@@ -320,6 +362,22 @@ export const LOG_REDACT = {
     '*.sheet.row',
     'payload.whatsapp.text',
     'payload.sheet.row',
+    // R13: secrets never reach a log line. Explicit paths, because `*` matches one level only. Not `*.code`: it would
+    // hide `err.code`.
+    'req.body.password',
+    'req.body.current',
+    'req.body.new',
+    'req.body.code',
+    'req.body.token',
+    'req.body.secret',
+    'req.body.apiKey',
+    'req.headers.authorization',
+    'req.headers.cookie',
+    ...SECRET_LOG_FIELDS.flatMap((f) => [f, `*.${f}`]),
+    // a logged config object: its nested secrets, and the environment (also non-enumerable)
+    'config.inbound.secret',
+    'config.push.privateKey',
+    'config.env',
   ],
   censor: '[redacted]',
 };
@@ -491,8 +549,14 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(orgRoutes(ctx));
   await app.register(platformRoutes(ctx));
   await app.register(platformSettingsRoutes(ctx));
+  await app.register(securityRoutes(ctx));
   await app.register(platformTeamRoutes(ctx));
+  await app.register(twoFactorRecoveryRoutes(ctx));
+  await app.register(ownershipTransferRoutes(ctx));
+  await app.register(devopsAuditRoutes(ctx));
   await app.register(workstationRoutes(ctx));
+  await app.register(passkeyRoutes(ctx));
+  await app.register(workstationServingRoutes(ctx));
   await app.register(integrationRoutes(ctx));
   await app.register(installerRoutes(ctx));
   await app.register(cloudRoutes(ctx));
@@ -520,6 +584,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(runRoutes(ctx));
   await app.register(commitAsRoutes(ctx));
   await app.register(releaseDocsPrepRoutes(ctx));
+  await app.register(releaseSigningRoutes(ctx));
   await app.register(sharingRoutes(ctx));
   await app.register(testingRoutes(ctx));
   await app.register(scheduleRoutes(ctx));
@@ -578,6 +643,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   await app.register(videoPlatformRoutes(ctx));
   await app.register(tiktokPlatformRoutes(ctx));
   await app.register(videoPushRoutes(ctx));
+  await app.register(renderJobRoutes(ctx));
   await app.register(videoMediaRoutes(ctx));
   await app.register(blogApiRoutes(ctx));
   await app.register(blogPublicRoutes(ctx));
@@ -753,6 +819,7 @@ export async function createApp(config: Config, opts: BuildOptions = {}): Promis
   // Simulation organizations: the simulated workstations come up with the server (not under tests unless asked for).
   const simulation = config.simulationHost ? new SimulationHostImpl(ctx) : undefined;
   if (simulation) ctx.services.simulation = simulation;
+  if (opts.beforeBackground) await opts.beforeBackground(ctx);
   if (simulation && opts.background) await simulation.start();
   if (opts.background) {
     dispatcher.start();

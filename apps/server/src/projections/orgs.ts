@@ -42,8 +42,8 @@ export const orgProjectors: Record<string, Projector> = {
       tx,
       `INSERT INTO organizations (id, name, owner_user_id, status, status_reason, status_changed_at, plan,
          max_members, max_workstations, max_agents, max_projects, trial_ends_at, license_expires_at, features,
-         created_via, created_at, simulation, mode)
-       VALUES ($1,$2,$3,$4,NULL,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$5,$15,$16)`,
+         created_via, created_at, simulation, mode, created_as_simulation)
+       VALUES ($1,$2,$3,$4,NULL,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$5,$15,$16,$15)`,
       [
         p.orgId,
         p.name,

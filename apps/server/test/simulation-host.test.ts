@@ -50,10 +50,15 @@ afterAll(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+/** Test users get a real organization; R17-5 lets only one created as a simulation take the simulation tools. */
+const asCreatedSimulation = (orgId: string) =>
+  q('UPDATE organizations SET created_as_simulation = true WHERE id=$1', [orgId]);
+
 describe.skipIf(!hasRunner)('the simulated workstation', () => {
   it('runs a card through build, review and test on a mock runner with a local repository', async () => {
     const orgId = owner.id;
     const host = t.app.ctx.services.simulation as SimulationHostImpl;
+    await asCreatedSimulation(orgId);
     const on = await t.req('PUT', `/api/platform/orgs/${orgId}/simulation`, {
       cookie: root.cookie,
       body: { enabled: true, pace: 'fast' },
@@ -192,7 +197,7 @@ describe.skipIf(!hasRunner)('the simulated workstation', () => {
       cookie: root.cookie,
     });
     expect(refuseReal.status).toBe(409);
-    expect(refuseReal.body.error.code).toBe('not_simulation');
+    expect(refuseReal.body.error.code).toBe('not_created_as_simulation');
     // A real organization still refuses mock fields when the flag is off.
     const proj = await t.req('POST', '/api/projects', {
       cookie: demoOwner.cookie,
@@ -210,15 +215,16 @@ describe.skipIf(!hasRunner)('the simulated workstation', () => {
     });
     expect(refused.status).toBe(422);
     expect(refused.body.error.code).toBe('mock_fields_disabled');
-    // A real organization with a project cannot be switched; the demo runs in a fresh, empty one.
+    // A real organization is never switched (R17-5); the demo runs in one created as a simulation.
     const switchRefused = await t.req('PUT', `/api/platform/orgs/${orgId}/simulation`, {
       cookie: root.cookie,
       body: { enabled: true, pace: 'fast' },
     });
     expect(switchRefused.status).toBe(409);
-    expect(switchRefused.body.error.code).toBe('simulation_not_empty');
+    expect(switchRefused.body.error.code).toBe('not_created_as_simulation');
     const simOwner = await t.userSession(uniqueEmail('demosim'));
     orgId = simOwner.id;
+    await asCreatedSimulation(orgId);
     await t.req('PUT', `/api/platform/orgs/${orgId}/simulation`, {
       cookie: root.cookie,
       body: { enabled: true, pace: 'fast' },
@@ -256,6 +262,7 @@ describe.skipIf(!hasRunner)('the simulated workstation', () => {
   it('completes a partial demo scenario: what exists is skipped, what is missing is added', async () => {
     const partOwner = await t.userSession(uniqueEmail('partial'));
     const orgId = partOwner.id;
+    await asCreatedSimulation(orgId);
     await t.req('PUT', `/api/platform/orgs/${orgId}/simulation`, {
       cookie: root.cookie,
       body: { enabled: true, pace: 'fast' },

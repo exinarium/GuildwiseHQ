@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  EMAIL_NOT_ACCEPTED,
   type InvitationInfoResponse,
   type NewOrgInvitationRequest,
   NO_LIMITS,
@@ -8,8 +9,10 @@ import {
   type OrgRole,
   type PlatformInvitationDto,
   planDefinition,
+  REQUEST_REFUSED,
   streamId,
 } from '@aom/shared';
+import { screenAddress } from '../auth/address-policy.ts';
 import { hashPassword } from '../auth/password.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import { ceoProvisionEvents } from '../ceo/provision.ts';
@@ -17,7 +20,7 @@ import type { Ctx } from '../context.ts';
 import { randomToken, sha256Hex } from '../crypto.ts';
 import { iso, one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
-import { conflict, forbidden, HttpError, notFound } from '../errors.ts';
+import { badRequest, conflict, forbidden, HttpError, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { TEAM } from '../mail/layout.ts';
 import { newOrgInvitationMail } from '../mail/templates.ts';
@@ -26,6 +29,7 @@ import { orgScope, userScope } from './common.ts';
 import { hireDevopsForOrgIn } from './devops.ts';
 import { ensureOrgInbox } from './mail-inboxes.ts';
 import { notifySignup } from './platform-notify.ts';
+import { acceptServingIds, servingEvent, staleServingIds } from './workstation-serving.ts';
 
 const INVITE_TTL_MS = 7 * 24 * 3600_000;
 const ADMIN_SCOPE = { orgId: null, projectId: null, audience: 'admin' } as const;
@@ -37,6 +41,18 @@ interface Meta {
   userAgent?: string | undefined;
 }
 const metaOf = (m?: Meta) => (m && (m.ip || m.userAgent) ? { meta: { ...m } } : {});
+
+/**
+ * The address policy at invite, resend and accept (R1): the owner's block list, then the hosted screening. A refused
+ * address is 400 `email_not_accepted`, a refused client IP 403 `request_refused`. Why it matched goes to the log only.
+ */
+export async function assertAddressAccepted(ctx: Ctx, email: string, ip?: string | null): Promise<void> {
+  const r = await screenAddress(ctx, { email, ip: ip ?? null, purpose: 'invite' });
+  if (!r) return;
+  ctx.log.info({ source: r.source, kind: r.kind, reason: r.reason }, 'invitation address refused');
+  if (r.kind === 'ip') throw new HttpError(403, REQUEST_REFUSED, 'this request was refused');
+  throw badRequest(EMAIL_NOT_ACCEPTED, 'this email address cannot be invited');
+}
 
 // ------------------------------------------------------------------------------ platform: new organizations
 
@@ -106,6 +122,7 @@ export async function inviteNewOrg(
   };
   if (terms.status === 'trial' && !terms.trialEndsAt)
     throw conflict('trial_needs_end', 'a trial needs an end date');
+  await assertAddressAccepted(ctx, input.email, meta?.ip);
   await withAppendTx(ctx.pool, async (tx) => {
     const user = await one(tx, 'SELECT id, kind FROM users WHERE lower(email)=lower($1)', [input.email]);
     if (user?.kind === 'super_admin')
@@ -300,6 +317,8 @@ interface Accepting {
   mode?: OrgMode | undefined;
   /** The account is created by this accept (a password and name were given). */
   newUser?: { email: string; passwordHash: string } | undefined;
+  /** new_org and legacy: the id the new organization gets (chosen up front so serving can be set first, R9). */
+  newOrgId?: string | undefined;
 }
 
 const clean = (s: string | undefined | null) => (s ?? '').trim();
@@ -393,7 +412,7 @@ async function acceptEvents(
       });
   } else {
     // new_org and legacy: the invitee becomes the Owner of an organization of their own.
-    orgId = randomUUID();
+    orgId = a.newOrgId ?? randomUUID();
     const terms = (inv.org_terms ?? {}) as {
       plan?: string;
       status?: 'trial' | 'active';
@@ -472,6 +491,8 @@ export async function acceptInvitation(
     // Single use: the status flip happens in this transaction, guarded by the row lock.
     const inv = await lockPending(tx, ctx, token);
     if (!inv) throw notFound('invitation is invalid or expired');
+    // The block list may have changed since the invitation went out (R1): the address is screened again.
+    await assertAddressAccepted(ctx, inv.email);
     if (await one(tx, 'SELECT 1 FROM users WHERE lower(email)=lower($1)', [inv.email])) {
       throw conflict('user_exists', 'an account with this email already exists: sign in to accept');
     }
@@ -506,11 +527,18 @@ export async function acceptInvitationExisting(
   ctx: Ctx,
   session: AuthSession,
   token: string,
-  input: { orgName?: string | undefined; mode?: OrgMode | undefined },
+  input: {
+    orgName?: string | undefined;
+    mode?: OrgMode | undefined;
+    /** R9: the workstations that work for the organization (absent: the default for the invitation kind). */
+    serveWorkstationIds?: string[] | undefined;
+  },
 ): Promise<string> {
   const r = await withAppendTx(ctx.pool, async (tx) => {
     const inv = await lockPending(tx, ctx, token);
     if (!inv) throw notFound('invitation is invalid or expired');
+    // The block list may have changed since the invitation went out (R1): the address is screened again.
+    await assertAddressAccepted(ctx, inv.email);
     if (inv.kind === 'legacy')
       throw conflict('legacy_invitation', 'this invitation creates a new account: open it signed out');
     if (inv.email.toLowerCase() !== session.user.email.toLowerCase())
@@ -527,16 +555,56 @@ export async function acceptInvitationExisting(
       );
       if (already) throw conflict('already_member', 'you are already a member of this organization');
     }
+    // R9 (audit F4): only the workstations the user ticked work for the organization (default: all for a new
+    // organization of their own, none for one they join). Appended first, so the CEO and DevOps placement below see it.
+    const newOrgId = inv.kind === 'org_member' ? undefined : randomUUID();
+    const serveIds = await acceptServingIds(tx, session.user.id, inv.kind, input.serveWorkstationIds);
+    // A user who comes back to an organization starts from what they tick now: rows left on from an earlier membership
+    // are switched off for the workstations they did not tick.
+    const stale = newOrgId ? [] : await staleServingIds(tx, session.user.id, inv.org_id as string, serveIds);
+    if (stale.length)
+      await ctx.store.append(
+        stale.map((workstationId) =>
+          servingEvent(
+            {
+              workstationId,
+              orgId: inv.org_id as string,
+              serving: false,
+              by: session.user.id,
+              reason: 'accept',
+            },
+            session.user.id,
+          ),
+        ),
+        { tx },
+      );
+    if (serveIds.length)
+      await ctx.store.append(
+        serveIds.map((workstationId) =>
+          servingEvent(
+            {
+              workstationId,
+              orgId: (newOrgId ?? inv.org_id) as string,
+              serving: true,
+              by: session.user.id,
+              reason: 'accept',
+            },
+            session.user.id,
+          ),
+        ),
+        { tx },
+      );
     const { events, orgId } = await acceptEvents(ctx, tx, {
       inv,
       userId: session.user.id,
       displayName: session.user.displayName,
       orgName: input.orgName,
       mode: input.mode,
+      newOrgId,
     });
     await ctx.store.append(events, { tx });
     await ensureOrgInbox(ctx, tx, orgId, ctx.config.inbound.domain);
-    // Their workstations get this organization's DevOps engineer.
+    // Their workstations that work for it get this organization's DevOps engineer.
     try {
       await hireDevopsForOrgIn(ctx, tx, session.user.id, orgId);
     } catch (err) {

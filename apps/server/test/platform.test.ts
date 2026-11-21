@@ -192,8 +192,15 @@ describe('organizations', () => {
       toUserId: admin.id,
       reason: 'the owner left the company',
     });
-    expect(r.status).toBe(200);
-    expect(r.body.owner.id).toBe(admin.id);
+    // R17-3: a request the Owner approves (or vetoes); nothing moves before that
+    expect(r.status).toBe(202);
+    expect(r.body.owner.id).toBe(owner.id);
+    expect(r.body.pendingTransfer).toMatchObject({ toUser: { id: admin.id }, decision: null });
+    await ok(
+      t.req('POST', `/api/org/ownership-transfers/${r.body.pendingTransfer.id}/approve`, {
+        cookie: owner.cookie,
+      }),
+    );
     const roles = await q('SELECT user_id, role FROM org_members WHERE org_id=$1 ORDER BY role', [org]);
     expect(roles.find((x) => x.user_id === admin.id)!.role).toBe('owner');
     expect(roles.find((x) => x.user_id === owner.id)!.role).toBe('admin');

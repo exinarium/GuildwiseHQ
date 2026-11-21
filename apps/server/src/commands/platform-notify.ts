@@ -66,6 +66,48 @@ export async function notifySignup(
   }
 }
 
+/** A security notice for the platform administrators (R1, R4, R16, R17, R23): a forged session, a recovery, a render worker on the CPU, ... */
+export interface SuperAdminNotice {
+  subject: string;
+  heading: string;
+  facts: Array<[string, string]>;
+  /** Path on this server the mail links to (default: the platform audit log). */
+  path?: string;
+  linkLabel?: string;
+}
+
+/**
+ * Mails every active super admin (not the support addresses, and regardless of the notification switches). Sent after
+ * the caller's transaction; a mail that fails is logged and never fails the action. Returns how many were addressed.
+ * Rate limits ("at most one per 10 min") belong to the caller.
+ */
+export async function notifySuperAdmins(ctx: Ctx, notice: SuperAdminNotice): Promise<number> {
+  try {
+    const admins = await rows<{ email: string }>(
+      ctx.pool,
+      `SELECT email FROM users WHERE kind = 'super_admin' AND status = 'active' ORDER BY created_at`,
+    );
+    const origin = ctx.config.publicOrigin;
+    for (const a of admins)
+      await sendQuietly(
+        ctx,
+        platformNoticeMail({
+          to: a.email,
+          subject: notice.subject,
+          heading: notice.heading,
+          facts: notice.facts,
+          link: `${origin}${notice.path ?? '/platform/audit'}`,
+          linkLabel: notice.linkLabel ?? 'Open the audit log',
+          origin,
+        }),
+      );
+    return admins.length;
+  } catch (err) {
+    ctx.log.warn({ err, subject: notice.subject }, 'super admin notice failed');
+    return 0;
+  }
+}
+
 /** Marks everything in the audit log up to now as seen (called when the switch is turned on). */
 export async function resetAuditCursor(ctx: Ctx): Promise<void> {
   const m = await one(ctx.pool, `SELECT coalesce(max(seq), 0)::text AS seq FROM platform_audit_log`);

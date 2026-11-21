@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { HashtagPoolsSchema } from '../blog/hashtags.ts';
+import { RenderWorkerHealthSchema } from './render-jobs.ts';
 import {
   defaultSchedule,
   PatchVideoScheduleSchema,
@@ -354,6 +355,8 @@ export const VideoStatusSchema = z.object({
   auditFormUrl: z.string(),
   /** The hashtag pools in force, so the schedule step shows the default captions as they will be posted. */
   hashtagPools: HashtagPoolsSchema.optional(),
+  /** The remote render workers that are not revoked (R16, R23): the encoder and, on the CPU, the reason. */
+  renderWorkers: z.array(RenderWorkerHealthSchema).optional(),
 });
 export type VideoStatus = z.infer<typeof VideoStatusSchema>;
 

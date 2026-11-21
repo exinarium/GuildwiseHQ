@@ -37,9 +37,25 @@ The **Invitations** tab shows pending and past invitations. You can **Resend** o
 3. Pick which **Projects** they start on (Members only; you can change this later with **Change projects** on their row).
 4. Click **Send invitation**. They receive an email with a link; people without an account create one.
 
-Everyone can reset their own password with **Forgot your password?** on the sign-in page (see [Getting started](/help/getting-started#forgot-password)). If a member cannot get the reset email, the Owner or an Admin can open the actions menu on their row and choose **Reset password**. You get a temporary password to copy and pass on yourself (it is shown once and no email is sent). The member is signed out everywhere and chooses their own password at the next sign-in. An Admin can do this for Members only; the Owner can do it for Members and Admins. Nobody resets their own password this way; they use **Forgot your password?** on the sign-in page. Their account is one account for every organization, so the new password applies in their other organizations too.
+Invitations have limits: 20 per organization per hour, 50 per person inviting per day, 50 pending per organization, and **Resend** 3 an hour per invitation. Over a limit you see "invite_limit" or "pending_invitations_cap"; wait or **Revoke** old ones. An address on the platform's block list is refused. If you invite a platform administrator's address, it is listed as normal but no email is sent.
+
+When someone accepts an invitation, a **Works for** box asks whether their workstations may work for your organization. It is ticked for a new organization they create and off when they join as a member. See [Workstations](/help/workstations-and-installer#works-for).
+
+Everyone can reset their own password with **Forgot your password?** on the sign-in page (see [Getting started](/help/getting-started#forgot-password)). If a member cannot get the reset email, the Owner or an Admin can open the actions menu on their row and choose **Email a reset link**. This is the main action: it mails the member a reset link that names your organization (3 an hour per person). The other action, **Reset password**, gives you a temporary password to copy and pass on yourself (it is shown once and the member is mailed a notice without it). Both need **Confirm it's you**.
+
+A member who also has access in another organization (a personal organization counts) cannot have their password or two-factor login reset by you: the reset is refused (`member_has_other_access`), because the account is theirs in every organization. Use **Email a reset link**. For two-factor login the member recovers it themselves: see [Two-factor login](/help/two-factor#owner-reset).
+
+The rest applies to a temporary password. The member is signed out everywhere and chooses their own password at the next sign-in. An Admin can do this for Members only; the Owner can do it for Members and Admins. Nobody resets their own password this way; they use **Forgot your password?** on the sign-in page. Their account is one account for every organization, so the new password applies in their other organizations too.
 
 The Owner can change an Admin or Member's role from the role selector on their row. On a hosted service your plan may limit how many members you can have; the **Plan & limits** tab shows it.
+
+## Transferring ownership {#ownership-transfer}
+
+The Owner hands over ownership with **Transfer ownership** on the **General** tab, and approving it needs **Confirm it's you**. A transfer requested by the platform needs the Owner's consent: the Owner and all Admins are mailed. The Owner opens the link (page `/org-transfer/:id`) and chooses to approve (sign-in and **Confirm it's you** needed) or veto (no sign-in needed). With no answer it happens after 7 days' notice, but never automatically when the organization has deploy targets. It is void if the Owner changed meanwhile and expires after 30 days.
+
+## DevOps commands {#devops-commands}
+
+The Owner sees the commands the organization's DevOps shifts ran on the **DevOps commands** tab of **Organization** (organization settings). The platform sees counts only, and the owner of a workstation sees everything on that workstation's own log. See [DevOps](/help/devops-and-hygiene#devops-log).
 
 ## Removing a member: offboarding {#offboarding}
 
@@ -75,7 +91,9 @@ Only the Owner can still sign in, with read access plus organization settings an
 
 ## Platform area {#platform-area}
 
-Platform administrators sign in at the same address but see only the **Platform** area instead of organizations. The Platform area has 11 entries: **Organizations**, **Invitations**, **Accounts**, **Billing**, **Support**, **Blog**, **API keys** (keys for outside tools that use `/api/v1`), **Runners** (pause the automatic runner updates), **Platform team** (which organization and project receive the platform's own bugs and reports), **Inbound mail** (whether inbound e-mail works and what arrived in the last 24 hours) and **Audit log**. Administrators can view and manage all organizations, accounts, invitations, billing, the blog and support requests. They never see a specific organization's cards, desk or vaults. [Contact us](/help/contact) if you need a platform administrator.
+Platform administrators sign in at the same address but see only the **Platform** area instead of organizations. The Platform area has these entries: **Organizations**, **Invitations**, **Accounts**, **Billing**, **Support**, **Blog**, **API keys** (keys for outside tools that use `/api/v1`), **Runners** (pause the automatic runner updates), **Platform team** (which organization and project receive the platform's own bugs and reports), **Inbound mail** (whether inbound e-mail works and what arrived in the last 24 hours), **Security** and **Audit log**. Administrators can view and manage all organizations, accounts, invitations, billing, the blog and support requests. They never see a specific organization's cards, desk or vaults. Since 1.10.0 they also cannot read or change an organization's projects, cards, workstations, secrets, vaults or runner commands, and they have no reach into the platform team's bugs and pins. Their powers are the organization's details, plan, limits and dates, suspend, reactivate and cancel, invitations, deactivating users, sending a reset mail, the audit log, the runner update switch, the blog and video. Which organization is the platform team is set by the server (`AOM_PLATFORM_TEAM_ORG_ID`, `AOM_PLATFORM_TEAM_PROJECT_ID`); the **Platform team** page is read-only. The **Security** page is described in [Account security](/help/account-security#security-page).
+
+When the platform changes a feature of your organization, the Owner gets a desk item and an email, and the **Plan & limits** tab says **set by the platform** next to it. A change of the support address mails the previous addresses. [Contact us](/help/contact) if you need a platform administrator.
 
 ### Support emails {#console-emails}
 

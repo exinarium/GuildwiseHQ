@@ -92,6 +92,8 @@ function setup(
     root,
     findRepo: async () => ({ localPath: repoDir }),
     installDependencies: opts.dependencies ?? false,
+    // the repository's owner allowed its install scripts locally (R18-S): the installs run as written
+    installScriptsAllowed: () => true,
   };
   const payload = (a: DevOpsAccess): EnvEnsurePayload => ({
     requestId: '0190aaaa-0000-7000-8000-00000000ffff',

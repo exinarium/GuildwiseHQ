@@ -1,7 +1,7 @@
 ---
 title: The architect: investigate and design
-summary: The optional design step before build, investigation-only cards, where reports go, the main branch merge, and what the architect may touch.
-keywords: [architect, investigate, design, investigation, report, spike, comparison, design step, merge main, main branch, conflict, organization source folder, hire architect]
+summary: The optional design step before build, investigation-only cards, size estimates, where reports go, the main branch merge, and what the architect may touch.
+keywords: [architect, investigate, design, investigation, report, spike, comparison, design step, size estimate, size budget, verdict, needs split, merge main, main branch, conflict, organization source folder, hire architect]
 order: 11
 ---
 
@@ -21,6 +21,16 @@ Tick **Investigation only** for an answer, not a change (a comparison, "how shou
 ## Tests-only cards {#tests-only}
 
 When a card only needs tests, the architect hands it to build with `aom design --tests-only`. The Build stage is then worked by the **tester**, not a builder (builders may not edit E2E specs), and the tester needs no test environment for it. The project needs an active tester: without one the card waits and says to hire a tester. A tests-only card cannot also be investigation-only.
+
+## Size estimate and verdict {#size}
+
+When the project has a **size unit** (Project settings, **Review settings**), the architect records an estimate in that unit with its design, plus the folders or files the change touches and a risk class. The server then gives the verdict against the project's **size budget**; the architect does not decide it.
+
+- **Within budget**: the card goes on to build as usual.
+- **Over budget**: the architect names at least two places where the card could be split, with their folders, and asks: **split it** (back to the business analyst once, along those places) or **build it as designed**. The CEO decides first when one is active and can look at it; otherwise the question waits on the owner's Desk. The card goes back to the business analyst at most once; after that the owner decides.
+- A **high risk class alone** never asks for a split. Designs that touch high-risk paths stop at the design gate instead (see [Projects](/help/projects)).
+
+Without a size unit nothing is estimated and no verdict is given. See [the size budget](/help/projects#pr-only-repositories).
 
 ## Where the report goes {#report-location}
 

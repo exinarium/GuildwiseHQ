@@ -1,5 +1,7 @@
 import { z } from 'zod';
+import { BlockKindSchema, SecuritySettingKeySchema } from '../security/index.ts';
 import { defineEvent, Id } from './define.ts';
+import { EventMetaSchema } from './org.ts';
 
 const Scope = z.object({
   projectId: Id.nullable().default(null),
@@ -40,6 +42,42 @@ export const platformEvents = [
       reason: z.string().max(500),
       by: z.enum(['fix', 'manual', 'invalid']),
       byUserId: Id.optional(),
+    }),
+  ),
+  // ---- platform security (1.10.0): stream `platform-security`, platform audit `always`
+  /** The super admin added a block-list entry (R1): a domain (with its subdomains), an exact address, an IP or CIDR, or an allowed domain. */
+  defineEvent(
+    'PlatformBlockAdded',
+    z.object({
+      blockId: Id,
+      kind: BlockKindSchema,
+      /** Normalized: lower-case domain or address, canonical IP or CIDR. */
+      value: z.string().min(1).max(320),
+      note: z.string().max(500).default(''),
+      by: Id,
+      meta: EventMetaSchema,
+    }),
+  ),
+  defineEvent(
+    'PlatformBlockRemoved',
+    z.object({
+      blockId: Id,
+      kind: BlockKindSchema,
+      value: z.string().min(1).max(320),
+      by: Id,
+      meta: EventMetaSchema,
+    }),
+  ),
+  /** A security setting changed (R27, R28): `requireSignedRunners` or `enforceTwoFactor`. Never for a locked key. */
+  defineEvent(
+    'SecuritySettingChanged',
+    z.object({
+      key: SecuritySettingKeySchema,
+      value: z.boolean(),
+      by: Id,
+      /** Turning signed runners on: how many unsigned workstations the sweep unlinked in the same transaction. */
+      unlinked: z.number().int().nonnegative().optional(),
+      meta: EventMetaSchema,
     }),
   ),
 ] as const;

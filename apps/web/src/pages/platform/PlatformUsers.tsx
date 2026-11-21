@@ -1,10 +1,5 @@
 import { useState } from 'react';
-import {
-  usePatchPlatformUser,
-  usePlatformUsers,
-  useResetUserTwoFactor,
-  useSendPasswordReset,
-} from '../../api/queries/platform.ts';
+import { usePatchPlatformUser, usePlatformUsers, useSendPasswordReset } from '../../api/queries/platform.ts';
 import {
   Badge,
   Button,
@@ -18,21 +13,22 @@ import {
 } from '../../components/ui.tsx';
 import { formatDateTime } from '../../lib/time.ts';
 
-/** `/platform/users`: every account, deactivate or reactivate it, reset its two-factor login. */
+/**
+ * `/platform/users`: every account, deactivate or reactivate it, mail it a password reset link. There is no two-factor
+ * reset here (R17-2): a user who lost the authenticator recovers it by email from the sign-in page.
+ */
 export function PlatformUsers() {
   const [q, setQ] = useState('');
   const users = usePlatformUsers(q);
   const patch = usePatchPlatformUser();
-  const reset = useResetUserTwoFactor();
   const sendReset = useSendPasswordReset();
   const toast = useToast();
   const [mailing, setMailing] = useState<{ id: string; name: string; email: string } | null>(null);
-  const [resetting, setResetting] = useState<{ id: string; name: string } | null>(null);
   return (
     <div>
       <PageHeader
         title="Accounts"
-        sub="Everyone with an account. An Owner is deactivated only after ownership moves."
+        sub="Everyone with an account. An Owner is deactivated only after ownership moves. Someone who lost their authenticator uses “Lost your authenticator?” when signing in."
       />
       <div className="mb-4 max-w-sm">
         <TextInput
@@ -88,15 +84,6 @@ export function PlatformUsers() {
                         Send reset link
                       </Button>
                     )}
-                    {u.twoFactorEnabled && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setResetting({ id: u.id, name: u.displayName })}
-                      >
-                        Reset 2FA
-                      </Button>
-                    )}
                     <Button
                       variant={u.status === 'active' ? 'danger-ghost' : 'secondary'}
                       size="sm"
@@ -126,18 +113,6 @@ export function PlatformUsers() {
               onSuccess: (r) => toast.success(`Reset link sent to ${r.sentTo}`),
             });
           setMailing(null);
-        }}
-      />
-      <ConfirmDialog
-        open={!!resetting}
-        onOpenChange={(o) => !o && setResetting(null)}
-        title={`Reset two-factor login for ${resetting?.name ?? ''}?`}
-        description="They sign in with their password only until they set it up again. The reset is recorded in the audit log."
-        confirmLabel="Reset"
-        onConfirm={() => {
-          if (resetting)
-            reset.mutate(resetting.id, { onSuccess: () => toast.success('Two-factor login reset') });
-          setResetting(null);
         }}
       />
     </div>

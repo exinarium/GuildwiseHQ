@@ -363,7 +363,12 @@ export interface SupervisorDeps {
   /** How `aom transcript` reaches yt-dlp and the web (default: the real ones; tests inject fakes). */
   transcript?: TranscriptDeps;
   /** `aom sudo`: runs a command with administrator rights for the DevOps engineer (the stored sudo password stays here). */
-  sudoRun?: (cmd: string, args: string[]) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  sudoRun?: (
+    cmd: string,
+    args: string[],
+    /** The DevOps shift asking: the runner allows sudo only for a shift approved on the workstation (R18-S). */
+    shiftId: string,
+  ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
   /** `aom git status|connect` for the DevOps engineer (the runner drives the login on this workstation). */
   git?: { handle(method: string, params: Record<string, unknown>): Promise<IpcRpcResponse> };
   /** The ticket systems of this workstation: a batch intake shift reads its ticket (`aom source read`) like an intake chat. */
@@ -3125,7 +3130,7 @@ export class ShiftSupervisor {
       return { ok: false, error: 'usage: aom sudo -- <command> [args...]' } as IpcRpcResponse;
     const [cmd, ...args] = argv as [string, ...string[]];
     this.addProgress(s, 'tool', `sudo ${cmd} ${args.join(' ')}`.slice(0, 200));
-    const r = await this.deps.sudoRun(cmd, args);
+    const r = await this.deps.sudoRun(cmd, args, s.msg.shiftId);
     return {
       ok: true,
       result: { exitCode: r.exitCode, stdout: r.stdout.slice(-20000), stderr: r.stderr.slice(-8000) },

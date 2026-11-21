@@ -10,6 +10,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../auth/guards.ts';
+import { requireStepUp } from '../auth/step-up.ts';
 import {
   clearProviderKey,
   promoteAccount,
@@ -39,6 +40,7 @@ export function providerRoutes(ctx: Ctx) {
       { schema: { params: ProviderParamsSchema, body: SetProviderKeyRequestSchema } },
       async (req, reply) => {
         const s = await requireUser(ctx, req);
+        requireStepUp(ctx, s);
         await setProviderKey(ctx, s.user, req.params.id, req.params.provider, req.body);
         reply.code(202);
         return { queued: true };
@@ -67,6 +69,7 @@ export function providerRoutes(ctx: Ctx) {
       },
       async (req, reply) => {
         const s = await requireUser(ctx, req);
+        requireStepUp(ctx, s);
         await clearProviderKey(ctx, s.user, req.params.id, req.params.provider, req.query.account);
         reply.code(202);
         return { queued: true };

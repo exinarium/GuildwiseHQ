@@ -141,12 +141,14 @@ export async function devopsHireEvent(
   };
 }
 
-/** The DevOps engineers a user's active workstation needs: one for each organization they are an active member of. */
+/** The DevOps engineers a user's active workstation needs: one for each organization they are an active member of (and it works for). */
 export async function devopsHireEvents(
   tx: Tx,
   userId: string,
   workstationId: string,
   simulationOrgId?: string,
+  /** R9: only these organizations (the ones the workstation works for); absent = every one. */
+  onlyOrgIds?: readonly string[],
 ): Promise<AppendInput[]> {
   // A simulated workstation serves its simulation organization only; a real one never serves a simulation organization.
   const orgs = await rows<{ org_id: string }>(
@@ -158,6 +160,7 @@ export async function devopsHireEvents(
   );
   const out: AppendInput[] = [];
   for (const o of orgs) {
+    if (onlyOrgIds && !onlyOrgIds.includes(o.org_id)) continue;
     const ev = await devopsHireEvent(tx, userId, o.org_id, workstationId);
     if (ev) out.push(ev);
   }
@@ -257,18 +260,23 @@ export function threadMessage(
   };
 }
 
-/** The DevOps engineer of `orgId` on the workstation, else (a guest's machine) its oldest active engineer. */
+/**
+ * The DevOps engineer of `orgId` on the workstation, else (a guest's machine) its oldest active engineer. `strict`
+ * (1.10.0, R18-D: every agent- or system-started request): only `orgId`'s own engineer, never another organization's.
+ */
 export async function devopsAgentOn(
   db: Queryable,
   workstationId: string,
   orgId: string | null,
+  opts: { strict?: boolean } = {},
 ): Promise<{ id: string; org_id: string } | undefined> {
   return one<{ id: string; org_id: string }>(
     db,
     `SELECT a.id, a.org_id FROM agents a JOIN organizations o ON o.id = a.org_id
       WHERE a.workstation_id=$1 AND a.is_devops AND a.status='active'
+        AND ($3::boolean IS NOT TRUE OR a.org_id = $2::uuid)
       ORDER BY (a.org_id = $2::uuid) DESC NULLS LAST, (o.status IN ('trial','active')) DESC, a.hired_at, a.id LIMIT 1`,
-    [workstationId, orgId],
+    [workstationId, orgId, opts.strict === true],
   );
 }
 
@@ -284,6 +292,8 @@ export async function createDevOpsRequestIn(
     hygiene?: HygieneSpec;
     /** The organization the request is for: its DevOps engineer on this workstation works it (else the oldest one). */
     orgId?: string | null;
+    /** 1.10.0 (R18-D): only `orgId`'s own engineer takes it; none is a `no_devops_agent` conflict, never a fallback. */
+    strictOrg?: boolean;
     origin?: DevOpsRequestOrigin;
     context?: DevOpsRequestContext;
   },
@@ -292,8 +302,16 @@ export async function createDevOpsRequestIn(
     input.workstationId,
   ]);
   if (!ws) throw notFound('workstation not found');
-  const agent = await devopsAgentOn(tx, input.workstationId, input.orgId ?? null);
-  if (!agent) throw conflict('no_devops_agent', 'this workstation has no DevOps engineer');
+  const agent = await devopsAgentOn(tx, input.workstationId, input.orgId ?? null, {
+    strict: input.strictOrg === true,
+  });
+  if (!agent)
+    throw conflict(
+      'no_devops_agent',
+      input.strictOrg
+        ? 'this workstation has no DevOps engineer for this organization'
+        : 'this workstation has no DevOps engineer',
+    );
   const requestId = randomUUID();
   const author: Parameters<typeof threadMessage>[2] =
     input.requestedBy.kind === 'user'

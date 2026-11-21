@@ -6,6 +6,7 @@ import '@fontsource-variable/geist/wght.css';
 import '@fontsource-variable/geist-mono/wght.css';
 import './index.css';
 import { ApiError } from './api/client.ts';
+import { StepUpHost } from './components/auth/StepUpDialog.tsx';
 import { UpdateToast } from './components/pwa/UpdateToast.tsx';
 import { ToastProvider } from './components/ui.tsx';
 import { installClientErrorBuffer, recordClientError } from './lib/client-errors.ts';
@@ -44,6 +45,7 @@ async function boot() {
         <ToastProvider>
           <RouterProvider router={createRouter()} />
           <UpdateToast />
+          <StepUpHost />
         </ToastProvider>
       </QueryClientProvider>
     </StrictMode>,

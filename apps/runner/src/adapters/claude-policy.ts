@@ -240,6 +240,15 @@ export const HOME_SECRETS = [
   '.config/gcloud',
   '.claude',
   '.claude.json',
+  // browser profiles (cookies, saved logins), R18-L
+  '.mozilla',
+  '.config/google-chrome',
+  '.config/chromium',
+  '.config/BraveSoftware',
+  '.config/microsoft-edge',
+  'Library/Application Support/Google/Chrome',
+  'Library/Application Support/Firefox',
+  'Library/Application Support/BraveSoftware',
 ];
 
 /**

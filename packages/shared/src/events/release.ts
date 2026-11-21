@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ComponentBumpSchema } from '../release/dto.ts';
+import { ReleaseSignatureSourceSchema } from '../security/index.ts';
 import { defineEvent, Id } from './define.ts';
 
 const Level = z.enum(['patch', 'minor', 'major']);
@@ -133,4 +134,32 @@ export const releaseEvents = [
   ),
   /** Retry of a failed land, tag or publish step. */
   defineEvent('ReleasePublishRetried', z.object({ shipId: Id, step: z.string(), workstationId: Id })),
+  // ---- release signing per deploy target (R30): stream `release-<releaseId>`
+  /** The deploy's package step produced the artefact to sign for a target (`release/<target>/manifest.json`); the file stays on the workstation. */
+  defineEvent(
+    'ReleaseArtefactPrepared',
+    z.object({
+      releaseId: Id,
+      targetId: Id,
+      artefactSha256: z.string().regex(/^[0-9a-f]{64}$/),
+      version: z.string().min(1).max(40),
+      /** The artefact's raw text (public data), so a signature can be verified and the file offered for offline signing (W14). */
+      manifest: z.string().max(16_384).optional(),
+    }),
+  ),
+  /**
+   * A signature over that artefact by the target's key was stored: made on the workstation holding the key under a local
+   * approval, or uploaded after an offline signing. The `.minisig` (public data) is in `release_signatures`.
+   */
+  defineEvent(
+    'ReleaseArtefactSigned',
+    z.object({
+      releaseId: Id,
+      targetId: Id,
+      keyId: z.string().regex(/^[0-9A-F]{16}$/),
+      artefactSha256: z.string().regex(/^[0-9a-f]{64}$/),
+      minisig: z.string().min(10).max(2048),
+      source: ReleaseSignatureSourceSchema,
+    }),
+  ),
 ] as const;

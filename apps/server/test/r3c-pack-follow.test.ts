@@ -11,7 +11,15 @@ import { followProjectPacks } from '../src/commands/pack-follow.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { FakeRunner } from './helpers/fake-runner.ts';
-import { createWorld, MOCK_RUNTIME, ok, pairWorkstation, until, type World } from './helpers/world.ts';
+import {
+  createWorld,
+  MOCK_RUNTIME,
+  ok,
+  pairWorkstation,
+  until,
+  type World,
+  worksFor,
+} from './helpers/world.ts';
 
 /**
  * R3c: the packs of a project follow its sessions. A member who starts a Discovery or Boardroom session in the project on a
@@ -61,6 +69,7 @@ beforeAll(async () => {
   await w.t.addOrgMember(w.owner.id, member.id, 'member');
   await asOwner('POST', `/api/projects/${w.projectId}/members`, { email: member.email }, 201);
   const paired = await pairWorkstation(w.t, member, 'follow-desk');
+  await worksFor(w.t, member, paired.workstationId, w.owner.id);
   memberWs = paired.workstationId;
   mem = await FakeRunner.connect(w.baseUrl, paired.runnerToken);
   mem.hello({ runtimes: MOCK_RUNTIME, capabilities: CAPS });
@@ -179,6 +188,7 @@ describe('a "no" is remembered, and some packs are never moved by themselves', (
     await w.t.addOrgMember(w.owner.id, stranger.id, 'member');
     await asOwner('POST', `/api/projects/${w.projectId}/members`, { email: stranger.email }, 201);
     const paired = await pairWorkstation(w.t, stranger, 'no-thanks');
+    await worksFor(w.t, stranger, paired.workstationId, w.owner.id);
     const r2 = await FakeRunner.connect(w.baseUrl, paired.runnerToken);
     r2.hello({ runtimes: MOCK_RUNTIME, capabilities: CAPS });
     await r2.waitFor('welcome');
@@ -252,6 +262,7 @@ describe('a "no" is remembered, and some packs are never moved by themselves', (
     const third = await w.t.userSession(uniqueEmail('r3c-follow3'));
     await w.t.addOrgMember(w.owner.id, third.id, 'member');
     const paired = await pairWorkstation(w.t, third, 'plain');
+    await worksFor(w.t, third, paired.workstationId, w.owner.id);
     const r3 = await FakeRunner.connect(w.baseUrl, paired.runnerToken);
     r3.hello({ runtimes: MOCK_RUNTIME, capabilities: [SESSION_TURNS_CAPABILITY] }); // no pack capability
     await r3.waitFor('welcome');

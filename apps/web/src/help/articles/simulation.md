@@ -21,6 +21,10 @@ A **simulation organization** looks and works like a normal one, but nothing rea
 
 A platform administrator can invite a new organization as a simulation, or switch an existing one over, but only while it is **empty**: no projects (archived ones count) and no active billing subscription. Otherwise Guildwise explains why and nothing changes. A simulation organization **cannot be switched back**; it stays a simulation until it is deleted, so test data never turns into a real organization. Only the pace can still change.
 
+## Simulation tools only on simulations {#tools-only}
+
+Pace, **Load demo scenario**, wiping and **Delete simulation organization** exist only on organizations that were created as simulations. A real organization does not have them, not even for a platform administrator.
+
 ## Pace {#pace}
 
 The platform administrator sets how fast the simulated workstation works: **Fast** (good for tests), **Normal** or **Slow** (good for demos, so people can watch a card move).

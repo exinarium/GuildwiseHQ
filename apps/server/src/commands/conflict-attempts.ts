@@ -63,7 +63,8 @@ export async function cardConflictAttemptEvents(
 ): Promise<AppendInput[]> {
   // Second line of defence: a "conflict" without files is not a conflict and never starts a DevOps attempt.
   if (files.length === 0) return [];
-  const agent = await devopsAgentOn(tx, workstationId, card.org_id);
+  // 1.10.0 (R18-D): only the card organization's own engineer, never another organization's on the same machine.
+  const agent = await devopsAgentOn(tx, workstationId, card.org_id, { strict: true });
   if (!agent) return [];
   const prior = await one(
     tx,
@@ -116,6 +117,7 @@ export async function cardConflictAttemptEvents(
     requestedBy: { kind: 'system', id: null, name: 'Conflict handling' },
     cardId: card.id,
     orgId: card.org_id,
+    strictOrg: true,
     origin: 'conflict',
     context: { cardId: card.id },
   });

@@ -6,7 +6,7 @@ import { uniqueEmail } from './helpers/app.ts';
 import { Browser } from './helpers/browser.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { FakeRunner } from './helpers/fake-runner.ts';
-import { createWorld, MOCK_RUNTIME, ok, pairWorkstation, type World } from './helpers/world.ts';
+import { createWorld, MOCK_RUNTIME, ok, pairWorkstation, type World, worksFor } from './helpers/world.ts';
 
 /**
  * Reference repositories, second part: any clone on a workstation can be picked (not only project repositories), and
@@ -36,6 +36,7 @@ beforeAll(async () => {
   member = await w.t.userSession(uniqueEmail('member'));
   await w.t.addOrgMember(org, admin.id, 'admin');
   await w.t.addOrgMember(org, member.id, 'member');
+  await worksFor(w.t, admin, admin.workstationId, org);
   // the Owner's other project (the admin and the member do not belong to it)
   const own = await ok<any>(
     w.t.req('POST', '/api/projects', { cookie: w.owner.cookie, body: { key: 'LIB', name: 'Library' } }),

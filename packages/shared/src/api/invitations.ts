@@ -38,6 +38,11 @@ export const AcceptExistingInvitationRequestSchema = z.object({
   orgName: z.string().trim().min(1).max(120).optional(),
   blogDigest: z.boolean().optional(),
   mode: OrgModeSchema.optional(),
+  /**
+   * R9 (audit F4): which of your workstations work for the organization. Absent: all of them for a new organization of
+   * your own, none for an organization you join as a member. Each id must be an active workstation of yours.
+   */
+  serveWorkstationIds: z.array(z.uuid()).max(50).optional(),
 });
 export type AcceptExistingInvitationRequest = z.infer<typeof AcceptExistingInvitationRequestSchema>;
 export const InvitationTokenParamsSchema = z.object({ token: z.string().min(16) });

@@ -141,6 +141,22 @@ export const DeployExecPayloadSchema = z.object({
   trial: z.boolean().default(false),
   dryRun: z.boolean().default(false),
   expiresAt: z.iso.datetime(),
+  /**
+   * R30 (W14): the target requires a signed runner. Before the rest of the recipe the runner verifies `minisig` against
+   * `publicKey` and the artefact on disk (which must hash to `artefactSha256`), writes it beside the artefact
+   * (`<artefact>.minisig`) and builds with `RUNNER_RELEASE=own-key` and `AOM_RUNNER_RELEASE_PUBKEY` = `publicKey`; anything
+   * that does not verify refuses the deploy. Absent: the target requires no signature.
+   */
+  signing: z
+    .object({
+      releaseId: z.uuid(),
+      keyId: z.string().regex(/^[0-9A-F]{16}$/),
+      publicKey: z.string().regex(/^RW[A-Za-z0-9+/]{54}$/),
+      artefact: z.string().min(1).max(300),
+      artefactSha256: z.string().regex(/^[0-9a-f]{64}$/),
+      minisig: z.string().min(10).max(2048),
+    })
+    .optional(),
 });
 export type DeployExecPayload = z.infer<typeof DeployExecPayloadSchema>;
 

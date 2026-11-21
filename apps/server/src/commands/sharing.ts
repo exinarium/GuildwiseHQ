@@ -54,8 +54,9 @@ export async function shareProject(
         'no active account with that email. Invite them to the organization first, or ask them to sign up.',
         'user_not_found',
       );
-    if (invitee.kind === 'super_admin')
-      throw conflict('super_admin_cannot_join', 'platform accounts cannot join projects');
+    // R8 (audit F3): a platform account takes the normal path (stored, listed as invited, the same 201 and the same 409 on
+    // a repeat), so the answer does not reveal it. No share sends mail, and a platform account can never accept
+    // (`requireUser` refuses it), so it never joins.
     if (invitee.id === user.id)
       throw badRequest('invalid_invitee', 'you already have access to this project');
     const existing = await one(
@@ -438,7 +439,7 @@ export async function checkAgentMove(
   }
   const w = await one(
     tx,
-    `SELECT w.id, w.name, w.status, w.user_id, w.runtimes, ${orgWorkstationSql('w', '$2::uuid')} AS in_org
+    `SELECT w.id, w.name, w.status, w.user_id, w.runtimes, w.simulation_org_id, ${orgWorkstationSql('w', '$2::uuid')} AS in_org
        FROM workstations w WHERE w.id=$1`,
     [req.workstationId, a.org_id],
   );
@@ -449,6 +450,25 @@ export async function checkAgentMove(
       [a.org_id, w.user_id],
     );
     if (member) throw conflict('workstation_unpaired', `${w.name} was unpaired: pick a paired workstation`);
+  }
+  if (w && !w.in_org && w.status === 'active' && !w.simulation_org_id) {
+    // R9 (audit F4): a member's workstation takes this organization's agents only after its user switched it on.
+    const member = await one(
+      tx,
+      `SELECT u.display_name FROM org_members om JOIN users u ON u.id = om.user_id
+         JOIN organizations o ON o.id = om.org_id AND NOT o.simulation
+        WHERE om.org_id=$1 AND om.user_id=$2 AND om.status='active' AND u.status='active'
+          AND NOT EXISTS (SELECT 1 FROM workstation_org_serving s
+                           WHERE s.workstation_id=$3 AND s.org_id=$1 AND s.serving)`,
+      [a.org_id, w.user_id, w.id],
+    );
+    if (member)
+      throw conflict(
+        'workstation_not_serving',
+        w.user_id === by.userId
+          ? `${w.name} does not work for this organization yet: switch it on under Works for on the Workstations page, then move ${a.name}.`
+          : `${w.name} does not work for this organization: only ${member.display_name} can switch it on (Works for on their Workstations page).`,
+      );
   }
   if (!w || !w.in_org) throw notFound('workstation not found in this organization', 'workstation_not_found');
   if (w.id === a.workstation_id) throw conflict('same_workstation', `${a.name} already works on ${w.name}`);

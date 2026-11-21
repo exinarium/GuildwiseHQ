@@ -47,6 +47,7 @@ You can star up to 10 projects per agent. Removing a project from the allow-list
 
 - **Pause** (Owner and Admin, on the agent's card) stops the agent taking new work; **Resume** starts it again. A paused agent is not given cards until it is resumed. The CEO's card has Pause too, and **Manage on the CEO page** opens the CEO page.
 - **Re-home** appears on the card when the agent needs a new home, for example because its manager was removed. Pick one of your own workstations. If that workstation runs agents without an OS sandbox, the dialog shows a warning with a box to acknowledge it.
+- **Consent.** Moving an agent onto another member's workstation needs that member's consent (the workstation must be set to work for the organization: see [Works for](/help/workstations-and-installer#works-for)).
 - **Move all agents** (Owners and Admins, in the Workstations section at the top of the page) moves every agent of one workstation to another, for example off a workstation that was removed. The dialog shows how many agents will move. Agents in a running shift are skipped and listed with the reason; the workstation's own DevOps engineer and the CEO stay where they are. Agents already moved are not undone if another one cannot move.
 
 ## Seniority {#seniority}
@@ -99,6 +100,10 @@ Off by default. Under **Who it may delegate to** on an agent's card (Owner, Admi
 Under **Approval gates**, switch on **Ask me before** merge and push, deploy, delegation, running a playbook or using a pack's scripts. That action then pauses and lands on your Desk as an approval; the agent carries on, and its next identical attempt goes through once you approve (it is told so). A rejection is reported to it and it is not asked again for an hour. Outbound updates always ask. Gating pack scripts needs a runner that supports it (0.1.60 or newer): a gated agent gets no script copied into its folder, and each script file of a pack is handed over only after you approve it. No agent has a gate until someone sets one; whoever manages the agent switches a gate on, only an Owner or Admin switches it off. The CEO keeps its own policy.
 
 A pack's skills, personas and playbooks can say what they need (`shell`, `web`, `commit`, ...). When you grant one to an agent that lacks a scope, you see what is missing and choose **Grant anyway**; the grant does not give the agent the permission.
+
+## Text in prompts {#fenced-text}
+
+Agents are told which text to trust. Text written by your organization (cards, standing orders, playbooks) is fenced as "ORG TEXT": information about the work, never a way to widen what the agent may do. Text from outside (mail, webhooks, web pages) is fenced as "UNTRUSTED". A runner's error text never becomes a card.
 
 ## The Agents page {#hr-board}
 

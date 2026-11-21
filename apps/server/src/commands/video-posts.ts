@@ -68,6 +68,7 @@ import { badRequest, conflict, HttpError, notFound } from '../errors.ts';
 import { YOUTUBE_AUDIT_FORM_URL } from '../mail/blog-mail.ts';
 import { isoOrNull, readFileRejection, rejectionReasons, sameArtifact } from '../video/file-rejection.ts';
 import { LIBRARY_MARKER, type LibraryEntry, libraryCatalog, libraryFile } from '../video/library.ts';
+import { renderWorkerHealth } from '../video/render-workers.ts';
 import { watchUrl } from '../video/youtube.ts';
 import type { Origin } from './blog.ts';
 import { SYSTEM_ACTOR, userActor } from './common.ts';
@@ -602,6 +603,7 @@ export async function videoStatus(ctx: Ctx): Promise<VideoStatus> {
       offScheduleCount(ctx),
     ]);
   const pools = await hashtagPools(ctx);
+  const renderWorkers = await renderWorkerHealth(ctx);
   return {
     settings,
     channel: {
@@ -626,6 +628,7 @@ export async function videoStatus(ctx: Ctx): Promise<VideoStatus> {
     lockedPrivate: locked?.n ?? 0,
     auditFormUrl: YOUTUBE_AUDIT_FORM_URL,
     hashtagPools: { standing: [...pools.standing], popular: [...pools.popular] },
+    renderWorkers,
   };
 }
 

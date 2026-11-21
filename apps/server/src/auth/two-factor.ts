@@ -5,13 +5,24 @@ import { randomToken, sha256Hex } from '../crypto.ts';
 import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict } from '../errors.ts';
-import { decryptSecret, encryptSecret } from './secrets.ts';
+import { secondFactorFailedMail } from '../mail/templates.ts';
+import { enforceLoginGuard, recordFailedSignIn } from './login-guard.ts';
+import { claimSecurityNotice, sendSecurityMail } from './security-mail.ts';
 import { generateTotpSecret, otpauthUri, totpStep, verifyTotp } from './totp.ts';
+import {
+  hashRecoveryCode,
+  normalizeRecoveryCode,
+  openSeed,
+  recoveryCodeCandidates,
+  sealSeed,
+} from './two-factor-key.ts';
 
 /**
  * Two-factor login (owner decision 7): TOTP for everyone, required for the super admin, optional for users and
  * enforceable per organization by its Owner. The seed and the hashed recovery codes live in operational tables
  * (`user_totp`, `user_recovery_codes`); the events only record that it was enabled, disabled or a code was used.
+ * Seeds are sealed with the two-factor key and recovery codes keyed by it (`two-factor-key.ts`, R11); a value read with
+ * an older key is re-sealed under the row lock.
  */
 
 export const RECOVERY_CODE_COUNT = 10;
@@ -24,9 +35,8 @@ export function newRecoveryCode(): string {
   for (const x of b) s += RECOVERY_ALPHABET[x % RECOVERY_ALPHABET.length];
   return `${s.slice(0, 5)}-${s.slice(5)}`;
 }
-export const normalizeRecoveryCode = (c: string): string => c.toLowerCase().replace(/[^a-z0-9]/g, '');
+export { normalizeRecoveryCode };
 export const looksLikeRecoveryCode = (c: string): boolean => normalizeRecoveryCode(c).length === 10;
-const hashRecovery = (c: string) => sha256Hex(normalizeRecoveryCode(c));
 
 const userScope = (userId: string) => ({ orgId: null, projectId: null, audience: 'user', userId }) as const;
 const SYSTEM = { kind: 'system', id: null } as const;
@@ -50,20 +60,42 @@ export async function beginEnrollment(
     `INSERT INTO user_totp (user_id, secret_enc, confirmed_at, last_used_step, created_at)
      VALUES ($1,$2,NULL,NULL,$3)
      ON CONFLICT (user_id) DO UPDATE SET secret_enc=EXCLUDED.secret_enc, confirmed_at=NULL, last_used_step=NULL, created_at=EXCLUDED.created_at`,
-    [user.id, await encryptSecret(ctx, secret), ctx.clock.now()],
+    [user.id, await sealSeed(ctx, user.id, secret), ctx.clock.now()],
   );
   return { secret, otpauthUri: otpauthUri({ issuer: PRODUCT, account: user.email, secret }) };
 }
 
-async function writeRecoveryCodes(tx: Queryable, userId: string): Promise<string[]> {
+async function writeRecoveryCodes(ctx: Ctx, tx: Queryable, userId: string): Promise<string[]> {
   await exec(tx, 'DELETE FROM user_recovery_codes WHERE user_id=$1', [userId]);
   const codes = Array.from({ length: RECOVERY_CODE_COUNT }, newRecoveryCode);
   for (const c of codes)
     await exec(tx, 'INSERT INTO user_recovery_codes (user_id, code_hash) VALUES ($1,$2)', [
       userId,
-      hashRecovery(c),
+      await hashRecoveryCode(ctx, c),
     ]);
   return codes;
+}
+
+/**
+ * Opens the user's seed and, when an older key sealed it, re-seals it under the current key (the caller holds the row
+ * lock). Null when no available key opens it (the key was lost): the code is then never right, and the user recovers
+ * by email (R17-2).
+ */
+async function seedOf(ctx: Ctx, tx: Queryable, userId: string, blob: string): Promise<string | null> {
+  let opened: { seed: string; reseal: boolean };
+  try {
+    opened = await openSeed(ctx, userId, blob);
+  } catch (err) {
+    ctx.log.warn({ userId, err: (err as Error).message }, 'two-factor seed opens with no available key');
+    return null;
+  }
+  const { seed, reseal } = opened;
+  if (reseal)
+    await exec(tx, 'UPDATE user_totp SET secret_enc=$2 WHERE user_id=$1', [
+      userId,
+      await sealSeed(ctx, userId, seed),
+    ]);
+  return seed;
 }
 
 /** Confirms the enrolment with a code from the app; returns the recovery codes (shown once). */
@@ -76,7 +108,8 @@ export async function confirmEnrollment(ctx: Ctx, userId: string, code: string):
     );
     if (!row) throw badRequest('no_enrolment', 'start the setup first');
     if (row.confirmed_at) throw conflict('two_factor_enabled', 'two-factor login is already on');
-    const step = verifyTotp(await decryptSecret(ctx, row.secret_enc), code, ctx.clock.now());
+    const seed = await seedOf(ctx, tx, userId, row.secret_enc);
+    const step = seed === null ? null : verifyTotp(seed, code, ctx.clock.now());
     if (step === null)
       throw badRequest('invalid_code', 'that code is not right; check the time on your phone');
     await exec(tx, 'UPDATE user_totp SET confirmed_at=$2, last_used_step=$3 WHERE user_id=$1', [
@@ -84,7 +117,7 @@ export async function confirmEnrollment(ctx: Ctx, userId: string, code: string):
       ctx.clock.now(),
       step,
     ]);
-    const codes = await writeRecoveryCodes(tx, userId);
+    const codes = await writeRecoveryCodes(ctx, tx, userId);
     await ctx.store.append(
       [
         {
@@ -119,10 +152,14 @@ export async function verifySecondFactor(
     );
     if (!row) return null;
     if (looksLikeRecoveryCode(code)) {
+      // Every stored form the code may have (each available key, and the legacy sha256); the used row is re-hashed
+      // under the current key.
       const used = await exec(
         tx,
-        `UPDATE user_recovery_codes SET used_at=$3 WHERE user_id=$1 AND code_hash=$2 AND used_at IS NULL`,
-        [userId, hashRecovery(code), ctx.clock.now()],
+        `UPDATE user_recovery_codes SET used_at=$3, code_hash=$4
+          WHERE ctid = (SELECT ctid FROM user_recovery_codes
+                         WHERE user_id=$1 AND code_hash = ANY($2) AND used_at IS NULL LIMIT 1)`,
+        [userId, await recoveryCodeCandidates(ctx, code), ctx.clock.now(), await hashRecoveryCode(ctx, code)],
       );
       if (!used) return null;
       await ctx.store.append(
@@ -138,8 +175,10 @@ export async function verifySecondFactor(
       );
       return 'recovery';
     }
+    const seed = await seedOf(ctx, tx, userId, row.secret_enc);
+    if (seed === null) return null;
     const step = verifyTotp(
-      await decryptSecret(ctx, row.secret_enc),
+      seed,
       code,
       ctx.clock.now(),
       row.last_used_step === null ? null : Number(row.last_used_step),
@@ -154,7 +193,7 @@ export async function verifySecondFactor(
 export async function regenerateRecoveryCodes(ctx: Ctx, userId: string): Promise<string[]> {
   return withAppendTx(ctx.pool, async (tx) => {
     if (!(await hasTwoFactor(tx, userId))) throw badRequest('two_factor_off', 'two-factor login is not on');
-    const codes = await writeRecoveryCodes(tx, userId);
+    const codes = await writeRecoveryCodes(ctx, tx, userId);
     await ctx.store.append(
       [
         {
@@ -179,7 +218,11 @@ export async function unusedRecoveryCodes(db: Queryable, userId: string): Promis
   return r?.n ?? 0;
 }
 
-/** Switches two-factor off: the user themselves (when nothing requires it), or a reset by an Owner or super admin. */
+/**
+ * Switches two-factor off: the user themselves (when nothing requires it), or a reset by an Owner or super admin. The
+ * notice to the user about an admin-initiated reset is sent by the caller (orgs workstream), so it is not mailed twice;
+ * the console reset mails from `consoleResetSuperAdminPassword`.
+ */
 export async function disableTwoFactorIn(
   ctx: Ctx,
   tx: Tx,
@@ -204,17 +247,35 @@ export async function disableTwoFactorIn(
   );
 }
 
-/** Whether the account must have two-factor: super admin, or a member of an organization that requires it. */
-export async function twoFactorRequired(db: Queryable, userId: string, kind: string): Promise<boolean> {
+/**
+ * Whether the account must have two-factor: super admin, a member of an organization that requires it, or anyone while
+ * "Require two-factor login" is on (`enforced`, R28) unless all their memberships are simulation organizations.
+ */
+export async function twoFactorRequired(
+  db: Queryable,
+  userId: string,
+  kind: string,
+  enforced = false,
+): Promise<boolean> {
   if (kind === 'super_admin') return true;
-  return Boolean(
+  if (
     await one(
       db,
       `SELECT 1 FROM org_members om JOIN organizations o ON o.id = om.org_id
         WHERE om.user_id=$1 AND om.status='active' AND o.require_two_factor AND o.status IN ('trial','active') LIMIT 1`,
       [userId],
-    ),
+    )
+  )
+    return true;
+  if (!enforced) return false;
+  const m = await one<{ any: boolean; real: boolean }>(
+    db,
+    `SELECT EXISTS (SELECT 1 FROM org_members WHERE user_id=$1 AND status='active') AS any,
+            EXISTS (SELECT 1 FROM org_members om JOIN organizations o ON o.id = om.org_id
+                     WHERE om.user_id=$1 AND om.status='active' AND NOT o.simulation) AS real`,
+    [userId],
   );
+  return !m?.any || !!m.real;
 }
 
 export async function requiringOrgs(
@@ -264,9 +325,16 @@ export async function createLoginChallenge(
 
 /**
  * Answers a challenge: the user id when the code is right (the challenge is spent), null when it is wrong (the attempt
- * counts; after five the challenge is dead and the user signs in again).
+ * counts; after five the challenge is dead and the user signs in again). A wrong code on a live challenge is a
+ * `second_factor` failure (R2) and mails the user that the password was right and the code was not (at most once an
+ * hour).
  */
-export async function answerLoginChallenge(ctx: Ctx, token: string, code: string): Promise<string | null> {
+export async function answerLoginChallenge(
+  ctx: Ctx,
+  token: string,
+  code: string,
+  meta: { ip?: string | undefined; userAgent?: string | undefined } = {},
+): Promise<{ userId: string; factor: SecondFactor } | null> {
   const id = sha256Hex(token);
   const c = await one<{ user_id: string; expires_at: Date; attempts: number }>(
     ctx.pool,
@@ -274,8 +342,49 @@ export async function answerLoginChallenge(ctx: Ctx, token: string, code: string
     [id],
   );
   if (!c || new Date(c.expires_at) <= ctx.clock.now() || c.attempts > MAX_CHALLENGE_ATTEMPTS) return null;
-  const ok = await verifySecondFactor(ctx, c.user_id, code);
-  if (!ok) return null;
+  // R2: the account and IP locks hold at the second step too, so challenges fetched before a lock cannot be spent on
+  // guesses after it (429 `too_many_attempts`, the code is not checked).
+  const owner = await one<{ email: string }>(ctx.pool, 'SELECT email FROM users WHERE id=$1', [c.user_id]);
+  if (owner)
+    await enforceLoginGuard(ctx, { email: owner.email, ip: meta.ip ?? null, userAgent: meta.userAgent });
+  const factor = await verifySecondFactor(ctx, c.user_id, code);
+  if (!factor) {
+    await secondFactorFailed(ctx, c.user_id, meta);
+    return null;
+  }
   await exec(ctx.pool, 'DELETE FROM login_challenges WHERE id=$1', [id]);
-  return c.user_id;
+  return { userId: c.user_id, factor };
+}
+
+const SECOND_FACTOR_NOTICE_MS = 3600_000;
+
+async function secondFactorFailed(
+  ctx: Ctx,
+  userId: string,
+  meta: { ip?: string | undefined; userAgent?: string | undefined },
+): Promise<void> {
+  const u = await one<{ email: string; display_name: string }>(
+    ctx.pool,
+    'SELECT email, display_name FROM users WHERE id=$1',
+    [userId],
+  );
+  await recordFailedSignIn(ctx, {
+    reason: 'second_factor',
+    email: u?.email ?? null,
+    userId,
+    ip: meta.ip,
+    userAgent: meta.userAgent,
+  });
+  if (!u || !(await claimSecurityNotice(ctx, userId, 'second_factor_failed', SECOND_FACTOR_NOTICE_MS)))
+    return;
+  await sendSecurityMail(
+    ctx,
+    secondFactorFailedMail({
+      to: u.email,
+      name: u.display_name,
+      when: ctx.clock.now(),
+      ip: meta.ip ?? null,
+      origin: ctx.config.publicOrigin,
+    }),
+  );
 }

@@ -4,6 +4,7 @@ import { Runner, type RunnerOptions } from '../src/runner.ts';
 import { FakeServer, type FakeServerOptions } from './fake-server.ts';
 import { makeShiftStart, type ShiftOptions } from './fixtures.ts';
 import { makeConfig, makeRepo, type TestRepo, tmp, waitUntil } from './helpers.ts';
+import { grantedAuthority } from './test-authority.ts';
 
 export interface Harness {
   server: FakeServer;
@@ -25,7 +26,15 @@ export async function startHarness(
   const server = await FakeServer.start(serverOpts);
   const dataDir = tmp('aom-data-');
   const config = makeConfig(server.url, { repoRoots: [repo.scanRoot] });
-  const runner = new Runner({ config, dataDir, exitGraceMs: 5000, ...runnerOpts });
+  // a workstation set up and granted locally (R18-S); the local-authority tests pass their own `authority`
+  const runner = new Runner({
+    config,
+    dataDir,
+    exitGraceMs: 5000,
+    authority: grantedAuthority(),
+    policyDir: tmp('aom-policy-'),
+    ...runnerOpts,
+  });
   await runner.start();
   await waitUntil(() => server.helloCount > 0 && runner.client.isReady, 10_000, 'runner welcome');
   return {

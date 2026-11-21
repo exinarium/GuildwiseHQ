@@ -9,6 +9,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../auth/guards.ts';
+import { requireStepUp } from '../auth/step-up.ts';
 import {
   listIntegrationWorkstations,
   readIntegrationRequest,
@@ -79,6 +80,7 @@ export function integrationRoutes(ctx: Ctx) {
       { schema: { params: Ws, body: IntegrationConnectRequestSchema }, ...limit(10, '1 minute') },
       async (req, reply) => {
         const s = await requireUser(ctx, req);
+        requireStepUp(ctx, s);
         reply.code(202);
         return requestConnect(ctx, s.user, req.params.id, req.body);
       },
@@ -98,6 +100,7 @@ export function integrationRoutes(ctx: Ctx) {
       { schema: { params: Ws, body: IntegrationSessionRequestSchema }, ...limit(6, '10 minutes', true) },
       async (req, reply) => {
         const s = await requireUser(ctx, req);
+        requireStepUp(ctx, s);
         reply.code(202);
         return requestSession(ctx, s.user, req.params.id, req.body);
       },

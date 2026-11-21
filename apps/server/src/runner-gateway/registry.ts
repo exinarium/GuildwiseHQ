@@ -1,4 +1,10 @@
-import { makeEnvelope, type RepoReport, type ServerToRunner, type ShiftLimitSource } from '@aom/shared';
+import {
+  type HeldItem,
+  makeEnvelope,
+  type RepoReport,
+  type ServerToRunner,
+  type ShiftLimitSource,
+} from '@aom/shared';
 import type { WebSocket } from 'ws';
 
 export interface RunnerConn {
@@ -38,6 +44,17 @@ export interface RunnerConn {
    * An older runner answers those commands with an error, and holding its cards back for that would be wrong.
    */
   setupCapable?: boolean;
+  /**
+   * 1.10.0 (R18-S): the runner keeps its grants and approvals locally (it reported `setupPending`, `startupRefused` or
+   * `approvals.held`): DevOps, sudo and approval changes made on the web wait for a yes on the workstation.
+   */
+  localPolicy?: boolean;
+  /** No local `guildwise-runner setup` yet: unsandboxed steps are held ("setup pending", R20). */
+  setupPending?: boolean;
+  /** The runner refused to start and connected only to say why (R21); it runs nothing. */
+  startupRefused?: string;
+  /** What the runner holds until a local approval (`approvals.held`, the latest full list; in memory only). */
+  heldItems?: HeldItem[];
 }
 
 /** Live runner sockets by workstation. A second connection supersedes the first. */

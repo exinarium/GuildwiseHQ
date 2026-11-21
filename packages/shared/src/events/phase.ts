@@ -10,6 +10,7 @@ import {
   PhaseCardOutcome,
   PhaseOutstandingSchema,
 } from '../phases/index.ts';
+import { DeployTargetSigningSchema } from '../security/index.ts';
 import { defineEvent, Id } from './define.ts';
 import { DeskActorSchema } from './desk.ts';
 
@@ -293,5 +294,13 @@ export const phaseEvents = [
       status: BaTaskStatus.exclude(['queued', 'running']),
       note: z.string().optional(),
     }),
+  ),
+  /**
+   * The project Owner set (or cleared, `signing` null) the release signature a deploy to this target requires (R30):
+   * the minisign key the target trusts. Step-up guarded.
+   */
+  defineEvent(
+    'DeployTargetSigningSet',
+    z.object({ targetId: Id, signing: DeployTargetSigningSchema.nullable(), by: Id }),
   ),
 ] as const;

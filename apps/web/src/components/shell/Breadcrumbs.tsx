@@ -83,6 +83,14 @@ export function crumbsFor(
         { label: 'Integrations' },
       ],
     ],
+    [
+      '/workstations/:id/approvals',
+      () => [
+        { label: 'Organization' },
+        { label: 'Workstations', to: '/workstations' },
+        { label: 'Approvals' },
+      ],
+    ],
     ['/integrations', () => [{ label: 'Organization' }, { label: 'Integrations' }]],
     ['/workstations', () => [{ label: 'Organization' }, { label: 'Workstations' }]],
     [RELEASES_PATH, () => [{ label: 'Organization' }, { label: 'Releases' }]],

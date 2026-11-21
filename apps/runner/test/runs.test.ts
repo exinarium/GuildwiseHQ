@@ -459,8 +459,8 @@ describe('guards', () => {
     expect(foreign.error).toMatch(/another DevOps request/);
   });
 
-  it('allows Docker when the project does', async () => {
-    const t = setup();
+  it('allows Docker when the project does and the workstation allows it locally', async () => {
+    const t = setup({ localAllowDocker: () => true });
     mgrs.push(t.mgr);
     const { p, envId } = t.start('main', { allowDocker: true });
     await t.mgr.startEnv(p);
@@ -471,6 +471,23 @@ describe('guards', () => {
       t.caller(p.requestId!),
     )) as any;
     expect(r.ok).toBe(true); // it ran (docker may not exist: the step then failed, which is fine)
+  });
+
+  it('the server flag alone never allows Docker: policy.json allowDocker off refuses the step (R18-L)', async () => {
+    for (const local of [undefined, () => false]) {
+      const t = setup(local ? { localAllowDocker: local } : {});
+      mgrs.push(t.mgr);
+      const { p, envId } = t.start('main', { allowDocker: true });
+      await t.mgr.startEnv(p);
+      const r = (await t.mgr.rpc(
+        envId,
+        'run.step',
+        { name: 'x', cmd: ['docker', '--version'] },
+        t.caller(p.requestId!),
+      )) as any;
+      expect(r.ok).toBe(false);
+      expect(JSON.stringify(r)).toMatch(/[Dd]ocker/);
+    }
   });
 
   it('refuses a service that contradicts the declared one', async () => {

@@ -18,6 +18,8 @@ const EXEMPT_PREFIXES = [
   '/api/runner/uploads/',
   // The video render worker pushes a finished file with its worker token (Bearer), no cookie and no Origin.
   '/api/worker/video/',
+  // The render job API (R16): a remote render worker with its own token (Bearer), no cookie and no Origin.
+  '/api/render/jobs/',
 ];
 
 const PUBLIC_FORMS_PREFIX = '/api/public/forms/';

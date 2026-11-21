@@ -1089,11 +1089,47 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'What the DevOps engineer may do on its own (install, Docker, sudo, extra paths), Repository hygiene (how often, and Run hygiene now), Ask DevOps (a quick request, or Ask DevOps in a chat that works on the machine), and its requests.',
       },
       {
+        name: 'Reinstall required',
+        text: 'Shown on a workstation that was unlinked because the server accepts only signed runners and its runner is older than Guildwise 1.10.0 or unsigned. The button opens Add a workstation: run the new command on the machine. The installer puts the old install in a quarantine folder first.',
+      },
+      {
+        name: 'Approvals',
+        text: 'Opens what this workstation holds until you say yes on the machine, and its passkeys.',
+      },
+      {
+        name: 'Works for',
+        text: 'Which organizations this workstation may work for. Only the organizations you own are on when you pair it; switch another one on here. Switching one off sends its agents there to be re-homed and is refused while one of its shifts runs.',
+      },
+      {
         name: 'Unpair',
         text: 'Disconnect a workstation for good. Its runner token is revoked, cards claimed there go back to the queue and its agents wait to be re-homed. The dialog lists the places and environments that deployed from it: they are kept, marked "computer removed", and you choose another computer for each on the project\'s Environments page.',
       },
     ],
     article: 'workstations-and-installer#add-a-workstation',
+  },
+  '/workstations/:id/approvals': {
+    title: 'Approvals',
+    intro:
+      'What this workstation holds until you say yes, and the passkeys it may trust. The workstation decides: this page only shows its list and passes a passkey answer on.',
+    controls: [
+      {
+        name: 'Waiting for your yes',
+        text: 'Each item the workstation holds: what it is, since when, and how to approve it. Most need guildwise-runner approve <id> on the workstation itself.',
+      },
+      {
+        name: 'Approve with passkey',
+        text: 'Only for a redeploy at a new commit and a recipe change, and only with a passkey the workstation trusts. The workstation checks the passkey itself and runs the item only then; it shows here when it accepted or refused.',
+      },
+      {
+        name: 'Add a passkey',
+        text: "Registers a passkey of this browser or security key for this workstation (after Confirm it's you). It does nothing until you run guildwise-runner passkey trust on the workstation and trust it there.",
+      },
+      {
+        name: 'Remove',
+        text: 'Removes the passkey here and tells the workstation to drop it if not trusted yet. A passkey the workstation already trusts stays until guildwise-runner passkey remove on the workstation.',
+      },
+    ],
+    article: 'workstations-and-installer#passkeys',
   },
   '/integrations': {
     title: 'Integrations',
@@ -1259,10 +1295,66 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'ai-runtimes#keys',
   },
+  '/org-transfer/:id': {
+    title: 'Ownership transfer',
+    intro:
+      'Guildwise support asked to make one of your Admins the Owner of your organization. Nothing changes until you approve it, or until the notice ends if your organization has no deploy targets.',
+    controls: [
+      {
+        name: 'Approve the transfer',
+        text: 'Makes the named Admin the Owner; you become an Admin. You confirm it is you first.',
+      },
+      {
+        name: 'Veto',
+        text: 'Stops the transfer. Do this when you did not expect it: the request did not come from you.',
+      },
+    ],
+    article: 'organizations-and-roles#ownership-transfer',
+  },
+  '/workstations/:id/devops-log': {
+    title: 'DevOps commands',
+    intro:
+      'Every shell command a DevOps session ran on this workstation, for every organization it serves, and the commands the runner refused. Only the workstation owner sees it.',
+    controls: [
+      {
+        name: 'Command',
+        text: 'The command as the runner saw it, with the time, the kind of session and whether it was allowed or refused.',
+      },
+    ],
+    article: 'devops-and-hygiene#devops-log',
+  },
+  '/reset-password/:token': {
+    title: 'Choose a new password',
+    intro:
+      'Set a new password from the link in your email. A completed reset signs you out everywhere and clears any sign-in lock.',
+    controls: [
+      {
+        name: 'Code',
+        text: 'Shown when your account has two-factor login: enter the 6-digit code from your authenticator app or a recovery code. The page counts the tries left; after 5 wrong codes the link stops working and you ask for a new one.',
+      },
+      {
+        name: 'New password',
+        text: 'Choose the new password and confirm it.',
+      },
+    ],
+    article: 'account-security#reset',
+  },
+  '/recover-2fa': {
+    title: 'Recover your two-factor login',
+    intro:
+      'You asked to remove your two-factor login because you lost your authenticator and your recovery codes. It is removed after a wait of 24 hours, so that you can stop it if this was not you.',
+    controls: [
+      {
+        name: 'Cancel: this was not me',
+        text: 'Stops the removal. Do this if you did not ask for it, then change your password.',
+      },
+    ],
+    article: 'two-factor#recover-by-email',
+  },
   '/settings/org': {
     title: 'Organization',
     intro:
-      'Manage your organization: members, invitations, guests, e-mail inbox, project links, plan and billing.',
+      'Manage your organization: members, invitations, guests, e-mail inbox, project links, model providers, plan and limits and the audit log.',
     controls: [
       {
         name: 'General tab',
@@ -1270,7 +1362,11 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         name: 'Members tab',
-        text: 'Everyone in the organization with their role, projects and 2FA state. Owner and Admins can Invite member, change projects or remove people; only the Owner changes roles or resets two-factor login. Owner and Admins can reset a password (a temporary one, shown once): Admins for Members, the Owner for Members and Admins.',
+        text: "Everyone in the organization with their role, projects and 2FA state. Owner and Admins can Invite member, change projects or remove people; only the Owner changes roles or resets two-factor login. Email a reset link mails the member a link (the main action); Reset password gives a temporary password, shown once. Admins reset Members, the Owner Members and Admins. A member who also has access in another organization cannot be reset here: use Email a reset link. Resets ask Confirm it's you.",
+      },
+      {
+        name: 'DevOps commands tab',
+        text: "Owner only. The commands this organization's DevOps shifts ran, with the time and whether the runner allowed them.",
       },
       {
         name: 'Invitations tab',
@@ -1916,6 +2012,18 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         name: 'Releases tab',
         text: 'One row per release of Guildwise HQ. Write the announcement, edit the caption and hashtags of each network, then approve it: a release post is never shared without your approval, and each release is announced once.',
       },
+      {
+        name: 'Video: Render workers',
+        text: 'On the Videos tab, Settings: the remote render workers. Add one to get a token, shown once, and revoke it here. Each row shows when it was last seen, its address, its version and an encoder badge.',
+      },
+      {
+        name: 'Video: encoder badge',
+        text: 'Says whether the worker renders on the GPU or the CPU. A warning badge with the reason means the GPU test failed and it renders on the CPU instead.',
+      },
+      {
+        name: 'Video: CPU fallback warning',
+        text: 'A callout on this page when a worker that should use a GPU is rendering on the CPU. Renders still finish, only slower; super admins are mailed once per worker a day.',
+      },
     ],
     article: 'blog-and-digest#platform-blog',
   },
@@ -2014,22 +2122,38 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
     article: 'workstations-and-installer#runner-updates',
   },
+  '/platform/security': {
+    title: 'Security',
+    intro:
+      'Sign-in protection and the security settings of this installation: who failed to sign in and who signed in, the block list, and the two security settings.',
+    controls: [
+      {
+        name: 'Failed sign-ins',
+        text: 'Wrong passwords and codes, locked accounts and refused addresses, newest first.',
+      },
+      {
+        name: 'Sign-ins',
+        text: 'Every sign-in, with the address, the browser and whether the device was new.',
+      },
+      {
+        name: 'Block list',
+        text: 'Domains, addresses and IP ranges that may not sign up, sign in, be invited or reset a password.',
+      },
+      {
+        name: 'Security settings',
+        text: '"Only signed runners" and "Require two-factor login". Both are off by default; Guildwise Cloud locks them on ("Set by Guildwise Cloud; cannot be changed here"). Each change asks Confirm it\'s you.',
+      },
+    ],
+    article: 'account-security#security-page',
+  },
   '/platform/team': {
     title: 'Platform team',
     intro:
-      "Which of your organizations and projects fixes Guildwise itself. Bugs the runners and the server report become cards in that project; its approvals and reports go to that organization's desk, not to you.",
+      'Which organization and project fix Guildwise itself. Bugs the runners and the server report become cards in that project; its approvals, reports, pauses and pins belong to that organization, not to you.',
     controls: [
       {
-        name: 'Designate',
-        text: 'Pick one existing organization and the id of one of its projects. The project keeps its decisions at project level. Clear removes the designation: bugs are still recorded but no cards are filed.',
-      },
-      {
-        name: 'Pauses',
-        text: 'Work paused for what a critical bug hits (a project and stage, or a workstation). Pauses end by themselves when the bug card is fixed, or with Resume. The platform project is never paused.',
-      },
-      {
-        name: 'Safe mode pins',
-        text: 'Pin all workstations to a runner version, an older one too, to roll back a bad release. Unpin follows the latest release again.',
+        name: 'Designation',
+        text: 'Read-only: it is set in the server config (AOM_PLATFORM_TEAM_ORG_ID and AOM_PLATFORM_TEAM_PROJECT_ID). A designation from an older version keeps working until you set them.',
       },
     ],
     article: 'workstations-and-installer#runner-updates',

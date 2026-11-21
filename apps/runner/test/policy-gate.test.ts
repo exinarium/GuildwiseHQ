@@ -1,0 +1,322 @@
+import type { DeployExecPayload } from '@aom/shared';
+import { describe, expect, it } from 'vitest';
+import { deployPinHashes, isStrippedDeployVar, stripDeployEnv } from '../src/policy/deploy-pin.ts';
+import {
+  gateCommand,
+  gateDeploy,
+  gateDevopsShift,
+  gateEnvEnsure,
+  gateReleaseSign,
+  localEnvEnsure,
+  narrowAccess,
+} from '../src/policy/gate.ts';
+import { DEFAULT_POLICY, type Policy, PolicySchema } from '../src/policy/schema.ts';
+
+const ORG = '0190a000-0000-7000-8000-000000000001';
+const AGENT = '0190a000-0000-7000-8000-000000000002';
+const set = (p: Partial<Policy>): Policy => PolicySchema.parse({ ...DEFAULT_POLICY, setupDone: true, ...p });
+
+const deploy = (o: Partial<DeployExecPayload> = {}): DeployExecPayload => ({
+  runId: '0190a000-0000-7000-8000-0000000000aa',
+  orgId: ORG,
+  projectId: '0190a000-0000-7000-8000-000000000003',
+  projectKey: 'GWP',
+  vault: { vaultId: 'v1', storage: 'local', folder: 'gwp' } as DeployExecPayload['vault'],
+  vaultCommit: null,
+  hash: 'a'.repeat(64),
+  env: 'uat',
+  target: {
+    id: '0190a000-0000-7000-8000-000000000004',
+    name: 'uat',
+    kind: 'docker',
+    host: 'devbox',
+    appUrl: 'https://uat',
+  },
+  commit: 'c'.repeat(40),
+  repo: {
+    repoId: '0190a000-0000-7000-8000-000000000005',
+    name: 'core',
+    remoteUrlNormalized: 'github.com/x/core',
+    workingBranch: 'development',
+  },
+  trial: false,
+  dryRun: false,
+  expiresAt: '2030-01-01T00:00:00.000Z',
+  ...o,
+});
+
+describe('deploy pins cover the whole command [rv4-4]', () => {
+  it('a redeploy of the same command (new run id, new expiry) has the same pin', () => {
+    const a = deployPinHashes(deploy());
+    const b = deployPinHashes(
+      deploy({ runId: '0190a000-0000-7000-8000-0000000000bb', expiresAt: '2031-01-01T00:00:00.000Z' }),
+    );
+    expect(a).toEqual(b);
+  });
+
+  it('any change of script bundle, env, target, folder or kind changes the pin', () => {
+    const base = deployPinHashes(deploy()).base;
+    const changed = [
+      deploy({ hash: 'b'.repeat(64) }), // script, env names and values, secret names: the recipe bundle
+      deploy({ env: 'prod' }),
+      deploy({ target: { ...deploy().target, host: 'other' } }),
+      deploy({
+        repo: {
+          ...(deploy().repo as NonNullable<DeployExecPayload['repo']>),
+          remoteUrlNormalized: 'github.com/evil/core',
+        },
+      }),
+      deploy({
+        repo: { ...(deploy().repo as NonNullable<DeployExecPayload['repo']>), workingBranch: 'evil' },
+      }),
+      deploy({ dryRun: true }),
+      deploy({ trial: true }),
+    ];
+    for (const c of changed) expect(deployPinHashes(c).base).not.toBe(base);
+  });
+
+  it('the commit is in the bound hash only', () => {
+    const a = deployPinHashes(deploy());
+    const b = deployPinHashes(deploy({ commit: 'd'.repeat(40) }));
+    expect(a.base).toBe(b.base);
+    expect(a.bound).not.toBe(b.bound);
+    expect(deployPinHashes(deploy({ commit: null })).bound).toBeNull();
+  });
+});
+
+describe('the deploy gate', () => {
+  it('holds an unpinned deploy, dry runs and trials too', () => {
+    for (const p of [deploy(), deploy({ dryRun: true }), deploy({ trial: true })])
+      expect(gateDeploy(set({}), p)).toMatchObject({ action: 'hold', kind: 'deploy.exec' });
+  });
+
+  it('a pinned redeploy runs only when the whole command is unchanged', () => {
+    const pin = deployPinHashes(deploy()).base;
+    const policy = set({ deployPins: [pin] });
+    expect(gateDeploy(policy, deploy({ runId: '0190a000-0000-7000-8000-0000000000cc' }))).toEqual({
+      action: 'run',
+    });
+    expect(gateDeploy(policy, deploy({ hash: 'e'.repeat(64) })).action).toBe('hold');
+    expect(
+      gateDeploy(policy, deploy({ target: { ...deploy().target, appUrl: 'https://evil' } })).action,
+    ).toBe('hold');
+  });
+
+  it('with deployPinCommit a new commit is held as the passkey kind "deploy.commit_redeploy"', () => {
+    const h = deployPinHashes(deploy());
+    const policy = set({ deployPinCommit: true, deployPins: [h.base, h.bound as string] });
+    expect(gateDeploy(policy, deploy())).toEqual({ action: 'run' });
+    expect(gateDeploy(policy, deploy({ commit: 'f'.repeat(40) }))).toMatchObject({
+      action: 'hold',
+      kind: 'deploy.commit_redeploy',
+    });
+    // a deploy that is not pinned at all is a plain deploy.exec, never the passkey kind
+    expect(gateDeploy(policy, deploy({ env: 'prod' }))).toMatchObject({ kind: 'deploy.exec' });
+  });
+
+  it('setup pending holds even a pinned deploy; deploy "off" refuses', () => {
+    const pin = deployPinHashes(deploy()).base;
+    expect(gateDeploy(set({ deployPins: [pin], setupDone: false }), deploy())).toMatchObject({
+      action: 'hold',
+      note: expect.stringMatching(/setup pending/),
+    });
+    expect(gateDeploy(set({ deploy: 'off' }), deploy())).toMatchObject({ action: 'refuse' });
+  });
+
+  it('shows the command as received: target, commit, recipe hash and pin hash', () => {
+    const d = gateDeploy(set({}), deploy());
+    expect(d.action === 'hold' && d.detail).toMatch(
+      /devbox[\s\S]*cccccccccccc[\s\S]*recipe hash\s+a{64}[\s\S]*pin hash/,
+    );
+  });
+});
+
+describe('other held commands', () => {
+  it('recipe writes, vault configuration and reseals always wait', () => {
+    for (const [cmd, kind] of [
+      ['recipe.write', 'recipe.write'],
+      ['vault.configure', 'vault.configure'],
+      ['env.secret.set', 'env.secret'],
+      ['deploy.secret.set', 'env.secret'],
+      ['provider.key.reseal', 'provider.reseal'],
+    ] as const)
+      expect(gateCommand(set({}), cmd, { projectId: 'p', files: [], value: 'SECRET-VALUE' })).toMatchObject({
+        action: 'hold',
+        kind,
+      });
+  });
+
+  it('never prints a secret value in the detail', () => {
+    const d = gateCommand(set({}), 'env.secret.set', {
+      name: 'DB_PASSWORD',
+      sealed: 'CIPHERTEXT-XYZ',
+      value: 'p4ss',
+    });
+    expect(d.action === 'hold' && d.detail).not.toMatch(/CIPHERTEXT-XYZ|p4ss/);
+  });
+
+  it('other commands run; a malformed deploy is refused, never run', () => {
+    expect(gateCommand(set({}), 'repo.release_facts', {})).toEqual({ action: 'run' });
+    expect(gateCommand(set({}), 'deploy.exec', { runId: 'x' })).toMatchObject({ action: 'refuse' });
+  });
+
+  it('env.ensure: sudo and Docker are narrowed to the local grants; installs or extra paths wait', () => {
+    const access = { allowInstall: false, allowDocker: true, allowedPaths: [], sudo: true };
+    expect(narrowAccess(set({}), access)).toMatchObject({ sudo: false, allowDocker: false });
+    expect(
+      narrowAccess(set({ devops: { agents: {}, sudo: true }, allowDocker: true }), access),
+    ).toMatchObject({
+      sudo: true,
+      allowDocker: true,
+    });
+    const payload = (a: object) => ({
+      requestId: '0190a000-0000-7000-8000-000000000010',
+      projectId: '0190a000-0000-7000-8000-000000000011',
+      repos: [{ repoId: '0190a000-0000-7000-8000-000000000012', name: 'r', remoteUrlNormalized: 'x/r' }],
+      access: { ...access, ...a },
+    });
+    expect(gateEnvEnsure(set({}), payload({}))).toEqual({ action: 'run' });
+    expect(gateEnvEnsure(set({}), payload({ allowInstall: true }))).toMatchObject({ action: 'hold' });
+    expect(gateEnvEnsure(set({}), payload({ allowedPaths: ['/etc'] }))).toMatchObject({ action: 'hold' });
+    // what runs: the server's sudo is dropped unless sudo is granted locally, and the prompt says so
+    expect(localEnvEnsure(set({}), payload({ allowInstall: true })).access).toMatchObject({
+      sudo: false,
+      allowDocker: false,
+    });
+    expect(
+      localEnvEnsure(set({ devops: { agents: {}, sudo: true } }), payload({ allowInstall: true })).access
+        .sudo,
+    ).toBe(true);
+    const held = gateEnvEnsure(set({}), payload({ allowInstall: true }));
+    expect(held.action === 'hold' && held.detail).toMatch(/sudo\s+no/);
+  });
+});
+
+describe('release.sign (R30)', () => {
+  const p = {
+    releaseId: '0190a000-0000-7000-8000-000000000020',
+    targetId: '0190a000-0000-7000-8000-000000000021',
+    targetName: 'uat',
+    projectName: 'Guildwise',
+    version: '1.10.0',
+    keyId: '8399E5B65A3876B0',
+    artefact: 'release/uat/manifest.json',
+    repoId: '0190a000-0000-7000-8000-000000000022',
+    artefactSha256: 'a'.repeat(64),
+  };
+  it('is refused for a key this workstation does not hold', () => {
+    expect(gateReleaseSign(set({}), p)).toMatchObject({ action: 'refuse' });
+  });
+  it('is held until approve unless the key has autoSign (and setup is done)', () => {
+    const key = { keyId: p.keyId, keyFile: '/k/test.key', autoSign: false };
+    expect(gateReleaseSign(set({ signingKeys: [key] }), p)).toMatchObject({
+      action: 'hold',
+      kind: 'release.sign',
+    });
+    expect(gateReleaseSign(set({ signingKeys: [{ ...key, autoSign: true }] }), p)).toEqual({ action: 'run' });
+    expect(
+      gateReleaseSign(set({ signingKeys: [{ ...key, autoSign: true }], setupDone: false }), p).action,
+    ).toBe('hold');
+  });
+});
+
+describe('DevOps shifts [rv4-2]', () => {
+  const s = { orgId: ORG, agentId: AGENT, shiftId: 's1' };
+  it('an isDevops shift without a local grant is refused', () => {
+    expect(gateDevopsShift(set({}), s)).toMatchObject({ action: 'refuse' });
+    // a grant for another agent of the org is not a grant for this one
+    expect(gateDevopsShift(set({ devops: { agents: { [ORG]: ORG }, sudo: false } }), s).action).toBe(
+      'refuse',
+    );
+  });
+  it('a granted agent is held until a local yes (ask, the default); auto runs; sudo makes it ask again', () => {
+    const granted = { agents: { [ORG]: AGENT }, sudo: false };
+    expect(gateDevopsShift(set({ devops: granted }), s)).toMatchObject({
+      action: 'hold',
+      kind: 'devops.task',
+    });
+    expect(gateDevopsShift(set({ devops: granted, devopsRequests: 'auto' }), s)).toEqual({ action: 'run' });
+    expect(
+      gateDevopsShift(
+        { ...set({ devops: granted }), devopsRequests: 'auto', devops: { ...granted, sudo: true } },
+        s,
+      ).action,
+    ).toBe('hold');
+  });
+  it('the schema refuses devopsRequests auto while sudo is granted', () => {
+    expect(
+      PolicySchema.safeParse({ devopsRequests: 'auto', devops: { agents: {}, sudo: true } }).success,
+    ).toBe(false);
+  });
+});
+
+describe('deploy env stripping', () => {
+  it('removes loader and interpreter variables and replaces PATH, whatever their source', () => {
+    const env = stripDeployEnv(
+      {
+        NODE_OPTIONS: '--require /tmp/x.js',
+        LD_PRELOAD: '/tmp/x.so',
+        BASH_ENV: '/tmp/x.sh',
+        DYLD_INSERT_LIBRARIES: 'x',
+        GIT_CONFIG_COUNT: '1',
+        GIT_SSH_COMMAND: 'evil',
+        PYTHONPATH: '/x',
+        PATH: '/evil/bin',
+        DATABASE_URL: 'keep',
+      },
+      '/usr/bin:/bin',
+    );
+    expect(env).toEqual({ DATABASE_URL: 'keep', PATH: '/usr/bin:/bin' });
+    expect(isStrippedDeployVar('_JAVA_OPTIONS')).toBe(true);
+    expect(isStrippedDeployVar('APP_NAME')).toBe(false);
+  });
+});
+
+describe('release.prepare prompt (R30, review round 2)', () => {
+  const p = {
+    releaseId: '0190a000-0000-7000-8000-000000000020',
+    targetId: '0190a000-0000-7000-8000-000000000021',
+    targetName: 'uat',
+    projectName: 'Guildwise',
+    version: '1.10.0',
+    repoId: '0190a000-0000-7000-8000-000000000022',
+    commit: 'c'.repeat(40),
+    keyId: '8399E5B65A3876B0',
+    publicKey: `RW${'A'.repeat(54)}`,
+    artefact: 'release/uat/manifest.json',
+  };
+  it('always waits, names the repository, the commit and that its package script runs outside the sandbox', () => {
+    const d = gateCommand(set({}), 'release.prepare', p, { remoteOf: () => 'github.com/acme/core' });
+    expect(d).toMatchObject({ action: 'hold', kind: 'release.prepare' });
+    if (d.action !== 'hold') return;
+    expect(d.summary).toMatch(
+      /package Guildwise 1\.10\.0 for uat: runs github\.com\/acme\/core scripts\/package-runner\.sh outside the sandbox/,
+    );
+    expect(d.detail).toMatch(/repository\s+github\.com\/acme\/core/);
+    expect(d.detail).toMatch(/commit\s+c{40}/);
+    expect(d.detail).toMatch(
+      /scripts\/package-runner\.sh of commit c{40} of github\.com\/acme\/core on this workstation, outside the sandbox/,
+    );
+  });
+  it('says when the repository is unknown here', () => {
+    const d = gateCommand(set({}), 'release.prepare', p);
+    expect(d.action === 'hold' && d.detail).toMatch(/no known clone on this workstation/);
+  });
+});
+
+describe('DevOps task prompt shows the grant (round-1 should-fix 4)', () => {
+  it('lists the shift kind and the access as it applies here', () => {
+    const d = gateDevopsShift(set({ devops: { agents: { [ORG]: AGENT }, sudo: false } }), {
+      orgId: ORG,
+      agentId: AGENT,
+      shiftId: 's1',
+      kind: 'devops',
+      access: { allowInstall: true, allowDocker: true, allowedPaths: ['/srv/app'], sudo: true },
+    });
+    expect(d.action === 'hold' && d.detail).toMatch(/kind\s+devops/);
+    expect(d.action === 'hold' && d.detail).toMatch(/sudo\s+asked, NOT granted here/);
+    expect(d.action === 'hold' && d.detail).toMatch(/docker\s+asked, NOT allowed here/);
+    expect(d.action === 'hold' && d.detail).toMatch(/installs\s+yes/);
+    expect(d.action === 'hold' && d.detail).toMatch(/paths\s+\/srv\/app/);
+  });
+});

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestApp, type TestApp, uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q as rawQ } from './helpers/db.ts';
-import { ok, pairWorkstation, until } from './helpers/world.ts';
+import { ok, pairWorkstation, until, worksFor } from './helpers/world.ts';
 
 /**
  * Removing a member from an organization retires the DevOps engineers of their workstations there with exactly one
@@ -48,7 +48,8 @@ async function acme(opts: { memberHasOtherOrg: boolean; secondStation?: boolean;
   const as = (who: { cookie: string }, method: string, url: string, body?: unknown) =>
     t.req(method, url, { cookie: who.cookie, headers: { 'x-aom-org': org }, body });
 
-  // the Acme engineer of the member's workstation is hired by the membership hook, after the response
+  // R9: the member switches Acme on for their workstation, which hires its Acme DevOps engineer
+  await worksFor(t, member, member.workstationId, org);
   await until(
     async () => (await activeDevops(org, member.workstationId)).length > 0,
     5000,
@@ -57,6 +58,7 @@ async function acme(opts: { memberHasOtherOrg: boolean; secondStation?: boolean;
   const stations = [member.workstationId];
   if (opts.secondStation) {
     const second = await pairWorkstation(t, member, 'member-box-2');
+    await worksFor(t, member, second.workstationId, org);
     await until(
       async () => (await activeDevops(org, second.workstationId)).length > 0,
       5000,

@@ -159,3 +159,54 @@ Secret files like `.env` and keys stay blocked even in reference repositories. A
 ## A project says "Paused until ..." {#usage-limit}
 
 The Claude subscription behind the project reached its session or weekly **usage limit**. Nothing is broken: cards wait in their queue without penalty and work continues by itself when the limit resets (shown on the board and the project page, in your time zone). You also get one notice on the **Desk**, which closes by itself. To avoid waiting, use another workstation or a different Claude plan.
+
+## The runner will not start (exit 78) {#exit-78}
+
+The runner refused to start (exit code 78); the workstation page shows why.
+
+The runner refuses to run when its user is root-equivalent (root, passwordless sudo, the docker group or a writable Docker socket) or when its files can be written by other users. This is checked when setup asked for it or when the server requires signed runners.
+
+Fix it as the page says, usually by running `guildwise-runner setup` again as a normal user and choosing a dedicated runner user, then start the runner. See [Setting local permissions](/help/workstations-and-installer#local-permissions) and [Signed runners](/help/workstations-and-installer#signed-runners). Files writable by others can never be accepted. On a self-hosted server with **Only signed runners** off, a self-updated runner only warns.
+
+## "Reinstall required" {#reinstall-needed}
+
+The server has **Only signed runners** on, and this workstation's runner is unsigned or older than Guildwise 1.10.0.
+
+Its workstation was unlinked. You may also see:
+
+- **403 `signed_runner_required`** when pairing: the pairing code is not used up. Reinstall instead.
+- **410 `reinstall_required`** from an old runner asking for an update: old runners can never update into 1.10.0 on such a server.
+
+Click **Reinstall required** on the workstation card (it opens **Add a workstation**) and run the new command on the machine. The installer quarantines the old install first. See [Reinstalling a runner](/help/workstations-and-installer#reinstall).
+
+If the first start after installing failed, fix what the installer log says and run the same command again; it is safe to repeat. A runner that was cleanly stopped by the server does not restart by itself.
+
+## "Too many attempts" {#too-many-attempts}
+
+Your account or address is locked after wrong answers (429 `too_many_attempts`).
+
+Wait for the time shown, or finish a password reset with a code, which clears the lock. A browser you used to sign in within 30 days still works. See [Account security](/help/account-security#lockout).
+
+## "Set up two-factor login to continue" {#two-factor-setup-required}
+
+The server requires two-factor login (403 `two_factor_setup_required`) and your account has none.
+
+Set it up on the **Secure your account** page. See [Require two-factor login](/help/account-security#enforcement).
+
+## "Confirm it's you" keeps appearing {#step-up-required}
+
+A sensitive action needs a fresh confirmation (`step_up_required`).
+
+Enter your authenticator code (or recovery code, or your password if you have no two-factor login) and the action repeats by itself. 5 wrong answers end the session. See [Confirm it's you](/help/account-security#confirm).
+
+## "member_has_other_access" {#member-other-access}
+
+The member also has access in another organization, so you cannot reset them (409 `member_has_other_access`).
+
+Use **Email a reset link**. See [Organizations and roles](/help/organizations-and-roles#members-and-invitations).
+
+## A deploy says "runner_signature_required" {#runner-signature-required}
+
+The deploy target needs a runner signed with its key (409 `runner_signature_required`).
+
+Sign it on the release screen: see [Signing the runner per environment](/help/phases#runner-signing).

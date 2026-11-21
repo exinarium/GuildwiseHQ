@@ -6,6 +6,7 @@ import type { Ctx } from '../context.ts';
 import { one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
+import { workstationServesOrg } from '../simulation/fit.ts';
 import { ensureCeoThread } from './chat.ts';
 import { isOrgOwner } from './commands.ts';
 import { loadCeo } from './state.ts';
@@ -33,6 +34,12 @@ export async function moveCeo(
     );
     if (!a || !ws) throw notFound('workstation not found: the CEO runs on your own workstation');
     if (a.workstation_id === ws.id) return;
+    // R9: the CEO runs only on a workstation that works for the organization (a move is not consent, decision 2)
+    if (!(await workstationServesOrg(tx, ws.id, orgId)))
+      throw conflict(
+        'workstation_not_serving',
+        'that workstation does not work for this organization yet: switch it on under Works for on the Workstations page, then move the CEO',
+      );
     const ack = await sandboxGate(ctx, tx, user.id, ws.id, a.runtime, req.acknowledgeUnsandboxed, {
       roleKey: 'ceo',
       model: a.model,

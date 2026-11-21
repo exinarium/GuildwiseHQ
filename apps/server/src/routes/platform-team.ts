@@ -5,13 +5,13 @@ import {
   RecordDeployRequestSchema,
   RequestGrantRequestSchema,
   ResumePlatformPauseRequestSchema,
-  SetPlatformTeamRequestSchema,
   SetRunnerPinRequestSchema,
   TriageBugRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { requireSession, requireSuperAdmin, requireUser } from '../auth/guards.ts';
+import { requireStepUp } from '../auth/step-up.ts';
 import type { Ctx } from '../context.ts';
 import { rows } from '../db/sql.ts';
 import { forbidden, notFound } from '../errors.ts';
@@ -27,49 +27,39 @@ import { triageBug } from '../platform-team/intake.ts';
 import { endPause, listPauses, pausesForUser, startPause } from '../platform-team/pause.ts';
 import { listPins, setRunnerPin } from '../platform-team/pins.ts';
 import { listBugs } from '../platform-team/queries.ts';
-import {
-  type PlatformAccess,
-  platformAccessOf,
-  platformTeamSettings,
-  setPlatformTeam,
-} from '../platform-team/settings.ts';
+import { type PlatformAccess, platformAccessOf, platformTeamSettings } from '../platform-team/settings.ts';
 import { typed } from './util.ts';
 
 const SignatureParams = z.object({ signature: z.string().min(1).max(200) });
 
 /**
- * The platform team's routes (Lean Team v3). The super admin only DESIGNATES the team (`/api/platform/team`) and may read
- * and pause/pin; everything the team decides (approvals, reports) lives on the platform organisation's desk. Members of
- * the platform project read, the Owner and Admins of the platform organisation act. 404 for everyone else, like the
- * rest of the platform area.
+ * The platform team's routes (Lean Team v3). The designation is server config (R17-1); the super admin only reads it
+ * (`GET /api/platform/team`) and has no other access here: bugs are cards, and pauses and pins reach into
+ * organizations' projects and runners (R17). Members of the platform project read, the Owner and Admins of the platform
+ * organisation act, and only inside the platform organisation (pins and manual pauses). 404 for everyone else, like
+ * the rest of the platform area.
  */
 export function platformTeamRoutes(ctx: Ctx) {
   return async (fastify: FastifyInstance) => {
     const app = typed(fastify);
 
-    /** Super admin, or a member (read) / manager (write) of the platform organisation; 404 otherwise. */
+    /** A member (read) / manager (write) of the platform organisation; 404 otherwise, the super admin included. */
     const access = async (req: FastifyRequest, write: boolean): Promise<PlatformAccess> => {
       const first = await requireSession(ctx, req).catch(() => {
         throw notFound();
       });
-      const session =
-        first.user.kind === 'super_admin' ? await requireSuperAdmin(ctx, req) : await requireUser(ctx, req);
-      const a = await platformAccessOf(ctx, session);
+      if (first.user.kind === 'super_admin') throw notFound();
+      const a = await platformAccessOf(ctx, await requireUser(ctx, req));
       if (!a.team) throw notFound('no platform team is designated');
-      if (a.superAdmin) return a;
       if (write ? !a.manager : !a.member) throw notFound();
       return a;
     };
     const actorLabel = (a: PlatformAccess): string => a.session.user.email ?? a.session.user.id;
 
-    // ---------------------------------------------------------------- designation (super admin)
+    // ---------------------------------------------------------------- designation (read-only; server config)
     app.get('/api/platform/team', async (req) => {
       await requireSuperAdmin(ctx, req);
       return platformTeamSettings(ctx);
-    });
-    app.put('/api/platform/team', { schema: { body: SetPlatformTeamRequestSchema } }, async (req) => {
-      const s = await requireSuperAdmin(ctx, req);
-      return setPlatformTeam(ctx, s, req.body);
     });
 
     // ---------------------------------------------------------------- overview and lists
@@ -77,7 +67,7 @@ export function platformTeamRoutes(ctx: Ctx) {
       const a = await access(req, false);
       return {
         team: await platformTeamSettings(ctx),
-        canManage: a.manager || a.superAdmin,
+        canManage: a.manager,
         bugs: await listBugs(ctx, { limit: 50 }),
         pauses: await listPauses(ctx, { limit: 50 }),
         grants: await listGrants(ctx),
@@ -118,6 +108,7 @@ export function platformTeamRoutes(ctx: Ctx) {
           source: 'manual',
           ...(b.bugCardId ? { bugCardId: b.bugCardId } : {}),
           byUserId: a.session.user.id,
+          platformOnly: true,
         });
         return { pauseId: r?.pauseId ?? null, created: r?.created ?? false };
       },
@@ -155,7 +146,7 @@ export function platformTeamRoutes(ctx: Ctx) {
     // ---------------------------------------------------------------- grants
     app.post('/api/platform-team/grants', { schema: { body: RequestGrantRequestSchema } }, async (req) => {
       const a = await access(req, true);
-      if (a.superAdmin) throw forbidden('the platform organization asks for grants, not the super admin');
+      requireStepUp(ctx, a.session);
       return requestGrant(ctx, a.session.user, req.body);
     });
     app.get(
@@ -163,7 +154,6 @@ export function platformTeamRoutes(ctx: Ctx) {
       { schema: { params: SignatureParams } },
       async (req) => {
         const a = await access(req, false);
-        if (a.superAdmin) throw forbidden('only the platform team reads granted diagnostics');
         return readExtendedDiagnostics(ctx, a.session.user, req.params.signature);
       },
     );
@@ -181,6 +171,7 @@ export function platformTeamRoutes(ctx: Ctx) {
     });
     app.post('/api/platform-team/grants/:id/revoke', { schema: { params: IdParamsSchema } }, async (req) => {
       const s = await requireUser(ctx, req);
+      requireStepUp(ctx, s);
       return revokeGrant(ctx, s.user, req.params.id);
     });
     app.get(

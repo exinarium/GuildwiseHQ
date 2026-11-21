@@ -47,6 +47,8 @@ export interface ReleaseShipInput {
   exec?: ReleaseExec;
   /** Toolchain PATH folders, searched for the formatter after the clone's node_modules/.bin. */
   toolPathDirs?: string[];
+  /** R18-S: the formatter runs only for a configuration approved locally (policy.json `formatterPins`). */
+  formatterPinned?: (configHash: string) => boolean;
 }
 
 type Bumps = ReleaseShipResult['components'];
@@ -281,6 +283,7 @@ async function commitRelease(
     repoPath: input.repoPath,
     pathDirs: input.toolPathDirs ?? [],
     ...(input.exec ? { exec: input.exec } : {}),
+    ...(input.formatterPinned ? { formatterPinned: input.formatterPinned } : {}),
   });
   if (fmt.state === 'failed')
     return fail(

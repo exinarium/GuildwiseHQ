@@ -13,6 +13,7 @@ import {
   REPO_SSH,
   until,
   type World,
+  worksFor,
 } from './helpers/world.ts';
 
 let w: World;
@@ -34,6 +35,7 @@ beforeEach(async () => {
 async function addMember(world: World, label: string) {
   const m = await addProjectMember(world, label);
   await world.t.addOrgMember(world.owner.id, m.id, 'member');
+  await worksFor(world.t, m, m.workstationId, world.owner.id);
   return m;
 }
 

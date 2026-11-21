@@ -13,3 +13,11 @@ paths = [
   '''^e2e/''',
   '''^scripts/check-prod-compose\.sh$''',
 ]
+
+# A minisign SECRET key (core DESIGN R18-U, R30): runner releases are signed with keys that never enter a repository. The
+# test-only fixtures under apps/runner/test/ are allow-listed by the test/ path rule above.
+[[rules]]
+id = "minisign-secret-key"
+description = "minisign secret key file"
+regex = '''untrusted comment: minisign (encrypted )?secret key\r?\n[A-Za-z0-9+/]{100,}={0,2}'''
+keywords = ["minisign"]

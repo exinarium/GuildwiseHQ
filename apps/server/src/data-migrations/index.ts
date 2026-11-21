@@ -24,7 +24,9 @@ import { migrateReporterRetired } from './reporter-retired.ts';
 import { migrateRestructure } from './restructure.ts';
 import { migrateStrandedTestCards } from './stranded-test-cards.ts';
 import { migrateSuspiciousRoles } from './suspicious-roles.ts';
+import { migrateTwoFactorReseal } from './two-factor-reseal.ts';
 import { migrateVideoSchedule } from './video-schedule.ts';
+import { migrateWorkstationOrgServing } from './workstation-org-serving.ts';
 
 export {
   BLOG_CITE_CLEANUP_MIGRATION,
@@ -119,10 +121,20 @@ export {
   type StrandedTestCardsReport,
 } from './stranded-test-cards.ts';
 export {
+  migrateTwoFactorReseal,
+  TWO_FACTOR_RESEAL_MIGRATION,
+  type TwoFactorResealReport,
+} from './two-factor-reseal.ts';
+export {
   migrateVideoSchedule,
   VIDEO_SCHEDULE_MIGRATION,
   type VideoScheduleReport,
 } from './video-schedule.ts';
+export {
+  migrateWorkstationOrgServing,
+  WORKSTATION_ORG_SERVING_MIGRATION,
+  type WorkstationOrgServingReport,
+} from './workstation-org-serving.ts';
 
 /**
  * Boot data migrations, run after the SQL migrations and before the dispatcher, scheduler and HTTP listener
@@ -132,6 +144,8 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'orgs-2026-10', run: (env) => migrateOrgs(env) },
   { name: 'restructure-2026-10', run: (env) => migrateRestructure(env) },
   { name: 'no-personal-2026-10', run: (env) => migrateNoPersonal(env) },
+  // R9: before anything places agents or DevOps engineers through wsServesOrgSql (and before the dispatcher).
+  { name: 'workstation-org-serving-2026-11', run: (env) => migrateWorkstationOrgServing(env) },
   { name: 'blog-launch-2026-10', run: (env) => migrateBlogLaunch(env) },
   { name: 'blog-cite-cleanup-2026-10', run: (env) => migrateBlogCiteCleanup(env) },
   { name: 'card-completion-inherit-2026-10', run: (env) => migrateCardCompletionInherit(env) },
@@ -157,6 +171,7 @@ export const DATA_MIGRATIONS: Array<{ name: string; run: (env: DataMigrationEnv)
   { name: 'deploy-removed-computers-2026-11', run: (env) => migrateDeployRemovedComputers(env) },
   { name: 'orphaned-devops-2026-11', run: (env) => migrateOrphanedDevops(env) },
   { name: 'missing-devops-2026-11', run: (env) => migrateMissingDevops(env) },
+  { name: 'two-factor-reseal-2026-11', run: (env) => migrateTwoFactorReseal(env) },
 ];
 
 export async function runDataMigrations(env: DataMigrationEnv): Promise<void> {

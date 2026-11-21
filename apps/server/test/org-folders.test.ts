@@ -93,10 +93,14 @@ describe('organisation source folder', () => {
     await until(async () => !(await workstation()).orgFolders?.errors[orgId], 3000, 'error cleared');
   });
 
-  it('keeps the folder paths out of the admin list', async () => {
+  it('the legacy admin list is gone (R7, audit F2): 410 even for a legacy admin', async () => {
     const root = await w.t.userSession(uniqueEmail('admin'), 'admin');
-    const list = await ok<any>(w.t.req('GET', '/api/admin/workstations', { cookie: root.cookie }));
-    expect(list.workstations.length).toBeGreaterThan(0);
-    expect(list.workstations[0].orgFolders).toBeUndefined();
+    const list = await w.t.req('GET', '/api/admin/workstations', { cookie: root.cookie });
+    expect(list.status).toBe(410);
+    expect(JSON.stringify(list.body)).not.toContain(w.workstationId);
+    const unlink = await w.t.req('POST', `/api/admin/workstations/${w.workstationId}/unlink`, {
+      cookie: root.cookie,
+    });
+    expect(unlink.status).toBe(410);
   });
 });

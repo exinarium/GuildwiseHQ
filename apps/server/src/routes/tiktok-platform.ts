@@ -10,10 +10,13 @@ import { typed } from './util.ts';
 export function tiktokPlatformRoutes(ctx: Ctx) {
   return async (fastify: FastifyInstance) => {
     const app = typed(fastify);
-    /** Starts the OAuth sign-in: a redirect to TikTok (the Connect button is a link). */
-    app.get('/api/platform/social/tiktok/connect', async (req, reply) => {
+    /**
+     * Starts the OAuth sign-in: a write, so it needs a fresh "Confirm it's you" (R5); the page then goes to the returned
+     * TikTok address. The state it makes is bound to this session and that proof (checked by the callback).
+     */
+    app.post('/api/platform/social/tiktok/connect', async (req) => {
       const s = await requireSuperAdmin(ctx, req);
-      return reply.redirect(await tiktokConnectUrl(ctx, s.user), 302);
+      return { url: await tiktokConnectUrl(ctx, s) };
     });
     /** TikTok sends the browser back here with `code` and `state`; the page goes on to the Social sharing panel. */
     app.get(
@@ -31,7 +34,7 @@ export function tiktokPlatformRoutes(ctx: Ctx) {
       async (req, reply) => {
         const s = await requireSuperAdmin(ctx, req);
         try {
-          await tiktokCallback(ctx, s.user, req.query);
+          await tiktokCallback(ctx, s, req.query);
           return reply.redirect(`${ctx.config.publicOrigin}/platform/blog?tiktok=connected`, 302);
         } catch (err) {
           if (!(err instanceof HttpError) || err.status >= 500) throw err;

@@ -7,6 +7,8 @@ import {
   PasswordResetConfirmSchema,
   PasswordResetRequestSchema,
   PasswordResetTokenParamsSchema,
+  SecurityLogQuerySchema,
+  type SessionMethod,
   SetMyAvatarRequestSchema,
   streamId,
   TwoFactorConfirmRequestSchema,
@@ -14,11 +16,12 @@ import {
   TwoFactorSetupRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
-import { requireSession } from '../auth/guards.ts';
+import { requireSession, requireSuperAdmin } from '../auth/guards.ts';
 import { SlidingLimit } from '../auth/limits.ts';
 import { requestedOrgId } from '../auth/org-context.ts';
 import { verifyPassword } from '../auth/password.ts';
 import { createSession, deleteSession, SESSION_COOKIE, sessionOfUser } from '../auth/sessions.ts';
+import { failedSignIns, signIns } from '../auth/sign-in-log.ts';
 import {
   answerLoginChallenge,
   beginEnrollment,
@@ -34,8 +37,9 @@ import {
 import { changePassword, verifyLogin } from '../commands/auth.ts';
 import { avatarImageFor, setMyAvatar } from '../commands/avatar.ts';
 import { requestPasswordReset, resetLinkState, resetPassword } from '../commands/password-reset.ts';
+import { cancelRecoveriesOnSignIn } from '../commands/two-factor-recovery.ts';
 import type { Ctx } from '../context.ts';
-import { one } from '../db/sql.ts';
+import { exec, one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, unauthorized } from '../errors.ts';
 import { buildMe } from '../queries/me.ts';
@@ -67,8 +71,9 @@ export async function startSession(
   userId: string,
   meta: { userAgent?: string | undefined; ip?: string | undefined },
   requestedOrg: string | null,
+  method: SessionMethod,
 ): Promise<MeResponse> {
-  const s = await createSession(ctx, userId, meta);
+  const s = await createSession(ctx, userId, meta, method);
   setSessionCookie(ctx, reply, s.token, s.maxAgeSec);
   const kind = await one<{ kind: string }>(ctx.pool, 'SELECT kind FROM users WHERE id=$1', [userId]);
   if (kind?.kind === 'super_admin')
@@ -118,8 +123,9 @@ export function authRoutes(ctx: Ctx) {
       },
       async (req, reply) => {
         if (ctx.config.rateLimit) loginPerIp.hit(req.ip);
-        const userId = await verifyLogin(ctx, req.body.email, req.body.password);
         const meta = { userAgent: req.headers['user-agent'], ip: req.ip };
+        // R2: the login guard runs first (429 `too_many_attempts`), then the address policy and the password.
+        const userId = await verifyLogin(ctx, req.body.email, req.body.password, meta);
         // Two-factor accounts get a challenge, not a session, until the code is right.
         if (await hasTwoFactor(ctx.pool, userId)) {
           const challenge = await createLoginChallenge(ctx, userId, meta);
@@ -129,7 +135,7 @@ export function authRoutes(ctx: Ctx) {
             methods: ['totp', 'recovery'] as Array<'totp' | 'recovery'>,
           };
         }
-        return startSession(ctx, reply, userId, meta, requestedOrgId(req));
+        return startSession(ctx, reply, userId, meta, requestedOrgId(req), 'password');
       },
     );
 
@@ -142,14 +148,20 @@ export function authRoutes(ctx: Ctx) {
       },
       async (req, reply) => {
         if (ctx.config.rateLimit) loginPerIp.hit(req.ip);
-        const userId = await answerLoginChallenge(ctx, req.body.challenge, req.body.code);
-        if (!userId) throw unauthorized('that code is not right, or the sign-in expired: sign in again');
+        const answer = await answerLoginChallenge(ctx, req.body.challenge, req.body.code, {
+          ip: req.ip,
+          userAgent: req.headers['user-agent'],
+        });
+        if (!answer) throw unauthorized('that code is not right, or the sign-in expired: sign in again');
+        // R17-2: a code (or a recovery code) proves the second factor is not lost: an open recovery ends.
+        await cancelRecoveriesOnSignIn(ctx, answer.userId);
         return startSession(
           ctx,
           reply,
-          userId,
+          answer.userId,
           { userAgent: req.headers['user-agent'], ip: req.ip },
           requestedOrgId(req),
+          answer.factor === 'recovery' ? 'password_recovery' : 'password_totp',
         );
       },
     );
@@ -165,7 +177,10 @@ export function authRoutes(ctx: Ctx) {
     app.post('/api/auth/password', { schema: { body: ChangePasswordRequestSchema } }, async (req) => {
       const s = await requireSession(ctx, req);
       if (ctx.config.rateLimit) passwordPerAccount.hit(s.user.id);
-      await changePassword(ctx, s, req.body.current, req.body.new);
+      await changePassword(ctx, s, req.body.current, req.body.new, {
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+      });
       return { ok: true };
     });
 
@@ -202,7 +217,11 @@ export function authRoutes(ctx: Ctx) {
         config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
       },
       async (req) => {
-        await resetPassword(ctx, req.body.token, req.body.password);
+        await resetPassword(ctx, req.body.token, req.body.password, {
+          code: req.body.code,
+          ip: req.ip,
+          userAgent: req.headers['user-agent'],
+        });
         return { ok: true };
       },
     );
@@ -235,7 +254,13 @@ export function authRoutes(ctx: Ctx) {
     app.post('/api/auth/2fa/enable', { schema: { body: TwoFactorEnableRequestSchema } }, async (req) => {
       const s = await requireSession(ctx, req);
       if (ctx.config.rateLimit) twoFactorLimit.hit(s.user.id);
-      return { recoveryCodes: await confirmEnrollment(ctx, s.user.id, req.body.code) };
+      const recoveryCodes = await confirmEnrollment(ctx, s.user.id, req.body.code);
+      // R28/R5: a confirmed enrolment proves the second factor, so the session is fresh for step-up.
+      await exec(ctx.pool, 'UPDATE auth_sessions SET second_factor_at=$2 WHERE id=$1', [
+        s.sessionId,
+        ctx.clock.now(),
+      ]);
+      return { recoveryCodes };
     });
 
     app.post('/api/auth/2fa/disable', { schema: { body: TwoFactorConfirmRequestSchema } }, async (req) => {
@@ -289,6 +314,24 @@ export function authRoutes(ctx: Ctx) {
         .header('x-content-type-options', 'nosniff')
         .send(img.data);
     });
+
+    // ---- Platform > Security: failed and successful sign-ins (R2, R4). Super admins only (404 for anyone else).
+    app.get(
+      '/api/platform/security/failed-sign-ins',
+      { schema: { querystring: SecurityLogQuerySchema } },
+      async (req) => {
+        await requireSuperAdmin(ctx, req);
+        return failedSignIns(ctx, req.query);
+      },
+    );
+    app.get(
+      '/api/platform/security/sign-ins',
+      { schema: { querystring: SecurityLogQuerySchema } },
+      async (req) => {
+        await requireSuperAdmin(ctx, req);
+        return signIns(ctx, req.query);
+      },
+    );
 
     app.get('/api/auth/me', async (req) => {
       const s = await requireSession(ctx, req);

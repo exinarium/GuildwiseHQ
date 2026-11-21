@@ -4,6 +4,7 @@ import {
   type RunnerToServer,
   RunnerToServerSchema,
   type ServerToRunnerOf,
+  SIGNED_RUNNER_CLOSE_CODE,
   type StorageKind,
   streamId,
   UNLIMITED_SHIFTS,
@@ -12,6 +13,7 @@ import {
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
+import { securitySetting } from '../auth/security-settings.ts';
 import { confirmBranchOnEvent } from '../commands/branch-confirm.ts';
 import { SYSTEM_ACTOR, userScope } from '../commands/common.ts';
 import { writeResearchIndex } from '../commands/convert.ts';
@@ -29,6 +31,7 @@ import { RunnerHandlers } from './handlers.ts';
 import type { RunnerConn } from './registry.ts';
 import { promoteRotatedToken } from './rotation.ts';
 import { platformShiftCap } from './shift-limit.ts';
+import { checkHelloRelease } from './signed-sweep.ts';
 
 const PING_MS = 15_000;
 
@@ -85,6 +88,10 @@ export class RunnerGateway {
       return c;
     });
     let ping: NodeJS.Timeout | undefined;
+    // "Only signed runners" (R21, R27): nothing but `hello` is handled before its signed-release proof passed, and a
+    // refused connection handles nothing at all.
+    let proven = false;
+    let refused = false;
 
     socket.on('message', (data) => {
       // A relayed request waits for its answer with a deadline of seconds: `relay.response` must not sit behind slower
@@ -114,7 +121,18 @@ export class RunnerGateway {
           else ctx.log.warn({ issues: parsed.error.issues.slice(0, 3) }, 'invalid runner message');
           return;
         }
+        if (refused) return;
         try {
+          if (parsed.data.type === 'hello') {
+            const check = await checkHelloRelease(ctx, c.workstationId, parsed.data);
+            if (!check.allowed) {
+              refused = true;
+              // The exact unpaired reason: an old runner stops cleanly (exit 0) instead of restart-looping.
+              socket.close(SIGNED_RUNNER_CLOSE_CODE, UNPAIRED_CLOSE_REASON);
+              return;
+            }
+            proven = true;
+          } else if (!proven && (await securitySetting(ctx, 'requireSignedRunners'))) return;
           await this.handlers.handle(c, parsed.data);
         } catch (err) {
           ctx.log.error({ err, type: parsed.data.type }, 'runner message handler failed');
@@ -305,7 +323,11 @@ export class RunnerGateway {
         sha256Hex(token),
       ])) ?? (await promoteRotatedToken(ctx, token));
     if (!ws) {
-      socket.close(WS_CLOSE.unauthorized, 'unauthorized');
+      // While "Only signed runners" is on, an unknown token is an old runner of a replaced install (R21): it gets the
+      // unpaired close, so it stops cleanly instead of retrying.
+      if (await securitySetting(ctx, 'requireSignedRunners'))
+        socket.close(SIGNED_RUNNER_CLOSE_CODE, UNPAIRED_CLOSE_REASON);
+      else socket.close(WS_CLOSE.unauthorized, 'unauthorized');
       return null;
     }
     if (ws.status !== 'active') {

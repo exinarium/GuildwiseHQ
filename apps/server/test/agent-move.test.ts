@@ -6,7 +6,15 @@ import { conflict } from '../src/errors.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { addMember } from './helpers/members.ts';
-import { createWorld, markOnline, ok, pairWorkstation, type Session, type World } from './helpers/world.ts';
+import {
+  createWorld,
+  markOnline,
+  ok,
+  pairWorkstation,
+  type Session,
+  type World,
+  worksFor,
+} from './helpers/world.ts';
 
 let w: World;
 let orgId: string;
@@ -26,10 +34,12 @@ beforeAll(async () => {
   const a = await w.t.userSession(uniqueEmail('adm'));
   await w.t.addOrgMember(orgId, a.id, 'admin');
   adminS = { ...a, ...(await pairWorkstation(w.t, a, 'admin-box')) };
+  await worksFor(w.t, adminS, adminS.workstationId, orgId);
   await markOnline(w.t, adminS.workstationId);
   const m = await w.t.userSession(uniqueEmail('mem'));
   await w.t.addOrgMember(orgId, m.id, 'member');
   memberS = { ...m, ...(await pairWorkstation(w.t, m, 'member-box')) };
+  await worksFor(w.t, memberS, memberS.workstationId, orgId);
   await markOnline(w.t, memberS.workstationId);
   const o = await w.t.userSession(uniqueEmail('out'));
   outsider = { ...o, ...(await pairWorkstation(w.t, o, 'outsider-box')) };

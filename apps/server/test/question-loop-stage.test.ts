@@ -7,6 +7,7 @@ import { detectLoops } from '../src/ceo/detectors.ts';
 import { platformScan } from '../src/platform-team/detectors.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
+import { designatePlatformTeam } from './helpers/platform-team.ts';
 import { freshState } from './helpers/shifts.ts';
 import { createWorld, markOnline, ok, type World } from './helpers/world.ts';
 
@@ -14,7 +15,6 @@ import { createWorld, markOnline, ok, type World } from './helpers/world.ts';
 
 let w: World;
 let r: FakeRunner;
-let root: { id: string; cookie: string; email: string };
 let releaseDir: string;
 let ctx: World['t']['app']['ctx'];
 let orgId: string;
@@ -27,7 +27,6 @@ beforeAll(async () => {
   w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false', AOM_RUNNER_RELEASE_DIR: releaseDir } });
   ctx = w.t.app.ctx;
   r = await w.connectRunner({ capabilities: ['runner-pin:1'] });
-  root = await w.t.superAdminSession();
   orgId = w.owner.id;
   toyId = w.projectId;
   const p = await ok<any>(
@@ -65,13 +64,7 @@ beforeEach(async () => {
   agentId = (await q('SELECT id FROM agents WHERE name=$1', ['Bea']))[0]!.id as string;
 });
 
-const designate = () =>
-  ok<any>(
-    w.t.req('PUT', '/api/platform/team', {
-      cookie: root.cookie,
-      body: { orgId, projectId: platformProjectId },
-    }),
-  );
+const designate = () => designatePlatformTeam(w.t, orgId, platformProjectId);
 const bugRows = () => q('SELECT * FROM platform_bugs ORDER BY created_at');
 const questionLoops = async (cardId: string) =>
   (await detectLoops(ctx.pool)).filter((l) => l.fingerprint === `loop:questions:${cardId}`);

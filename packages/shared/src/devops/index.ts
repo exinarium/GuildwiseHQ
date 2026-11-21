@@ -177,6 +177,16 @@ export const DevopsShiftSchema = z.object({
     })
     .optional(),
   workstationName: z.string(),
+  /**
+   * 1.10.0 (R18-T): the request text was written by the owner of this workstation (a person, not an agent or a schedule).
+   * Absent or false: the prompt fences the request as text from someone else.
+   */
+  fromWorkstationOwner: z.boolean().optional(),
+  /**
+   * 1.10.0 (R18-T): standing orders of the organization, its projects and the DevOps role that the workstation owner did
+   * not write. They are shown fenced, as context; only `brief.standingOrders` (the owner's own) bind a DevOps shift.
+   */
+  contextOrders: z.array(z.object({ title: z.string(), body: z.string() })).optional(),
   access: DevOpsAccessSchema,
   /** Set when the manager already approved the out-of-access action this request is resumed for. */
   approval: z

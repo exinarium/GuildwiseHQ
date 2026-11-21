@@ -7,15 +7,18 @@ import { CEO_DEGRADED_FULL_POWER_OFF, type CeoOrderSpec } from '@aom/shared';
  * server. Pure; unit tested.
  *
  * - `restricted`: today's behaviour (not a CEO owner turn, or `ceoMode` is absent, or the agent is not the CEO).
- * - `full`: the owner's own Claude Code (`ceoMode` owner or order, CEO agent, opt-in on).
- * - `degraded`: an owner turn without the opt-in runs restricted and reports `chat.done.degraded`.
+ * - `full`: the owner's own Claude Code (`ceoMode` owner or order, CEO agent, opt-in on, AND a local action on this
+ *   machine opened the turn: `guildwise-runner ceo turn` or the tray, R18-S). A server-marked `ownerMarked` or `ceoMode`
+ *   alone never starts an unsandboxed turn.
+ * - `degraded`: an owner turn without the opt-in or without the local action runs restricted and reports
+ *   `chat.done.degraded`.
  * - `refuse`: an order turn that lacks the opt-in or an Owner-marked, hash-matching authorization.
  */
 export type ChatProfile =
   | { kind: 'restricted' }
   | { kind: 'full'; mode: 'owner' | 'order' }
   | { kind: 'degraded'; degraded: typeof CEO_DEGRADED_FULL_POWER_OFF }
-  | { kind: 'refuse'; error: 'full_power_off' | 'order_not_authorized' };
+  | { kind: 'refuse'; error: 'full_power_off' | 'order_not_authorized' | 'local_turn_required' };
 
 export const orderVersionHash = (title: string, body: string): string =>
   createHash('sha256').update(`${title}\n${body}`).digest('hex');
@@ -33,15 +36,21 @@ export function selectChatProfile(
     agent: { roleKey: string };
     order?: CeoOrderSpec | undefined;
   },
-  local: { fullPower: boolean },
+  local: {
+    fullPower: boolean;
+    /** Consumes the one turn a local action opened (R18-S); absent: none, so nothing runs with full power. */
+    takeLocalTurn?: () => boolean;
+  },
 ): ChatProfile {
   if (!msg.ceoMode || msg.agent.roleKey !== 'ceo') return { kind: 'restricted' };
   if (msg.ceoMode === 'order') {
     if (!orderAuthorized(msg.order)) return { kind: 'refuse', error: 'order_not_authorized' };
     if (!local.fullPower) return { kind: 'refuse', error: 'full_power_off' };
+    if (!local.takeLocalTurn?.()) return { kind: 'refuse', error: 'local_turn_required' };
     return { kind: 'full', mode: 'order' };
   }
   if (!local.fullPower) return { kind: 'degraded', degraded: CEO_DEGRADED_FULL_POWER_OFF };
+  if (!local.takeLocalTurn?.()) return { kind: 'degraded', degraded: CEO_DEGRADED_FULL_POWER_OFF };
   return { kind: 'full', mode: 'owner' };
 }
 

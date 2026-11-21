@@ -27,6 +27,7 @@ import {
 } from '../ui.tsx';
 import { AddCodespaceForm, AddVpsForm } from './AddCloudWorkstation.tsx';
 import { InstallArt } from './InstallArt.tsx';
+import { SignedRunnersInstallNote } from './SignedRunners.tsx';
 
 type Where = 'local' | 'vps' | 'codespaces';
 const WHERE: Array<{ value: Where; label: string; sub: string }> = [
@@ -117,6 +118,7 @@ export function AddWorkstationWizard({
         {where === 'codespaces' && <AddCodespaceForm onDone={() => close(false)} />}
         {where === 'local' && (
           <>
+            <SignedRunnersInstallNote />
             <fieldset className="flex flex-col gap-2">
               <legend className="mb-1 text-sm font-semibold text-fg">
                 1. Which computer will run your agents?

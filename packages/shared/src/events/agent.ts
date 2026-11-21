@@ -108,7 +108,7 @@ export const agentEvents = [
       by: Id,
       releasedCardIds: z.array(Id),
       /** Why: absent = fired by a manager. */
-      reason: z.enum(['fired', 'workstation_unpaired', 'orphaned_migration']).optional(),
+      reason: z.enum(['fired', 'workstation_unpaired', 'orphaned_migration', 'serving_off']).optional(),
       /** The workstation that was removed, for a retirement caused by it. */
       workstationId: Id.optional(),
     }),
@@ -146,9 +146,15 @@ export const agentEvents = [
       unsandboxedAck: UnsandboxedAckSchema.optional(),
     }),
   ),
-  /** The agent's workstation was retired: it has no home until someone re-homes it (status needs_rehome). */
+  /** The agent's workstation was retired, or stopped working for its organization: no home until re-homed (needs_rehome). */
   defineEvent(
     'AgentNeedsRehome',
-    z.object({ agentId: Id, by: Id, fromWorkstationId: Id, reason: z.enum(['workstation_retired']) }),
+    z.object({
+      agentId: Id,
+      by: Id,
+      fromWorkstationId: Id,
+      /** `serving_off`: the workstation's owner switched the organization off under "Works for" (R9). */
+      reason: z.enum(['workstation_retired', 'serving_off']),
+    }),
   ),
 ] as const;

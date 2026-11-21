@@ -4,7 +4,8 @@
 {
 	# Caddy logs handler errors (a 502 while the app restarts, a 413, a client abort) with the request URI and headers,
 	# even without an access log. Secrets travel in some of them: delete or redact them in every log line. The URI rule
-	# matches redactUrl in apps/server/src/app.ts; keep the two in step.
+	# matches redactUrl in apps/server/src/app.ts; keep the two in step (RE2 has no lookahead, so here the fixed
+	# /api/auth/password-reset/request and /confirm endpoints are redacted as well).
 	log default {
 		output stderr
 		format filter {
@@ -23,7 +24,7 @@
 				request>headers>Authorization delete
 				request>headers>Proxy-Authorization delete
 				resp_headers>Set-Cookie delete
-				request>uri regexp "(?i)(/(?:relay|hooks)/in/)[^#]*|(/(?:f|api/public/forms|api/invitations|invite)/)[^/?#]+|((?:/|%2F|%252F)m(?:/|%2F|%252F)desk(?:/|%2F|%252F))(?:[A-Za-z0-9_.~-]|%[0-9A-Fa-f][0-9A-Fa-f])+|([?&](?:token|code|invite|pairing[_-]?code)=)[^&#]*|(/api/hooks/[^/?#]+/)[^/?#]+" "${1}${2}${3}${4}${5}[redacted]"
+				request>uri regexp "(?i)(/(?:relay|hooks)/in/)[^#]*|(/(?:f|api/public/forms|api/invitations|invite|api/auth/password-reset|reset-password|verify-email)/)[^/?#]+|((?:/|%2F|%252F)m(?:/|%2F|%252F)desk(?:/|%2F|%252F))(?:[A-Za-z0-9_.~-]|%[0-9A-Fa-f][0-9A-Fa-f])+|([?&](?:token|code|invite|pairing[_-]?code)=)[^&#]*|(/api/hooks/[^/?#]+/)[^/?#]+" "${1}${2}${3}${4}${5}[redacted]"
 			}
 		}
 	}

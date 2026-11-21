@@ -1,3 +1,4 @@
+import { pruneLoginFailures } from '../auth/login-guard.ts';
 import { cloudTick } from '../cloud/tick.ts';
 import { autoPublishDue } from '../commands/blog.ts';
 import { blogDigestTick } from '../commands/blog-digest.ts';
@@ -13,6 +14,7 @@ import { pruneAppRequests } from '../commands/org-apps.ts';
 import { evaluateAllProviderCaps } from '../commands/org-provider-keys.ts';
 import { ownerPendingSweep } from '../commands/owner-pending.ts';
 import { auditMailTick } from '../commands/platform-notify.ts';
+import { ownershipTransferTick } from '../commands/platform-transfer.ts';
 import { pollPrOnlyRepos } from '../commands/pr-only.ts';
 import { dispatchReplayRuns } from '../commands/pr-replays.ts';
 import { dispatchPrReviews, sweepStalePrReviewRuns } from '../commands/pr-review-runs.ts';
@@ -27,13 +29,16 @@ import { sizeExceptionSweep } from '../commands/size-exception.ts';
 import { socialTick } from '../commands/social.ts';
 import { pruneStorage } from '../commands/storage-connections.ts';
 import { sweepSubworkflows } from '../commands/subworkflows.ts';
+import { twoFactorRecoveryTick } from '../commands/two-factor-recovery.ts';
 import { weeklyBriefingTick } from '../commands/weekly-briefing.ts';
 import type { Ctx } from '../context.ts';
 import { reachabilityTick } from '../delivery/reachability.ts';
 import { governanceTick } from '../governance/offboarding.ts';
 import { journeyTick } from '../journeys/tick.ts';
 import { pruneMail } from '../mail/inbound/prune.ts';
+import { syncPlatformTeamDesignation } from '../platform-team/settings.ts';
 import { kickFormUploadCleanup } from '../public-forms/cleanup.ts';
+import { mailRunnerReinstallNotices } from '../runner-gateway/signed-sweep.ts';
 import { prunePersonaChats } from '../sessions/persona-chat.ts';
 import { videoWatch } from '../video/sweep.ts';
 
@@ -113,6 +118,14 @@ export class Scheduler {
       await prunePersonaChats(this.ctx).catch((err) =>
         this.ctx.log.error({ err }, 'persona chat retention failed'),
       );
+      // Owners of workstations the signed-runner sweep unlinked get one reinstall mail, once mail works (R21).
+      await mailRunnerReinstallNotices(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'runner reinstall mails failed'),
+      );
+      // Failed sign-ins older than 90 days (R2); at most once a day.
+      await pruneLoginFailures(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'login failure prune failed'),
+      );
     });
     this.chain = next.catch(() => {});
     return next;
@@ -156,6 +169,16 @@ export class Scheduler {
       await this.interests();
       await this.triggers();
       await auditMailTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'audit mail failed'));
+      // R17: the platform team designation follows server config; recoveries and transfers whose wait is over.
+      await syncPlatformTeamDesignation(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'platform team designation sync failed'),
+      );
+      await twoFactorRecoveryTick(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'two-factor recovery tick failed'),
+      );
+      await ownershipTransferTick(this.ctx).catch((err) =>
+        this.ctx.log.error({ err }, 'ownership transfer tick failed'),
+      );
       await cloudTick(this.ctx).catch((err) => this.ctx.log.error({ err }, 'cloud workstations failed'));
       await reachabilityTick(this.ctx).catch((err) =>
         this.ctx.log.error({ err }, 'reachability checks failed'),

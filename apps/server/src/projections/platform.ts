@@ -35,4 +35,19 @@ export const platformProjectors: Record<string, Projector> = {
       [p.pauseId, e.createdAt, p.reason, p.by],
     );
   },
+  // ---- the owner's block list (R1): read by screenAddress (auth/address-policy.ts)
+  PlatformBlockAdded: async (tx, e) => {
+    const p = (e.event as EventOf<'PlatformBlockAdded'>).payload;
+    await exec(
+      tx,
+      `INSERT INTO platform_blocklist (id, kind, value, note, created_by, created_at) VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (kind, value) DO UPDATE SET id = EXCLUDED.id, note = EXCLUDED.note, created_by = EXCLUDED.created_by,
+         created_at = EXCLUDED.created_at`,
+      [p.blockId, p.kind, p.value, p.note, p.by, e.createdAt],
+    );
+  },
+  PlatformBlockRemoved: async (tx, e) => {
+    const p = (e.event as EventOf<'PlatformBlockRemoved'>).payload;
+    await exec(tx, 'DELETE FROM platform_blocklist WHERE kind=$1 AND value=$2', [p.kind, p.value]);
+  },
 };

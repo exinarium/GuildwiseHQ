@@ -1,5 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { DESK_SUBKIND, type RunnerToServerOf, streamId } from '@aom/shared';
+import {
+  DESK_SUBKIND,
+  type DevopsAuditCount,
+  type DevopsCommandLogEntry,
+  type RunnerErrorSummary,
+  type RunnerToServerOf,
+  streamId,
+} from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
@@ -98,6 +105,7 @@ export async function applyDevopsAudit(
   }
 }
 
+/** Every DevOps command row, unscoped: internal use and tests only. No route returns it (R17-4: see below). */
 export async function listDevopsAudit(
   ctx: Ctx,
   opts: { workstationId?: string; refusedOnly?: boolean; limit?: number } = {},
@@ -203,4 +211,108 @@ export async function applyRoleSmoke(
     }
     if (events.length > 0) await ctx.store.append(events, { tx });
   });
+}
+
+// ------------------------------------------------------------------------------- R17-4: who sees what of it
+
+/**
+ * A stack frame the platform may see: `at name (module:line:col)` (or without a name), where the module is a path the
+ * runner ships (`src/…`, `dist/…`, `node:…`), reduced to that tail. Anything else (a message, a user path, a host name,
+ * a command) is dropped.
+ */
+const FRAME =
+  /^\s*at\s+(?:((?:async\s)?[\w$.<>[\]]{1,120})\s+\()?(?:file:\/\/)?(?:[^()\s]*?\/)?((?:src|dist)\/[\w./-]{1,200}|node:[\w/]{1,60}):(\d{1,6}):(\d{1,6})\)?\s*$/;
+
+export function safeTopFrames(stack: string | null | undefined, max = 5): string[] {
+  const out: string[] = [];
+  for (const line of (stack ?? '').split('\n')) {
+    const m = FRAME.exec(line);
+    if (!m) continue;
+    out.push(`at ${m[1] ? `${m[1]} ` : ''}(${m[2]}:${m[3]}:${m[4]})`);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/** The platform's view of the runner errors (R17-4): no message, no stack, no context; checked frames only. */
+export async function listRunnerErrorSummaries(ctx: Ctx, limit = 100): Promise<RunnerErrorSummary[]> {
+  return (await listRunnerErrors(ctx, limit)).map((e) => ({
+    signature: e.signature,
+    firstVersion: e.firstVersion,
+    lastVersion: e.lastVersion,
+    workstationCount: e.workstationCount,
+    occurrences: e.occurrences,
+    firstSeenAt: e.firstSeenAt,
+    lastSeenAt: e.lastSeenAt,
+    topFrames: safeTopFrames(e.stack),
+  }));
+}
+
+/** The platform's view of the DevOps audit (R17-4): counts per runner version and platform, never a command. */
+export async function devopsAuditCounts(ctx: Ctx): Promise<DevopsAuditCount[]> {
+  const r = await rows(
+    ctx.pool,
+    `SELECT w.runner_version, w.platform, count(*)::int AS total,
+            count(*) FILTER (WHERE a.decision = 'refused')::int AS refused,
+            count(DISTINCT a.workstation_id)::int AS workstations
+       FROM devops_audit a LEFT JOIN workstations w ON w.id = a.workstation_id
+      GROUP BY w.runner_version, w.platform
+      ORDER BY total DESC, w.runner_version NULLS LAST, w.platform NULLS LAST`,
+  );
+  return r.map((x) => ({
+    runnerVersion: x.runner_version ?? null,
+    platform: x.platform ?? null,
+    total: x.total,
+    refused: x.refused,
+    workstations: x.workstations,
+  }));
+}
+
+const auditEntry = (r: Row): DevopsCommandLogEntry => ({
+  id: String(r.id),
+  workstationId: r.workstation_id,
+  workstationName: r.workstation_name ?? null,
+  at: new Date(r.at).toISOString(),
+  kind: r.kind,
+  shiftKind: r.shift_kind ?? null,
+  decision: r.decision,
+  rule: r.rule ?? null,
+  command: r.command,
+});
+
+/**
+ * The full DevOps command log of one organization, for its Owner: the commands of DevOps shifts of that organization
+ * (`session_ref` is the shift id). Chat sessions carry no organization and show only on the workstation's own log.
+ */
+export async function orgDevopsAudit(
+  ctx: Ctx,
+  orgId: string,
+  opts: { limit?: number; refusedOnly?: boolean } = {},
+): Promise<DevopsCommandLogEntry[]> {
+  const r = await rows(
+    ctx.pool,
+    `SELECT a.*, w.name AS workstation_name FROM devops_audit a
+       JOIN shifts s ON s.id::text = a.session_ref AND s.org_id = $1
+       LEFT JOIN workstations w ON w.id = a.workstation_id
+      WHERE a.kind = 'shift' AND (NOT $2 OR a.decision = 'refused')
+      ORDER BY a.at DESC, a.id DESC LIMIT $3`,
+    [orgId, opts.refusedOnly ?? false, Math.min(Math.max(1, opts.limit ?? 100), 500)],
+  );
+  return r.map(auditEntry);
+}
+
+/** The full DevOps command log of one workstation, for its owner (shifts of every organization, and chats). */
+export async function workstationDevopsAudit(
+  ctx: Ctx,
+  workstationId: string,
+  opts: { limit?: number; refusedOnly?: boolean } = {},
+): Promise<DevopsCommandLogEntry[]> {
+  const r = await rows(
+    ctx.pool,
+    `SELECT a.*, w.name AS workstation_name FROM devops_audit a LEFT JOIN workstations w ON w.id = a.workstation_id
+      WHERE a.workstation_id = $1 AND (NOT $2 OR a.decision = 'refused')
+      ORDER BY a.at DESC, a.id DESC LIMIT $3`,
+    [workstationId, opts.refusedOnly ?? false, Math.min(Math.max(1, opts.limit ?? 100), 500)],
+  );
+  return r.map(auditEntry);
 }

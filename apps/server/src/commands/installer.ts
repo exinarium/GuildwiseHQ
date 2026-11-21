@@ -1,11 +1,14 @@
-import type {
-  CreateInstallerRequest,
-  InstallerProgressRequest,
-  InstallerSession,
-  InstallerState,
-  InstallerStatus,
-  InstallerStep,
+import {
+  type CreateInstallerRequest,
+  type InstallerProgressRequest,
+  type InstallerSession,
+  type InstallerState,
+  type InstallerStatus,
+  type InstallerStep,
+  isPlaceholderReleaseKey,
+  OFFICIAL_RUNNER_RELEASE_PUBKEY,
 } from '@aom/shared';
+import { securitySetting } from '../auth/security-settings.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import type { Ctx } from '../context.ts';
 import { generatePairingCode, normalizePairingCode, randomToken, sha256Hex } from '../crypto.ts';
@@ -135,6 +138,11 @@ export async function installerScript(
   if (!s) return null;
   const fresh = await mintCode(ctx, s.code_id, new Date(s.expires_at));
   const release = await latestRelease(ctx.config);
+  // R21/R27: the installer refuses an unsigned release and replaces an old runner only where signed runners are required.
+  const requireSignedRunners = await securitySetting(ctx, 'requireSignedRunners');
+  const releasePubkey =
+    ctx.config.runnerReleasePubkey ??
+    (isPlaceholderReleaseKey(OFFICIAL_RUNNER_RELEASE_PUBKEY) ? null : OFFICIAL_RUNNER_RELEASE_PUBKEY);
   const params = {
     serverUrl: ctx.config.publicOrigin,
     pairingCode: fresh,
@@ -144,6 +152,8 @@ export async function installerScript(
     expiresAt: new Date(s.expires_at),
     generatedAt: now,
     expertMode: s.expert === true,
+    requireSignedRunners,
+    releasePubkey,
   };
   await exec(
     ctx.pool,

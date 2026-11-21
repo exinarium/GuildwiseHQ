@@ -9,6 +9,7 @@ import {
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireOrg, requireUser } from '../auth/guards.ts';
+import { requireStepUp } from '../auth/step-up.ts';
 import { resetAgent } from '../commands/agents.ts';
 import {
   createDevOpsRequest,
@@ -59,6 +60,7 @@ export function devopsRoutes(ctx: Ctx) {
       { schema: { params: IdParamsSchema, body: ResolveDevOpsApprovalRequestSchema } },
       async (req) => {
         const s = await requireUser(ctx, req);
+        if (req.body.resolution === 'approved') requireStepUp(ctx, s);
         await resolveDevOpsApproval(ctx, s.user, req.params.id, req.body.resolution, req.body.note);
         return getDevOpsRequest(ctx, s.user.id, req.params.id);
       },
@@ -69,6 +71,7 @@ export function devopsRoutes(ctx: Ctx) {
       { schema: { params: IdParamsSchema, body: PatchDevOpsAccessRequestSchema } },
       async (req) => {
         const s = await requireUser(ctx, req);
+        requireStepUp(ctx, s);
         await patchDevOpsAccess(ctx, s.user, req.params.id, req.body);
         const [w] = await workstationDtos(ctx, 'w.id = $1 AND w.user_id = $2', [req.params.id, s.user.id]);
         if (!w) throw notFound('workstation not found');
@@ -79,6 +82,7 @@ export function devopsRoutes(ctx: Ctx) {
     /** The runner's public key for the sudo password (the browser encrypts with it; the server cannot read the result). */
     app.get('/api/workstations/:id/sudo-key', { schema: { params: IdParamsSchema } }, async (req) => {
       const s = await requireUser(ctx, req);
+      requireStepUp(ctx, s);
       return sudoKeyOf(ctx, s.user, req.params.id);
     });
 
@@ -87,6 +91,7 @@ export function devopsRoutes(ctx: Ctx) {
       { schema: { params: IdParamsSchema, body: SetSudoPasswordRequestSchema } },
       async (req, reply) => {
         const s = await requireUser(ctx, req);
+        requireStepUp(ctx, s);
         await setSudoPassword(ctx, s.user, req.params.id, req.body);
         reply.code(202);
         return { queued: true };
@@ -98,6 +103,7 @@ export function devopsRoutes(ctx: Ctx) {
       { schema: { params: IdParamsSchema } },
       async (req, reply) => {
         const s = await requireUser(ctx, req);
+        requireStepUp(ctx, s);
         await clearSudoPassword(ctx, s.user, req.params.id);
         reply.code(202);
         return { queued: true };

@@ -22,6 +22,7 @@ import type { Ctx } from '../context.ts';
 import { exec, iso, one, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, HttpError, notFound, unprocessable } from '../errors.ts';
+import { pairingRelease } from '../runner-gateway/signed-sweep.ts';
 import { GithubError } from './github.ts';
 import { cloudProblemMail } from './mail.ts';
 import { SshError } from './ssh.ts';
@@ -443,6 +444,8 @@ export async function enrollCodespace(ctx: Ctx, input: RunnerEnrollRequest) {
     throw deny();
   }
   if (login.toLowerCase() !== String(cw.gh_login).toLowerCase()) throw deny();
+  // Refused before anything changes (an earlier workstation of this codespace stays as it is) while signed runners are on.
+  await pairingRelease(ctx, input);
   // A second enrollment (the codespace was rebuilt) replaces the old workstation, but only while it is not connected.
   if (cw.workstation_id) {
     const ws = await one(ctx.pool, 'SELECT connected FROM workstations WHERE id=$1', [cw.workstation_id]);
@@ -458,6 +461,8 @@ export async function enrollCodespace(ctx: Ctx, input: RunnerEnrollRequest) {
     platform: input.platform,
     hostname: input.hostname,
     runnerVersion: input.runnerVersion,
+    // The proof the bootstrap kept beside the runner: checked like any pairing (403 while "Only signed runners" is on).
+    release: input.release,
   });
   const now = ctx.clock.now();
   await setState(ctx, cw.id, 'running', '', {

@@ -29,6 +29,7 @@ const org = (status: 'active' | 'suspended' = 'active') => ({
   requireTwoFactor: false,
   simulation: sim,
   simulationPace: 'normal',
+  createdAsSimulation: sim,
   createdAt: T,
   lastActiveAt: null,
 });
@@ -140,36 +141,29 @@ describe('platform area', () => {
     });
   });
 
-  it('switches simulation on and asks for the typed name before deleting a simulation organization', async () => {
+  it('a real organization gets no simulation tools (R17-5)', async () => {
+    wrap(`/platform/orgs/${ID(10)}`);
+    expect((await screen.findByTestId('simulation-state')).textContent).toMatch(/Real organization/);
+    expect(screen.queryByTestId('simulation-toggle')).toBeNull();
+    expect(screen.queryByTestId('simulation-demo')).toBeNull();
+    expect(screen.queryByTestId('simulation-wipe')).toBeNull();
+    expect(screen.getByTestId('platform-org-simulation').textContent).toMatch(
+      /Only an organization created as a simulation/,
+    );
+  });
+
+  it('an organization created as a simulation loads the demo and asks for the typed name before deleting', async () => {
+    sim = true;
     const user = userEvent.setup();
     wrap(`/platform/orgs/${ID(10)}`);
-    // off: no delete button
-    const toggle = await screen.findByTestId('simulation-toggle');
-    expect(screen.queryByTestId('simulation-wipe')).toBeNull();
-    // switching is permanent: the admin is asked first
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValue(true);
-    await user.click(toggle);
-    expect(calls.some((c) => c.method === 'PUT')).toBe(false);
-    await user.click(toggle);
-    await waitFor(() =>
-      expect(calls.some((c) => c.method === 'PUT' && (c.body as { enabled: boolean }).enabled === true)).toBe(
-        true,
-      ),
-    );
-    confirmSpy.mockRestore();
-    // on: the switch is locked and the page points to deleting
-    await waitFor(() =>
-      expect((screen.getByTestId('simulation-toggle') as HTMLInputElement).disabled).toBe(true),
-    );
+    expect((await screen.findByTestId('simulation-state')).textContent).toMatch(/Simulation \(permanent\)/);
     expect(screen.getByTestId('platform-org-simulation').textContent).toMatch(
       /stays one until it is deleted/,
     );
-    // on: the demo scenario can be loaded
     await user.click(await screen.findByTestId('simulation-demo'));
     await waitFor(() =>
       expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/demo-scenario'))).toBe(true),
     );
-    // on: the delete button opens a dialog that needs the name
     expect(await screen.findByTestId('simulation-wipe')).toBeTruthy();
     await user.click(screen.getByTestId('simulation-wipe'));
     const confirm = (await screen.findByTestId('simulation-wipe-confirm')) as HTMLButtonElement;

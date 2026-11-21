@@ -23,7 +23,10 @@
     "apps/web/src/pages/AcceptInvite.tsx",
     "apps/web/src/pages/ChangePasswordRequired.tsx",
     "apps/web/src/pages/SecuritySetup.tsx",
-    "apps/web/src/pages/DeskActionConfirm.tsx"
+    "apps/web/src/pages/DeskActionConfirm.tsx",
+    "apps/web/src/pages/RecoverTwoFactor.tsx",
+    "apps/web/src/pages/OwnershipTransfer.tsx",
+    "apps/web/src/pages/WorkstationDevopsLog.tsx"
   ],
   "videos": {
     "agents": {
@@ -329,7 +332,8 @@
         {
           "name": "Workstations",
           "files": ["apps/web/src/pages/Workstations.tsx", "apps/web/src/components/workstations/**"]
-        }
+        },
+        { "name": "Approvals", "files": ["apps/web/src/pages/WorkstationApprovals.tsx"] }
       ]
     }
   },

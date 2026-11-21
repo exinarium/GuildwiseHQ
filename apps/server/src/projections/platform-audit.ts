@@ -129,17 +129,20 @@ export const platformAuditProjectors: Record<string, Projector> = {
       meta: p.meta,
     };
   }),
-  PlatformTeamDesignated: byPlatform(async (tx, e) => {
-    const p = ev<'PlatformTeamDesignated'>(e).payload;
-    return {
-      action: e.event.type,
-      orgId: p.orgId ?? null,
-      summary: p.orgId
-        ? `Designated ${await orgName(tx, p.orgId)} as the platform team organization`
-        : 'Cleared the platform team organization',
-      details: { projectId: p.projectId },
-    };
-  }),
+  PlatformTeamDesignated: byPlatform(
+    async (tx, e) => {
+      const p = ev<'PlatformTeamDesignated'>(e).payload;
+      return {
+        action: e.event.type,
+        orgId: p.orgId ?? null,
+        summary: p.orgId
+          ? `Designated ${await orgName(tx, p.orgId)} as the platform team organization${e.actor.kind === 'system' ? ' (server config)' : ''}`
+          : `Cleared the platform team organization${e.actor.kind === 'system' ? ' (server config)' : ''}`,
+        details: { projectId: p.projectId },
+      };
+    },
+    { system: true },
+  ),
   // Kept forever (the wiped organization's own events are gone): org_id stays empty so nothing links back to it.
   SimulationOrgWiped: always(async (_tx, e) => {
     const p = ev<'SimulationOrgWiped'>(e).payload;
@@ -333,13 +336,28 @@ export const platformAuditProjectors: Record<string, Projector> = {
       meta: p.meta,
     };
   }),
-  TwoFactorDisabled: byPlatform(async (tx, e) => {
+  // 1.10.0 (R2, R3): every reset is audited, whoever made it (an Owner, a super admin, the console).
+  TwoFactorDisabled: always(async (tx, e) => {
     const p = ev<'TwoFactorDisabled'>(e).payload;
     if (p.reason !== 'reset') return null;
     return {
       action: e.event.type,
       targetUserId: p.userId,
-      summary: `Reset two-factor login of ${await userName(tx, p.userId)}`,
+      summary: `Reset two-factor login of ${await userName(tx, p.userId)}${e.actor.kind === 'system' ? ' (server console)' : ''}`,
+      meta: p.meta,
+    };
+  }),
+  PasswordChanged: always(async (tx, e) => {
+    const p = ev<'PasswordChanged'>(e).payload;
+    if (p.via !== 'reset_link' && p.via !== 'cli') return null;
+    return {
+      action: e.event.type,
+      targetUserId: p.userId,
+      summary:
+        p.via === 'cli'
+          ? `Reset the password of ${await userName(tx, p.userId)} on the server console`
+          : `${await userName(tx, p.userId)} set a new password from a reset link`,
+      details: { via: p.via },
       meta: p.meta,
     };
   }),
@@ -677,5 +695,56 @@ export const platformAuditProjectors: Record<string, Projector> = {
       summary: `Viewed ${await orgName(tx, p.orgId)}`,
       meta: p.meta,
     };
+  }),
+  // ---- security hardening (1.10.0): always audited, whoever caused them
+  SecuritySettingChanged: always(async (_tx, e) => {
+    const p = ev<'SecuritySettingChanged'>(e).payload;
+    const name = p.key === 'requireSignedRunners' ? 'Only signed runners' : 'Require two-factor login';
+    return {
+      action: e.event.type,
+      summary: `${name} turned ${p.value ? 'on' : 'off'}${p.unlinked ? ` (${p.unlinked} unsigned workstation(s) unlinked)` : ''}`,
+      details: { key: p.key, value: p.value, ...(p.unlinked !== undefined ? { unlinked: p.unlinked } : {}) },
+      meta: p.meta,
+    };
+  }),
+  PlatformBlockAdded: always(async (_tx, e) => {
+    const p = ev<'PlatformBlockAdded'>(e).payload;
+    return {
+      action: e.event.type,
+      summary: `${p.kind === 'allow_domain' ? 'Allowed' : 'Blocked'} ${p.kind.replace('allow_', '')} ${p.value}`,
+      details: { kind: p.kind, value: p.value, note: p.note },
+      meta: p.meta,
+    };
+  }),
+  PlatformBlockRemoved: always(async (_tx, e) => {
+    const p = ev<'PlatformBlockRemoved'>(e).payload;
+    return {
+      action: e.event.type,
+      summary: `Removed ${p.kind.replace('_', ' ')} ${p.value} from the block list`,
+      details: { kind: p.kind, value: p.value },
+      meta: p.meta,
+    };
+  }),
+  SuperAdminSessionRejected: always(async (tx, e) => {
+    const p = ev<'SuperAdminSessionRejected'>(e).payload;
+    return {
+      action: e.event.type,
+      targetUserId: p.userId,
+      summary: `Refused a super-admin session no sign-in created (${p.reason.replace('_', ' ')}) for ${await userName(tx, p.userId)}`,
+      details: { reason: p.reason },
+      meta: p.meta,
+    };
+  }),
+  RenderWorkerAdded: always(async (_tx, e) => {
+    const p = ev<'RenderWorkerAdded'>(e).payload;
+    return {
+      action: e.event.type,
+      summary: `Render worker ${p.name} added`,
+      details: { workerId: p.workerId },
+    };
+  }),
+  RenderWorkerRevoked: always(async (_tx, e) => {
+    const p = ev<'RenderWorkerRevoked'>(e).payload;
+    return { action: e.event.type, summary: 'Render worker revoked', details: { workerId: p.workerId } };
   }),
 };

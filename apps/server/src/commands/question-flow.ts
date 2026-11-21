@@ -16,6 +16,7 @@ import { one, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import { devopsQueueSentence } from '../dispatcher/devops.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { getPlatformTeam } from '../platform-team/settings.ts';
 import { agentActor, cardMessage, projectScope, SYSTEM_ACTOR } from './common.ts';
 import { createDevOpsRequestIn, devopsAgentOn } from './devops.ts';
 import { DUPLICATE_SIMILARITY, questionSimilarity } from './escalation.ts';
@@ -265,7 +266,11 @@ export async function devopsTopicQuestion(
     [shift.workstation_id],
   );
   if (!ws) return undefined;
-  const devops = await devopsAgentOn(tx, ws.id, card.org_id);
+  // 1.10.0 (R18-D): the platform project's cards carry text from every tenant: their questions never reach DevOps.
+  const team = await getPlatformTeam(tx);
+  if (team && card.project_id === team.projectId) return undefined;
+  // Only the card organization's own engineer on this workstation, never another organization's.
+  const devops = await devopsAgentOn(tx, ws.id, card.org_id, { strict: true });
   const detail = report.text.replace(/\s+/g, ' ').trim().slice(0, 300);
   // "Test without an environment": a builder's test-run question never parks the card. With no DevOps engineer on the
   // workstation nobody can run the tests, so the gap is recorded without a request.
@@ -295,6 +300,7 @@ export async function devopsTopicQuestion(
         requestedBy,
         cardId: card.id,
         orgId: card.org_id,
+        strictOrg: true,
       });
     await ctx.store.append(
       [
@@ -496,6 +502,7 @@ async function builderTestGap(
       requestedBy: q.requestedBy,
       cardId: card.id,
       orgId: card.org_id,
+      strictOrg: true,
     }));
     events.push(
       {

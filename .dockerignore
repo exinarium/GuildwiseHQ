@@ -10,3 +10,7 @@ release
 *.tsbuildinfo
 media/videos/*.mp4
 media/videos/*.webm
+# Never a secret key in the build context (core DESIGN R18-U, R30): own-key builds copy only runner-release/ (signed before
+# the build); the test-only minisign keys are not needed in an image either.
+**/*.key
+**/*.pem

@@ -9,6 +9,7 @@ import {
   MailQuestion,
   Newspaper,
   ScrollText,
+  ShieldCheck,
   Users,
   Wrench,
 } from 'lucide-react';
@@ -34,6 +35,7 @@ const CORE_NAV: Array<{ to: string; label: string; icon: LucideIcon; end: boolea
     { to: '/platform/runners', label: 'Runners', icon: Download, end: false },
     { to: '/platform/team', label: 'Platform team', icon: Wrench, end: false },
     { to: '/platform/inbound', label: 'Inbound mail', icon: MailQuestion, end: false },
+    { to: '/platform/security', label: 'Security', icon: ShieldCheck, end: false },
     { to: '/platform/audit', label: 'Audit log', icon: ScrollText, end: false },
   ];
 

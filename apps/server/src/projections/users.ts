@@ -191,4 +191,25 @@ export const userProjectors: Record<string, Projector> = {
       p.passwordHash,
     ]);
   },
+  // R4: one row per sign-in. The per-request super-admin check, the new-device check, the account-lock exemption and
+  // the Security page read it. `session_ref` is auth_sessions.id (the token's hash), never the token.
+  SessionStarted: async (tx, e) => {
+    const p = (e.event as EventOf<'SessionStarted'>).payload;
+    await exec(
+      tx,
+      `INSERT INTO sign_ins (seq, at, user_id, session_ref, method, ip, user_agent, ua_family, new_device)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (seq) DO NOTHING`,
+      [
+        e.seq.toString(),
+        e.createdAt,
+        p.userId,
+        p.sessionRef,
+        p.method,
+        p.meta?.ip ?? null,
+        p.meta?.userAgent ?? null,
+        p.uaFamily ?? null,
+        p.newDevice,
+      ],
+    );
+  },
 };

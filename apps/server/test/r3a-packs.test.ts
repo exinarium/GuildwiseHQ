@@ -21,7 +21,15 @@ import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { FakeRunner } from './helpers/fake-runner.ts';
-import { createWorld, MOCK_RUNTIME, ok, pairWorkstation, until, type World } from './helpers/world.ts';
+import {
+  createWorld,
+  MOCK_RUNTIME,
+  ok,
+  pairWorkstation,
+  until,
+  type World,
+  worksFor,
+} from './helpers/world.ts';
 
 /**
  * Revision R3a on the server: authored packs and who sees them, private git packs with sealed credentials, member opt-in,
@@ -1972,6 +1980,7 @@ describe('chat with a persona', () => {
     const m2 = await w.t.userSession(uniqueEmail('r3a-m2'));
     await w.t.addOrgMember(w.owner.id, m2.id, 'member');
     const p2 = await pairWorkstation(w.t, m2, 'm2-desk');
+    await worksFor(w.t, m2, p2.workstationId, w.owner.id);
     const r2 = await FakeRunner.connect(w.baseUrl, p2.runnerToken);
     r2.hello({
       runtimes: MOCK_RUNTIME,

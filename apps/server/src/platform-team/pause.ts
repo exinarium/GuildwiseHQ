@@ -2,11 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { type PauseScope, type PlatformPauseDto, streamId } from '@aom/shared';
 import { projectScope, SYSTEM_ACTOR, userActor } from '../commands/common.ts';
 import type { Ctx } from '../context.ts';
-import { iso, one, type Row, rows } from '../db/sql.ts';
+import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
-import { conflict } from '../errors.ts';
+import { conflict, HttpError } from '../errors.ts';
 import { notifyPlatformDesk } from './desk.ts';
-import { getPlatformTeam, type PlatformTeam } from './settings.ts';
+import { getPlatformTeam, isPlatformWorkstation, type PlatformTeam } from './settings.ts';
 
 /**
  * Pause scoped to what a bug hits (Lean Team v3, design 8.3): project, workflow, stage and/or workstation. A card is
@@ -65,6 +65,26 @@ function eventScope(s: PauseScope, orgOfProject: string | null, team: PlatformTe
   };
 }
 
+/** 403 `outside_platform_org` unless the scope stays inside the platform organisation (R17-1). */
+async function assertInsidePlatformOrg(
+  db: Queryable,
+  team: PlatformTeam | null,
+  scope: PauseScope,
+): Promise<void> {
+  const refuse = () =>
+    new HttpError(
+      403,
+      'outside_platform_org',
+      'the platform team pauses only its own projects and workstations: a client organization is suspended on the platform console',
+    );
+  if (!team || (!scope.projectId && !scope.workstationId)) throw refuse();
+  if (scope.projectId) {
+    const p = await one(db, 'SELECT org_id FROM projects WHERE id=$1', [scope.projectId]);
+    if (p?.org_id !== team.orgId) throw refuse();
+  }
+  if (scope.workstationId && !(await isPlatformWorkstation(db, team, scope.workstationId))) throw refuse();
+}
+
 export interface StartPause {
   scope: Partial<PauseScope>;
   reason: string;
@@ -73,6 +93,11 @@ export interface StartPause {
   bugSignature?: string | undefined;
   bugCardId?: string | undefined;
   byUserId?: string | undefined;
+  /**
+   * A person's pause from the platform page (R17-1): only inside the platform organisation, a project of it or a
+   * workstation of one of its active members. A workflow or stage alone would reach every organisation and is refused.
+   */
+  platformOnly?: boolean | undefined;
 }
 
 /**
@@ -92,6 +117,7 @@ export async function startPause(
       throw conflict('platform_project', "the platform project's own fix flow is never paused");
     return null;
   }
+  if (input.platformOnly) await assertInsidePlatformOrg(db, team, scope);
   const existing = await one(
     db,
     `SELECT id FROM platform_pauses WHERE resumed_at IS NULL

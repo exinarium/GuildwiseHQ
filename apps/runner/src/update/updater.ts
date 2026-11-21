@@ -1,16 +1,20 @@
 import { join } from 'node:path';
 import type { RunnerUpdateCheckResult, RunnerUpdateState } from '@aom/shared';
 import type { Logger } from '../log.ts';
+import type { Policy } from '../policy/schema.ts';
 import {
   type Fetcher,
-  fetchRelease,
+  fetchVerifiedRelease,
   pruneVersions,
   type ServiceMode,
   scheduleRestart,
   stageRelease,
   switchBack,
   switchTo,
+  UntrustedReleaseError,
+  type VerifiedRelease,
 } from './apply.ts';
+import { atOrAboveFloor, MIN_TRUSTED_RUNNER } from './floor.ts';
 import {
   type InstallLayout,
   readFailed,
@@ -19,8 +23,10 @@ import {
   writeFailed,
   writePending,
 } from './layout.ts';
+import { RELEASE_PUBKEY } from './release-key.ts';
 import { decideProbation, PROBATION_SEC } from './rollback.ts';
 import { isNewer } from './semver.ts';
+import { acceptablePin } from './verify.ts';
 
 export interface UpdateStatus {
   state: RunnerUpdateState;
@@ -69,6 +75,10 @@ export interface UpdaterOptions {
   now?: () => number;
   random?: () => number;
   timing?: Partial<UpdateTiming>;
+  /** The local policy (re-read at every check): which origins may serve unsigned updates (R18-U, R29). */
+  policy?: () => Pick<Policy, 'allowUnsignedUpdatesFrom' | 'legacyUpdateOrigin'>;
+  /** The release key this runner trusts (default: the compiled-in key, `update/release-key.ts`). */
+  trustedKey?: string;
   /** Test seams. */
   stage?: typeof stageRelease;
   scheduleRestartFn?: typeof scheduleRestart;
@@ -147,6 +157,12 @@ export class Updater {
    * follow newer releases while it is set. Null ends it. A change starts a check at once.
    */
   setPin(version: string | null): void {
+    const ok = acceptablePin(version);
+    if (!ok.ok) {
+      // below the floor: refused even while updates are paused, and the current pin (if any) stays
+      this.opts.log.warn(ok.reason);
+      return;
+    }
     if (version === this.pin) return;
     this.pin = version;
     this.waitingFor = null;
@@ -287,7 +303,9 @@ export class Updater {
         return;
       case 'confirm': {
         removeFile(layout.pendingFile);
-        const removed = pruneVersions(layout, [version, pending?.from ?? version]);
+        // the previous version stays for a rollback only when it is at or above the floor; copies below it go
+        const keepFrom = pending?.from && atOrAboveFloor(pending.from) ? pending.from : version;
+        const removed = pruneVersions(layout, [version, keepFrom]);
         log.info(
           `updated to ${version} (from ${pending?.from}); removed old versions: ${removed.join(', ') || 'none'}`,
         );
@@ -307,6 +325,19 @@ export class Updater {
   private rollback(from: string, to: string): void {
     const { layout, log } = this.opts;
     if (!layout) return;
+    if (!atOrAboveFloor(from)) {
+      // never back below the floor (R18-U): keep the new version and say so
+      removeFile(layout.pendingFile);
+      log.error(
+        `${to} did not connect, but ${from} is below the floor ${MIN_TRUSTED_RUNNER}: not rolling back`,
+      );
+      this.set({
+        state: 'failed',
+        latestVersion: to,
+        detail: `${to} did not connect; ${from} is below the floor ${MIN_TRUSTED_RUNNER}, so there is no rollback`,
+      });
+      return;
+    }
     try {
       switchBack(layout, join(layout.versionDir(from), 'aom-runner'));
     } catch (err) {
@@ -346,10 +377,20 @@ export class Updater {
     const server = this.opts.serverUrl();
     this.lastCheckError = null;
     if (!layout || this.status.state === 'unmanaged' || !server) return this.status;
-    let release: Awaited<ReturnType<typeof fetchRelease>>;
+    let release: VerifiedRelease;
     try {
-      release = await fetchRelease(server, this.f, undefined, this.pin ?? undefined);
+      release = await this.fetchOffer(server);
     } catch (err) {
+      if (err instanceof UntrustedReleaseError) {
+        log.warn(`update check: the release from ${server} is refused: ${err.message}`);
+        this.set({
+          state: 'failed',
+          lastCheckedAt: new Date(this.now()).toISOString(),
+          detail: `the offered release is refused: ${err.message}`.slice(0, 280),
+        });
+        this.lastCheckError = `the offered release is refused: ${err.message}`;
+        return this.status;
+      }
       log.warn(`update check: could not read the release from ${server}: ${String(err)}`);
       this.lastCheckError = `could not read the release from the server: ${err instanceof Error ? err.message : String(err)}`;
       return this.status;
@@ -422,6 +463,17 @@ export class Updater {
     return this.status;
   }
 
+  /** The offered release, verified (signature or allowed unsigned origin, floor, no downgrade). */
+  private fetchOffer(server: string): Promise<VerifiedRelease> {
+    return fetchVerifiedRelease(server, {
+      current: this.opts.version,
+      pin: this.pin,
+      trustedKey: this.opts.trustedKey ?? RELEASE_PUBKEY,
+      policy: this.opts.policy?.() ?? { allowUnsignedUpdatesFrom: [] },
+      fetch: this.f,
+    });
+  }
+
   private waitForIdle(target: string, pkg: string, since: number): void {
     const tick = (): void => {
       if (this.stopped || this.waitingFor !== target) return;
@@ -446,7 +498,7 @@ export class Updater {
     const server = this.opts.serverUrl();
     if (!layout || !server) return true;
     try {
-      const release = await fetchRelease(server, this.f, undefined, this.pin ?? undefined);
+      const release = await this.fetchOffer(server);
       if (release.autoUpdatePaused && !this.pin) {
         this.waitingFor = null;
         this.set({

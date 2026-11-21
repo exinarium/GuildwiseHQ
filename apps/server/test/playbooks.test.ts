@@ -17,7 +17,15 @@ import { rebuildProjections } from '../src/projections/rebuild.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q as rawQ } from './helpers/db.ts';
 import { FakeRunner } from './helpers/fake-runner.ts';
-import { createWorld, MOCK_RUNTIME, ok, pairWorkstation, until, type World } from './helpers/world.ts';
+import {
+  createWorld,
+  MOCK_RUNTIME,
+  ok,
+  pairWorkstation,
+  until,
+  type World,
+  worksFor,
+} from './helpers/world.ts';
 
 /**
  * Revision R3b, playbooks as `/` commands (docs/ARCHITECTURE.md section 38.10): the menu and who sees what, guided sessions
@@ -40,6 +48,7 @@ beforeAll(async () => {
   member = await w.t.userSession(uniqueEmail('pb-member'));
   await w.t.addOrgMember(w.owner.id, member.id, 'member');
   const paired = await pairWorkstation(w.t, member, 'member-desk');
+  await worksFor(w.t, member, paired.workstationId, w.owner.id);
   memberWs = paired.workstationId;
   mem = await FakeRunner.connect(w.baseUrl, paired.runnerToken);
   mem.hello({

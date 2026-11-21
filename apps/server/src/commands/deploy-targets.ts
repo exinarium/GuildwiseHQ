@@ -14,6 +14,7 @@ import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { duplicateOfPlace, placeBlockFor } from '../delivery/environments.ts';
 import { conflict, forbidden, notFound, unprocessable } from '../errors.ts';
+import { wsServesOrgSql } from '../simulation/fit.ts';
 import { projectScope, userActor } from './common.ts';
 
 export function toTargetDto(t: Row): DeployTargetDto {
@@ -90,12 +91,13 @@ export async function liveTarget(db: Queryable, projectId: string, targetId: str
   return t;
 }
 
-/** Workstations a deploy may name: active ones of an active member of the project (owner decision A1). */
+/** Workstations a deploy may name: active ones of an active member of the project (owner decision A1) that work for its organization (R9). */
 async function assertMemberWorkstation(tx: Queryable, projectId: string, workstationId: string) {
   const ok = await one(
     tx,
     `SELECT 1 FROM workstations w JOIN project_members pm ON pm.user_id = w.user_id AND pm.project_id = $1 AND pm.status = 'active'
       WHERE w.id = $2 AND w.status = 'active'
+        AND ${wsServesOrgSql('w', '(SELECT org_id FROM projects WHERE id = $1)')}
         AND NOT EXISTS (SELECT 1 FROM cloud_workstations cw WHERE cw.workstation_id = w.id
                          AND cw.provider = 'codespaces' AND cw.removed_at IS NULL)`,
     [projectId, workstationId],
@@ -103,7 +105,7 @@ async function assertMemberWorkstation(tx: Queryable, projectId: string, worksta
   if (!ok)
     throw unprocessable(
       'workstation_not_member',
-      "the workstation must be an active workstation of one of the project's members (a Codespace cannot deploy Docker images: use a workstation or a VPS)",
+      "the workstation must be an active workstation of one of the project's members that works for this organization (Works for on the Workstations page; a Codespace cannot deploy Docker images: use a workstation or a VPS)",
     );
 }
 

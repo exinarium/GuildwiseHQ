@@ -49,6 +49,8 @@ import { OrgSourceFolder } from '../components/workstations/OrgSourceFolder.tsx'
 import { RetireWorkstationDialog } from '../components/workstations/RetireWorkstationDialog.tsx';
 import { RunnerUpdateBadge } from '../components/workstations/RunnerUpdateBadge.tsx';
 import { ShiftLimit, ShiftLimitStatus } from '../components/workstations/ShiftLimit.tsx';
+import { ReinstallRequired } from '../components/workstations/SignedRunners.tsx';
+import { NotServedNotice, WorksFor } from '../components/workstations/WorksFor.tsx';
 import { integrationsLink } from '../lib/integrations.ts';
 import { useBusinessView } from '../lib/orgMode.ts';
 import { useCanManageOrg } from '../lib/orgRole.ts';
@@ -150,7 +152,11 @@ export function Workstations() {
           }
         />
       )}
+      <ReinstallRequired onReinstall={() => setAddOpen(true)} />
       <CloudWorkstations canManage={canManageCloud} />
+      {q.data && !me.data?.activeOrg?.simulation && (
+        <NotServedNotice workstations={q.data.filter((w) => w.status === 'active')} />
+      )}
       <ul className="flex flex-col gap-3">
         {q.data
           ?.filter((w) => w.status === 'active')
@@ -358,6 +364,17 @@ export function WorkstationCard({
             <ConnectionDot connected={w.connected} />
             {!admin && (
               <ButtonLink
+                to={`/workstations/${w.id}/devops-log`}
+                variant="ghost"
+                size="sm"
+                data-testid="workstation-devops-log"
+                aria-label={`DevOps commands on ${w.name}`}
+              >
+                DevOps log
+              </ButtonLink>
+            )}
+            {!admin && (
+              <ButtonLink
                 to={integrationsLink(w.id)}
                 variant="secondary"
                 size="sm"
@@ -365,6 +382,17 @@ export function WorkstationCard({
                 aria-label={`Integrations of ${w.name}`}
               >
                 Integrations
+              </ButtonLink>
+            )}
+            {!admin && (
+              <ButtonLink
+                to={`/workstations/${w.id}/approvals`}
+                variant="secondary"
+                size="sm"
+                data-testid="workstation-approvals"
+                aria-label={`Approvals of ${w.name}`}
+              >
+                Approvals
               </ButtonLink>
             )}
             {!w.connected && holdsAgents && (
@@ -474,6 +502,7 @@ export function WorkstationCard({
             {w.lastSeenAt && (
               <p className="mt-1 text-xs text-subtle">Last seen {formatDateTime(w.lastSeenAt)}</p>
             )}
+            {!admin && <WorksFor w={w} />}
             {!admin && <OrgSourceFolder w={w} />}
             {!admin && <AgentToolchains w={w} />}
             {!admin && !business && <GitConnectionsPanel w={w} />}

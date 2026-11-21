@@ -128,9 +128,75 @@ The runner version is shown under the workstation's name. When there is somethin
 - **Updates paused**: the platform administrator paused automatic updates. Runners stay on their version until they resume.
 - **Updates by hand**: this runner was started by hand and not by the installer's service, so it cannot restart itself. Run the install command again to update it.
 
-You do not need to do anything. Running the install command again still upgrades a runner at any time. To switch automatic updates off on one computer, set `AOM_RUNNER_AUTO_UPDATE=0` for the runner.
+Every update is checked before it is installed: the runner verifies the signature on the release and never installs, or rolls back to, a version below its floor (the lowest version Guildwise 1.10.0 accepts). On a self-hosted server with **Only signed runners** off, runners from before 1.10.0 keep working and, with automatic updates on, move to the runner that ships with Guildwise 1.10.0 by themselves, normally within about a day. The new runner then starts in "setup pending": sandboxed card shifts keep running, but DevOps, deploys and other steps outside the sandbox wait until you run `guildwise-runner setup` once on that machine (see [Setting local permissions](#local-permissions)). With **Only signed runners** on, an old runner cannot update itself; it must be reinstalled (see [Reinstalling a runner](#reinstall)).
+
+You do not need to do anything else. Running the install command again still upgrades a runner at any time. To switch automatic updates off on one computer, set `AOM_RUNNER_AUTO_UPDATE=0` for the runner.
 
 **Check for updates.** Next to the runner version on the workstation card, **Check for updates** asks the runner to run its update check now instead of waiting for its timer. The usual rules still apply: it downloads and checks the new version, and waits until no agent is working before it restarts. The runner's answer appears beside the button. The button is disabled when the workstation is offline, or when its runner is too old to report updates.
+
+## Works for {#works-for}
+
+A workstation works only for the organizations you own when you pair it.
+
+To let it work for another organization, switch that organization on under **Works for** on the Workstations page, or tick it when you accept an invitation (on by default for an organization you create, off when you join as a member). Hiring an agent onto your own workstation switches serving on for that organization. Moving an agent onto someone else's workstation, and the automatic DevOps hire, need that person's consent. Switching an organization off marks its agents there as needing a new home and retires its DevOps engineer; it is refused while a shift of that organization runs there.
+
+## Reinstalling a runner {#reinstall}
+
+Reinstalling means running the **Add a workstation** command from your own server again.
+
+The installer starts with **Looking for an older runner**: it finds an old install, stops it and quarantines it (a single archive under `~/.guildwise-quarantine/<time>/`, with a `MANIFEST.txt`; use `--legacy remove` to delete instead). Nothing of the old install is read or reused: no token, key, sudo password, policy or clone. Delete the quarantine after you have looked at it. If sudo was ever granted to the old runner, change that user's password, because the old sealed password may be known.
+
+When it is required:
+
+- **Only signed runners** is on: a runner that is unsigned or older than 1.10.0 is unlinked and its card shows **Reinstall required** with a button that opens **Add a workstation**. It cannot be paired again in place.
+- A self-hosted server with the setting off needs nothing. Old runners keep working and update by themselves.
+- After a failed first start, run the install command again (see [Troubleshooting](/help/troubleshooting#reinstall-needed)).
+
+## Setting local permissions {#local-permissions}
+
+The installer has a step **Setting local permissions**; it runs `guildwise-runner setup`, which you can run again at any time (it refuses to run as root). Your answers stay on the machine and never come from the server. `--yes` picks the safest values.
+
+- **Runner user**: a dedicated `guildwise-runner` user (Linux, macOS) or a dedicated WSL distribution (Windows), or your own user.
+- **Own clones**: the runner works only in its own clones under its home folder, never in your folders. You get its work through git.
+- **DevOps organizations**: which organizations the DevOps engineer may serve. Each starts as No; the server's list is only a suggestion.
+- **Sudo**: on or off. The password is sealed on the machine, never through the browser.
+- **Docker**: none, a narrow helper, or the docker group. The narrow helper (`deploy-compose`) runs only a compose setup you approved with `guildwise-admin approve-app`, from a frozen copy, and refuses privileged containers, host network, devices, host folders outside the project and remote includes. A changed file waits until you approve it again. The docker group gives the runner root-equivalent power, so setup asks you to type `root-equivalent` (or pass `--accept-root-equivalent`).
+- **Deploy approvals**: the default for new deploy scripts.
+
+Steps that need root are printed as `sudo /usr/local/lib/guildwise/guildwise-admin ...`. `guildwise-admin` is owned by root, installed from the verified package, and the runner can never change it. For an offline install, download the package, verify it yourself and run the installer with `--from-file`. Otherwise the installer script comes from your server and you trust it the first time. The macOS dedicated user and the Windows distribution are not yet tested on hardware.
+
+## Approvals on the workstation {#approvals}
+
+The runner no longer believes everything the server sends. Some things are held until you say yes on the machine, in a terminal:
+
+- `guildwise-runner pending` lists held items.
+- `guildwise-runner approve <id>` approves one (add `--pin` to pin it). `guildwise-runner deny <id>` refuses it.
+
+Held: new deploy scripts (unless a pin matches the exact script, environment, folder and target), recipe writes, vault setup, secret and provider-key reseals, installs that need extra paths, release signing, and every DevOps task not started on that machine. **Deploy pins** bind a deploy script to its exact command; `guildwise-runner deploy pin-commit` also binds an unattended redeploy to one commit, because otherwise it builds whatever is on the branch.
+
+**Install scripts per repository.** Only package installs known to run no project code run by themselves (npm, pnpm, Yarn, Composer with scripts off, `go mod download`, `cargo fetch`). Others (Bundler, `dotnet restore`, Gradle, Maven, pip) need `guildwise-runner repo allow-scripts` for that repository on this machine.
+
+The workstation page shows what is waiting: setup pending, a start-up refusal with its fix, held items.
+
+## Passkey approvals {#passkeys}
+
+The **Approvals** button on a workstation card opens the approvals page. **Waiting for your yes** lists held items. **Approve with passkey** appears for only two kinds: a redeploy at a new commit and a recipe change. Everything else shows the `guildwise-runner approve <id>` command. Grants, DevOps, sudo, install scripts and CEO turns always need the machine.
+
+1. Under **Passkeys**, type a name and click **Add a passkey** (**Confirm it's you** is asked).
+2. On the machine run `guildwise-runner passkey trust`. The page names the start of the credential id.
+3. To remove one, use the browser if it is not yet trusted. A trusted one stays until `guildwise-runner passkey remove` on the machine.
+
+Passkeys work only on the server's public https address. The server never approves anything: the runner verifies each passkey itself.
+
+## Signed runners {#signed-runners}
+
+A signed runner release carries a signature (minisign) over its manifest, and the runner checks it before every update. The server's own check at pairing cannot prove what code runs on a remote machine, so the runner's check is the real protection.
+
+- **Official key**: Guildwise Cloud and the official image use the key published by the project.
+- **Your own key**: a self-hosted server can sign its own runner release and trust only that key (`AOM_RUNNER_RELEASE_PUBKEY`). This is optional. See [Open source and self-hosting](/help/open-source-and-self-hosting#security-settings).
+- **Setting**: **Platform > Security > Security settings > Only signed runners**. Off by default on self-hosted servers; locked on in Guildwise Cloud. Turning it on unlinks unsigned workstations, which then show **Reinstall required**.
+- **Start-up refusal**: when the server says signed runners are required, or when setup asks for it, the runner refuses to start (exit code 78, shown on the workstation page) if its user is root-equivalent (root, passwordless sudo, the docker group, a writable Docker socket) or its files are writable by others. Fix it and start again; see [Troubleshooting](/help/troubleshooting#exit-78). With the setting off, a self-updated runner only warns.
+- To sign a release for one deploy environment, see [Signing the runner per environment](/help/phases#runner-signing).
 
 ## Unpairing {#unpairing}
 

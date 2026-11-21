@@ -1,5 +1,6 @@
 import type { SocialChannel } from '@aom/shared';
 import { type FormEvent, useState } from 'react';
+import { errorMessage, post } from '../../api/client.ts';
 import { useConnectChannel, useDisconnectChannel } from '../../api/queries/blog.ts';
 import { usePatchVideoSettings, useVideoSettings } from '../../api/queries/video.ts';
 import { formatDateTime } from '../../lib/time.ts';
@@ -304,22 +305,41 @@ function Channel({ channel }: { channel: SocialChannel }) {
   );
 }
 
-/** TikTok signs in on TikTok (a redirect), so there is no form: the Connect link, and the switch for the app audit. */
+/**
+ * TikTok signs in on TikTok (a redirect), so there is no form: the Connect button, and the switch for the app audit.
+ * Connect asks the server for the TikTok address first (a write: "Confirm it's you" shows when the proof is stale).
+ */
 function TikTokRow({ channel, help }: { channel: SocialChannel; help: string }) {
   const settings = useVideoSettings();
   const patch = usePatchVideoSettings();
   const audited = settings.data?.tiktokAudited ?? false;
+  const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
+  const connect = async () => {
+    setConnecting(true);
+    setConnectError(null);
+    try {
+      const { url } = await post<{ url: string }>('/platform/social/tiktok/connect');
+      window.location.assign(url);
+    } catch (e) {
+      setConnectError(errorMessage(e));
+      setConnecting(false);
+    }
+  };
   return (
     <div className="mt-2 flex flex-col gap-3">
       <p className="text-xs text-subtle">{help}</p>
       <div>
-        <a
-          href="/api/platform/social/tiktok/connect"
+        <button
+          type="button"
+          onClick={() => void connect()}
+          disabled={connecting}
           className="inline-flex items-center rounded-control border border-line px-3 py-1.5 text-sm font-medium text-fg hover:bg-surface-2"
           data-testid="tiktok-connect"
         >
           {channel.connected ? 'Connect again' : 'Connect TikTok'}
-        </a>
+        </button>
+        {connectError && <p className="mt-1 text-xs text-danger">{connectError}</p>}
       </div>
       <label className="flex items-start gap-2 text-sm text-fg">
         <input

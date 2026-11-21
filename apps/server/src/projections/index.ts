@@ -55,6 +55,7 @@ import { questionFlowProjectors } from './question-flow.ts';
 import { relayProjectors } from './relay.ts';
 import { releaseProjectors } from './release.ts';
 import { releaseDocsPrepProjectors } from './release-docs-prep.ts';
+import { releaseSigningProjectors } from './release-signing.ts';
 import { repoProjectors } from './repo.ts';
 import { reporterProjectors } from './reporter.ts';
 import { researchProjectors } from './research.ts';
@@ -73,6 +74,7 @@ import { trackRecordProjectors } from './track-record.ts';
 import { userProjectors } from './users.ts';
 import { vaultProjectors } from './vaults.ts';
 import { videoPostProjectors } from './video-posts.ts';
+import { workstationServingProjectors } from './workstation-serving.ts';
 import { workstationProjectors } from './workstations.ts';
 
 /**
@@ -89,6 +91,7 @@ const domains: Array<Record<string, Projector>> = [
   videoPostProjectors,
   catalogueProjectors,
   workstationProjectors,
+  workstationServingProjectors,
   projectProjectors,
   prReviewRunProjectors,
   prSizeCheckProjectors,
@@ -126,6 +129,7 @@ const domains: Array<Record<string, Projector>> = [
   outboundProjectors,
   repoProjectors,
   releaseProjectors,
+  releaseSigningProjectors,
   releaseDocsPrepProjectors,
   phaseProjectors,
   reporterProjectors,
@@ -196,13 +200,18 @@ export const PROJECTION_TABLES = [
   'org_members',
   'platform_audit_log',
   'platform_pauses',
+  'platform_blocklist',
+  'sign_ins',
   'invitations',
   'blog_posts',
   'blog_topics',
   'social_posts',
   'video_posts',
   'video_topics',
+  'render_workers',
   'workstations',
+  'workstation_passkeys',
+  'workstation_org_serving',
   'projects',
   'project_provider_accounts',
   'project_repos',
@@ -319,6 +328,8 @@ export const PROJECTION_TABLES = [
   'repo_requests',
   'release_proposals',
   'release_ships',
+  'release_artefacts',
+  'release_signatures',
   'release_docs_prep_runs',
   'release_docs_prep_repos',
   'release_docs_prep_steps',

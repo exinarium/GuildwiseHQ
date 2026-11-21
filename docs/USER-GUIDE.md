@@ -105,6 +105,7 @@ This guide is for people who have never worked with AI agents before. You do not
   - [7.11 API keys](#711-api-keys)
   - [7.12 Runners](#712-runners)
   - [7.13 Inbound mail](#713-inbound-mail)
+  - [7.14 Security](#714-security)
 - [8. Everyday workflows](#8-everyday-workflows)
   - [8.1 A feature, from intake to deploy](#81-a-feature-from-intake-to-deploy)
   - [Reopening a finished card](#reopening-a-finished-card)
@@ -249,7 +250,7 @@ If the link says the invitation is no longer valid, it has expired, was used alr
 
 ![An invitation link that no longer works](guide/assets/invite-invalid.jpg)
 
-**Forgot your password?** On the sign-in page click **Forgot your password?**, type your email and we send a link (it works once and expires after an hour). We answer the same way whether or not the email has an account, so nobody can find out who is registered. Choose a new password (at least 12 characters); every other place you were signed in is signed out. Then sign in as usual: if you use two-factor login you still enter your code. A platform administrator can also send you this link (7.4). Platform administrators may use it too (their two-factor code is still asked at the next sign-in). If the email never reaches you, your organization's Owner or an Admin can give you a temporary password instead (4.15).
+**Forgot your password?** On the sign-in page click **Forgot your password?**, type your email and we send a link (it works once and expires after an hour). We answer the same way whether or not the email has an account, so nobody can find out who is registered. If your account has two-factor login, the reset page also asks for a code from your app or a recovery code, and shows how many tries are left (5 wrong codes end the link). You can ask for at most 5 reset links a day. Choose a new password (at least 12 characters); every other place you were signed in is signed out, and we email you that your password changed. Then sign in as usual: if you use two-factor login you still enter your code. A platform administrator can also send you this link (7.4). Platform administrators may use it too (their two-factor code is still asked at the next sign-in). If the email never reaches you, your organization's Owner or an Admin can give you a temporary password instead (4.15).
 
 Visitors who are not signed in see the landing page, with **Log in** and a sign-up button, a link to the blog, and a small **Ask Guildwise** chat that answers questions about the product.
 
@@ -265,9 +266,15 @@ A wrong email or password always gives the same message, so nobody can use the p
 
 ![A wrong password](guide/assets/login-error.jpg)
 
+**Sign-in protection.** After 5 wrong answers on one address (a wrong password, a wrong two-factor code, a wrong answer to **Confirm it's you** or a wrong reset code), sign-in for that address pauses for 15 minutes. Each further lock doubles the pause, up to 60 minutes. Addresses nobody has registered behave the same way. Too many failures from one network address are paused too. You see "too many attempts" with the time to wait. While your account is locked, a browser you signed in with during the last 30 days still works, and finishing a password reset clears the lock. We email you when your account is locked, and when your password was right but the code was wrong.
+
+**New-device mail.** When you sign in from a browser we have not seen, we email you the time and network address, so you can spot a sign-in that was not you. There is no mail for your very first sign-in, or for the first one after the upgrade to 1.10.0. Your server's operator can limit these mails to platform administrators or switch them off. Change your password at once if the mail was not about you.
+
+**Two-factor login may be required.** If the platform requires two-factor login and you have not set it up, the app shows **Secure your account** (**Set up two-factor login to continue.**) after you sign in. Nothing else in the app works until you finish (3.2). On Guildwise Cloud every new sign-up does this before it can create an organization or reach billing.
+
 ### 3.2 Turn on two-factor login (3 minutes)
 
-Two-factor login means that after your password you also type a six-digit code from an app on your phone. Even if somebody learns your password, they cannot get in. It is strongly recommended for everybody, and your Owner may require it.
+Two-factor login means that after your password you also type a six-digit code from an app on your phone. Even if somebody learns your password, they cannot get in. It is strongly recommended for everybody, and your Owner may require it. The platform may require it too: on Guildwise Cloud it is always required, and a self-hosted server can switch the requirement on (7.14). When it is required, the **Secure your account** page leads you through the same steps.
 
 1. Open your avatar menu at the bottom of the sidebar and choose **Your settings**.
 2. On that page, in the **Two-factor login** panel, press **Set up**. Type your password, scan the QR code with an authenticator app (any one will do, for example Google Authenticator, Microsoft Authenticator or 1Password), type the first six-digit code and press **Turn on two-factor login**.
@@ -275,7 +282,7 @@ Two-factor login means that after your password you also type a six-digit code f
 
 ![Setting up two-factor login](guide/assets/security-2fa.jpg)
 
-> **Watch out:** the recovery codes are the only way back in if you lose your phone, apart from asking your Owner to reset your two-factor login. Save them now.
+> **Watch out:** the recovery codes are the only quick way back in if you lose your phone. Without them you recover by email, which takes 24 hours (9.6). Save them now.
 
 > **In the app:** Help, "Two-factor login" (`/help/two-factor`).
 
@@ -309,7 +316,9 @@ A workstation is the computer where your agents will work. The guided installer 
 2. **Choose where your agents run**: **My computer** (the rest of this section), **A VPS (SSH)** or **GitHub Codespaces** (section 4.19). For your own computer, **pick the system**. The page guesses from your browser (Windows, Linux or macOS). Change it if the machine that will run the agents is a different one. Windows runs the agents inside WSL2, Microsoft's built-in Linux, and the installer turns it on for you. You may also type a name for it ("Office PC").
 3. **Copy the command** with the copy button, or choose **Download the script** if you would like to read it first. The command contains a link that is valid for 30 minutes and a one-time pairing code. It never contains a password.
 4. **Run it on that computer.** Open a terminal (on Windows, PowerShell), paste the command and press Enter. Say yes when it asks for permission. Windows may ask you to restart, possibly more than once (up to twice to turn on WSL2 and once more for Ubuntu). After each restart, sign in: the installer opens again by itself; if it does not, run the command again. WSL2 needs virtualization (Intel VT-x, AMD-V or SVM) turned on in the PC's BIOS/UEFI settings: if it is off, the installer says so at step 2; turn it on, restart and run the installer again. If WSL2 is still not working after that, the installer stops and says what is still off.
-5. **Watch the page.** It shows "Waiting for you to run the command", then the installer starting, the computer pairing, and then health checks one by one (Node, git, Claude, the sandbox, Docker, yt-dlp, your repositories, the server), ending with **Ready**.
+5. **Let it deal with an older runner.** The first thing the installer does is **Looking for an older runner**. If it finds a runner from before Guildwise 1.10.0 (running or not), it stops it and moves its files into a quarantine folder, `~/.guildwise-quarantine/<date and time>/`, with a `MANIFEST.txt` listing what was moved. It never reads or reuses the old token, keys, sudo password, settings or clones. You may delete the folder after a look. If you had given sudo to the old runner, change this user's password now. Use `--legacy remove` to delete the old install instead of quarantining it.
+6. **Answer "Setting local permissions".** The installer then runs `guildwise-runner setup` for you. It asks, in plain words, what this runner may do on this machine (below). Your answers are stored on the computer and never come from the server.
+7. **Watch the page.** It shows "Waiting for you to run the command", then the installer starting, the computer pairing, and then health checks one by one (Node, git, Claude, the sandbox, Docker, yt-dlp, your repositories, the server), ending with **Ready**.
 
 **Pair with a code.** If you would rather not paste the long command, use **Pair with a code** at the top of the Workstations page (or **Pair with a code** on an empty page, or **Pair it with a code instead** at the bottom of the wizard). Press **Generate pairing code**, then run the command it shows on the machine that will host your agents; the page updates when the runner connects.
 
@@ -321,9 +330,30 @@ A workstation is the computer where your agents will work. The guided installer 
 
 The installer asks only what it must: your password once to install system tools, whether you want the optional extras (yt-dlp for transcripts of videos and podcasts; Docker only if your tests run containers), and how Claude should sign in. Your code lives in `~/src`; the installer asks about the folder only in expert mode (Settings) or with `--choose-folders`. It explains the two ways in plain words. Choose **Claude subscription** if you have one: you sign in with your Claude account in a browser. Choose **API key** if you would rather pay for exactly what the agents use.
 
-> **Good to know:** you can run the same command again at any time. It upgrades the runner, repairs a broken installation and keeps your existing pairing.
+**Setting local permissions.** `guildwise-runner setup` can be run again at any time, as your normal user (it refuses to run as root). It asks about:
 
-**The runner updates itself.** Once installed, the runner checks once a day (and a few minutes after it starts) whether the server offers a newer version. It downloads and checks it, then waits until no agent is working on that workstation before restarting into it, so a running job is never cut short (after about six hours of being busy it updates anyway). The Workstations page shows the runner version and, when there is something to know, a label: *Update pending*, *Updating*, *Update failed*, *Update rolled back* (the new version did not connect within a few minutes, so the runner went back to the previous one by itself), *Updates paused* (a platform administrator paused automatic updates) or *Updates by hand* (this runner was not started by the installer's service). Platform administrators pause and resume automatic updates under **Runners** in the platform area. To not wait for the daily check, press **Check for updates** next to the runner version: the runner looks right away and the page tells you the result (*Up to date*, *Update found: installs when idle*, *Updates are paused* ...). It still waits until no agent is working before it restarts. The button needs runner 0.1.34 or newer and a connected workstation; an older runner checks by itself once a day. You can still run the install command again at any time, and set `AOM_RUNNER_AUTO_UPDATE=0` for the runner to switch updating off on one computer.
+- **The runner's user.** A dedicated `guildwise-runner` user (Linux and macOS) or a dedicated WSL distribution (Windows) is the default, or your own user.
+- **Its own clones.** The runner works only in its own clones of your repositories, under its own home folder, never in your folders. Work reaches you through git.
+- **DevOps.** Which organizations the DevOps engineer may serve on this machine. Each one starts at No; the server's suggestions are only suggestions.
+- **Sudo.** On or off. It is sealed on this machine and never set through the browser.
+- **Docker.** No access, the **narrow helper** (it can only run a Compose setup you approved with `guildwise-admin approve-app`, from a frozen copy, with a safety check of the file), or the **docker group**. The docker group is the same as root, so setup asks you to type `root-equivalent` to choose it.
+- **Deploy approval defaults.**
+
+Then it shows a summary. `--yes` picks the safest answers. Some steps need root; setup prints them as `sudo /usr/local/lib/guildwise/guildwise-admin ...` for you to run. Scripted installs use flags such as `--runner-user dedicated|current`, `--sudo on|off`, `--docker none|narrow|group`, `--yes` and `--legacy quarantine|remove` (`docs/RUNNER.md`).
+
+<!-- figure needed: installer-local-permissions.jpg - the terminal during "Setting local permissions" showing the questions and the summary -->
+
+**Offline install.** If you want to check the package yourself, download it and run the installer with `--from-file`. The installer script itself still comes from your server, so you trust the server the first time.
+
+**Reinstall required.** If the platform requires signed runners (7.14), a workstation whose runner is older than Guildwise 1.10.0 or unsigned is unlinked. Its card on the Workstations page says **Reinstall required**; press the button to open **Add a workstation** and run the new command. The wizard says "Runners from before Guildwise 1.10.0 are refused here." You cannot pair the old runner again, and the owner gets one email about it. On a self-hosted server where **Only signed runners** is off (the default), nothing like this happens: existing runners keep working and, with auto-update on, move to the runner that ships with Guildwise 1.10.0 by themselves, normally within about a day. That runner starts in "setup pending": sandboxed card shifts keep running, but DevOps, deploys and other unsandboxed steps wait until you run `guildwise-runner setup` once on that machine.
+
+**The runner refuses to start.** If the runner's user is root-equivalent (root, passwordless sudo, the docker group or a writable Docker socket) or its files can be written by others, and the server requires signed runners, it stops with exit code 78 and the Workstations page shows the reason and the fix. On a server that does not require signed runners it only warns.
+
+**Held items and approvals.** The runner no longer believes everything the server sends. Some things wait for a yes on the workstation itself: new deploy scripts, recipe changes, vault setup, secret and provider-key changes, release signing and DevOps tasks not started on that machine. Run `guildwise-runner pending` to list them, then `guildwise-runner approve <id>` or `guildwise-runner deny <id>`. The Workstations page shows "confirm on the workstation" states. Two kinds, a redeploy at a new commit and a recipe change, can also be approved with a passkey (see 4.15).
+
+> **Good to know:** you can run the same command again at any time. It installs a fresh runner and repairs a broken installation: the older install is stopped and quarantined, and the workstation pairs again.
+
+**The runner updates itself.** Once installed, the runner checks once a day (and a few minutes after it starts) whether the server offers a newer version. It downloads and checks it, then waits until no agent is working on that workstation before restarting into it, so a running job is never cut short (after about six hours of being busy it updates anyway). The Workstations page shows the runner version and, when there is something to know, a label: *Update pending*, *Updating*, *Update failed*, *Update rolled back* (the new version did not connect within a few minutes, so the runner went back to the previous one by itself), *Updates paused* (a platform administrator paused automatic updates) or *Updates by hand* (this runner was not started by the installer's service). Platform administrators pause and resume automatic updates under **Runners** in the platform area. To not wait for the daily check, press **Check for updates** next to the runner version: the runner looks right away and the page tells you the result (*Up to date*, *Update found: installs when idle*, *Updates are paused* ...). It still waits until no agent is working before it restarts. The button needs runner 0.1.34 or newer and a connected workstation; an older runner checks by itself once a day. You can still run the install command again at any time, and set `AOM_RUNNER_AUTO_UPDATE=0` for the runner to switch updating off on one computer. Updates from an official or own-key build are signed, and the runner checks the signature before it installs; it never goes to a version below its floor. Running the install command again replaces the runner: the older install is stopped and quarantined, and the workstation pairs again. That is how you reinstall when the platform requires signed runners (**Reinstall required**). On a server with that setting off you do not need to: the runner upgrades itself as before.
 
 If something goes wrong, the installer says what happened and links to the install help and to **Contact us**. Chapter 9.1 covers the usual problems.
 
@@ -480,11 +510,15 @@ On **Organization, Members** you see everybody with their role.
 
 ![The Members tab](guide/assets/org-members.jpg)
 
-**To invite someone:** click **Invite member**, type their email, choose the role (**Member**, or **Admin** if you are the Owner) and, if you like, the projects they should start on, then **Send invitation**. They receive an email with a link that works for 7 days. On the **Invitations** tab you can see pending and past invitations, resend one or revoke one.
+**To invite someone:** click **Invite member**, type their email, choose the role (**Member**, or **Admin** if you are the Owner) and, if you like, the projects they should start on, then **Send invitation**. They receive an email with a link that works for 7 days. Invitations are limited: 20 per organization an hour, 50 per person who invites a day and 50 waiting at once (you see a "limit" message when you reach one), and a single invitation can be resent 3 times an hour. An address on the platform's block list is refused, and inviting a platform administrator's address works like any other but sends no mail. On the **Invitations** tab you can see pending and past invitations, resend one or revoke one.
 
 ![Inviting a member](guide/assets/dlg-invite.jpg)
 
 ![The Invitations tab](guide/assets/org-invitations.jpg)
+
+**Consent at accept.** When somebody accepts, they see what joining means for their workstations. Under **Works for** they can tick whether their own workstation may serve your organization. It is on by default when they start a new organization and off when they join as a member. A workstation only works for organizations its owner owns or has switched on under **Works for** on the Workstations page; moving an agent onto a member's workstation needs that member's consent.
+
+**Resetting a member.** You cannot reset the password or the two-factor login of a member who also has access to another organization (a personal organization counts): you would be changing their account everywhere. Use **Email a reset link** on their row instead (3 an hour per person; the mail names your organization and needs **Confirm it's you**). For a refused two-factor reset the member recovers it themselves with **Lost your authenticator?** (9.6). Every admin reset emails the member.
 
 **To change a role or remove a person:** use the role selector and the remove button in the Members list. When somebody is removed, their agents are handed to you and any cards those agents held go back into the queue. Anyone except the Owner can leave an organization. The Owner must hand over ownership first (**General, Transfer ownership**, which asks for your password).
 
@@ -1177,9 +1211,23 @@ Cards, notes and history stay as they are. For each repository added, the DevOps
 
 Everyone can turn on two-factor login under **Your settings** (3.2). As Owner you can **require it for the organization** on **Organization, General** (see the General tab in 4.1). Members who have not set it up are then held at the setup screen until they do. You need it on your own account first.
 
-If a member loses their phone and their recovery codes, you reset their two-factor login on the **Members** tab (**Reset two-factor login**, Owner only). They set it up again at the next sign-in.
+If a member loses their phone and their recovery codes, you reset their two-factor login on the **Members** tab (**Reset two-factor login**, Owner only). They set it up again at the next sign-in. This works for members who belong only to your organization (see 4.2 for the others), and an Owner's reset also starts the 24-hour wait described below and emails the member a link to cancel it. Both resets ask you to **Confirm it's you**.
 
-**Reset a member's password (Owner and Admins).** An Owner may reset a Member or an Admin; an Admin may reset a Member only (never an Owner or another Admin), and nobody resets their own password this way (use **Forgot your password?** on the sign-in page). If a member cannot get the reset email, open the actions menu on their row on the **Members** tab and choose **Reset password**. Guildwise HQ makes a strong temporary password and shows it to you **once**, with a **Copy** button: send it to them yourself, in a message only they can read. No email is sent and we do not keep the password. The member is signed out everywhere, and the next time they sign in with the temporary password the app asks for a new password before anything else (two-factor login still applies). A Guildwise HQ account is one account for every organization: if the member also belongs to other organizations, the new password applies there too. The reset is recorded in the organization's activity and never contains the password.
+**The platform can require it too.** **Require two-factor login** (7.14) is off on a self-hosted server unless its super admin turns it on, and always on in Guildwise Cloud. When it is on, anybody without two-factor login lands on **Secure your account** at sign-in and cannot use the app until they set it up. Accounts that belong only to simulation organizations are exempt. You cannot turn two-factor login off while it is required.
+
+**Sign-in lockout.** Five wrong answers pause an address for 15 minutes, doubling up to 60 (3.1). Resetting a password of an account with two-factor login needs a two-factor or recovery code as well. Members get a mail when their account is locked, when their password changes (with time and network address), when an admin resets it (never with the password) and when they sign in from a new device.
+
+**Confirm it's you.** Sensitive actions ask for a fresh answer first: the dialog **Confirm it's you** asks for the six-digit code (or a recovery code), or for your password if you have no two-factor login. An answer counts for 10 minutes. Five wrong answers end your session. You meet it for member resets, **Email a reset link**, provider keys and accounts, deploy targets, workstation secrets, adding a passkey and approving an ownership transfer.
+
+**Lost the phone and the recovery codes.** Nobody, not even a platform administrator, can remove somebody's two-factor login for them. On the sign-in code step the person chooses **Lost your authenticator and your recovery codes?**, enters their password and gets a mail link (valid 24 hours). After the link there is a wait of 24 hours, **Waiting 24 hours for your safety**, and then two-factor login is removed. The person and the Owners of their organizations are mailed. Signing in with a code, or **Cancel: this was not me**, cancels it (9.6).
+
+**Approving on the workstation.** Approving a held item needs the machine itself (`guildwise-runner approve <id>`, see 3.4). For a redeploy at a new commit and a recipe change you can instead open **Approvals** on the workstation card, find the item under **Waiting for your yes** and press **Approve with passkey**. Add a passkey first under **Passkeys** (**Add a passkey**, with **Confirm it's you**), then run `guildwise-runner passkey trust` on the machine. Passkeys work only on the server's public https address. The runner checks every approval itself; the server approves nothing.
+
+**Ownership transfer needs your yes.** If the platform asks to move your organization to another owner, you and the Admins are emailed. Approve (sign in and **Confirm it's you**) or veto from the link. Without an answer it happens after 7 days, but never automatically if the organization has deploy targets. The request expires after 30 days. In **Organization settings**, the **DevOps commands** tab shows you the commands of your organization's DevOps shifts; the platform sees only counts.
+
+<!-- figure needed: confirm-its-you.jpg - the Confirm it's you dialog asking for the six-digit code -->
+
+**Reset a member's password (Owner and Admins).** An Owner may reset a Member or an Admin; an Admin may reset a Member only (never an Owner or another Admin), and nobody resets their own password this way (use **Forgot your password?** on the sign-in page). If a member cannot get the reset email, open the actions menu on their row on the **Members** tab and choose **Reset password**. Guildwise HQ makes a strong temporary password and shows it to you **once**, with a **Copy** button: send it to them yourself, in a message only they can read. No email is sent and we do not keep the password. The member is signed out everywhere, and the next time they sign in with the temporary password the app asks for a new password before anything else (two-factor login still applies). A Guildwise HQ account is one account for every organization, so this works only when the member has no access elsewhere; otherwise it is refused and you use **Email a reset link** (4.2). The member is mailed a notice that you reset the password. The reset is recorded in the organization's activity and never contains the password.
 
 > **Tip:** a suspended organization keeps its data. Running shifts finish, nothing new starts, and only the Owner can still sign in to see settings and members. Everything resumes where it stopped when the platform administrator reactivates the organization.
 
@@ -1492,6 +1540,9 @@ An approved setup turns "how we deploy" into something you approve once and that
 
 **Approving.** On the **Environments** page you see the environments, who releases each, the gate, the lint (a secret in a file, a missing or non-executable script, an unknown target, an automatic production environment with no gate must be fixed first) and, once a version was approved, **what changed since**. Only the **Owner** presses **Approve**, and the button approves the exact hash on screen. Nobody can approve by typing a message to the CEO. When anyone edits the recipe afterwards, Guildwise notices (it re-reads the vault when it syncs, or press **Check for changes**), shows it as "changed: needs a new approval", puts a notice on your desk and **refuses every deploy from the recipe** until you approve the new version. Once an environment is approved, the **Releases** switch at the top of the page decides whether the project's releases and updates run from it (**On**) or are **Paused**.
 
+
+**Runner signing per environment.** A deploy target can require a signed runner. Each environment has its own key: a test key for UAT and the owner's offline key for production. The secret key never reaches the server or an agent. The project Owner turns this on (with **Confirm it's you**) through the API for now (`PUT /api/deploy-targets/:id/signing`); there is no form in the editor yet. Then the release sheet shows, per place, **Runner: waiting for signature** until it is signed, and **Release** stays off with "Waiting for a signed runner for <place>." Sign it in one of two ways. On the workstation that holds the key, run `guildwise-runner signing add-key --key-id <id> --key-file <path>` once, then approve the sign request there with `guildwise-runner approve <id>`. Or press **Download manifest.json**, sign it offline with `minisign -S -s <key> -m manifest.json` and **Upload signature**. A deploy to a target that requires signing is refused (`runner_signature_required`) until a signature by that target's key exists; dry runs are exempt.
+
 > **In the app:** Help, "Phases and follow-ups", section "Deploying with a recipe" (`/help/phases#delivery-recipes`).
 
 > **In the app:** watch the video "Environments: where your app runs" (Help, "Phases and follow-ups", `/help/phases#delivery-recipes`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
@@ -1517,6 +1568,10 @@ The CEO is never the releaser unless the recipe says so, and an Owner or Admin c
 **How a deploy runs.** Asking (the CEO's `aom deploy run`, a trigger, a phase follow-up, **Update now** or **Release** on an environment card, or the button in the CEO chat) only asks Guildwise. Guildwise checks that the Owner approved this exact version and that the gate holds, then sends your workstation a command pinned to the approved hash. The workstation takes the files from the approved vault version, recomputes the hash (a mismatch refuses), reads the secrets it holds by name, prepares a clean checkout of the commit, runs the script outside any model with a time limit, then the health and smoke checks. The log has secrets hidden. A refusal or failure is an answer, never a blind retry, and the CEO is told. A missing secret refuses the run and puts a notice naming it on your desk; set it on the Environments page under **Show technical details**: the value is encrypted in your browser for the workstation you choose and kept only there (like a test account of a deploy target), never on the server, in the vault or in a prompt.
 
 **Phases.** For a project whose releases are **On**, a phase's **deploy** follow-up names an **environment** ("Release to Live site") instead of creating a DevOps request: it finishes with the deploy run (a release waiting in the queue holds the phase until you release or cancel it). While the project's releases are **Paused**, follow-ups work as in 4.10 (a DevOps request written in words).
+
+**Signed runners per place.** A place that requires a signed runner shows **Runner: waiting for signature** or **Runner: signed by <key id>** on the release sheet, and **Release** waits for the signature. Only shipped releases deploy to such a place. How to sign is in 4.27.
+
+<!-- figure needed: release-runner-signature.jpg - the release sheet showing "Runner: waiting for signature" with the sign and upload buttons -->
 
 > **Good to know:** a model only ever asks. The CEO's rights to deploy follow the recipe you approved and your CEO settings (**Authority** tab); in the chat, if its call to Guildwise is ever blocked, release from the card in the chat or the **Releases** page: it is the same server path from your session.
 
@@ -1782,6 +1837,7 @@ A **Guest** is someone from another organization who was invited to work in one 
 
 1. Sign in with the account the invitation was sent to. (There are no guests without an account in some organization. If you have none, ask for a Member invitation instead.)
 2. Open **Projects**. At the top, the **Project invitations** inbox names the organization that invited you. Click **Accept invitation**.
+   Joining as a guest never switches your workstation on for the other organization.
 3. The project now appears in your project list with a "Guest" label and the other organization's name. The organization switcher in the sidebar lists it under "Guest in".
 
 ![The Project invitations inbox on the Projects page](guide/assets/guest-invitation.jpg)
@@ -1812,7 +1868,9 @@ The **platform administrator** (also called the **super admin**) runs the Guildw
 
 ### 7.1 First sign-in and two-factor login
 
-A platform account is created on the server with a command (see `docs/SELF-HOSTING.md`). At your first sign-in the app holds you at the two-factor setup: type your password, scan the QR code, type the first code and **save the ten recovery codes**. Two-factor login is mandatory for platform accounts. If you lose your password, use **Forgot your password?** on the sign-in page like everyone else (your two-factor code is still asked), or another platform administrator can send you a reset link (7.4). If the second factor is lost too, an operator resets it on the server (`superadmin-reset-password --reset-two-factor`).
+A platform account is created on the server with a command (see `docs/SELF-HOSTING.md`). At your first sign-in the app holds you at the two-factor setup: type your password, scan the QR code, type the first code and **save the ten recovery codes**. Two-factor login is mandatory for platform accounts. If you lose your password, use **Forgot your password?** on the sign-in page like everyone else (your two-factor code is still asked), or another platform administrator can send you a reset link (7.4). If the second factor is lost too, there is no reset in the app: an operator resets it on the server (`superadmin-reset-password --reset-two-factor`).
+
+**Step-up and sessions.** Every change you make in the platform area asks **Confirm it's you** (a fresh code, valid 10 minutes). Platform sessions last 8 hours at most and end after 30 minutes without use. After the upgrade to 1.10.0 you must sign in once more. A platform session that no real sign-in created is refused and the platform administrators are mailed.
 
 ![The platform area, Organizations](guide/assets/platform-orgs.jpg)
 
@@ -1882,6 +1940,7 @@ Everyone else reads the blog under **Help**, **Blog**, and can turn the weekly d
 
 A **simulation organization** is a safe sandbox for testing (for example your family member trying the product) and for demos. Everyone in it sees a **Simulation** banner. Its agents run on a **Simulated workstation** hosted by Guildwise, so nothing real is built, no model is used and nothing is billed. A hire there without a chosen runtime is a mock agent (no real model), and commits there carry a built-in simulation identity when the project has no **Commit as**. Repositories added there are throwaway copies on the server, whatever address is typed, and repositories that the BA or a DevOps engineer asks for are simulated the same way (you still approve the request on the desk; nothing is created on a git host). Chats are answered with prepared replies for typical questions (status, scope, acceptance criteria, estimates, risks, tests, deployments). Emails still go out, with **[Simulation]** at the start of the subject whenever the email is about the simulation organization (an invitation, a support request, a notice), even for someone who also belongs to a real organization. Your own workstations receive no work from it.
 
+- **Only on simulations:** the pace, load-demo and wipe tools work only on organizations that were created as simulations, never on real ones.
 - **Create one:** on **Invitations** tick **Simulation organization** and invite the Owner. Or open an existing organization and switch **Simulation** on. That works only while the organization is **empty**: no projects (archived ones count) and no active billing subscription. Otherwise you get a clear message and should invite a new simulation organization instead.
 - **No way back:** a simulation organization cannot be switched off. It stays a simulation until it is deleted, so test data can never turn into a real organization. Only the pace can change.
 - **Pace:** Fast (tests), Normal or Slow (demos, so people can watch cards move).
@@ -1892,7 +1951,7 @@ A **simulation organization** is a safe sandbox for testing (for example your fa
 
 Guildwise repairs itself with a normal team. You, the platform administrator, only pick which organisation and project run it; the approvals and reports land on **that organisation's desk**, not yours.
 
-**Set it up.** Platform, Platform team: choose one existing organisation and paste the id of one of its projects (Project settings shows it), then Designate. The project keeps its decisions at project level. Until you do, bugs are recorded but no cards are filed. Clear removes the designation.
+**Set it up.** The platform team is chosen in the server's configuration, not in the app: set `AOM_PLATFORM_TEAM_ORG_ID` to the organisation and `AOM_PLATFORM_TEAM_PROJECT_ID` to one of its projects (Project settings shows the id). It is applied at start-up and on every scheduler pass. The Platform team page is read-only. A designation made earlier keeps working, read-only, until the keys are set. Until one exists, bugs are recorded but no cards are filed. As platform administrator you have no access to the platform team's pages (`/platform-team`); its own organisation's members do.
 
 **What happens automatically.**
 - Runner crashes, server errors, loops (a card failing 3 times, or asking question after question), rejection storms on a workstation and failed role self-tests become one bug card per problem in the platform project, with a counter ("seen 10 times"). The platform architect triages it: close as invalid, or set a severity and a fix size and design the fix, then the normal flow runs (review, test, deploy).
@@ -1917,11 +1976,35 @@ A hosting service may add a **Billing** page to the platform menu; its own help 
 
 ### 7.12 Runners
 
-**Runners** (platform menu) controls the automatic updates of the runner program on every workstation. Runners check the server once a day and update themselves when it offers a newer version (3.4). The **Automatic runner updates** panel shows whether updating is on; press **Pause automatic updates** when a release turns out to be bad (runners that already updated are not changed) and **Resume automatic updates** later. A banner says "Runners are not updating" while it is paused, and workstations show *Updates paused*. To hold one workstation or all of them on a known-good version instead, use Safe mode in 7.9.
+**Runners** (platform menu) controls the automatic updates of the runner program on every workstation. Runners check the server once a day and update themselves when it offers a newer version (3.4). The **Automatic runner updates** panel shows whether updating is on; press **Pause automatic updates** when a release turns out to be bad (runners that already updated are not changed) and **Resume automatic updates** later. A banner says "Runners are not updating" while it is paused, and workstations show *Updates paused*. To hold one workstation or all of them on a known-good version instead, use Safe mode in 7.9. A pin below the runner floor (the oldest version a runner may install) is refused. Updates are served from signed release files; see 7.14 for the signing setting.
 
 ### 7.13 Inbound mail
 
 **Inbound mail** (platform menu) is the health page for the mail that organizations receive at their own Guildwise addresses (4.8, E-mail inbox). All of it arrives through one provider webhook. The **Provider** panel says whether inbound e-mail is configured ("Inbound e-mail is not set up" when it is not; the set-up is in `docs/SELF-HOSTING.md`) and the **Last 24 hours** panel counts what was **Accepted**, **Skipped** (with the reasons), came to an **Unknown address** or was **Refused (bad credentials)**.
+
+### 7.14 Security
+
+**Platform, Security** (super admin only) has four tabs. Every change needs **Confirm it's you** and is written to the audit log (7.6).
+
+- **Failed sign-ins:** recent failures and the locks in force (3.1).
+- **Sign-ins:** every sign-in as an audit event.
+- **Block list:** domains (subdomains too), exact addresses, network addresses or ranges, and allowed domains. It is checked at sign-up (hosted service), invitation, accept, login and password reset. Each change mails every platform administrator.
+- **Security settings:** two switches, below.
+
+| Setting | Self-hosted default | Guildwise Cloud |
+|---|---|---|
+| **Only signed runners** | off | locked on |
+| **Require two-factor login** | off | locked on |
+
+The value in force is the Cloud lock, else the value saved here, else the server's environment default (`AOM_REQUIRE_SIGNED_RUNNERS`, `AOM_ENFORCE_TWO_FACTOR`), else off. A locked switch is disabled with a lock and says "Set by Guildwise Cloud; cannot be changed here". The tab shows how many workstations are unsigned and how many users have no two-factor login. Upgrading to 1.10.0 with the defaults locks nobody out.
+
+**Only signed runners.** Off: nothing is refused. Old runners keep working and update themselves (3.4); the server still records whether each is signed. On: a runner that is unsigned or older than Guildwise 1.10.0 cannot pair, a connected one is disconnected and stops, and the update paths for old runners answer "reinstall required". If unsigned workstations exist, a dialog asks you to confirm that they will be **unlinked** (the unlink includes their tokens, keys and pending commands), and each owner gets one mail to reinstall (3.4). The switch is refused (`runner_release_unsigned`, HTTP 409) while the server's own runner release does not verify, for example on a development image. A self-hoster signs the release with their own key (optional); `docs/SELF-HOSTING.md` has the steps.
+
+**Require two-factor login.** On: anyone without two-factor login must set it up after signing in (3.2). Accounts in simulation organizations only are exempt.
+
+**What the super admin cannot do.** You keep the console: organization details, plan, limits, dates, suspending and cancelling, invitations, deactivating accounts, password-reset mail, the audit log, the runner update switch, blog, video and settings. You have no read or write path into organizations' projects, cards, workstations, secrets, vaults or runner commands, and no access to the platform team's pages. DevOps commands show as counts only. Ownership transfers need the Owner's consent (4.15). Feature changes you make give the Owner a desk item and a mail, and the Plan tab says "set by the platform". A change of the support address mails the old addresses.
+
+<!-- figure needed: platform-security-settings.jpg - Platform, Security, Security settings tab with both switches and the counts -->
 
 ## 8. Everyday workflows
 
@@ -2021,7 +2104,7 @@ A workstation that shows **Offline** cannot take work. Its agents show "offline"
 1. Is the computer on and awake? Laptops that sleep disconnect.
 2. On the workstation open a terminal and run `guildwise-runner status`. It shows whether the runner is running and connected.
 3. If it is not running, `guildwise-runner start` (or restart the service the installer set up). Run `guildwise-runner doctor` for a health check of Node, git, Claude and the connection to the server.
-4. Still stuck? Running the installer command again repairs the installation and keeps the pairing.
+4. Still stuck? Run the installer command again: it stops and quarantines the old install and pairs the workstation again.
 
 The warning icons clear by themselves when the machine returns (within about 30 seconds). Logs are in `~/.aom-runner/logs/`.
 
@@ -2059,7 +2142,8 @@ Guildwise uses the repository's default branch by itself, so you rarely see this
 ### 9.6 Two-factor recovery
 
 - **You lost your phone, but have your recovery codes:** at the sign-in code step, type one of the ten recovery codes instead of the six digits. Each works once. Then set up two-factor login again on a new phone (**Your settings**), which gives you new codes.
-- **You lost both:** ask your Owner to **reset your two-factor login** (**Organization, Members**; only the Owner can). If you are the Owner, ask the platform administrator (**Accounts**). If you are the platform administrator, an operator resets it on the server with `superadmin-reset-password --reset-two-factor`.
+- **You lost both:** on the sign-in code step choose **Lost your authenticator and your recovery codes?**, type your password and open the link we mail you (valid 24 hours). Then comes a wait of 24 hours (**Waiting 24 hours for your safety**) before two-factor login is removed; you sign in and set it up again. You and the Owners of your organizations are mailed. Signing in with a code, or **Cancel: this was not me** in the mail, stops it. You can ask for at most 3 links a day. If the platform requires two-factor login, you set it up again at the next sign-in. The platform administrator cannot reset it for you. An Owner can still **reset your two-factor login** on **Organization, Members** (this starts the same 24-hour wait and mails you a cancel link), except when you also belong to another organization: then use the steps above.
+- **You are a platform administrator:** you cannot use the email recovery. An operator resets it on the server with `superadmin-reset-password --reset-two-factor`.
 - **Too many wrong codes:** after five wrong codes the sign-in attempt is cancelled. Sign in again with your password and type the right code.
 
 ![The sign-in code step](guide/assets/login-2fa.jpg)

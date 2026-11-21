@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { mkdir, readdir, rm, rmdir, stat } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { mkdir, readdir, rm, stat } from 'node:fs/promises';
+import { basename, dirname, join, relative } from 'node:path';
 import {
   type BlueskyFacet,
   composeCaption,
@@ -17,7 +17,6 @@ import {
   type VideoPostMeta,
   type VideoScript,
   WORKER_OUTDATED_CODE,
-  WORKER_OUTDATED_LIKE,
   workerOutdated,
   workerOutdatedMessage,
 } from '@aom/shared';
@@ -41,7 +40,6 @@ import {
   videoActive,
   videoPostStream,
   videoSettings,
-  videoStorageUsed,
   withLock,
   workerHeartbeat,
 } from '../commands/video-posts.ts';
@@ -58,7 +56,18 @@ import {
 } from './file-rejection.ts';
 import { libraryCatalog } from './library.ts';
 import { signedMediaUrl } from './media-url.ts';
-import { type PushDeps, pushArtifacts } from './push-client.ts';
+import { uploadSlotFile } from './push.ts';
+import {
+  claimRender,
+  durationOverLimit,
+  extendLease,
+  failTooLong,
+  IN_PROCESS_LEASE_MS,
+  markFailed,
+  markRendered,
+  releaseOutdatedWaits,
+} from './render-jobs.ts';
+import { renderWorkerWatch, reportServerRender } from './render-workers.ts';
 import { watchUrl, YouTubeError } from './youtube.ts';
 
 /**
@@ -74,7 +83,6 @@ import { watchUrl, YouTubeError } from './youtube.ts';
  */
 
 const adminScope = { orgId: null, projectId: null, audience: 'admin' } as const;
-const LEASE_MS = 40 * 60_000;
 const STALE_POSTING_MS = 30 * 60_000;
 const PUBLISH_AT_MARGIN_MS = 15 * 60_000;
 const DAY = 86_400_000;
@@ -102,8 +110,6 @@ export type RenderFn = (
 export interface SweepDeps {
   /** Defaults to `renderScript` of video/renders.ts (loaded on first use: it pulls in Playwright and ffmpeg). */
   render?: RenderFn;
-  /** The artifact push (fetch, sleep and backoff); tests inject fakes. */
-  push?: PushDeps;
   /** Overrides `AOM_VIDEO_ROLE`. */
   role?: 'render' | 'publish' | 'all';
   /** This worker's application version; defaults to appVersion() (tests play an older worker with it). */
@@ -249,62 +255,6 @@ export async function resumeRerenders(ctx: Ctx): Promise<void> {
   }
 }
 
-/** A render that may start: of an approved post once its `not_before` has passed, or an explicit preview in review. */
-const CLAIMABLE = `NOT x.library AND p.script IS NOT NULL
-  AND ((p.status='approved' AND (x.not_before IS NULL OR x.not_before <= $1))
-       OR (x.preview AND p.status IN ('draft','in_review')))
-  AND ((x.status='queued' AND (x.lease_until IS NULL OR x.lease_until <= $1))
-       OR (x.status='rendering' AND x.lease_until < $1))
-  AND x.attempts < $2`;
-
-async function claimRender(ctx: Ctx, previewsOnly = false): Promise<Row | undefined> {
-  const now = ctx.clock.now();
-  const claimable = previewsOnly ? `${CLAIMABLE} AND x.preview` : CLAIMABLE;
-  // the disk budget: nothing starts while the rendered videos on disk plus room for one more pass the limit
-  const waiting = await one(
-    ctx.pool,
-    `SELECT 1 AS x FROM video_renders x JOIN video_posts p ON p.id = x.post_id AND p.revision = x.revision
-      WHERE ${claimable} LIMIT 1`,
-    [now, VIDEO_POST_LIMITS.maxAttempts],
-  );
-  if (!waiting) return undefined;
-  const used = await videoStorageUsed(ctx);
-  if (used + VIDEO_POST_LIMITS.renderReserveBytes > ctx.config.videoMaxBytes) {
-    await alertVideoOnce(
-      ctx,
-      `storage:${now.toISOString().slice(0, 10)}`,
-      'The video disk is full',
-      `Rendered videos take ${Math.round(used / 1024 ** 2)} MB of the ${Math.round(ctx.config.videoMaxBytes / 1024 ** 2)} MB budget (AOM_VIDEO_MAX_BYTES), so no new render starts until published videos are cleaned up.`,
-    );
-    return undefined;
-  }
-  // one render at a time even with several render workers: the claim runs under a transaction-scoped advisory lock, so
-  // two workers cannot both see "nothing is rendering" (READ COMMITTED would let them)
-  const db = await ctx.pool.connect();
-  try {
-    await db.query('BEGIN');
-    await db.query(`SELECT pg_advisory_xact_lock(hashtext('video-render-claim'))`);
-    const claimed = await one(
-      db,
-      `UPDATE video_renders r SET status='rendering', lease_until=$3, attempts=r.attempts+1, error=NULL
-        WHERE r.id = (
-          SELECT x.id FROM video_renders x JOIN video_posts p ON p.id = x.post_id AND p.revision = x.revision
-           WHERE ${claimable}
-             AND NOT EXISTS (SELECT 1 FROM video_renders y WHERE y.status='rendering' AND y.lease_until >= $1)
-           ORDER BY x.not_before NULLS FIRST, p.slot_at NULLS LAST, x.created_at LIMIT 1 FOR UPDATE OF x SKIP LOCKED)
-        RETURNING r.*`,
-      [now, VIDEO_POST_LIMITS.maxAttempts, new Date(now.getTime() + LEASE_MS)],
-    );
-    await db.query('COMMIT');
-    return claimed;
-  } catch (err) {
-    await db.query('ROLLBACK').catch(() => {});
-    throw err;
-  } finally {
-    db.release();
-  }
-}
-
 /** This worker's application version (deps.version in tests). */
 const workerVersionOf = (deps: SweepDeps): string | null =>
   deps.version !== undefined ? deps.version : appVersion();
@@ -333,25 +283,18 @@ export async function renderNext(ctx: Ctx, deps: SweepDeps = {}, previewsOnly = 
   }
   clearOutdated(ctx, mine);
   // renders a refused push put back with a wait are free again now that a current worker asks
-  await exec(
-    ctx.pool,
-    `UPDATE video_renders SET lease_until=NULL
-      WHERE status='queued' AND NOT library AND lease_until > $1 AND error LIKE $2`,
-    [ctx.clock.now(), WORKER_OUTDATED_LIKE],
-  );
-  const r = await claimRender(ctx, previewsOnly);
+  await releaseOutdatedWaits(ctx);
+  const r = await claimRender(ctx, { previewsOnly, leaseMs: IN_PROCESS_LEASE_MS, workerId: null });
   if (!r) return false;
+  await reportServerRender(ctx, r.id).catch((err) => ctx.log.error({ err }, 'server render report failed'));
   const post = await one(ctx.pool, 'SELECT * FROM video_posts WHERE id=$1', [r.post_id]);
   const root = ctx.config.videoDir;
   const outDir = join(root, renderDir(r.post_id, r.revision));
   const lines: string[] = [];
+  const held = { id: r.id as string, attempts: r.attempts as number };
   const beat = setInterval(() => {
     void beatHeartbeat(ctx, 'render', { busy: 'render', version: mine }).catch(() => {});
-    void exec(
-      ctx.pool,
-      `UPDATE video_renders SET lease_until=$2 WHERE id=$1 AND status='rendering' AND attempts=$3`,
-      [r.id, new Date(ctx.clock.now().getTime() + LEASE_MS), r.attempts],
-    ).catch(() => {});
+    void extendLease(ctx, held, IN_PROCESS_LEASE_MS).catch(() => {});
   }, 30_000);
   try {
     const script = post?.script as VideoScript | null;
@@ -368,87 +311,30 @@ export async function renderNext(ctx: Ctx, deps: SweepDeps = {}, previewsOnly = 
         ctx.log.info({ postId: r.post_id, renderId: r.id }, `video render: ${l}`);
       },
     });
-    const max = VIDEO_LIMITS.maxSeconds[script.format];
-    if (out.durationSeconds > max) {
-      await exec(
-        ctx.pool,
-        `UPDATE video_renders SET status='failed', attempts=$3, error=$2, finished_at=$4, lease_until=NULL
-          WHERE id=$1 AND status='rendering' AND attempts=$5`,
-        [
-          r.id,
-          `the video is ${Math.round(out.durationSeconds)} seconds; the limit is ${max}. Shorten the script.`,
-          VIDEO_POST_LIMITS.maxAttempts,
-          ctx.clock.now(),
-          r.attempts,
-        ],
-      );
+    const tooLong = durationOverLimit(script.format, out.durationSeconds);
+    if (tooLong) {
+      await failTooLong(ctx, held, tooLong);
       return true;
     }
     const rel = (p: string | null) => (p ? relative(root, p) : null);
     const a = out.artifacts;
-    // a render worker that is not on the machine with the video volume pushes every file to production first; the render
-    // is `rendered` only once all of them are acknowledged, and the local copy goes after that
-    const pushing = !!(ctx.config.videoPushUrl && ctx.config.videoWorkerToken);
-    if (pushing) {
-      const files = Object.values(a).filter((f): f is string => !!f && existsSync(f));
-      await pushArtifacts(
-        {
-          baseUrl: ctx.config.videoPushUrl as string,
-          token: ctx.config.videoWorkerToken as string,
-          version: mine,
-        },
-        r.id,
-        files,
-        deps.push,
-      );
-    }
-    await exec(
-      ctx.pool,
-      `UPDATE video_renders SET status='rendered', lease_until=NULL, error=NULL, duration_s=$2, bytes=$3, artifacts=$4::jsonb, finished_at=$5
-        WHERE id=$1 AND status='rendering' AND attempts=$6`,
-      [
-        r.id,
-        out.durationSeconds,
-        out.bytes,
-        JSON.stringify(
-          Object.fromEntries(
-            Object.entries({
-              video: rel(a.video),
-              captionsVtt: rel(a.captionsVtt),
-              captionsSrt: rel(a.captionsSrt),
-              thumb: rel(a.thumb),
-              script: rel(a.script),
-              description: rel(a.description),
-              log: rel(a.log),
-            }).filter(([, v]) => v),
-          ),
-        ),
-        ctx.clock.now(),
-        r.attempts,
-      ],
-    );
-    if (pushing) {
-      await rm(outDir, { recursive: true, force: true });
-      await rmdir(join(root, r.post_id)).catch(() => {}); // the post's folder too, unless another revision is in it
-    }
+    // the in-process path renders on the CPU, exactly as before (GPU encoding is the remote worker's: R19)
+    await markRendered(ctx, held, {
+      durationSeconds: out.durationSeconds,
+      bytes: out.bytes,
+      artifacts: {
+        video: rel(a.video),
+        captionsVtt: rel(a.captionsVtt),
+        captionsSrt: rel(a.captionsSrt),
+        thumb: rel(a.thumb),
+        script: rel(a.script),
+        description: rel(a.description),
+        log: rel(a.log),
+      },
+      encoder: 'cpu',
+    });
   } catch (err) {
-    const message = (err instanceof Error ? err.message : String(err)).slice(0, 480);
-    const final = (r.attempts as number) >= VIDEO_POST_LIMITS.maxAttempts;
-    await exec(
-      ctx.pool,
-      // a stale worker (its lease ran out and the render was reclaimed) must not overwrite the new owner's row; a failed
-      // attempt waits attempts x 1 minute before the next one
-      `UPDATE video_renders SET status=$2, error=$3, lease_until=$6, finished_at=$4
-        WHERE id=$1 AND status='rendering' AND attempts=$5`,
-      [
-        r.id,
-        final ? 'failed' : 'queued',
-        message,
-        final ? ctx.clock.now() : null,
-        r.attempts,
-        final ? null : new Date(ctx.clock.now().getTime() + (r.attempts as number) * 60_000),
-      ],
-    );
+    await markFailed(ctx, held, err instanceof Error ? err.message : String(err));
     ctx.log.warn({ err, postId: r.post_id }, 'video render failed');
   } finally {
     clearInterval(beat);
@@ -1377,6 +1263,8 @@ const HOUR = 3_600_000;
  */
 export async function videoWatch(ctx: Ctx): Promise<{ slipped: number; alerts: number }> {
   const out = { slipped: 0, alerts: 0 };
+  // remote render workers (R16, R23): "no render worker seen for 30 min while renders wait", and the log's pruning
+  if ((await renderWorkerWatch(ctx).catch(() => ({ alerted: false }))).alerted) out.alerts++;
   if (!(await videoActive(ctx))) return out;
   const now = ctx.clock.now();
   const send = async (key: string, heading: string, reason: string) => {
@@ -1523,6 +1411,8 @@ export async function cleanupVideos(ctx: Ctx, opts: { force?: boolean } = {}): P
       const v = a[k];
       if (typeof v !== 'string' || !v || v.startsWith('/') || v.startsWith('lib:')) continue; // a help video, not ours
       await rm(join(root, v), { force: true });
+      // and its upload slot (render job API), so a re-render of this revision starts clean
+      await rm(uploadSlotFile(dirname(join(root, v)), basename(v)), { force: true });
       delete keep[k];
     }
     if (!onlyVideo) await rm(join(root, renderDir(r.post_id, r.revision)), { recursive: true, force: true });
@@ -1597,38 +1487,7 @@ export async function cleanupVideos(ctx: Ctx, opts: { force?: boolean } = {}): P
 // ---- the loop
 
 /**
- * Render machines that push their files delete them after the push; a crash in between leaves a directory behind.
- * Remove local render directories older than a day whose render is not being worked on. At most once an hour.
- */
-let lastLocalSweep = 0;
-export async function cleanupLocalRenders(ctx: Ctx): Promise<number> {
-  const nowMs = ctx.clock.now().getTime();
-  if (nowMs - lastLocalSweep < 3_600_000) return 0;
-  lastLocalSweep = nowMs;
-  const root = ctx.config.videoDir;
-  let removed = 0;
-  const dirs = async (p: string) =>
-    (await readdir(p, { withFileTypes: true }).catch(() => [])).filter((d) => d.isDirectory());
-  for (const post of await dirs(root))
-    for (const rev of await dirs(join(root, post.name))) {
-      const dir = join(root, post.name, rev.name);
-      const age = nowMs - (await stat(dir)).mtimeMs;
-      if (age < DAY || !/^\d+$/.test(rev.name)) continue;
-      const busy = await one(
-        ctx.pool,
-        `SELECT 1 AS x FROM video_renders WHERE post_id::text=$1 AND revision=$2 AND status='rendering'`,
-        [post.name, Number(rev.name)],
-      );
-      if (busy) continue;
-      await rm(dir, { recursive: true, force: true });
-      removed++;
-    }
-  return removed;
-}
-
-/**
- * One pass of the worker, by role (`AOM_VIDEO_ROLE`): `render` beats `video_worker_render` and renders (plus clearing its
- * own leftovers when it pushes); `publish` beats `video_worker_publish` and does everything else (render rows, the watch,
+ * One pass of the worker, by role (`AOM_VIDEO_ROLE`): `render` beats `video_worker_render` and renders; `publish` beats `video_worker_publish` and does everything else (render rows, the watch,
  * destination rows, uploads, re-checks, cleanup); `all` does both. Returns what it did (for tests and the log).
  */
 export async function videoTick(
@@ -1671,11 +1530,6 @@ export async function videoTick(
     await recheckPublished(ctx).catch((err) => ctx.log.error({ err }, 'video re-check failed'));
     cleaned = await cleanupVideos(ctx).catch((err) => {
       ctx.log.error({ err }, 'video cleanup failed');
-      return 0;
-    });
-  } else if (ctx.config.videoPushUrl) {
-    cleaned = await cleanupLocalRenders(ctx).catch((err) => {
-      ctx.log.error({ err }, 'local render cleanup failed');
       return 0;
     });
   }

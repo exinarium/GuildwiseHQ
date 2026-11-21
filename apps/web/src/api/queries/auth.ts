@@ -225,7 +225,8 @@ export function useRequestPasswordReset() {
 export function useResetLinkValid(token: string) {
   return useQuery({
     queryKey: ['password-reset', token],
-    queryFn: () => get<{ valid: boolean }>(`/auth/password-reset/${encodeURIComponent(token)}`),
+    queryFn: () =>
+      get<{ valid: boolean; secondFactor?: boolean }>(`/auth/password-reset/${encodeURIComponent(token)}`),
     retry: false,
     staleTime: Number.POSITIVE_INFINITY,
   });
@@ -242,6 +243,7 @@ export function useChangePassword() {
 
 export function useConfirmPasswordReset() {
   return useMutation({
-    mutationFn: (v: { token: string; password: string }) => post('/auth/password-reset/confirm', v),
+    mutationFn: (v: { token: string; password: string; code?: string }) =>
+      post('/auth/password-reset/confirm', v),
   });
 }

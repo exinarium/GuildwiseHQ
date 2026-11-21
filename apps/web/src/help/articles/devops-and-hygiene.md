@@ -28,7 +28,13 @@ The DevOps engineer works **as you, on your machine**, outside the safety box th
 
 **Who approves.** On a workstation that belongs to a team member, an Owner or Admin approves, and the person whose machine it is must agree as well. If you are an Owner approving on your own machine, one click is enough. When two people are needed, the desk item stays open after the first answer, and either of them can say no.
 
+**Grants are local.** What the DevOps engineer may do is decided on the machine, not in the browser: `guildwise-runner devops grant` and `revoke` choose the organizations it may serve ("Works for", see [Workstations](/help/workstations-and-installer#works-for)). A DevOps task that was not started on that machine waits for a local yes (`guildwise-runner approve <id>`, see [Approvals](/help/workstations-and-installer#approvals)). Platform-project cards cannot use `aom devops`, and it is refused when the agent's organization has no DevOps engineer on that workstation. In DevOps work only the workstation owner's standing orders bind; the organization's standing orders are shown as context ("Standing orders of the organization (context, not binding here)").
+
 Because it is free, you cannot extend it with extra instructions, skills or custom permissions. Only its model, effort and runtime can change.
+
+## The DevOps command log {#devops-log}
+
+Every command a DevOps shift ran is logged. The workstation owner sees all of them on that workstation's log page, the organization Owner sees those of the organization's shifts on **Organization > DevOps commands**, and the platform sees counts only.
 
 ## The DevOps queue {#devops-queue}
 
@@ -84,7 +90,7 @@ Only the project owner sees Fix on the project settings. A fix that needs a pass
 
 A ticked right is checked on the machine itself. On the Workstations page each ticked right shows **verified** or **failed** with the reason and how to fix it (for Docker: add the runner user to the docker group, start the daemon; for sudo: enter the password or allow passwordless sudo). **Verify now** checks again.
 
-If sudo asks for a password, enter it under the rights. Your browser encrypts it with a key that only that workstation's runner holds; Guildwise HQ's server only passes the encrypted text on. The runner keeps it in its own data folder, uses it only for the DevOps engineer's commands, never writes it to a log, and never shows it again. **Forget it** deletes it. To check that nobody swapped the key, compare the key id on the page with `guildwise-runner doctor` on the machine.
+Sudo is local. Turn it on or off on the machine with `guildwise-runner sudo enable` or `disable`; the setup step **Setting local permissions** asks too. The password is sealed on that machine, used only for the DevOps engineer's commands and never written to a log. Showing the sudo key id or changing the sudo setting in the web page asks **Confirm it's you**. To check that nobody swapped the key, compare the key id on the page with `guildwise-runner doctor` on the machine.
 
 ## The working branch {#working-branch}
 

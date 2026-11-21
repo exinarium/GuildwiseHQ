@@ -139,6 +139,15 @@ async function defaultWorkstation(
   return w?.id;
 }
 
+/** A real workstation and a real organization: what is missing is the user's "Works for" consent (R9). */
+const realPairNotServing = async (db: Queryable, workstationId: string, orgId: string): Promise<boolean> =>
+  !!(await one(
+    db,
+    `SELECT 1 FROM workstations w, organizations o
+      WHERE w.id=$1 AND o.id=$2 AND w.simulation_org_id IS NULL AND NOT o.simulation`,
+    [workstationId, orgId],
+  ));
+
 /**
  * A workstation a session may run on: active, owned by a member of the organization and serving it, and one the actor may
  * spend. A session turn runs with the workstation owner's logins and provider keys, so it runs on the actor's own workstation,
@@ -161,11 +170,18 @@ export async function assertWorkstation(
   ]);
   if (!w || !(await orgRoleOf(db, w.user_id, orgId)))
     throw badRequest('unknown_workstation', 'workstation not found');
-  if (!(await workstationServesOrg(db, workstationId, orgId)))
-    throw badRequest('simulation_workstation', 'that workstation does not serve this organization');
   const viaAgent = !!who?.agentWorkstationIds?.includes(workstationId);
   if (who && w.user_id !== who.actorId && w.user_id !== who.creatorId && !viaAgent)
     throw new HttpError(403, 'workstation_not_yours', 'choose one of your own workstations for this session');
+  if (!(await workstationServesOrg(db, workstationId, orgId))) {
+    // R9 (audit F4): a real workstation works for an organization only once its user switched it on.
+    if (await realPairNotServing(db, workstationId, orgId))
+      throw conflict(
+        'workstation_not_serving',
+        'that workstation does not work for this organization yet: its owner switches it on under Works for on the Workstations page',
+      );
+    throw badRequest('simulation_workstation', 'that workstation does not serve this organization');
+  }
   return { userId: w.user_id as string, viaAgent };
 }
 

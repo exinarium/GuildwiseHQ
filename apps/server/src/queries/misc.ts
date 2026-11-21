@@ -606,6 +606,20 @@ function updateCheckDto(
   };
 }
 
+/**
+ * 1.10.0 (R18-S): the runner's own decisions as it reports them (live from the connection; the start-up refusal from the
+ * row, since the runner exits after reporting it).
+ */
+export function localAuthorityDto(ctx: Ctx, w: Row): NonNullable<WorkstationDto['localAuthority']> {
+  const conn = ctx.services.runners.isOnline(w.id) ? ctx.services.runners.get(w.id) : undefined;
+  return {
+    localPolicy: conn ? (conn.localPolicy ?? false) : null,
+    setupPending: conn?.setupPending ?? false,
+    startupRefused: conn ? (conn.startupRefused ?? null) : ((w.startup_refused as string | null) ?? null),
+    held: conn?.heldItems ?? [],
+  };
+}
+
 export async function workstationDtos(
   ctx: Ctx,
   where: string,
@@ -755,6 +769,7 @@ export async function workstationDtos(
         ),
       })),
     pairedAt: iso(w.paired_at) as string,
+    localAuthority: localAuthorityDto(ctx, w),
     devopsAccess: w.devops_access,
     devopsAgentId: w.devops_agent_id ?? null,
     hygiene: hygiene.get(w.id),

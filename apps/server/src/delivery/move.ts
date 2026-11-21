@@ -37,6 +37,7 @@ import { COMPUTER_REMOVED, computerRemovedMessage } from './computer-removed.ts'
 import { ownComputer, serverTarget } from './connect.ts';
 import { resolveAddresses } from './dns.ts';
 import { projectOwnerOrThrow } from './setup.ts';
+import { moveSigningRefusal, RUNNER_SIGNING_KEY_FIRST } from './signing-gate.ts';
 
 /**
  * Moving to a new server, server side (docs/design/deploy-run-ux-design.md J6, v3). The server never touches a server: it checks who
@@ -217,6 +218,9 @@ export async function startMove(
   const to = await serverTarget(ctx.pool, projectId, req.toTargetId);
   if (from.role !== 'active') throw unprocessable('not_active', `${from.name} is not the server in use`);
   if (to.role !== 'active') throw unprocessable('not_active', `${to.name} cannot be moved to`);
+  // R30: the move must not drop a signed-runner requirement (the new server takes the environment's target name)
+  const unsigned = moveSigningRefusal(from, to);
+  if (unsigned) throw conflict(RUNNER_SIGNING_KEY_FIRST, unsigned);
   if (from.workstation_id !== ws.id || to.workstation_id !== ws.id)
     throw unprocessable(
       'one_computer',

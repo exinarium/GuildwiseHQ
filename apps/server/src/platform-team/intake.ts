@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   BUG_COUNTER_MILESTONES,
   type BugSeverity,
@@ -64,6 +65,16 @@ export interface BugOutcome {
   severity: BugSeverity;
   paused: boolean;
 }
+
+/**
+ * The bug signature of a runner error (1.10.0, R18-T): `runner:` and the first 16 hex of the sha256 of the runner's own
+ * signature. The runner's signature is runner-supplied text, so it never appears in a bug, a card or a desk item.
+ */
+export const runnerBugSignature = (runnerSignature: string): string =>
+  `runner:${createHash('sha256').update(runnerSignature, 'utf8').digest('hex').slice(0, 16)}`;
+/** `runnerBugSignature` in SQL, over the column `col` of `runner_errors`. */
+export const RUNNER_BUG_SIGNATURE_SQL = (col: string): string =>
+  `('runner:' || substr(encode(sha256(convert_to(${col}, 'UTF8')), 'hex'), 1, 16))`;
 
 const SOURCE_LABEL: Record<BugSource, string> = {
   runner_error: 'Runner error',
@@ -260,10 +271,11 @@ async function fileBugCard(
     [bug.signature, created.cardId, team.projectId, ctx.clock.now()],
   )) as Row;
   if (bug.source === 'runner_error' && String(bug.signature).startsWith('runner:'))
-    await exec(tx, 'UPDATE runner_errors SET bug_card_id=$2 WHERE signature=$1', [
-      String(bug.signature).slice('runner:'.length),
-      created.cardId,
-    ]);
+    await exec(
+      tx,
+      `UPDATE runner_errors SET bug_card_id=$2 WHERE ${RUNNER_BUG_SIGNATURE_SQL('signature')} = $1`,
+      [String(bug.signature), created.cardId],
+    );
   return { ...updated, ref: created.ref, ...(created.missing?.length ? { missing: created.missing } : {}) };
 }
 

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseMinisignPublicKey } from '@aom/shared';
 import { BRAND_NAME } from './brand.ts';
 
 /**
@@ -29,7 +30,20 @@ export interface InstallerParams {
   generatedAt: Date;
   /** The user turned on expert mode: the installer then asks where the code lives (simple mode uses ~/src). */
   expertMode?: boolean;
+  /**
+   * "Only signed runners" (R27) is on for this server: the installer refuses an unsigned release and replaces an old
+   * runner it finds (R21). Off (the self-hosted default): existing installs are kept and upgraded as before.
+   */
+  requireSignedRunners?: boolean;
+  /**
+   * The minisign public key line (`RW...`) this server trusts for runner releases (the official key, or
+   * `AOM_RUNNER_RELEASE_PUBKEY`); null or anything that is not a public key line: none. Public data, never a secret.
+   */
+  releasePubkey?: string | null;
 }
+
+/** The release key as the scripts carry it: a valid minisign public key line, or empty. */
+const pubkeyLine = (k: string | null | undefined): string => (k && parseMinisignPublicKey(k) ? k.trim() : '');
 
 /** Bash single-quoted literal: everything is literal inside, except the quote itself. */
 export const shq = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -112,8 +126,12 @@ function bashHeader(os: string, p: InstallerParams): string {
     `SESSION_TOKEN=${shq(p.sessionToken)}`,
     `DEFAULT_NAME=${shq(cleanName(p.workstationName))}`,
     `RELEASE_VERSION=${shq(rel?.version ?? '')}`,
+    // The checksum the command was made with, for the record: the scripts check the one in the (signed) release manifest.
+    '# shellcheck disable=SC2034',
     `RELEASE_SHA256=${shq(rel?.sha256 ?? '')}`,
     `EXPERT_MODE=${p.expertMode ? '1' : '0'}`,
+    `REQUIRE_SIGNED_RUNNERS=${p.requireSignedRunners ? '1' : '0'}`,
+    `RELEASE_PUBKEY=${shq(pubkeyLine(p.releasePubkey))}`,
     'CURRENT_STEP=installer',
     'DOCTOR_FAILED=0',
     '',
@@ -141,6 +159,7 @@ export function renderPowerShell(p: WindowsParams): string {
     `$ScriptUrl = ${psq(p.scriptUrl)}`,
     `$LinuxScriptUrl = ${psq(p.linuxScriptUrl)}`,
     `$DefaultName = ${psq(cleanName(p.workstationName))}`,
+    `$RequireSignedRunners = ${p.requireSignedRunners ? '$true' : '$false'}`,
     '',
   ].join('\n')}\n${template('windows.ps1')}`.replace(/\r?\n/g, '\r\n');
 }

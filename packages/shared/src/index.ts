@@ -70,6 +70,7 @@ export * from './runs/index.ts';
 export * from './safe.ts';
 export * from './schedules/index.ts';
 export * from './secure-context.ts';
+export * from './security/index.ts';
 export * from './sessions/index.ts';
 export * from './sessions/time.ts';
 export * from './sessions/tools.ts';

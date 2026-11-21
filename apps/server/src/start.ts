@@ -1,16 +1,19 @@
 import { createApp } from './app.ts';
+import { describeSecuritySettings } from './auth/security-settings.ts';
 import { registerBuiltins } from './catalogue/boot.ts';
 import { ensureBusinessWorkflowsAtBoot } from './catalogue/business-workflows.ts';
 import { createClock } from './clock.ts';
 import { publishServerVersion } from './commands/video-posts.ts';
-import { loadConfig } from './config.ts';
+import { configWarnings, loadConfig } from './config.ts';
 import { runDataMigrations } from './data-migrations/index.ts';
 import { migrate } from './db/migrate.ts';
 import { createPool } from './db/pool.ts';
 import { PgEventStore } from './eventstore/pg-event-store.ts';
 import { extensionMigrationDirs, type ServerExtension } from './extension.ts';
 import { rebaseAgentsToCurrentRoles } from './hr/follow-role.ts';
+import { platformTeamWarnings, syncPlatformTeamDesignation } from './platform-team/settings.ts';
 import { buildProjectors } from './projections/index.ts';
+import { signedRunnersAtBoot } from './runner-gateway/signed-sweep.ts';
 
 /**
  * Boots the server: SQL migrations (the core's, then each extension's), data migrations, the app and its listener. The
@@ -19,6 +22,7 @@ import { buildProjectors } from './projections/index.ts';
 export async function startServer(extensions: ServerExtension[] = []): Promise<void> {
   const config = loadConfig();
 
+  for (const w of configWarnings(config)) console.warn(`WARN: ${w}`);
   for (const e of extensions) {
     const warning = e.startupWarning?.(config);
     if (warning) console.warn(`WARN: ${warning}`);
@@ -44,13 +48,29 @@ export async function startServer(extensions: ServerExtension[] = []): Promise<v
         log: (m) => console.log(m),
         inboundDomain: config.inbound.domain,
         projectGraphs: config.projectGraphs.enabled,
+        secretKey: config.secretKey,
+        twoFactorKey: config.twoFactorKey,
       });
     } finally {
       await pool.end();
     }
   }
 
-  const app = await createApp(config, { background: true, extensions });
+  const app = await createApp(config, {
+    background: true,
+    extensions,
+    // "Only signed runners" (R21, R27), after the data migrations and before the dispatcher, scheduler and simulation
+    // start: the served release must verify, else boot refuses; then the signed-runner sweep (idempotent, nothing on an
+    // empty DB or with the setting off) and the reinstall mails.
+    beforeBackground: async (ctx) => {
+      const signed = await signedRunnersAtBoot(ctx);
+      if (signed.unlinked || signed.mailed) ctx.log.warn(signed, 'signed-runner sweep');
+    },
+  });
+  app.log.info(await describeSecuritySettings(app.ctx), 'security settings');
+  // R17-1: the platform team designation follows server config; a legacy designation is read-only and warned about.
+  await syncPlatformTeamDesignation(app.ctx);
+  for (const w of await platformTeamWarnings(app.ctx)) app.log.warn(w);
   // Video workers on other machines compare their version with this one (here and not in createApp: the video worker
   // also calls createApp and must not overwrite the server's version with its own).
   await publishServerVersion(app.ctx);

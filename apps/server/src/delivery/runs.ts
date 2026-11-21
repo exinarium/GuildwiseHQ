@@ -29,6 +29,7 @@ import { withAppendTx, withTx } from '../db/tx.ts';
 import { forbidden, HttpError, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { workstationServesOrg } from '../simulation/fit.ts';
 import type { ProbeAnswer } from './commit-probe.ts';
 import { targetComputerRemoved } from './computer-removed.ts';
 import { environmentRoles } from './environments.ts';
@@ -43,6 +44,7 @@ import {
   projectVault,
   workstationForVault,
 } from './recipes.ts';
+import { RUNNER_SIGNATURE_REQUIRED, signingGate } from './signing-gate.ts';
 
 /**
  * Deploy runs, server side (docs/design/ceo-front-door.md 9.5 with the Owner's decisions of 14.2).
@@ -132,8 +134,12 @@ const actorOnly = (r: DeployRequester): DeployActor => ({
   ...(r.name ? { name: r.name } : {}),
 });
 
+/** R9 (audit F4): a deploy runs only on a workstation whose user switched the organization on. */
+const NOT_SERVING =
+  'the workstation that deploys this place does not work for this organization: its owner switches it on under Works for on the Workstations page';
+
 /** Where a target's deploy runs: the local vault's workstation, the remote target's, else a connected one that can read the vault. */
-async function deployWorkstation(
+export async function deployWorkstation(
   db: Queryable,
   project: Row,
   vault: ProjectVault,
@@ -150,13 +156,15 @@ async function deployWorkstation(
     const w = await one<{ id: string }>(db, `SELECT id FROM workstations WHERE id=$1 AND status='active'`, [
       vault.workstationId,
     ]);
-    return w ?? { error: 'the workstation that holds the local vault is gone' };
+    if (!w) return { error: 'the workstation that holds the local vault is gone' };
+    return (await workstationServesOrg(db, w.id, project.org_id)) ? w : { error: NOT_SERVING };
   }
   if (target.workstation_id) {
     const w = await one<{ id: string }>(db, `SELECT id FROM workstations WHERE id=$1 AND status='active'`, [
       target.workstation_id,
     ]);
-    return w ?? { error: computerRemovedMessage(target.name), reason: DEPLOYING_COMPUTER_REMOVED };
+    if (!w) return { error: computerRemovedMessage(target.name), reason: DEPLOYING_COMPUTER_REMOVED };
+    return (await workstationServesOrg(db, w.id, project.org_id)) ? w : { error: NOT_SERVING };
   }
   const id = await workstationForVault(db, project.id, vault, project.org_id);
   return id ? { id } : { error: 'no workstation of the project can deploy' };
@@ -869,6 +877,17 @@ async function requestDeployRunNow(ctx: Ctx, input: RequestDeployInput): Promise
       continue;
     }
 
+    // R30: a target that takes only a signed runner deploys a shipped release whose runner carries a signature by its key.
+    let signing: DeployExecPayload['signing'];
+    if (!runDry) {
+      const g = await signingGate(ctx.pool, project.id, t, commit);
+      if (g.required && 'refusal' in g) {
+        refuse(RUNNER_SIGNATURE_REQUIRED, g.refusal, [`a signed runner for ${targetName}`], commit);
+        continue;
+      }
+      if (g.required) signing = g.signing;
+    }
+
     // An open run of this environment and target: a waiting one with the same recipe and commit is the one to release;
     // another waiting one is replaced by this newer request; a running one is never touched.
     const open = await one(
@@ -977,6 +996,7 @@ async function requestDeployRunNow(ctx: Ctx, input: RequestDeployInput): Promise
           trial,
           dryRun: runDry,
           expiresAt: new Date(now.getTime() + DEPLOY_EXEC_TTL_MS).toISOString(),
+          ...(signing ? { signing } : {}),
         },
       });
       outcomes.push({ runId: id, target: targetName, status: 'queued' });
@@ -1054,6 +1074,15 @@ async function requestDeployRunNow(ctx: Ctx, input: RequestDeployInput): Promise
         now,
       ).catch(() => undefined);
   }
+  // R30: a person whose deploy is refused only for want of a runner signature gets the 409 (the refusals are recorded).
+  if (
+    (input.requester.kind === 'owner' || input.requester.kind === 'admin') &&
+    outcomes.length > 0 &&
+    outcomes.every((o) => o.status === 'refused' && o.refusal === RUNNER_SIGNATURE_REQUIRED)
+  )
+    throw new HttpError(409, RUNNER_SIGNATURE_REQUIRED, outcomes.map((o) => o.detail).join(' '), {
+      runs: outcomes,
+    });
   const queued = outcomes.filter((o) => o.status === 'queued');
   const refused = outcomes.filter((o) => o.status === 'refused');
   const parts: string[] = [];

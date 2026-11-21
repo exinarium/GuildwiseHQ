@@ -176,6 +176,52 @@ async function prepared() {
 }
 
 describe('starting a move', () => {
+  it('keeps the signed-runner gate (R30): a server that takes only signed runners moves only to one with the same key', async () => {
+    const signing = (keyId: string) =>
+      JSON.stringify({
+        required: true,
+        keyId,
+        publicKey: `RW${'A'.repeat(54)}`,
+        artefact: 'release/manifest.json',
+      });
+    await q(`UPDATE deploy_targets SET signing=$2::jsonb WHERE id=$1`, [
+      d.targets.prod,
+      signing('515674AC008F1CF3'),
+    ]);
+    try {
+      const refused = await req('POST', `${base()}/delivery/moves`, {
+        fromTargetId: d.targets.prod,
+        toTargetId: newTarget,
+        workstationId: d.w.workstationId,
+      });
+      expect(refused.status).toBe(409);
+      expect(refused.body.error.code).toBe('runner_signing_key_first');
+      expect(refused.body.error.message).toContain('515674AC008F1CF3');
+      await q(`UPDATE deploy_targets SET signing=$2::jsonb WHERE id=$1`, [
+        newTarget,
+        signing('F0D6288B1CBE00A7'),
+      ]);
+      expect(
+        (
+          await req('POST', `${base()}/delivery/moves`, {
+            fromTargetId: d.targets.prod,
+            toTargetId: newTarget,
+            workstationId: d.w.workstationId,
+          })
+        ).status,
+      ).toBe(409);
+      await q(`UPDATE deploy_targets SET signing=$2::jsonb WHERE id=$1`, [
+        newTarget,
+        signing('515674AC008F1CF3'),
+      ]);
+      await start();
+    } finally {
+      await q(`UPDATE deploy_targets SET signing=NULL WHERE id = ANY($1::uuid[])`, [
+        [d.targets.prod, newTarget],
+      ]);
+    }
+  });
+
   it('is built from the approved setup, not from the browser: the spec names the app, the database and the backup folder', async () => {
     const m = await start();
     expect(m).toMatchObject({

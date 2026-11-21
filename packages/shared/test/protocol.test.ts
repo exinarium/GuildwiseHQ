@@ -285,6 +285,26 @@ const runnerToServer: Record<string, Record<string, unknown>> = {
   'command.result': { ...env('command.result'), commandId: 'k1', ok: true, result: { removed: true } },
   'vault.status': { ...env('vault.status'), vaultId: 'v1', lastPullAt: TS, lastPushAt: null, error: 'x' },
   'vault.conflict': { ...env('vault.conflict'), vaultId: 'v1', files: ['standing-orders.md'] },
+  'approvals.held': {
+    ...env('approvals.held'),
+    items: [
+      {
+        id: 'h1',
+        kind: 'recipe.write',
+        summary: 'write delivery/deploy.sh',
+        commandHash: 'a'.repeat(64),
+        createdAt: '2026-11-20T23:00:00.000Z',
+        expiresAt: '2026-11-21T23:00:00.000Z',
+      },
+    ],
+  },
+  'release.artefact.prepared': {
+    ...env('release.artefact.prepared'),
+    releaseId: U.a,
+    targetId: U.b,
+    artefactSha256: 'b'.repeat(64),
+    version: '1.10.0',
+  },
   'deploy.progress': { ...env('deploy.progress'), runId: U.d, phase: 'started' },
   'token.rotate': { ...env('token.rotate') },
   'storage.report': {

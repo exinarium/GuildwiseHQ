@@ -376,6 +376,7 @@ describe('Docker steps run outside the sandbox, flagged', () => {
     const bin = tmp();
     writeFileSync(join(bin, 'docker'), '#!/bin/sh\nexec node "$@"\n', { mode: 0o755 });
     const m2 = setup({
+      localAllowDocker: () => true,
       sandboxMode: () => ({ mode: 'required', allowUnsandboxed: false }),
       launcher: new ServiceLauncher({ probeBwrap: async () => true, noScope: true }),
       pathDirs: () => [bin],

@@ -2,6 +2,8 @@ export { assetsDir } from './assets.ts';
 export * from './audio.ts';
 export * from './captions.ts';
 export * from './ffmpeg.ts';
+export * from './gpu.ts';
+export * from './mp4-duration.ts';
 export * from './reels.ts';
 export * from './render.ts';
 export * from './scenes.ts';

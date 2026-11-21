@@ -4,8 +4,10 @@ import {
   RELAY_BODY_HARD_MAX_BYTES,
   RELAY_KINDS,
   type RelayKind,
+  STEP_UP_WINDOW_DEFAULT_SEC,
   STORAGE_HARD_MAX_FILE_BYTES,
   STORAGE_MAX_FILE_BYTES,
+  SUPER_ADMIN_IDLE_DEFAULT_SEC,
 } from '@aom/shared';
 import { z } from 'zod';
 import { parseTrustProxy, type TrustProxy } from './trust-proxy.ts';
@@ -172,7 +174,7 @@ const EnvSchema = z.object({
   AOM_VIDEO_WORKER_TOKEN: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(24).optional()),
   /** The port of the publish worker's small push server (only when AOM_VIDEO_WORKER_TOKEN is set). */
   AOM_VIDEO_WORKER_PORT: z.coerce.number().int().min(1).max(65535).default(4610),
-  /** Render worker: the base URL of the production server (or its publish worker) to push finished files to. */
+  /** Retired (R16): the old DB-connected render worker's push target. The app warns, the video-worker entry refuses it. */
   AOM_VIDEO_PUSH_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
   AOM_VIDEO_MAX_BYTES: z.coerce
     .number()
@@ -255,12 +257,97 @@ const EnvSchema = z.object({
   AOM_FORMS_OFFLINE_HOLD_DAYS: z.coerce.number().int().min(1).max(30).default(7),
   AOM_FORMS_OFFLINE_LINK_DAYS: z.coerce.number().int().min(1).max(30).default(7),
   AOM_FORMS_OFFLINE_SETTLE_SEC: z.coerce.number().int().min(0).max(3600).default(30),
+  // ---- security hardening (1.10.0; docs/SELF-HOSTING.md "Security settings")
+  /** Seals the two-factor seeds (R11). At least 32 characters and never equal to AOM_SECRET_KEY. Unset: a key derived from the secret key (a warning in production). */
+  AOM_TWO_FACTOR_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(32).optional()),
+  /** Account and IP lockout after repeated failed sign-ins (R2). */
+  AOM_LOGIN_LOCKOUT: bool(true),
+  /** Who gets the "new sign-in" mail: everyone (D2), super admins only, or nobody. */
+  AOM_SIGNIN_NOTICES: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.enum(['all', 'super_admin', 'off']).default('all'),
+  ),
+  /** Invitation limits (R10): per organization per hour, per inviting person per day, pending per organization. */
+  AOM_INVITE_PER_ORG_HOUR: z.coerce.number().int().min(1).max(100_000).default(20),
+  AOM_INVITE_PER_ACTOR_DAY: z.coerce.number().int().min(1).max(100_000).default(50),
+  AOM_INVITE_PENDING_MAX: z.coerce.number().int().min(1).max(100_000).default(50),
+  /** How long a second factor (or password) proof stays fresh for "Confirm it's you" (R5). Production: at most 600. */
+  AOM_STEP_UP_WINDOW_SEC: z.coerce
+    .number()
+    .int()
+    .min(30)
+    .max(7 * 86_400)
+    .default(STEP_UP_WINDOW_DEFAULT_SEC),
+  /** Idle limit of a super-admin session (R4). Production: at most 1800. */
+  AOM_SUPER_ADMIN_IDLE_SEC: z.coerce
+    .number()
+    .int()
+    .min(60)
+    .max(7 * 86_400)
+    .default(SUPER_ADMIN_IDLE_DEFAULT_SEC),
+  /** Env defaults of the two security settings (R27, R28); the platform setting and a hosting lock win. */
+  AOM_REQUIRE_SIGNED_RUNNERS: bool(false),
+  AOM_ENFORCE_TWO_FACTOR: bool(false),
+  /** Own-key mode (R27): the minisign public key this server trusts for runner releases instead of the official one. */
+  AOM_RUNNER_RELEASE_PUBKEY: z.string().optional(),
+  /** The platform team's organization and project (R17-1): server config, no longer a super-admin setting. */
+  AOM_PLATFORM_TEAM_ORG_ID: z.preprocess((v) => (v === '' ? undefined : v), z.uuid().optional()),
+  AOM_PLATFORM_TEAM_PROJECT_ID: z.preprocess((v) => (v === '' ? undefined : v), z.uuid().optional()),
   LOG_LEVEL: z.string().default('info'),
 });
 
+/**
+ * `AOM_RUNNER_RELEASE_PUBKEY`: a minisign public key, either the key line alone (`RW...`, base64 of 42 bytes starting
+ * `Ed`) or the whole `.pub` file (`untrusted comment:` line plus the key line). Returns the key line; anything else
+ * (a secret key among them) stops the boot. Unset: undefined (the official key applies).
+ */
+export function parseRunnerReleasePubkey(raw: string | undefined): string | undefined {
+  const v = raw?.trim();
+  if (!v) return undefined;
+  if (/secret key/i.test(v))
+    throw new Error('AOM_RUNNER_RELEASE_PUBKEY looks like a minisign SECRET key: give the public key only');
+  const lines = v
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const key =
+    lines.length === 2 && lines[0]?.startsWith('untrusted comment:')
+      ? lines[1]
+      : lines.length === 1
+        ? lines[0]
+        : undefined;
+  if (!key || !/^RW[A-Za-z0-9+/]{54}$/.test(key) || Buffer.from(key, 'base64').length !== 42)
+    throw new Error(
+      'AOM_RUNNER_RELEASE_PUBKEY is not a minisign public key (expected the "RW..." line of the .pub file)',
+    );
+  return key;
+}
+
+/** Non-fatal configuration problems, logged at boot (the server still starts). */
+export function configWarnings(config: Config): string[] {
+  const out: string[] = [];
+  if (config.production && !config.twoFactorKey)
+    out.push(
+      'AOM_TWO_FACTOR_KEY is not set: two-factor seeds are sealed with a key derived from AOM_SECRET_KEY. Set a separate key (openssl rand -base64 48); existing seeds are re-sealed automatically.',
+    );
+  // R16: the database-connected remote render mode is retired; the app only warns (a self-hosted app never fails to boot
+  // over it), the video-worker entry refuses to start with it
+  if (config.videoPushUrl)
+    out.push(
+      'AOM_VIDEO_PUSH_URL is set but no longer used: remote render workers use `video-worker --remote` with AOM_RENDER_SERVER_URL and their own token (Platform > Video > Render workers).',
+    );
+  return out;
+}
+
 export interface Config {
-  /** The environment this configuration was read from (extensions read their own settings from it). */
+  /**
+   * The environment this configuration was read from (extensions read their own settings from it). Non-enumerable, so
+   * logging or spreading the config never copies it (it holds every secret); spread copies keep it through
+   * `withConfig`.
+   */
   env: Readonly<Record<string, string | undefined>>;
+  /** `NODE_ENV=production`. */
+  production: boolean;
   databaseUrl: string;
   port: number;
   host: string;
@@ -350,7 +437,7 @@ export interface Config {
   /** AOM_VIDEO_WORKER_TOKEN: the bearer token of the artifact push; undefined = the push endpoint is off. */
   videoWorkerToken: string | undefined;
   videoWorkerPort: number;
-  /** AOM_VIDEO_PUSH_URL: where a render worker pushes finished artifacts; undefined = write them to AOM_VIDEO_DIR. */
+  /** AOM_VIDEO_PUSH_URL: retired (R16); read only to warn at boot (`configWarnings`). The video-worker entry refuses it. */
   videoPushUrl: string | undefined;
   /** AOM_VIDEO_ENCODE_THREADS; undefined = the renderer's default (4). The renderer lowers it to the machine's cores. */
   videoEncodeThreads: number | undefined;
@@ -405,6 +492,24 @@ export interface Config {
   simulationServerUrl: string | undefined;
   /** Cookie `Secure` flag: true when the public origin is https. */
   secureCookies: boolean;
+  /** Seals the two-factor seeds (`AOM_TWO_FACTOR_KEY`); undefined: derived from the secret key (R11). */
+  twoFactorKey: string | undefined;
+  /** Account and IP lockout after failed sign-ins (`AOM_LOGIN_LOCKOUT`, R2). */
+  loginLockout: boolean;
+  /** Who is mailed about a new sign-in (`AOM_SIGNIN_NOTICES`, R4/D2). */
+  signinNotices: 'all' | 'super_admin' | 'off';
+  /** Invitation limits (R10). */
+  invites: { perOrgHour: number; perActorDay: number; pendingMax: number };
+  /** Freshness window of "Confirm it's you" in seconds (`AOM_STEP_UP_WINDOW_SEC`, R5). */
+  stepUpWindowSec: number;
+  /** Idle limit of a super-admin session in seconds (`AOM_SUPER_ADMIN_IDLE_SEC`, R4). */
+  superAdminIdleSec: number;
+  /** Env defaults of the security settings (R27, R28); the effective value is `securitySetting()` (auth/security-settings.ts). */
+  securityDefaults: { requireSignedRunners: boolean; enforceTwoFactor: boolean };
+  /** Own-key mode: the minisign public key line trusted for runner releases (`AOM_RUNNER_RELEASE_PUBKEY`); undefined: the official key. */
+  runnerReleasePubkey: string | undefined;
+  /** The platform team's designation from server config (R17-1); both undefined: not set by env. */
+  platformTeam: { orgId: string | undefined; projectId: string | undefined };
   /** Web Push: `enabled` only with a complete, valid VAPID configuration. */
   push: {
     enabled: boolean;
@@ -459,13 +564,23 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     throw new Error(
       'AOM_SECRET_KEY is required in production: set it to a long random string (for example `openssl rand -base64 32`) and keep it with your backups.',
     );
-  if (e.AOM_VIDEO_PUSH_URL && !e.AOM_VIDEO_WORKER_TOKEN)
+  if (e.AOM_TWO_FACTOR_KEY && e.AOM_SECRET_KEY && e.AOM_TWO_FACTOR_KEY === e.AOM_SECRET_KEY)
     throw new Error(
-      'AOM_VIDEO_PUSH_URL needs AOM_VIDEO_WORKER_TOKEN: the render worker authenticates its push to the publish worker with it.',
+      'AOM_TWO_FACTOR_KEY must differ from AOM_SECRET_KEY: a separate key is the point of it (openssl rand -base64 48).',
     );
+  if (e.NODE_ENV === 'production') {
+    if (e.AOM_STEP_UP_WINDOW_SEC > STEP_UP_WINDOW_DEFAULT_SEC)
+      throw new Error(
+        `AOM_STEP_UP_WINDOW_SEC is at most ${STEP_UP_WINDOW_DEFAULT_SEC} in production (larger values are for tests and recordings only).`,
+      );
+    if (e.AOM_SUPER_ADMIN_IDLE_SEC > SUPER_ADMIN_IDLE_DEFAULT_SEC)
+      throw new Error(
+        `AOM_SUPER_ADMIN_IDLE_SEC is at most ${SUPER_ADMIN_IDLE_DEFAULT_SEC} in production (larger values are for tests and recordings only).`,
+      );
+  }
   const publicOrigin = e.AOM_PUBLIC_ORIGIN.replace(/\/+$/, '');
-  return {
-    env: { ...env },
+  const config: Omit<Config, 'env'> = {
+    production: e.NODE_ENV === 'production',
     databaseUrl: e.DATABASE_URL,
     port: e.AOM_PORT,
     host: e.AOM_HOST,
@@ -584,5 +699,37 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
         offlineGraceSeconds: e.AOM_PUSH_OFFLINE_GRACE_SECONDS,
       };
     })(),
+    twoFactorKey: e.AOM_TWO_FACTOR_KEY,
+    loginLockout: e.AOM_LOGIN_LOCKOUT,
+    signinNotices: e.AOM_SIGNIN_NOTICES,
+    invites: {
+      perOrgHour: e.AOM_INVITE_PER_ORG_HOUR,
+      perActorDay: e.AOM_INVITE_PER_ACTOR_DAY,
+      pendingMax: e.AOM_INVITE_PENDING_MAX,
+    },
+    stepUpWindowSec: e.AOM_STEP_UP_WINDOW_SEC,
+    superAdminIdleSec: e.AOM_SUPER_ADMIN_IDLE_SEC,
+    securityDefaults: {
+      requireSignedRunners: e.AOM_REQUIRE_SIGNED_RUNNERS,
+      enforceTwoFactor: e.AOM_ENFORCE_TWO_FACTOR,
+    },
+    runnerReleasePubkey: parseRunnerReleasePubkey(e.AOM_RUNNER_RELEASE_PUBKEY),
+    platformTeam: { orgId: e.AOM_PLATFORM_TEAM_ORG_ID, projectId: e.AOM_PLATFORM_TEAM_PROJECT_ID },
   };
+  return withEnv(config, env);
+}
+
+/** Attaches the environment as a non-enumerable property (R13): `JSON.stringify`, pino and `{...config}` never copy it. */
+function withEnv(config: Omit<Config, 'env'>, env: Record<string, string | undefined>): Config {
+  return Object.defineProperty(config, 'env', {
+    value: Object.freeze({ ...env }),
+    enumerable: false,
+    writable: false,
+  }) as Config;
+}
+
+/** A copy of the config with some fields changed that keeps the (non-enumerable) environment. Use instead of `{...config}`. */
+export function withConfig(config: Config, changes: Partial<Omit<Config, 'env'>>): Config {
+  // `{...config}` leaves the non-enumerable `env` out by itself
+  return withEnv({ ...config, ...changes }, { ...config.env });
 }

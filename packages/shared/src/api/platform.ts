@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { OrgStatusSchema } from '../orgs/index.ts';
 import { OrgFeatureSchema, OrgLimitsSchema } from '../orgs/plans.ts';
 import { IsoTime } from './common.ts';
+import { OwnershipTransferSchema } from './least-privilege.ts';
 import { OrgUsageSchema } from './orgs.ts';
 
 /** Platform routes for the super admin (docs/design/organizations.md sections 10 and 11.3). Metadata only. */
@@ -23,6 +24,8 @@ export const PlatformOrgSummarySchema = z.object({
   /** A simulation organization: mock workstation, never billed, can be wiped. */
   simulation: z.boolean().default(false),
   simulationPace: z.enum(['fast', 'normal', 'slow']).default('normal'),
+  /** Created as a simulation: only such organizations take the simulation tools (R17-5). */
+  createdAsSimulation: z.boolean().default(false),
   createdAt: IsoTime,
   lastActiveAt: IsoTime.nullable(),
 });
@@ -72,6 +75,8 @@ export const PlatformOrgDetailSchema = PlatformOrgSummarySchema.extend({
   shifts30d: z.number().int(),
   admins: z.array(z.object({ id: z.uuid(), displayName: z.string(), email: z.string() })),
   recentAudit: z.array(PlatformAuditRowSchema),
+  /** A transfer of ownership waiting for the Owner's consent or the 7-day notice (R17-3). */
+  pendingTransfer: OwnershipTransferSchema.nullable().optional(),
 });
 export type PlatformOrgDetail = z.infer<typeof PlatformOrgDetailSchema>;
 

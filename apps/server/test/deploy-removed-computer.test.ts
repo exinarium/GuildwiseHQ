@@ -8,6 +8,7 @@ import {
 import { reachabilityTick } from '../src/delivery/reachability.ts';
 import { requestDeployRun } from '../src/delivery/runs.ts';
 import { rebuildProjections } from '../src/projections/rebuild.ts';
+import { PASSWORD } from './helpers/app.ts';
 import { keepOnline } from './helpers/ceo.ts';
 import { closeAdminPool, q as rawQ } from './helpers/db.ts';
 import {
@@ -58,6 +59,10 @@ beforeAll(async () => {
   );
   doomed = await computer('Doomed');
   fresh = await computer('Fresh');
+  // setWeekday moved the clock past the step-up window; deploy-target writes need a fresh proof (R5)
+  await ok(
+    d.w.t.req('POST', '/api/auth/step-up', { cookie: d.w.owner.cookie, body: { password: PASSWORD } }),
+  );
 });
 afterAll(async () => {
   await d.w.t.close();

@@ -3,10 +3,12 @@ import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { ApiError } from '../api/client.ts';
 import { useLogin, useLogin2fa, useMe } from '../api/queries/auth.ts';
+import { useStartTwoFactorRecovery } from '../api/queries/leastPrivilege.ts';
 import { AuthFrame } from '../components/auth/AuthFrame.tsx';
 import { PasswordInput } from '../components/auth/PasswordInput.tsx';
 import { Button, Callout, TextInput } from '../components/ui.tsx';
 import { ext } from '../extension/index.ts';
+import { formatDateTime } from '../lib/time.ts';
 import { usePageTitle } from '../lib/usePageTitle.ts';
 
 /** Only same-origin relative paths are honoured for `?next=`. */
@@ -41,6 +43,7 @@ export function Login() {
   const me = useMe();
   const login = useLogin();
   const login2fa = useLogin2fa();
+  const recover = useStartTwoFactorRecovery();
   const [challenge, setChallenge] = useState<string | null>(null);
   const [recovery, setRecovery] = useState(false);
   const [code, setCode] = useState('');
@@ -165,10 +168,39 @@ export function Login() {
               setChallenge(null);
               setCode('');
               setRecovery(false);
+              recover.reset();
             }}
           >
             Back to sign in
           </button>
+        </div>
+        {/* R17-2: no recovery codes either: a mailed link, then a 24-hour wait */}
+        <div className="mt-5 border-t border-line pt-4 text-sm" data-testid="login-lost-authenticator">
+          {recover.data ? (
+            <Callout tone="info" role="status">
+              {recover.data.state === 'waiting' && recover.data.effectiveAt
+                ? `A recovery is already confirmed: two-factor login is removed ${formatDateTime(recover.data.effectiveAt)}.`
+                : 'Check your mail: confirm the recovery with the link we sent. Two-factor login is removed 24 hours after you confirm, and the Owners of your organizations are told.'}
+            </Callout>
+          ) : (
+            <button
+              type="button"
+              className="text-muted underline-offset-2 hover:underline"
+              disabled={recover.isPending}
+              onClick={() => recover.mutate(challenge)}
+            >
+              Lost your authenticator and your recovery codes?
+            </button>
+          )}
+          {recover.isError && (
+            <Callout tone="danger" role="alert" className="mt-2">
+              {recover.error instanceof ApiError && recover.error.status === 429
+                ? 'Too many attempts. Try again later.'
+                : recover.error instanceof ApiError && recover.error.status === 403
+                  ? 'Platform accounts recover their two-factor login on the server console.'
+                  : 'The sign-in expired. Sign in again, then try once more.'}
+            </Callout>
+          )}
         </div>
       </AuthFrame>
     );

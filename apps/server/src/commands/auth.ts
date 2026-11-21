@@ -1,23 +1,64 @@
-import { streamId } from '@aom/shared';
+import { REQUEST_REFUSED, streamId } from '@aom/shared';
+import { screenAddress } from '../auth/address-policy.ts';
+import { enforceLoginGuard, recordFailedSignIn, recordLoginFailure } from '../auth/login-guard.ts';
 import { dummyHash, hashPassword, verifyPassword } from '../auth/password.ts';
+import { sendPasswordChangedMail } from '../auth/security-mail.ts';
 import type { AuthSession } from '../auth/sessions.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one, rows } from '../db/sql.ts';
 import { badRequest, HttpError, unauthorized } from '../errors.ts';
 
+export interface LoginMeta {
+  ip?: string | undefined;
+  userAgent?: string | undefined;
+}
+
 /**
  * Verifies credentials; uniform failure (same error, comparable time) for unknown user, wrong password, deactivated.
- * Only after the password is right can the organization state show (section 8.2): a user whose every organization is
- * suspended or cancelled, who owns none of them and has no usable guest project, is refused with 403 `org_suspended`.
+ * Before the password (R2, R1): the login guard (a lock gives 429 `too_many_attempts`, the password is not checked),
+ * then the address policy (a blocked address gets the same 401 and a `blocked` row; a blocked IP 403
+ * `request_refused`). A wrong password is a `password` failure row. Only after the password is right can the
+ * organization state show (section 8.2): a user whose every organization is suspended or cancelled, who owns none of
+ * them and has no usable guest project, is refused with 403 `org_suspended`.
  */
-export async function verifyLogin(ctx: Ctx, email: string, password: string): Promise<string> {
+export async function verifyLogin(
+  ctx: Ctx,
+  email: string,
+  password: string,
+  meta: LoginMeta = {},
+): Promise<string> {
+  const ip = meta.ip ?? null;
+  await enforceLoginGuard(ctx, { email, ip, userAgent: meta.userAgent });
   const u = await one(
     ctx.pool,
     'SELECT id, password_hash, status, kind, email_verified_at FROM users WHERE lower(email) = lower($1)',
     [email],
   );
+  const blocked = await screenAddress(ctx, { email, ip, purpose: 'login' });
+  if (blocked) {
+    await verifyPassword(await dummyHash(), password); // the same time as a wrong password
+    await recordLoginFailure(ctx, {
+      reason: 'blocked',
+      email,
+      userId: u?.id ?? null,
+      ip,
+      userAgent: meta.userAgent,
+    });
+    ctx.log.info({ source: blocked.source, kind: blocked.kind }, 'sign-in refused by the address policy');
+    if (blocked.kind === 'ip') throw new HttpError(403, REQUEST_REFUSED, 'this request was refused');
+    throw unauthorized('invalid email or password');
+  }
   const ok = await verifyPassword(u?.password_hash ?? (await dummyHash()), password);
-  if (!u || !ok || u.status !== 'active') throw unauthorized('invalid email or password');
+  if (!u || !ok || u.status !== 'active') {
+    await recordFailedSignIn(ctx, {
+      reason: 'password',
+      email,
+      userId: u?.id ?? null,
+      ip,
+      userAgent: meta.userAgent,
+    });
+    throw unauthorized('invalid email or password');
+  }
   if (!u.email_verified_at)
     throw new HttpError(
       403,
@@ -63,14 +104,15 @@ async function assertMayLogin(ctx: Ctx, userId: string): Promise<void> {
 export type { AuthSession };
 
 /**
- * Changes the signed-in user's password (`PasswordChanged`). Every other session of the user is signed out; the
- * current one stays. A wrong current password is a 400 (not a 401: the user is still logged in).
+ * Changes the signed-in user's password (`PasswordChanged`, via `change`). Every other session of the user is signed
+ * out; the current one stays; the user is mailed (R3). A wrong current password is a 400 (not a 401: the user is still logged in).
  */
 export async function changePassword(
   ctx: Ctx,
   session: AuthSession,
   current: string,
   next: string,
+  meta: LoginMeta = {},
 ): Promise<void> {
   const u = await one(ctx.pool, 'SELECT password_hash FROM users WHERE id=$1', [session.user.id]);
   if (!u || !(await verifyPassword(u.password_hash, current)))
@@ -81,7 +123,15 @@ export async function changePassword(
       streamId: streamId.user(session.user.id),
       event: {
         type: 'PasswordChanged',
-        payload: { userId: session.user.id, passwordHash: await hashPassword(next) },
+        payload: {
+          userId: session.user.id,
+          passwordHash: await hashPassword(next),
+          via: 'change',
+          meta: {
+            ...(meta.ip ? { ip: meta.ip.slice(0, 64) } : {}),
+            ...(meta.userAgent ? { userAgent: meta.userAgent.slice(0, 400) } : {}),
+          },
+        },
       },
       actor: { kind: 'user', id: session.user.id },
       scope: { orgId: null, projectId: null, audience: 'admin' },
@@ -97,4 +147,5 @@ export async function changePassword(
     session.sessionId,
   ]);
   for (const o of others) ctx.services.browser.closeSession(o.id);
+  await sendPasswordChangedMail(ctx, session.user.id, 'change', meta.ip ?? null);
 }

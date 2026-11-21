@@ -28,15 +28,6 @@ export function usePlatformTeamSettings() {
   });
 }
 
-export function useSetPlatformTeam() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: { orgId: string | null; projectId?: string | null }) =>
-      put<PlatformTeamSettings>('/platform/team', body),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['platform'] }),
-  });
-}
-
 /** Everything the platform page lists. 404 (no team, or not a member) leaves `data` empty and `error` set. */
 export function usePlatformTeamOverview(enabled = true) {
   return useQuery({

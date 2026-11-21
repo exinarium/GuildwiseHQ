@@ -504,8 +504,9 @@ revokes its token. Links typed into an X or TikTok caption are removed. A video 
    redirect URI exactly `https://<your host>/api/platform/social/tiktok/callback`; verify your domain (and the video URL prefix
    `https://<your host>/api/public/video-media/`) in the app, because TikTok only pulls videos from verified prefixes.
 2. Set `AOM_TIKTOK_CLIENT_KEY` and `AOM_TIKTOK_CLIENT_SECRET` on the server and the worker, then press **Connect TikTok** in
-   Social sharing (`GET /api/platform/social/tiktok/connect` redirects to TikTok with a state kept on the server for 10 minutes;
-   `/callback` swaps the code, stores the tokens encrypted and the account's `open_id`, and checks the creator info).
+   Social sharing (`POST /api/platform/social/tiktok/connect` needs a fresh "Confirm it's you" and returns `{ url }`, the TikTok
+   address the page then opens; the state is kept on the server for 10 minutes, bound to this session and that proof;
+   `/callback` checks it, swaps the code, stores the tokens encrypted and the account's `open_id`, and checks the creator info).
    The access token (24 hours) is renewed before it ends; TikTok may send a new refresh token (valid 365 days) with every renewal and
    the newest is always kept. Reconnect within a year of the last use.
 3. **Audit.** Until TikTok audits the app every post must be private (`SELF_ONLY`; TikTok answers

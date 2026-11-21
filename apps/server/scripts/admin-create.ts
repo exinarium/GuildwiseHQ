@@ -11,9 +11,10 @@ import { one } from '../src/db/sql.ts';
 import { withAppendTx } from '../src/db/tx.ts';
 import { PgEventStore } from '../src/eventstore/pg-event-store.ts';
 import { buildProjectors } from '../src/projections/index.ts';
+import { PASSWORD_STDIN_OPTION, readPassword } from './read-password.ts';
 
 /**
- * `pnpm --filter @aom/server admin:create --email a@b.c --name "Ada" [--password ...] [--org "Name"] [--plan founding]`:
+ * `pnpm --filter @aom/server admin:create --email a@b.c --name "Ada" [--password-stdin | --password ...] [--org "Name"] [--plan founding]`:
  * creates a user and a new organization they own (`UserRegistered` + `OrganizationCreated{createdVia:'cli'}` +
  * `OrgMemberAdded(owner)`). Default organization name "<name>'s organization", plan `founding`, status `active`. It
  * keeps fresh installs and the e2e setup working; the platform account is `superadmin:create`.
@@ -23,6 +24,7 @@ const { values } = parseArgs({
     email: { type: 'string' },
     name: { type: 'string' },
     password: { type: 'string' },
+    ...PASSWORD_STDIN_OPTION,
     org: { type: 'string' },
     plan: { type: 'string' },
   },
@@ -37,10 +39,17 @@ async function prompt(q: string): Promise<string> {
   }
 }
 
+if (values['password-stdin'] && (!values.email || !values.name)) {
+  console.error('--password-stdin needs --email and --name (standard input carries the password only)');
+  process.exit(1);
+}
 const email = values.email ?? (await prompt('Email: '));
 const name = values.name ?? (await prompt('Display name: '));
-const password =
-  values.password ?? process.env.AOM_ADMIN_PASSWORD ?? (await prompt('Password (min 12 chars): '));
+const password = await readPassword({
+  password: values.password,
+  passwordStdin: values['password-stdin'],
+  prompt: 'Password (min 12 chars): ',
+});
 if (!email.includes('@') || !name || password.length < 12 || password.length > 256) {
   console.error('a valid email, a name and a password of 12-256 characters are required');
   process.exit(1);

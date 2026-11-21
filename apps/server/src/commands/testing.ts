@@ -501,6 +501,9 @@ export async function environmentNotReadyEvents(
       summary,
       requestedBy: opts.requestedBy ?? { kind: 'system', id: null, name: 'Test environment check' },
       cardId: card.id,
+      // 1.10.0 (R18-D): the card organization's own engineer only, never another organization's.
+      orgId: card.org_id,
+      strictOrg: true,
     }));
   } catch {
     return hardStop('This workstation has no DevOps engineer to ask.');

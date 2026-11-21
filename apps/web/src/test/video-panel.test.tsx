@@ -183,6 +183,8 @@ beforeEach(() => {
         });
       if (url === '/api/platform/social/channels') return json({ channels });
       if (url === '/api/platform/social/tiktok/creator-info') return tiktokReply();
+      if (url === '/api/platform/social/tiktok/connect')
+        return json({ url: 'https://www.tiktok.com/v2/auth/authorize/?state=s1' });
       if (url.startsWith('/api/platform/video/slots'))
         return json({
           timezone: 'Africa/Johannesburg',
@@ -875,8 +877,15 @@ describe('Core 5: destinations', () => {
     expect(within(ig).getByLabelText('Instagram account id')).toBeTruthy();
     expect(within(ig).getByLabelText('Access token')).toBeTruthy();
     const tt = screen.getByTestId('social-tiktok');
-    expect(within(tt).getByTestId('tiktok-connect').getAttribute('href')).toBe(
-      '/api/platform/social/tiktok/connect',
+    // Connect is a write (step-up when stale), then the page goes to the address the server returns
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...window.location, assign });
+    await userEvent.setup().click(within(tt).getByTestId('tiktok-connect'));
+    await waitFor(() =>
+      expect(assign).toHaveBeenCalledWith('https://www.tiktok.com/v2/auth/authorize/?state=s1'),
+    );
+    expect(calls.some((c) => c.url === '/api/platform/social/tiktok/connect' && c.method === 'POST')).toBe(
+      true,
     );
     expect(tt.textContent).toContain('posts privately until the app is audited');
     const audited = within(tt).getByTestId('tiktok-audited') as HTMLInputElement;

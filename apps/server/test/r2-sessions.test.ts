@@ -5,7 +5,7 @@ import { Browser } from './helpers/browser.ts';
 import { closeAdminPool } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { CAST5, kit, q } from './helpers/sessions-r2.ts';
-import { createWorld, ok, pairWorkstation, until, type World } from './helpers/world.ts';
+import { createWorld, ok, pairWorkstation, until, type World, worksFor } from './helpers/world.ts';
 
 /**
  * Revision R2: any member creates sessions, the creator manages (Owners and Admins can override, other participants talk, add
@@ -44,6 +44,7 @@ describe('who creates and who manages', () => {
   it('lets any member start a discovery and a boardroom on their own workstation, and only there', async () => {
     const m = await member();
     const mine = await pairWorkstation(w.t, m, 'Member desk');
+    await worksFor(w.t, m, mine.workstationId, w.owner.id);
     const as = K.as(m.cookie);
     const disc = await as('POST', '/api/discovery', {
       title: 'Member idea',
@@ -81,6 +82,7 @@ describe('who creates and who manages', () => {
   it('the creator manages in full; an Admin who is in the room can override; other participants talk, add notes and vote', async () => {
     const creator = await member();
     const mine = await pairWorkstation(w.t, creator, 'Creator desk');
+    await worksFor(w.t, creator, mine.workstationId, w.owner.id);
     const as = K.as(creator.cookie);
     const st = (
       await as('POST', '/api/board', {
@@ -144,6 +146,7 @@ describe('who creates and who manages', () => {
   it("discovery: answers, phase, drafts and panel edits are the creator's; a participant can talk and add notes", async () => {
     const creator = await member();
     const mine = await pairWorkstation(w.t, creator, 'Disc desk');
+    await worksFor(w.t, creator, mine.workstationId, w.owner.id);
     const as = K.as(creator.cookie);
     const s = (
       await as('POST', '/api/discovery', { title: 'Own disc', idea: 'y', workstationId: mine.workstationId })

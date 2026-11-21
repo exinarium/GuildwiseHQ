@@ -19,10 +19,10 @@ import {
   probeDuration,
   RENDER_ENCODERS,
   resolveEncodeThreads,
-  runFfmpeg,
   vtt,
   x264ThreadArgs,
 } from './ffmpeg.ts';
+import { EncoderSession, nvencSegmentVideoArgs, nvencVideoArgs, type RenderEncoderUsed } from './gpu.ts';
 import { browserJobsFor, type SceneJob, thumbnailJob } from './jobs.ts';
 import { clipBox, type Orientation, type SceneImages, SIZES } from './scenes.ts';
 import {
@@ -69,6 +69,13 @@ export interface RenderOptions {
   /** Names the render in the log, e.g. `post <id> render <id>`. */
   renderLabel?: string;
   log?: (line: string) => void;
+  /**
+   * Encode the video with NVENC through this GPU ffmpeg (from `detectEncoder`). Absent: the CPU path, exactly as before.
+   * An NVENC encode that fails is retried on the CPU and the rest of the render stays there (R19 runtime fallback).
+   */
+  gpu?: { bin: string } | null;
+  /** Called once when an NVENC encode failed and the render went on on the CPU, with the reason. */
+  onGpuFailure?: (reason: string) => void;
 }
 
 export interface RenderArtifacts {
@@ -94,6 +101,8 @@ export interface RenderResult {
   voice: string;
   /** Seconds the render took. */
   renderSeconds: number;
+  /** The encoder the video was made with. */
+  encoder: RenderEncoderUsed;
 }
 
 const WORDS_PER_SECOND = 2.4;
@@ -114,7 +123,27 @@ export function encodeArgs(o: {
   seconds: number;
   out: string;
   threads?: number;
+  /** `nvenc`: the NVENC video arguments instead of libx264 (audio and mux unchanged). */
+  encoder?: 'nvenc';
 }): string[] {
+  const video =
+    o.encoder === 'nvenc'
+      ? [...nvencVideoArgs({ crf: o.crf, fps: o.fps }), '-r', String(o.fps)]
+      : [
+          '-c:v',
+          'libx264',
+          '-profile:v',
+          'high',
+          '-preset',
+          'medium',
+          '-crf',
+          String(o.crf),
+          '-pix_fmt',
+          'yuv420p',
+          '-r',
+          String(o.fps),
+          ...x264ThreadArgs(o.threads ?? DEFAULT_ENCODE_THREADS),
+        ];
   return [
     ...o.segments.flatMap((f) => ['-threads', '1', '-i', f]),
     '-i',
@@ -125,19 +154,7 @@ export function encodeArgs(o: {
     '[vout]',
     '-map',
     `${o.segments.length}:a`,
-    '-c:v',
-    'libx264',
-    '-profile:v',
-    'high',
-    '-preset',
-    'medium',
-    '-crf',
-    String(o.crf),
-    '-pix_fmt',
-    'yuv420p',
-    '-r',
-    String(o.fps),
-    ...x264ThreadArgs(o.threads ?? DEFAULT_ENCODE_THREADS),
+    ...video,
     '-c:a',
     'aac',
     '-b:a',
@@ -159,7 +176,21 @@ export function segmentEncodeArgs(o: {
   frames: number;
   out: string;
   threads: number;
+  /** `nvenc`: NVENC preset p4, constant quality 12, instead of libx264. */
+  encoder?: 'nvenc';
 }): string[] {
+  if (o.encoder === 'nvenc')
+    return [
+      '-an',
+      ...nvencSegmentVideoArgs(),
+      '-pix_fmt',
+      'yuv420p',
+      '-r',
+      String(o.fps),
+      '-frames:v',
+      String(o.frames),
+      o.out,
+    ];
   return [
     '-an',
     '-c:v',
@@ -207,6 +238,12 @@ export async function renderVideo(input: VideoScript, opts: RenderOptions): Prom
     `encode threads: ${threads} (asked ${opts.encodeThreads ?? 'default'}, default ${DEFAULT_ENCODE_THREADS}, ` +
       `${availableParallelism()} cores)${opts.renderLabel ? `, ${opts.renderLabel}` : ''}`,
   );
+  // NVENC when the worker detected it; a failed NVENC encode is retried on the CPU, and the rest of this render stays
+  // on the CPU (the caller hears it through onGpuFailure and switches the worker to cpu until restart)
+  if (opts.gpu) log(`encoder: h264_nvenc (${opts.gpu.bin})`);
+  const session = new EncoderSession({ gpu: opts.gpu, cpuBin: ff, log, onGpuFailure: opts.onGpuFailure });
+  const encode = (cpuArgs: string[], gpuArgs: string[], cwd?: string) =>
+    session.encode(cpuArgs, gpuArgs, cwd);
 
   // 1. speech
   const cues = script.cues.map((c) => ({ id: c.id, text: c.text, speech: c.speech ?? speakable(c.text) }));
@@ -263,44 +300,39 @@ export async function renderVideo(input: VideoScript, opts: RenderOptions): Prom
     const dur = lens[i] as number;
     const frames = Math.round(dur * fps);
     const enc = segmentEncodeArgs({ fps, frames, out: seg, threads });
+    const nv = segmentEncodeArgs({ fps, frames, out: seg, threads, encoder: 'nvenc' });
     if (job.clip) {
       const b = clipBox(orient);
       const fit = fitClip(dur, job.clip.to - job.clip.from);
-      runFfmpeg(
-        [
-          '-loop',
-          '1',
-          '-framerate',
-          String(fps),
-          '-i',
-          job.png.out,
-          '-ss',
-          job.clip.from.toFixed(3),
-          '-t',
-          fit.take.toFixed(3),
-          '-i',
-          job.clip.file,
-          '-filter_complex',
-          `[1:v]setpts=(PTS-STARTPTS)/${fit.speed.toFixed(4)},fps=${fps},scale=${b.w}:${b.h}:force_original_aspect_ratio=decrease,pad=${b.w}:${b.h}:(ow-iw)/2:(oh-ih)/2:black,tpad=stop_mode=clone:stop_duration=${(fit.freeze + 2).toFixed(3)}[c];[0:v][c]overlay=${b.x}:${b.y}:shortest=0,format=yuv420p[v]`,
-          '-map',
-          '[v]',
-          '-t',
-          dur.toFixed(3),
-          ...enc,
-        ],
-        { bin: ff },
-      );
+      const input = [
+        '-loop',
+        '1',
+        '-framerate',
+        String(fps),
+        '-i',
+        job.png.out,
+        '-ss',
+        job.clip.from.toFixed(3),
+        '-t',
+        fit.take.toFixed(3),
+        '-i',
+        job.clip.file,
+        '-filter_complex',
+        `[1:v]setpts=(PTS-STARTPTS)/${fit.speed.toFixed(4)},fps=${fps},scale=${b.w}:${b.h}:force_original_aspect_ratio=decrease,pad=${b.w}:${b.h}:(ow-iw)/2:(oh-ih)/2:black,tpad=stop_mode=clone:stop_duration=${(fit.freeze + 2).toFixed(3)}[c];[0:v][c]overlay=${b.x}:${b.y}:shortest=0,format=yuv420p[v]`,
+        '-map',
+        '[v]',
+        '-t',
+        dur.toFixed(3),
+      ];
+      encode([...input, ...enc], [...input, ...nv]);
     } else {
-      runFfmpeg(
-        [
-          '-i',
-          job.png.out,
-          '-vf',
-          `scale=${width * 2}:${height * 2}:flags=lanczos,zoompan=z='1+0.05*on/${frames}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps},format=yuv420p`,
-          ...enc,
-        ],
-        { bin: ff },
-      );
+      const input = [
+        '-i',
+        job.png.out,
+        '-vf',
+        `scale=${width * 2}:${height * 2}:flags=lanczos,zoompan=z='1+0.05*on/${frames}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps},format=yuv420p`,
+      ];
+      encode([...input, ...enc], [...input, ...nv]);
     }
     segFiles.push(seg);
   });
@@ -335,7 +367,7 @@ export async function renderVideo(input: VideoScript, opts: RenderOptions): Prom
     last = label;
   });
   parts.push(`${last}${short ? 'ass=burn.ass,' : ''}format=yuv420p[vout]`);
-  const args = encodeArgs({
+  const finalOpts = {
     segments: segFiles,
     audio,
     filter: parts.join(';'),
@@ -344,8 +376,8 @@ export async function renderVideo(input: VideoScript, opts: RenderOptions): Prom
     seconds: tl.total,
     out: final,
     threads,
-  });
-  runFfmpeg(args, { bin: ff, cwd: work });
+  };
+  encode(encodeArgs(finalOpts), encodeArgs({ ...finalOpts, encoder: 'nvenc' }), work);
   const durationSeconds = probeDuration(final, ff);
   const bytes = statSync(final).size;
   log(`encoded ${final}: ${durationSeconds.toFixed(1)}s, ${(bytes / 1e6).toFixed(1)} MB`);
@@ -379,5 +411,6 @@ export async function renderVideo(input: VideoScript, opts: RenderOptions): Prom
     timeline: tl,
     voice,
     renderSeconds,
+    encoder: session.used,
   };
 }

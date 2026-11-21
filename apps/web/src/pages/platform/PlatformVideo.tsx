@@ -8,12 +8,15 @@ import type {
 import { Video } from 'lucide-react';
 import { useState } from 'react';
 import {
+  useAddRenderWorker,
   useAddVideoTopic,
   useImportLibrary,
   useMoveVideoTopic,
   usePatchVideoSettings,
   useReflowVideos,
   useRejectVideoTopic,
+  useRenderWorkers,
+  useRevokeRenderWorker,
   useSubmitVideo,
   useVideoLibrary,
   useVideoList,
@@ -97,6 +100,20 @@ function Problems({ status }: { status: VideoStatus }) {
           it; rendering resumes by itself on its next heartbeat.
         </Callout>
       )}
+      {(status.renderWorkers ?? [])
+        .filter((w) => w.warning)
+        .map((w) => (
+          <Callout
+            key={w.name}
+            tone="warning"
+            title={`Render worker ${w.name} renders on the CPU`}
+            role="alert"
+            data-testid="render-worker-cpu"
+          >
+            {w.reason ?? 'NVENC is not available.'} Renders still finish, only slower. Fix the GPU and restart
+            the worker; the badge goes once it reports NVENC again.
+          </Callout>
+        ))}
       {!status.channel.connected && (
         <Callout tone="info" data-testid="video-no-channel">
           No YouTube channel is connected. Paste its refresh token under Social sharing on the Posts tab.
@@ -221,6 +238,132 @@ function SettingsPanel({ status }: { status: VideoStatus }) {
           ))}
         </div>
         <ErrorBox error={patch.error} />
+      </div>
+    </Panel>
+  );
+}
+
+/**
+ * Render workers (R16, R23): the remote GPU workers that render through the job API with their own token. The token is
+ * shown once when a worker is added; revoking stops it on its next request. A worker on the CPU carries a warning badge.
+ */
+function RenderWorkersCard() {
+  const list = useRenderWorkers();
+  const add = useAddRenderWorker();
+  const revoke = useRevokeRenderWorker();
+  const toast = useToast();
+  const [name, setName] = useState('');
+  const [shown, setShown] = useState<{ name: string; token: string } | null>(null);
+  const workers = list.data?.workers ?? [];
+  return (
+    <Panel title="Render workers" data-testid="render-workers">
+      <div className="flex flex-col gap-3">
+        <p className="text-sm text-muted">
+          Renders run on a GPU machine through the render job API (<code>video-worker --remote</code>, started
+          with <code>render-worker.sh</code>). Each worker has its own token; it never reaches the database.
+        </p>
+        {list.isError && <ErrorBox error={list.error} onRetry={() => list.refetch()} />}
+        {shown && (
+          <Callout tone="info" title={`Token for ${shown.name}`} data-testid="render-worker-token">
+            Copy it now: it is shown only once. Put it in the worker's token file (
+            <code>render-worker.sh install</code>
+            asks for it).
+            <code className="mt-2 block break-all rounded bg-surface-2 p-2 text-xs">{shown.token}</code>
+            <Button size="sm" className="mt-2" onClick={() => setShown(null)}>
+              I have copied it
+            </Button>
+          </Callout>
+        )}
+        {workers.length === 0 && list.data && (
+          <p className="text-sm text-muted" data-testid="render-workers-empty">
+            No render worker yet. Scheduled videos wait until one claims them.
+          </p>
+        )}
+        {workers.length > 0 && (
+          <ul className="divide-y divide-line text-sm" data-testid="render-worker-list">
+            {workers.map((w) => (
+              <li
+                key={w.id}
+                className="flex flex-wrap items-center gap-2 py-2"
+                data-testid={`render-worker-${w.id}`}
+              >
+                <span className="font-medium text-fg">{w.name}</span>
+                {w.revokedAt ? (
+                  <Badge tone="neutral">Revoked</Badge>
+                ) : w.encoder === 'nvenc' ? (
+                  <Badge tone="success">nvenc</Badge>
+                ) : w.encoder === 'cpu' ? (
+                  <Badge
+                    tone="warning"
+                    title={w.encoderReason ?? undefined}
+                    data-testid="render-worker-cpu-badge"
+                  >
+                    cpu
+                  </Badge>
+                ) : (
+                  <Badge tone="neutral">not seen yet</Badge>
+                )}
+                <span className="text-muted">
+                  {w.lastSeenAt ? `last seen ${formatDateTime(w.lastSeenAt)}` : 'never seen'}
+                  {w.lastIp ? ` from ${w.lastIp}` : ''}
+                  {w.version ? `, version ${w.version}` : ''}
+                </span>
+                {w.warning && w.encoderReason && (
+                  <span className="basis-full text-warning" data-testid="render-worker-reason">
+                    {w.encoderReason}
+                  </span>
+                )}
+                {!w.revokedAt && (
+                  <Button
+                    size="sm"
+                    className="ml-auto"
+                    loading={revoke.isPending && revoke.variables === w.id}
+                    onClick={() =>
+                      revoke.mutate(w.id, { onSuccess: () => toast.success(`${w.name} revoked`) })
+                    }
+                    data-testid="render-worker-revoke"
+                  >
+                    Revoke
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        <form
+          className="flex flex-wrap items-end gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const n = name.trim();
+            if (!n) return;
+            add.mutate(
+              { name: n },
+              {
+                onSuccess: (r) => {
+                  setShown({ name: r.worker.name, token: r.token });
+                  setName('');
+                },
+              },
+            );
+          }}
+        >
+          <TextInput
+            label="New worker name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="devbox"
+            data-testid="render-worker-name"
+          />
+          <Button
+            type="submit"
+            loading={add.isPending}
+            disabled={!name.trim()}
+            data-testid="render-worker-add"
+          >
+            Add worker
+          </Button>
+        </form>
+        <ErrorBox error={add.error ?? revoke.error} />
       </div>
     </Panel>
   );
@@ -567,6 +710,7 @@ export function PlatformVideo() {
           className="flex flex-col gap-5"
         >
           <SettingsPanel status={st} />
+          <RenderWorkersCard />
           <ScheduleSettings status={st} />
         </div>
       )}

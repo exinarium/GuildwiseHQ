@@ -17,6 +17,7 @@ import { platformFixBudget } from '../src/platform-team/stop-loss.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
+import { clearPlatformTeam, designatePlatformTeam } from './helpers/platform-team.ts';
 import { freshState } from './helpers/shifts.ts';
 import { createWorld, markOnline, ok, until, type World } from './helpers/world.ts';
 
@@ -89,13 +90,7 @@ async function newProject(key: string): Promise<string> {
 
 const api = (method: string, url: string, body?: unknown, cookie = w.owner.cookie) =>
   w.t.req(method, url, { cookie, body });
-const designate = () =>
-  ok<any>(
-    w.t.req('PUT', '/api/platform/team', {
-      cookie: root.cookie,
-      body: { orgId, projectId: platformProjectId },
-    }),
-  );
+const designate = () => designatePlatformTeam(w.t, orgId, platformProjectId);
 const eventsOf = async (type: string) =>
   (await q('SELECT payload FROM events WHERE type=$1 ORDER BY seq', [type])).map((e) => e.payload);
 const bugRows = () => q('SELECT * FROM platform_bugs ORDER BY created_at');
@@ -116,14 +111,26 @@ async function loopingCard(projectId = toyId, title = 'Looping card') {
   return (await q('SELECT * FROM cards WHERE id=$1', [card.id]))[0]!;
 }
 
-describe('designating the platform team (super admin)', () => {
-  it('is for the super admin only; the project keeps its decisions at project level', async () => {
+describe('designating the platform team (server config, R17-1)', () => {
+  it('is server config; the super admin only reads it; the project keeps its decisions at project level', async () => {
     expect((await api('PUT', '/api/platform/team', { orgId, projectId: platformProjectId })).status).toBe(
       404,
     );
     expect((await api('GET', '/api/platform/team')).status).toBe(404);
+    expect(
+      (
+        await w.t.req('PUT', '/api/platform/team', {
+          cookie: root.cookie,
+          body: { orgId, projectId: platformProjectId },
+        })
+      ).status,
+    ).toBe(404);
     const s = await designate();
-    expect(s).toMatchObject({ orgId, projectId: platformProjectId, projectKey: 'PLT' });
+    expect(s).toMatchObject({ orgId, projectId: platformProjectId, projectKey: 'PLT', source: 'env' });
+    expect(await ok<any>(w.t.req('GET', '/api/platform/team', { cookie: root.cookie }))).toMatchObject({
+      orgId,
+      projectId: platformProjectId,
+    });
     expect(
       (await q('SELECT decisions_project_only FROM projects WHERE id=$1', [platformProjectId]))[0]
         ?.decisions_project_only,
@@ -132,27 +139,21 @@ describe('designating the platform team (super admin)', () => {
       orgId,
       projectId: platformProjectId,
     });
-    // the audit log names the super admin
     expect(
       (await q(`SELECT action FROM platform_audit_log WHERE action='PlatformTeamDesignated'`)).length,
     ).toBeGreaterThan(0);
   });
 
-  it('refuses a project of another organisation and clears the designation', async () => {
+  it('ignores a project of another organisation and clears the designation', async () => {
     const other = await w.t.userSession(uniqueEmail('other'));
     const op = await ok<any>(
       w.t.req('POST', '/api/projects', { cookie: other.cookie, body: { key: 'OTH', name: 'Other' } }),
       201,
     );
-    const bad = await w.t.req('PUT', '/api/platform/team', {
-      cookie: root.cookie,
-      body: { orgId, projectId: op.project.id },
-    });
-    expect(bad.status).toBe(400);
+    await clearPlatformTeam(w.t);
+    expect((await designatePlatformTeam(w.t, orgId, op.project.id)).orgId).toBeNull();
     await designate();
-    const cleared = await ok<any>(
-      w.t.req('PUT', '/api/platform/team', { cookie: root.cookie, body: { orgId: null } }),
-    );
+    const cleared = await clearPlatformTeam(w.t);
     expect(cleared.orgId).toBeNull();
   });
 });
@@ -244,10 +245,10 @@ describe('bug intake', () => {
     await r.barrier();
     await platformScan(ctx);
     expect(await platformCards()).toHaveLength(2);
-    // sanitised: function and file name only, no directory
+    // sanitised: pattern-checked file:line tokens only, no directory, no function name (1.10.0, R18-T)
     const diag = (await bugRows())[0]?.diagnostics;
     expect(JSON.stringify(diag)).not.toContain('/home/u');
-    expect(diag.topFrames[0]).toEqual({ fn: 'doThing', file: 'aom-runner.mjs' });
+    expect(diag.topFrames[0]).toBe('aom-runner.mjs:1');
   });
 
   it('dedupes server 5xx by route plus error signature, sanitised, and never throws', async () => {
@@ -386,9 +387,7 @@ describe('bug intake', () => {
         201,
       );
       bare = p.project.id;
-      await ok<any>(
-        w.t.req('PUT', '/api/platform/team', { cookie: root.cookie, body: { orgId, projectId: bare } }),
-      );
+      await designatePlatformTeam(w.t, orgId, bare);
     });
     afterEach(async () => {
       await designate();

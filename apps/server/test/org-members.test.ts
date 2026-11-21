@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { twoFactorRecoveryTick } from '../src/commands/two-factor-recovery.ts';
 import { createTestApp, PASSWORD, type TestApp, uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
-import { fullFields, ok, pairWorkstation } from './helpers/world.ts';
+import { singleOrgUser } from './helpers/single-org.ts';
+import { fullFields, ok, pairWorkstation, worksFor } from './helpers/world.ts';
 
 let t: TestApp;
 beforeAll(async () => {
@@ -18,10 +20,16 @@ interface Person {
   cookie: string;
   workstationId: string;
 }
-/** A fresh organization `Acme` with an Owner, an Admin and a Member, each with a workstation, plus one project. */
-async function acme() {
+/**
+ * A fresh organization `Acme` with an Owner, an Admin and a Member, each with a workstation, plus one project. With
+ * `singleOrg` the Admin and the Member belong to Acme only (no personal organization), as the member resets need (R6).
+ */
+async function acme(opts: { singleOrg?: boolean } = {}) {
   const mk = async (label: string): Promise<Person> => {
-    const s = await t.userSession(uniqueEmail(label));
+    const s =
+      opts.singleOrg && label !== 'owner'
+        ? await singleOrgUser(t, uniqueEmail(label))
+        : await t.userSession(uniqueEmail(label));
     const ws = await pairWorkstation(t, s, `${label}-box`);
     return { ...s, workstationId: ws.workstationId };
   };
@@ -29,6 +37,8 @@ async function acme() {
   const admin = await mk('admin');
   const member = await mk('member');
   const org = await t.createOrg(owner.id, 'Acme');
+  // R9: the Owner's workstation was paired before Acme existed, so the Owner switches Acme on for it
+  await worksFor(t, owner, owner.workstationId, org);
   await t.addOrgMember(org, admin.id, 'admin');
   await t.addOrgMember(org, member.id, 'member');
   const as = (who: Person, method: string, url: string, body?: unknown) =>
@@ -241,7 +251,7 @@ describe('transferring ownership', () => {
 
 describe('two-factor policy of an organization', () => {
   it('members without it are held at the setup until they have it; the Owner can reset a member', async () => {
-    const { owner, member, as } = await acme();
+    const { owner, member, as } = await acme({ singleOrg: true });
     const early = await as(owner, 'PATCH', '/api/org', { requireTwoFactor: true });
     expect(early.status).toBe(409);
     expect(early.body.error.code).toBe('owner_two_factor_needed');
@@ -257,8 +267,17 @@ describe('two-factor policy of an organization', () => {
     expect((await as(member, 'GET', '/api/projects')).status).toBe(200);
     const list = await ok<any>(as(owner, 'GET', '/api/org/members'));
     expect(list.members.find((m: any) => m.userId === member.id).twoFactorEnabled).toBe(true);
-    // the Owner resets a member who lost their phone
+    // the Owner resets a member who lost their phone: never instantly (R17-2), it takes effect after 24 hours
     expect((await as(owner, 'POST', `/api/org/members/${member.id}/reset-two-factor`)).status).toBe(200);
+    expect(
+      (await q('SELECT two_factor_enabled FROM users WHERE id=$1', [member.id]))[0]!.two_factor_enabled,
+    ).toBe(true);
+    t.clock.advance(24 * 3600_000 + 1000);
+    try {
+      await twoFactorRecoveryTick(t.app.ctx);
+    } finally {
+      t.clock.advance(-(24 * 3600_000 + 1000));
+    }
     expect(
       (await q('SELECT two_factor_enabled FROM users WHERE id=$1', [member.id]))[0]!.two_factor_enabled,
     ).toBe(false);
@@ -268,7 +287,7 @@ describe('two-factor policy of an organization', () => {
 
 describe('the Owner resets a member’s password to a temporary one', () => {
   it('shows the temporary password once, ends sessions, forces a change at next sign-in and keeps it out of the log', async () => {
-    const { owner, admin, member, as } = await acme();
+    const { owner, admin, member, as } = await acme({ singleOrg: true });
     // an Admin may reset a Member, never an Owner or another Admin; nobody resets themselves
     expect((await as(admin, 'POST', `/api/org/members/${owner.id}/reset-password`)).status).toBe(403);
     expect((await as(admin, 'POST', `/api/org/members/${admin.id}/reset-password`)).status).toBe(409);
@@ -315,8 +334,8 @@ describe('the Owner resets a member’s password to a temporary one', () => {
   });
 
   it('an Admin resets a Member; the Owner resets an Admin; an Admin cannot reset another Admin', async () => {
-    const { owner, admin, member, org, as } = await acme();
-    const admin2 = await t.userSession(uniqueEmail('admin2'));
+    const { owner, admin, member, org, as } = await acme({ singleOrg: true });
+    const admin2 = await singleOrgUser(t, uniqueEmail('admin2'));
     await t.addOrgMember(org, admin2.id, 'admin');
     const byAdmin = await as(admin, 'POST', `/api/org/members/${member.id}/reset-password`);
     expect(byAdmin.status).toBe(200);
@@ -326,7 +345,7 @@ describe('the Owner resets a member’s password to a temporary one', () => {
   });
 
   it('still asks for the second factor', async () => {
-    const { owner, member, as } = await acme();
+    const { owner, member, as } = await acme({ singleOrg: true });
     await t.enableTwoFactor(member.id);
     const temp = (await ok<any>(as(owner, 'POST', `/api/org/members/${member.id}/reset-password`)))
       .temporaryPassword as string;
@@ -356,7 +375,7 @@ describe('a DevOps request belongs to the organization of the engineer that work
 });
 
 describe('the DevOps engineer per organization and workstation', () => {
-  it('joining an organization hires its engineer on the member’s workstations; pairing hires one per organization', async () => {
+  it('joining an organization hires its engineer on the workstations the member ticks; a later pairing only for their own organizations (R9)', async () => {
     const u = await t.userSession(uniqueEmail('multi'));
     const first = await pairWorkstation(t, u, 'Desk');
     const own = await q(
@@ -374,19 +393,25 @@ describe('the DevOps engineer per organization and workstation', () => {
     });
     const { latestInviteToken } = await import('./helpers/mailpit.ts');
     const token = await latestInviteToken(email, 'http://aom.test');
-    await ok(t.req('POST', `/api/invitations/${token}/accept-existing`, { cookie: u.cookie, body: {} }), 201);
+    await ok(
+      t.req('POST', `/api/invitations/${token}/accept-existing`, {
+        cookie: u.cookie,
+        body: { serveWorkstationIds: [first.workstationId] },
+      }),
+      201,
+    );
     const after = await q(
       `SELECT org_id FROM agents WHERE workstation_id=$1 AND is_devops AND status='active' ORDER BY org_id`,
       [first.workstationId],
     );
     expect(after.map((a) => a.org_id).sort()).toEqual([u.id, org].sort());
-    // a second workstation gets one for each organization at once
+    // a second workstation gets one only for the organization the member owns (R9: Hooli needs their yes there)
     const second = await pairWorkstation(t, u, 'Laptop');
     const both = await q(
       `SELECT org_id FROM agents WHERE workstation_id=$1 AND is_devops AND status='active'`,
       [second.workstationId],
     );
-    expect(both.map((a) => a.org_id).sort()).toEqual([u.id, org].sort());
+    expect(both.map((a) => a.org_id)).toEqual([u.id]);
     // and they do not count against any limit
     expect(
       (await ok<any>(t.req('GET', '/api/org', { cookie: owner.cookie, headers: { 'x-aom-org': org } })))
@@ -412,8 +437,9 @@ describe('unique names for the DevOps engineers hired when a member joins', () =
 
   async function orgWithOwnerStation() {
     const owner = await t.userSession(uniqueEmail('own'));
-    await pairWorkstation(t, owner, 'owner-box');
     const org = await t.createOrg(owner.id, 'Initech');
+    // paired after the organization exists: it works for the organizations the Owner owns (R9)
+    await pairWorkstation(t, owner, 'owner-box');
     return { owner, org };
   }
 
@@ -422,10 +448,14 @@ describe('unique names for the DevOps engineers hired when a member joins', () =
       const { owner, org } = await orgWithOwnerStation();
       const before = await devops(org);
       const u = await t.userSession(uniqueEmail(`u${n}`));
-      for (let i = 0; i < n; i++) await pairWorkstation(t, u, `box${i}`);
+      const ids: string[] = [];
+      for (let i = 0; i < n; i++) ids.push((await pairWorkstation(t, u, `box${i}`)).workstationId);
       const token = await invite(org, owner, u.email);
       await ok(
-        t.req('POST', `/api/invitations/${token}/accept-existing`, { cookie: u.cookie, body: {} }),
+        t.req('POST', `/api/invitations/${token}/accept-existing`, {
+          cookie: u.cookie,
+          body: { serveWorkstationIds: ids },
+        }),
         201,
       );
       const member = await q(`SELECT 1 FROM org_members WHERE org_id=$1 AND user_id=$2 AND status='active'`, [
@@ -448,12 +478,15 @@ describe('unique names for the DevOps engineers hired when a member joins', () =
     expect((await devops(org)).length).toBe(1);
   });
 
-  it('the membership hook hires with unique names for a member with 2 workstations', async () => {
+  it('the membership hook hires nothing without consent (R9); switching on hires with unique names', async () => {
     const { org } = await orgWithOwnerStation();
     const u = await t.userSession(uniqueEmail('hook'));
-    await pairWorkstation(t, u, 'a');
-    await pairWorkstation(t, u, 'b');
+    const a = await pairWorkstation(t, u, 'a');
+    const b = await pairWorkstation(t, u, 'b');
     await t.addOrgMember(org, u.id, 'member');
+    expect(await devops(org)).toHaveLength(1);
+    await worksFor(t, u, a.workstationId, org);
+    await worksFor(t, u, b.workstationId, org);
     const all = await devops(org);
     expect(all).toHaveLength(3);
     unique(all.map((a) => a.name));
@@ -462,7 +495,7 @@ describe('unique names for the DevOps engineers hired when a member joins', () =
   it('a failing hire rolls the accept back with a typed error and the same invitation works afterwards', async () => {
     const { owner, org } = await orgWithOwnerStation();
     const u = await t.userSession(uniqueEmail('fail'));
-    await pairWorkstation(t, u, 'a');
+    const station = await pairWorkstation(t, u, 'a');
     let fail = true;
     t.app.ctx.store.intercept(async (_tx, batch) => {
       if (
@@ -477,7 +510,7 @@ describe('unique names for the DevOps engineers hired when a member joins', () =
     const token = await invite(org, owner, u.email);
     const r = await t.req('POST', `/api/invitations/${token}/accept-existing`, {
       cookie: u.cookie,
-      body: {},
+      body: { serveWorkstationIds: [station.workstationId] },
     });
     expect(r.status).toBe(409);
     expect(r.body.error?.code ?? r.body.code).toBe('devops_hire_failed');

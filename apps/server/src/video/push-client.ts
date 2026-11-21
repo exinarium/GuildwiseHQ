@@ -5,9 +5,10 @@ import { basename } from 'node:path';
 import { WORKER_VERSION_HEADER } from '@aom/shared';
 
 /**
- * The render worker's side of the artifact push (video/push.ts): PUT each finished file to
- * `<base>/api/worker/video/renders/<renderId>/files/<name>` with its sha256, retrying with backoff. Resolves only when
- * every file is acknowledged (HTTP 2xx); throws otherwise, and the render then stays unfinished.
+ * The remote render worker's side of the artifact push (video/push.ts): PUT each finished file to the signed upload link
+ * the claim handed out (`/api/worker/video/renders/<renderId>/files/<name>?attempt&exp&sig`), with the worker's own
+ * bearer token and the file's sha256, retrying with backoff. Resolves only when every file is acknowledged (HTTP 2xx);
+ * throws otherwise, and the render then stays unfinished.
  */
 
 export interface PushDeps {
@@ -18,7 +19,9 @@ export interface PushDeps {
 }
 
 export interface PushTarget {
-  baseUrl: string;
+  /** The full upload URL of this file (the signed link resolved against the server URL). */
+  url: string;
+  /** The render worker's bearer token. */
   token: string;
   /** The worker's application version, sent with each file; the server refuses files from a worker older than itself. */
   version?: string | null;
@@ -32,17 +35,12 @@ export async function sha256File(path: string): Promise<string> {
 
 class PushRefused extends Error {}
 
-export async function pushFile(
-  target: PushTarget,
-  renderId: string,
-  path: string,
-  deps: PushDeps = {},
-): Promise<void> {
+export async function pushFile(target: PushTarget, path: string, deps: PushDeps = {}): Promise<void> {
   const doFetch = deps.fetch ?? fetch;
   const sleep = deps.sleep ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms)));
   const waits = deps.backoffMs ?? [2_000, 10_000, 30_000, 90_000];
   const name = basename(path);
-  const url = `${target.baseUrl.replace(/\/+$/, '')}/api/worker/video/renders/${encodeURIComponent(renderId)}/files/${encodeURIComponent(name)}`;
+  const url = target.url;
   const size = (await stat(path)).size;
   const sha = await sha256File(path);
   let last = '';
@@ -74,13 +72,13 @@ export async function pushFile(
   throw new Error(`push of ${name} failed after ${waits.length + 1} attempts: ${last}`);
 }
 
-/** Pushes every file in turn (the video last: the small files are cheap to repeat). */
+/** Pushes every file in turn (the video last: the small files are cheap to repeat). `urlOf` gives each file's link. */
 export async function pushArtifacts(
-  target: PushTarget,
-  renderId: string,
+  target: Omit<PushTarget, 'url'> & { urlOf: (name: string) => string },
   paths: string[],
   deps: PushDeps = {},
 ): Promise<void> {
   const ordered = [...paths].sort((a, b) => Number(/\.mp4$/.test(a)) - Number(/\.mp4$/.test(b)));
-  for (const p of ordered) await pushFile(target, renderId, p, deps);
+  for (const p of ordered)
+    await pushFile({ url: target.urlOf(basename(p)), token: target.token, version: target.version }, p, deps);
 }

@@ -51,6 +51,7 @@ import { OrgChartPage } from './pages/OrgChart.tsx';
 import { OrgDesigner } from './pages/OrgDesigner.tsx';
 import { OrgProviders } from './pages/OrgProviders.tsx';
 import { OrgSettings } from './pages/OrgSettings.tsx';
+import { OwnershipTransfer } from './pages/OwnershipTransfer.tsx';
 import { PersonaChat } from './pages/PersonaChat.tsx';
 import { Phase } from './pages/Phase.tsx';
 import { PlatformTeamDesk } from './pages/PlatformTeamDesk.tsx';
@@ -67,14 +68,18 @@ import { PlatformInvitations } from './pages/platform/PlatformInvitations.tsx';
 import { PlatformOrgDetail } from './pages/platform/PlatformOrgDetail.tsx';
 import { PlatformOrgs } from './pages/platform/PlatformOrgs.tsx';
 import { PlatformRunners } from './pages/platform/PlatformRunners.tsx';
+import { PlatformSecurity } from './pages/platform/PlatformSecurity.tsx';
 import { PlatformTeam } from './pages/platform/PlatformTeam.tsx';
 import { PlatformUsers } from './pages/platform/PlatformUsers.tsx';
+import { RecoverTwoFactor } from './pages/RecoverTwoFactor.tsx';
 import { Releases } from './pages/Releases.tsx';
 import { ResearchTab } from './pages/ResearchTab.tsx';
 import { ResetPassword } from './pages/ResetPassword.tsx';
 import { Settings } from './pages/Settings.tsx';
 import { Vaults } from './pages/Vaults.tsx';
 import { WorkflowBuilderPage } from './pages/WorkflowBuilderPage.tsx';
+import { WorkstationApprovals } from './pages/WorkstationApprovals.tsx';
+import { WorkstationDevopsLog } from './pages/WorkstationDevopsLog.tsx';
 import { Workstations } from './pages/Workstations.tsx';
 
 function Home() {
@@ -111,6 +116,8 @@ export const routes = [
   ...(ext.publicRoutes ?? []).map((r) => ({ errorElement: <RouteError />, ...r })),
   { path: '/forgot-password', element: <ForgotPassword />, errorElement: <RouteError /> },
   { path: '/reset-password/:token', element: <ResetPassword />, errorElement: <RouteError /> },
+  // R17-2: the mailed "Lost your authenticator?" link (the token is in the fragment)
+  { path: '/recover-2fa', element: <RecoverTwoFactor />, errorElement: <RouteError /> },
   { path: '/invite/:token', element: <AcceptInvite />, errorElement: <RouteError /> },
   // S-B1: the page a notification button opens; it signs the person in first and applies nothing until they press the button
   { path: '/m/desk/:token', element: <DeskActionConfirm />, errorElement: <RouteError /> },
@@ -160,7 +167,9 @@ export const routes = [
       { path: '/org/ceo', element: <Ceo /> },
       { path: '/costs', element: <Costs /> },
       { path: '/workstations', element: <Workstations /> },
+      { path: '/workstations/:id/devops-log', element: <WorkstationDevopsLog /> },
       { path: '/workstations/:id/integrations', element: <Integrations /> },
+      { path: '/workstations/:id/approvals', element: <WorkstationApprovals /> },
       { path: '/integrations', element: <IntegrationsIndex /> },
       { path: '/settings', element: <Settings /> },
       { path: '/settings/vaults', element: <Vaults /> },
@@ -168,6 +177,8 @@ export const routes = [
       { path: '/persona-chats/:id', element: <PersonaChat /> },
       { path: '/settings/providers', element: <OrgProviders /> },
       { path: '/settings/org', element: <OrgSettings /> },
+      // R17-3: the Owner's consent page for an ownership transfer support asked for
+      { path: '/org-transfer/:id', element: <OwnershipTransfer /> },
       { path: '/admin', element: <Navigate to="/settings/org" replace /> },
       { path: '/desk', element: <Desk /> },
       {
@@ -219,6 +230,7 @@ export const routes = [
           { path: '/platform/blog/:id', element: <PlatformBlogPost /> },
           { path: '/platform/api-keys', element: <PlatformApiKeys /> },
           { path: '/platform/runners', element: <PlatformRunners /> },
+          { path: '/platform/security', element: <PlatformSecurity /> },
           { path: '/platform/team', element: <PlatformTeam /> },
           { path: '/platform/inbound', element: <PlatformInbound /> },
           { path: '/platform/audit', element: <PlatformAudit /> },

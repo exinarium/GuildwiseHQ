@@ -9,7 +9,7 @@ import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { FakeRunner } from './helpers/fake-runner.ts';
 import { shiftHelpers } from './helpers/shifts.ts';
-import { createWorld, markOnline, pairWorkstation, until, type World } from './helpers/world.ts';
+import { createWorld, markOnline, pairWorkstation, until, type World, worksFor } from './helpers/world.ts';
 
 /**
  * Organization-wide provider keys with a monthly cap per provider (docs/ARCHITECTURE.md section 38.5): the server stores only the
@@ -79,12 +79,14 @@ beforeAll(async () => {
   // the member's workstation: a second runner that also knows organization keys
   const m = await pairWorkstation(w.t, member, 'member-box');
   ws2 = m.workstationId;
+  await worksFor(w.t, member, ws2, orgId);
   r2 = await FakeRunner.connect(w.baseUrl, m.runnerToken);
   r2.hello({ capabilities: [PROVIDER_KEYS_BOUND_CAPABILITY], sudoKey: KEY2 });
   await r2.waitFor('welcome');
   // a third workstation (the member's) with an older runner that does not know organization keys
   const old = await pairWorkstation(w.t, member, 'old-box');
   ws3 = old.workstationId;
+  await worksFor(w.t, member, ws3, orgId);
   const r3 = await FakeRunner.connect(w.baseUrl, old.runnerToken);
   r3.hello({ sudoKey: { keyId: 'cccccccccccccccc', publicKey: 'CCCC3' } });
   await r3.waitFor('welcome');

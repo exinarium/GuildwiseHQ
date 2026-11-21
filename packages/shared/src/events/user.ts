@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AvatarSeedSchema, AvatarStyleSchema } from '../avatars/index.ts';
+import { SessionMethodSchema } from '../security/index.ts';
 import { defineEvent, Id, IsoDate, UserRole } from './define.ts';
 import { EventMetaSchema } from './org.ts';
 
@@ -71,6 +72,8 @@ export const userEvents = [
       registeredAt: IsoDate,
       /** The email was verified but no card was saved within 14 days (absent: never verified within 7 days). */
       verified: z.boolean().optional(),
+      /** 1.10.0: why the sign-up was removed: it `expired`, or the address was `reclaimed` by a new sign-up or its real owner (R10). */
+      reason: z.enum(['expired', 'reclaimed']).optional(),
     }),
   ),
   /** The platform account: no organization, platform routes only. Created by the CLI only. */
@@ -84,6 +87,36 @@ export const userEvents = [
     }),
   ),
   defineEvent('SuperAdminSignedIn', z.object({ userId: Id, meta: EventMetaSchema })),
+  /**
+   * Every session start (R4), appended in the same transaction as the `auth_sessions` row. `sessionRef` is
+   * `auth_sessions.id` (already the sha256 of the token), never the token. `newDevice`: no sign-in of this user from the
+   * same IP and browser family (`ua_family`) in 180 days. Projection: `sign_ins`.
+   */
+  defineEvent(
+    'SessionStarted',
+    z.object({
+      userId: Id,
+      method: SessionMethodSchema,
+      sessionRef: z.string().regex(/^[0-9a-f]{64}$/),
+      newDevice: z.boolean(),
+      /** Browser family plus OS, normalized (never the full user agent). */
+      uaFamily: z.string().max(80).optional(),
+      meta: EventMetaSchema,
+    }),
+  ),
+  /**
+   * A super-admin session that no real sign-in created (no `sign_ins` row for it) was refused on its first request and
+   * deleted (R4, the forged 12:25 session). Platform audit `always`.
+   */
+  defineEvent(
+    'SuperAdminSessionRejected',
+    z.object({
+      userId: Id,
+      sessionRef: z.string().regex(/^[0-9a-f]{64}$/),
+      reason: z.enum(['no_sign_in', 'user_mismatch']),
+      meta: EventMetaSchema,
+    }),
+  ),
   /** `new_org` (by a super admin, audience admin) and `org_member` (by an Owner or Admin, audience org). */
   defineEvent(
     'OrgInvitationCreated',
@@ -150,7 +183,16 @@ export const userEvents = [
   ),
   /** The user turned expert mode for version control on or off (default off): it brings back branch names, completion pickers and "Mark merged". */
   defineEvent('UserGitExpertModeSet', z.object({ userId: Id, enabled: z.boolean() })),
-  defineEvent('PasswordChanged', z.object({ userId: Id, passwordHash: z.string().min(1) })),
+  defineEvent(
+    'PasswordChanged',
+    z.object({
+      userId: Id,
+      passwordHash: z.string().min(1),
+      /** 1.10.0: how (absent on older events): the user's own change, a reset link, or the server console. */
+      via: z.enum(['change', 'reset_link', 'cli']).optional(),
+      meta: EventMetaSchema,
+    }),
+  ),
   /**
    * An organization Owner set a temporary password for a member (the temporary password itself is never in the log).
    * The member must choose a new password at next sign-in (`must_change_password`, cleared by `PasswordChanged`).
@@ -160,5 +202,14 @@ export const userEvents = [
     z.object({ userId: Id, orgId: Id, by: Id, passwordHash: z.string().min(1) }),
   ),
   /** A super admin sent the user a password reset link (the platform audit log shows it). The link itself is not in the log. */
-  defineEvent('PasswordResetLinkSent', z.object({ userId: Id, by: Id, meta: EventMetaSchema })),
+  defineEvent(
+    'PasswordResetLinkSent',
+    z.object({
+      userId: Id,
+      by: Id,
+      meta: EventMetaSchema,
+      /** 1.10.0: sent by an organization Owner or Admin from the members list (R6); absent: by a super admin. */
+      orgId: Id.optional(),
+    }),
+  ),
 ] as const;

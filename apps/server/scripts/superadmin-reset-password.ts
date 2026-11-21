@@ -1,25 +1,25 @@
 import { createInterface } from 'node:readline/promises';
 import { parseArgs } from 'node:util';
-import { streamId } from '@aom/shared';
-import { hashPassword } from '../src/auth/password.ts';
 import { createClock } from '../src/clock.ts';
+import { consoleResetSuperAdminPassword } from '../src/commands/password-reset.ts';
 import { loadConfig } from '../src/config.ts';
 import { createPool } from '../src/db/pool.ts';
-import { exec, one } from '../src/db/sql.ts';
-import { withAppendTx } from '../src/db/tx.ts';
 import { PgEventStore } from '../src/eventstore/pg-event-store.ts';
+import { createMailer } from '../src/mail/mailer.ts';
 import { buildProjectors } from '../src/projections/index.ts';
+import { PASSWORD_STDIN_OPTION, readPassword } from './read-password.ts';
 
 /**
- * `pnpm --filter @aom/server superadmin:reset-password --email a@b.c [--password ...] [--reset-two-factor]`:
+ * `pnpm --filter @aom/server superadmin:reset-password --email a@b.c [--password-stdin | --password ...] [--reset-two-factor]`:
  * the emergency reset of a super admin's password (appends `PasswordChanged` with the system as actor, so it is
  * audited and replayable) and, with `--reset-two-factor`, of their two-factor login (they set it up again).
- * All their sessions end.
+ * All their sessions end, an account lock is cleared and the account is mailed (1.10.0, R2/R3).
  */
 const { values } = parseArgs({
   options: {
     email: { type: 'string' },
     password: { type: 'string' },
+    ...PASSWORD_STDIN_OPTION,
     'reset-two-factor': { type: 'boolean', default: false },
   },
 });
@@ -33,53 +33,40 @@ async function prompt(q: string): Promise<string> {
   }
 }
 
+if (values['password-stdin'] && !values.email) {
+  console.error('--password-stdin needs --email (standard input carries the password only)');
+  process.exit(1);
+}
 const email = values.email ?? (await prompt('Email: '));
-const password =
-  values.password ?? process.env.AOM_ADMIN_PASSWORD ?? (await prompt('New password (min 12 chars): '));
+const password = await readPassword({
+  password: values.password,
+  passwordStdin: values['password-stdin'],
+  prompt: 'New password (min 12 chars): ',
+});
 if (!email.includes('@') || password.length < 12 || password.length > 256) {
   console.error('a valid email and a new password of 12-256 characters are required');
   process.exit(1);
 }
 const config = loadConfig();
 const pool = createPool(config.databaseUrl, 2);
-const store = new PgEventStore(pool, buildProjectors(), createClock());
+const clock = createClock();
+const store = new PgEventStore(pool, buildProjectors(), clock);
+const mailer = createMailer(config.smtpUrl, config.mailFrom);
+const log = {
+  info: () => {},
+  warn: (o: unknown, m?: string) => console.warn(m ?? '', o instanceof Error ? o.message : ''),
+  error: (o: unknown, m?: string) => console.error(m ?? '', o instanceof Error ? o.message : ''),
+} as never;
 try {
-  await withAppendTx(pool, async (tx) => {
-    const u = await one(tx, `SELECT id, kind FROM users WHERE lower(email)=lower($1)`, [email]);
-    if (!u) throw new Error(`no account with email ${email}`);
-    if (u.kind !== 'super_admin')
-      throw new Error(`${email} is not a super admin: its password is changed in the app`);
-    const events = [
-      {
-        streamId: streamId.user(u.id),
-        event: {
-          type: 'PasswordChanged' as const,
-          payload: { userId: u.id, passwordHash: await hashPassword(password) },
-        },
-        actor: { kind: 'system' as const, id: null },
-        scope: { orgId: null, projectId: null, audience: 'admin' as const },
-      },
-    ];
-    if (values['reset-two-factor']) {
-      await exec(tx, 'DELETE FROM user_totp WHERE user_id=$1', [u.id]);
-      await exec(tx, 'DELETE FROM user_recovery_codes WHERE user_id=$1', [u.id]);
-      events.push({
-        streamId: streamId.user(u.id),
-        event: {
-          type: 'TwoFactorDisabled' as never,
-          payload: { userId: u.id, by: u.id, reason: 'reset' } as never,
-        },
-        actor: { kind: 'system' as const, id: null },
-        scope: { orgId: null, projectId: null, audience: 'admin' as const },
-      });
-    }
-    await store.append(events, { tx });
-    await exec(tx, 'DELETE FROM auth_sessions WHERE user_id=$1', [u.id]);
-  });
-  console.log(`password of ${email} reset; all sessions ended`);
+  await consoleResetSuperAdminPassword(
+    { pool, store, clock, mailer, log, config: { publicOrigin: config.publicOrigin } },
+    { email, password, resetTwoFactor: values['reset-two-factor'] },
+  );
+  console.log(`password of ${email} reset; all sessions ended; the account was mailed`);
 } catch (e) {
   console.error((e as Error).message);
   process.exitCode = 1;
 } finally {
+  mailer.close();
   await pool.end();
 }

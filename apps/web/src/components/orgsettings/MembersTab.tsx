@@ -1,6 +1,12 @@
-import { type OffboardingReport, ORG_ROLE_LABEL, type OrgMemberDto } from '@aom/shared';
+import {
+  MEMBER_HAS_OTHER_ACCESS,
+  type OffboardingReport,
+  ORG_ROLE_LABEL,
+  type OrgMemberDto,
+} from '@aom/shared';
 import { Copy, ShieldCheck, UserPlus, Users } from 'lucide-react';
 import { useState } from 'react';
+import { ApiError } from '../../api/client.ts';
 import {
   useChangeMemberRole,
   useOrg,
@@ -9,6 +15,7 @@ import {
   useRemoveMember,
   useResetMemberPassword,
   useResetMemberTwoFactor,
+  useSendMemberPasswordReset,
   useSetMemberProjects,
 } from '../../api/queries/orgs.ts';
 import { useProjects } from '../../api/queries/projects.ts';
@@ -33,6 +40,8 @@ import { OffboardingChecklist, OffboardingReportDialog } from './Offboarding.tsx
 
 const roleTone = { owner: 'brand', admin: 'blue', member: 'neutral' } as const;
 
+const hasOtherAccess = (err: unknown) => err instanceof ApiError && err.code === MEMBER_HAS_OTHER_ACCESS;
+
 /** Members of the organization with their role, projects and two-factor state (docs/design/organizations.md 11.2). */
 export function MembersTab({ me }: { me: { userId: string; role: 'owner' | 'admin' | 'member' } }) {
   const members = useOrgMembers();
@@ -42,12 +51,22 @@ export function MembersTab({ me }: { me: { userId: string; role: 'owner' | 'admi
   const role = useChangeMemberRole();
   const reset = useResetMemberTwoFactor();
   const resetPassword = useResetMemberPassword();
+  const sendLink = useSendMemberPasswordReset();
   const remove = useRemoveMember();
   const setProjects = useSetMemberProjects();
   const [inviting, setInviting] = useState(false);
   const [resettingPassword, setResettingPassword] = useState<OrgMemberDto | null>(null);
   // The temporary password lives in this state only while its dialog is open (shown once, never stored).
   const [temporary, setTemporary] = useState<{ name: string; password: string } | null>(null);
+  // A reset refused because the member has access in another organization (R6): offer the link instead.
+  // `what` decides the way out: a password goes by the reset link; lost two-factor login the member recovers
+  // themselves ("Lost your authenticator?" on the sign-in page), since a password link does not restore it.
+  const [refused, setRefused] = useState<{ member: OrgMemberDto; what: 'password' | 'two_factor' } | null>(
+    null,
+  );
+  const elsewhere = refused?.member ?? null;
+  const setElsewhere = (m: OrgMemberDto | null, what: 'password' | 'two_factor' = 'password') =>
+    setRefused(m ? { member: m, what } : null);
   const [removing, setRemoving] = useState<OrgMemberDto | null>(null);
   const [report, setReport] = useState<OffboardingReport | null>(null);
   const [assigning, setAssigning] = useState<OrgMemberDto | null>(null);
@@ -63,6 +82,14 @@ export function MembersTab({ me }: { me: { userId: string; role: 'owner' | 'admi
   // Owners reset Members and Admins; Admins reset Members only; nobody resets themselves this way.
   const canResetPassword = (m: OrgMemberDto) =>
     m.userId !== me.userId && (me.role === 'owner' ? m.role !== 'owner' : m.role === 'member');
+
+  const emailLink = (m: OrgMemberDto) =>
+    sendLink.mutate(m.userId, {
+      onSuccess: (r) => {
+        setElsewhere(null);
+        toast.success(`Reset link sent to ${r.sentTo}`);
+      },
+    });
 
   return (
     <Panel
@@ -162,12 +189,21 @@ export function MembersTab({ me }: { me: { userId: string; role: 'owner' | 'admi
                         Change projects
                       </MenuItem>
                     )}
+                    {canResetPassword(m) && (
+                      <MenuItem
+                        description="They choose a new password from a link in their email"
+                        onSelect={() => emailLink(m)}
+                      >
+                        Email a reset link
+                      </MenuItem>
+                    )}
                     {me.role === 'owner' && m.twoFactorEnabled && (
                       <MenuItem
                         description="They set it up again at their next sign-in"
                         onSelect={() =>
                           reset.mutate(m.userId, {
                             onSuccess: () => toast.success(`Two-factor login of ${m.displayName} reset`),
+                            onError: (err) => hasOtherAccess(err) && setElsewhere(m, 'two_factor'),
                           })
                         }
                       >
@@ -196,7 +232,15 @@ export function MembersTab({ me }: { me: { userId: string; role: 'owner' | 'admi
         ))}
       </ul>
       <div className="px-4 pb-3 empty:hidden">
-        <ErrorBox error={role.error ?? reset.error ?? remove.error ?? resetPassword.error} />
+        <ErrorBox
+          error={
+            role.error ??
+            (hasOtherAccess(reset.error) ? null : reset.error) ??
+            remove.error ??
+            (hasOtherAccess(resetPassword.error) ? null : resetPassword.error) ??
+            (elsewhere ? null : sendLink.error)
+          }
+        />
       </div>
       <InviteDialog
         open={inviting}
@@ -211,7 +255,7 @@ export function MembersTab({ me }: { me: { userId: string; role: 'owner' | 'admi
         open={!!resettingPassword}
         onOpenChange={(o) => !o && setResettingPassword(null)}
         title={`Reset the password of ${resettingPassword?.displayName ?? ''}?`}
-        description="You get a temporary password to pass on yourself (no email is sent). They are signed out everywhere, and must choose their own password the next time they sign in."
+        description="You get a temporary password to pass on yourself; they get an email saying that you reset it. They are signed out everywhere, and must choose their own password the next time they sign in."
         confirmLabel="Reset password"
         pending={resetPassword.isPending}
         onConfirm={() =>
@@ -221,15 +265,54 @@ export function MembersTab({ me }: { me: { userId: string; role: 'owner' | 'admi
               setTemporary({ name: resettingPassword.displayName, password: r.temporaryPassword });
               setResettingPassword(null);
             },
-            onError: () => setResettingPassword(null),
+            onError: (err) => {
+              if (hasOtherAccess(err)) setElsewhere(resettingPassword);
+              setResettingPassword(null);
+            },
           })
         }
       >
         <p className="text-sm text-muted" data-testid="reset-password-global-note">
-          A Guildwise HQ account is one account for every organization. If {resettingPassword?.displayName}{' '}
-          also belongs to other organizations, this new password applies there too.
+          A Guildwise HQ account is one account for every organization, so this works only for people who
+          belong to this organization alone. For anyone else, email them a reset link.
         </p>
       </ConfirmDialog>
+
+      <Dialog
+        open={!!refused}
+        onOpenChange={(o) => !o && setElsewhere(null)}
+        title={`${elsewhere?.displayName ?? ''} also has access to another organization`}
+        description={
+          refused?.what === 'two_factor'
+            ? 'Their account is shared with that organization, so their two-factor login cannot be reset from here. They recover it themselves: "Lost your authenticator?" on the sign-in page sends a recovery link to their own email.'
+            : 'Their account is shared with that organization, so it cannot be reset from here. Email them a reset link instead: only they can use it.'
+        }
+        footer={
+          refused?.what === 'two_factor' ? (
+            <Button variant="primary" onClick={() => setElsewhere(null)}>
+              Close
+            </Button>
+          ) : (
+            <>
+              <Button variant="secondary" onClick={() => setElsewhere(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                disabled={sendLink.isPending}
+                onClick={() => elsewhere && emailLink(elsewhere)}
+                data-testid="member-other-access-send-link"
+              >
+                Email a reset link
+              </Button>
+            </>
+          )
+        }
+      >
+        <div data-testid="member-other-access">
+          <ErrorBox error={sendLink.error} />
+        </div>
+      </Dialog>
 
       <Dialog
         open={!!temporary}

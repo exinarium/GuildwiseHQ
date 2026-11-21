@@ -12,7 +12,7 @@ import {
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireAdmin, requireOrg, requireUser } from '../auth/guards.ts';
+import { requireOrg, requireUser } from '../auth/guards.ts';
 import { whoOf } from '../auth/org-context.ts';
 import { readRepoList, requestGitRecheck, requestRepoList } from '../commands/forges.ts';
 import { requestOrgFolder } from '../commands/org-folders.ts';
@@ -203,18 +203,5 @@ export function workstationRoutes(ctx: Ctx) {
       },
       async (req) => pairRunner(ctx, req.body),
     );
-
-    app.get('/api/admin/workstations', async (req) => {
-      await requireAdmin(ctx, req);
-      // Folder paths are the owner's business: the admin list leaves them out.
-      const list = await workstationDtos(ctx, `w.status = 'active'`, []);
-      return { workstations: list.map(({ orgFolders: _o, toolchains: _t, ...w }) => w) };
-    });
-
-    app.post('/api/admin/workstations/:id/unlink', { schema: { params: IdParamsSchema } }, async (req) => {
-      const s = await requireAdmin(ctx, req);
-      await unlinkWorkstation(ctx, s.user, req.params.id);
-      return { ok: true };
-    });
   };
 }

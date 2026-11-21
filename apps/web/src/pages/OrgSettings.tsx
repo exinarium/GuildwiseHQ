@@ -1,6 +1,8 @@
 import { useSearchParams } from 'react-router';
 import { useMe } from '../api/queries/auth.ts';
+import { useOrgDevopsLog } from '../api/queries/leastPrivilege.ts';
 import { useOrg } from '../api/queries/orgs.ts';
+import { DevopsCommandLog } from '../components/DevopsCommandLog.tsx';
 import { AppsTab } from '../components/orgsettings/AppsTab.tsx';
 import { AuditTab } from '../components/orgsettings/AuditTab.tsx';
 import { GeneralTab } from '../components/orgsettings/GeneralTab.tsx';
@@ -56,6 +58,8 @@ export function OrgSettings() {
           { id: 'audit', label: 'Audit log' },
         ]
       : []),
+    // R17-4: the DevOps command log belongs to the Owner (the platform sees counts only)
+    ...(role === 'owner' ? [{ id: 'devops', label: 'DevOps commands' }] : []),
     // tabs of the extension (the hosted build's Billing): Owner and Admins unless the extension says otherwise
     ...(ext.orgSettingsTabs ?? [])
       .filter((t) =>
@@ -104,8 +108,21 @@ export function OrgSettings() {
         {tab === 'providers' && manager && <OrgProvidersBody />}
         {tab === 'plan' && manager && <PlanTab org={org.data} />}
         {tab === 'audit' && manager && <AuditTab />}
+        {tab === 'devops' && role === 'owner' && <OrgDevopsLogTab />}
         {ext.orgSettingsTabs?.map((t) => (tab === t.id ? <t.Component key={t.id} /> : null))}
       </div>
     </div>
+  );
+}
+
+/** The Owner's DevOps command log: the commands of this organization's DevOps shifts on every workstation (R17-4). */
+function OrgDevopsLogTab() {
+  const log = useOrgDevopsLog();
+  return (
+    <DevopsCommandLog
+      title="DevOps commands"
+      intro="Every shell command your DevOps engineers ran in this organization's shifts, and the ones the runner refused. Only you, the Owner, see this log; Guildwise support sees counts only."
+      query={log}
+    />
   );
 }

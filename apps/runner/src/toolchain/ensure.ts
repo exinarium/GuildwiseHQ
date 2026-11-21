@@ -8,6 +8,7 @@ import {
   normalizeProjectPath,
   type ToolReport,
 } from '@aom/shared';
+import { allowScriptsHint, planInstall } from '../policy/installs.ts';
 import { redact } from '../secrets/redact.ts';
 import { detectStacks, viewOf } from './detect.ts';
 import {
@@ -58,6 +59,11 @@ export interface EnsureDeps {
    * is installed into it.
    */
   dotnet?: () => DotnetSelection;
+  /**
+   * R18-S: the repository may run its install scripts (policy.json `installScripts`, by normalized remote URL). Absent or
+   * false: only the script-free install modes run (`policy/installs.ts`); every other install is refused.
+   */
+  installScriptsAllowed?: (remoteUrlNormalized: string) => boolean;
 }
 
 /** Env for a command: `dotnet` and its installers run with the chosen root first on PATH and as DOTNET_ROOT. */
@@ -117,7 +123,7 @@ export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): 
   const reports: ToolReport[] = [];
   const stackList: EnvironmentReport['stacks'] = [];
   const need = new Map<string, { spec: ToolSpec; params: Params; stack: string }>();
-  const runs: Array<{ name: string; localPath: string; detections: Detection[] }> = [];
+  const runs: Array<{ name: string; localPath: string; detections: Detection[]; remote: string }> = [];
 
   // 1. What the repositories use.
   for (const r of p.repos) {
@@ -164,7 +170,7 @@ export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): 
     log(
       `${r.name}${projectDir !== repo.localPath ? ` (${r.projectPath})` : ''}: ${detections.map((d) => d.name).join(', ') || 'no known stack'}`,
     );
-    runs.push({ name: r.name, localPath: projectDir, detections });
+    runs.push({ name: r.name, localPath: projectDir, detections, remote: r.remoteUrlNormalized });
     for (const d of detections) {
       stackList.push({ id: d.id, name: d.name, repo: r.name });
       const stack = tables.stacks.find((s) => s.id === d.id);
@@ -236,7 +242,7 @@ export function depCommand(step: DepStep, dir: string): string {
  * installing. A failing install makes the environment "failed" with the log tail, like a failing tool install.
  */
 async function installDependencies(
-  runs: Array<{ name: string; localPath: string; detections: Detection[] }>,
+  runs: Array<{ name: string; localPath: string; detections: Detection[]; remote: string }>,
   tables: { stacks: typeof STACKS; tools: Record<string, ToolSpec> },
   access: DevOpsAccess,
   done: Map<string, ToolReport>,
@@ -263,11 +269,32 @@ async function installDependencies(
           });
           break;
         }
-        log(`$ (${run.name}) ${step.cmd} ${step.args.join(' ')}`);
-        const r = await deps.exec.run(depCommand(step, run.localPath), step.args, {
+        // R18-S: only installs proven to run no repository code run by themselves
+        const plan = planInstall(
+          step,
+          run.localPath,
+          run.remote,
+          deps.installScriptsAllowed?.(run.remote) ?? false,
+        );
+        if (!plan.ok) {
+          log(`  refused: ${plan.reason}`);
+          out.push({
+            ...base,
+            status: 'failed',
+            detail: plan.reason.slice(0, 500),
+            fix: allowScriptsHint(run.remote),
+          });
+          break;
+        }
+        log(`$ (${run.name}) ${step.cmd} ${plan.args.join(' ')}`);
+        const dotnetEnv = dotnetRunEnv(step.cmd, deps);
+        const r = await deps.exec.run(depCommand(step, run.localPath), plan.args, {
           cwd: run.localPath,
           timeoutMs: 30 * 60_000,
-          ...dotnetRunEnv(step.cmd, deps),
+          ...dotnetEnv,
+          ...(Object.keys(plan.env).length
+            ? { env: { ...('env' in dotnetEnv ? dotnetEnv.env : {}), ...plan.env } }
+            : {}),
         });
         for (const line of `${r.stdout}\n${r.stderr}`.split('\n').slice(-8))
           if (line.trim()) log(`  ${line.trim()}`);

@@ -15,6 +15,7 @@ import {
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { requireUserWithFeature } from '../auth/guards.ts';
+import { requireStepUp } from '../auth/step-up.ts';
 import { requireProjectMember } from '../authz/scope.ts';
 import {
   addOrReuseDeployTarget,
@@ -167,6 +168,7 @@ export function phaseRoutes(ctx: Ctx) {
       { schema: { params: IdParamsSchema, body: CreateDeployTargetRequestSchema } },
       async (req, reply) => {
         const s = await requireUserWithFeature(ctx, req, 'phases');
+        requireStepUp(ctx, s);
         const { id, reused } = await addOrReuseDeployTarget(ctx, s.user, req.params.id, req.body);
         reply.code(reused ? 200 : 201);
         const t = (await listDeployTargets(ctx.pool, req.params.id)).find((x) => x.id === id);
@@ -180,6 +182,7 @@ export function phaseRoutes(ctx: Ctx) {
       { schema: { params: IdParamsSchema, body: PatchDeployTargetRequestSchema } },
       async (req) => {
         const s = await requireUserWithFeature(ctx, req, 'phases');
+        requireStepUp(ctx, s);
         await updateDeployTarget(ctx, s.user, req.params.id, req.body);
         const row = await one(ctx.pool, 'SELECT project_id FROM deploy_targets WHERE id=$1', [req.params.id]);
         const t = (await listDeployTargets(ctx.pool, row?.project_id)).find((x) => x.id === req.params.id);
@@ -189,6 +192,7 @@ export function phaseRoutes(ctx: Ctx) {
 
     app.delete('/api/deploy-targets/:id', { schema: { params: IdParamsSchema } }, async (req, reply) => {
       const s = await requireUserWithFeature(ctx, req, 'phases');
+      requireStepUp(ctx, s);
       await removeDeployTarget(ctx, s.user, req.params.id);
       reply.code(204);
     });

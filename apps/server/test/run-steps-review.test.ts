@@ -4,7 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { closeAdminPool, q as rawQ } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { addMember, type Member } from './helpers/members.ts';
-import { createWorld, ok, until, type World } from './helpers/world.ts';
+import { createWorld, ok, until, type World, worksFor } from './helpers/world.ts';
 
 // The v1a review fixes (docs/design/deploy-run-ux-design.md section 14): the scan fails closed, a project plan needs the
 // consent of the owner of another member's computer, tests run only on your own computer, the server decides source and
@@ -19,6 +19,12 @@ beforeAll(async () => {
   w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false' } });
   r = await w.connectRunner({ capabilities: ['runs:1', 'runs:2', SETUP_SCAN_CAPABILITY] });
   member = await addMember(w, 'dev');
+  await worksFor(
+    w.t,
+    member,
+    member.workstationId,
+    (await q('SELECT org_id FROM projects WHERE id=$1', [w.projectId]))[0]!.org_id,
+  ); // R9: the member's consent (Works for)
   // the member's computer: online, new enough, holds the project code (no runner needed: commands queue)
   await q(`UPDATE workstations SET connected=true WHERE id=$1`, [member.workstationId]);
   await q(

@@ -108,7 +108,11 @@ export function PlatformOrgDetail() {
     if (dialog.kind === 'transfer')
       transfer.mutate(
         { toUserId, reason: reason.trim() },
-        { onSuccess: () => (toast.success('Ownership transferred'), close()) },
+        {
+          onSuccess: () => (
+            toast.success('Transfer requested: the Owner approves or vetoes it by email'), close()
+          ),
+        },
       );
     else
       status.mutate(
@@ -119,7 +123,7 @@ export function PlatformOrgDetail() {
   const err = status.error ?? transfer.error;
   const dialogTitle =
     dialog?.kind === 'transfer'
-      ? 'Transfer ownership'
+      ? 'Request an ownership transfer'
       : dialog
         ? `${dialog.kind[0]?.toUpperCase()}${dialog.kind.slice(1)} ${o.name}`
         : '';
@@ -197,12 +201,23 @@ export function PlatformOrgDetail() {
             disabled={o.admins.length === 0}
             onClick={() => setDialog({ kind: 'transfer' })}
           >
-            Transfer ownership
+            Request ownership transfer
           </Button>
           {o.admins.length === 0 && (
             <span className="text-xs text-subtle">Ownership moves to an existing Admin only.</span>
           )}
         </div>
+        {o.pendingTransfer && (
+          <Callout tone="info" title="Ownership transfer waiting for the Owner" className="mt-3">
+            <span data-testid="platform-org-pending-transfer">
+              To {o.pendingTransfer.toUser.displayName}, requested{' '}
+              {formatDateTime(o.pendingTransfer.requestedAt)}.{' '}
+              {o.pendingTransfer.automatic
+                ? `It takes effect ${formatDateTime(o.pendingTransfer.effectiveAt)} unless the Owner vetoes it.`
+                : 'This organization has deploy targets: it takes effect only when the Owner approves it.'}
+            </span>
+          </Callout>
+        )}
       </Panel>
 
       <Panel title="Simulation" data-testid="platform-org-simulation">
@@ -210,34 +225,15 @@ export function PlatformOrgDetail() {
           A simulation organization is for testing and demos: its agents run on a simulated workstation hosted
           by this server (nothing real is built), its repositories are simulated, it is never billed, and its
           emails are marked [Simulation].{' '}
-          {o.simulation
-            ? 'A simulation organization stays one until it is deleted: it cannot be switched back to a real organization. Use "Delete simulation organization" to remove it and all its data.'
-            : `Only an empty organization (no projects, not even archived ones${ext.planLimits ? ', and no active billing subscription' : ''}) can be switched, and it cannot be switched back. To test with a populated setup, invite a new simulation organization instead.`}
+          {o.createdAsSimulation
+            ? 'It stays one until it is deleted. Use "Delete simulation organization" to remove it and all its data.'
+            : 'Only an organization created as a simulation takes the simulation tools: a real organization never becomes one. To test or demo, invite a new simulation organization.'}
         </p>
         <div className="flex flex-wrap items-end gap-4">
-          <label className="flex items-center gap-2.5 text-sm font-medium text-fg">
-            <input
-              type="checkbox"
-              role="switch"
-              aria-checked={o.simulation}
-              data-testid="simulation-toggle"
-              className="size-5"
-              checked={o.simulation}
-              disabled={o.simulation || simulate.isPending}
-              onChange={(e) => {
-                if (
-                  !e.target.checked ||
-                  !window.confirm(
-                    'Switch this organization to simulation? This cannot be undone: a simulation organization stays one until it is deleted.',
-                  )
-                )
-                  return;
-                simulate.mutate({ enabled: true }, { onSuccess: () => toast.success('Simulation is on') });
-              }}
-            />
-            {o.simulation ? 'Simulation on (permanent)' : 'Simulation off'}
-          </label>
-          {o.simulation && (
+          <span className="text-sm font-medium text-fg" data-testid="simulation-state">
+            {o.createdAsSimulation ? 'Simulation (permanent)' : 'Real organization'}
+          </span>
+          {o.createdAsSimulation && (
             <>
               <Select
                 label="Pace of the simulated workstation"

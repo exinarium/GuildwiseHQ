@@ -14,7 +14,10 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { type RunnerReleaseResponse, RunnerReleaseResponseSchema } from '@aom/shared';
+import type { Policy } from '../policy/schema.ts';
+import { MIN_TRUSTED_RUNNER } from './floor.ts';
 import { type InstallLayout, installedVersions } from './layout.ts';
+import { type FetchedRelease, verifyUpdate } from './verify.ts';
 
 function readText(file: string): string | null {
   try {
@@ -55,6 +58,112 @@ export async function fetchRelease(
 }
 
 export type Fetcher = typeof fetch;
+
+/** The 1.10.0 release paths (R21): every 1.10.0 runner uses these; the legacy `/api/runner/release` is for old runners. */
+export const RELEASES_PATH = '/api/runner/releases';
+/**
+ * The kill switch on the new paths: the server sets this header on `manifest.json` while a super admin pauses runner
+ * auto-updates (the legacy JSON carried `autoUpdatePaused`).
+ */
+export const UPDATES_PAUSED_HEADER = 'x-runner-updates-paused';
+
+export class UntrustedReleaseError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = 'UntrustedReleaseError';
+  }
+}
+
+/** A release the runner has verified (signature or allowed unsigned origin, floor, no downgrade) and may download. */
+export interface VerifiedRelease extends RunnerReleaseResponse {
+  proof: { manifestText: string; minisig: string | null };
+  signed: boolean;
+  keyId: string | null;
+}
+
+async function getText(
+  url: URL,
+  f: Fetcher,
+  timeoutMs: number,
+): Promise<{ status: number; text: string; headers: Headers }> {
+  const res = await f(url, { signal: AbortSignal.timeout(timeoutMs) });
+  return { status: res.status, text: res.ok ? await res.text() : '', headers: res.headers };
+}
+
+/**
+ * Reads the offered release from the 1.10.0 paths (`manifest.json` and `manifest.json.minisig`), falling back to the
+ * legacy JSON only when the server has no new paths (an older server, 404); then verifies it (`verifyUpdate`). Throws
+ * `UntrustedReleaseError` when it must not be installed.
+ */
+export async function fetchVerifiedRelease(
+  serverUrl: string,
+  opts: {
+    current: string;
+    pin: string | null;
+    trustedKey: string;
+    policy: Pick<Policy, 'allowUnsignedUpdatesFrom' | 'legacyUpdateOrigin'>;
+    fetch?: Fetcher;
+    timeoutMs?: number;
+  },
+): Promise<VerifiedRelease> {
+  const f = opts.fetch ?? fetch;
+  const timeout = opts.timeoutMs ?? 15_000;
+  const origin = new URL(serverUrl).origin;
+  const at = (file: string): URL => {
+    const u = new URL(`${RELEASES_PATH}/${file}`, serverUrl);
+    if (opts.pin) u.searchParams.set('version', opts.pin);
+    return u;
+  };
+  const m = await getText(at('manifest.json'), f, timeout);
+  let fetched: FetchedRelease;
+  let paused = false;
+  let url: string;
+  if (m.status === 200) {
+    const sig = await getText(at('manifest.json.minisig'), f, timeout);
+    if (sig.status !== 200 && sig.status !== 404)
+      throw new Error(`the server answered HTTP ${sig.status} for the release signature`);
+    fetched = { manifestText: m.text, minisig: sig.status === 200 ? sig.text : null, origin };
+    paused = (m.headers.get(UPDATES_PAUSED_HEADER) ?? '').toLowerCase() === 'true';
+    url = '';
+  } else if (m.status === 404) {
+    // an older server: its legacy answer has no manifest and no signature, so it is unsigned
+    const legacy = await fetchRelease(serverUrl, f, timeout, opts.pin ?? undefined);
+    fetched = {
+      manifestText: JSON.stringify({
+        version: legacy.version,
+        file: `aom-runner-${legacy.version}.tgz`,
+        sha256: legacy.sha256,
+        minRunner: legacy.version,
+        floor: MIN_TRUSTED_RUNNER,
+        allowDowngrade: false,
+        nodeRuntime: {},
+      }),
+      minisig: null,
+      origin,
+    };
+    paused = legacy.autoUpdatePaused;
+    url = new URL(legacy.url, serverUrl).toString();
+  } else throw new Error(`the server answered HTTP ${m.status} for the runner release`);
+  const verdict = verifyUpdate({
+    fetched,
+    current: opts.current,
+    pin: opts.pin,
+    trustedKey: opts.trustedKey,
+    policy: opts.policy,
+  });
+  if (!verdict.ok) throw new UntrustedReleaseError(verdict.reason);
+  const file = verdict.manifest.file;
+  return {
+    version: verdict.manifest.version,
+    sha256: verdict.manifest.sha256,
+    size: 0,
+    url: url || new URL(`${RELEASES_PATH}/${encodeURIComponent(file)}`, serverUrl).toString(),
+    autoUpdatePaused: paused,
+    proof: { manifestText: fetched.manifestText, minisig: fetched.minisig },
+    signed: verdict.signed,
+    keyId: verdict.keyId,
+  };
+}
 
 /** Downloads `url` to `dest` and returns its sha256 (hex) and size. Streams, so a big file never sits in memory. */
 export async function downloadTo(
@@ -105,7 +214,9 @@ export interface StageDeps {
  */
 export async function stageRelease(
   layout: InstallLayout,
-  release: Pick<RunnerReleaseResponse, 'version' | 'sha256' | 'url'>,
+  release: Pick<RunnerReleaseResponse, 'version' | 'sha256' | 'url'> & {
+    proof?: { manifestText: string; minisig: string | null };
+  },
   f: Fetcher = fetch,
   deps: StageDeps = {},
 ): Promise<string> {
@@ -127,6 +238,12 @@ export async function stageRelease(
     if (!existsSync(join(unpacked, 'aom-runner', 'dist', 'aom-runner.mjs')))
       throw new Error('the downloaded archive does not hold a runner (no aom-runner/dist/aom-runner.mjs)');
     writeFileSync(join(unpacked, '.sha256'), release.sha256);
+    // The verified manifest and signature go with the version: the signed-release proof this version sends in `hello`.
+    if (release.proof) {
+      writeFileSync(join(unpacked, 'manifest.json'), release.proof.manifestText);
+      if (release.proof.minisig)
+        writeFileSync(join(unpacked, 'manifest.json.minisig'), release.proof.minisig);
+    }
     rmSync(finalDir, { recursive: true, force: true });
     renameSync(unpacked, finalDir);
     return pkg;

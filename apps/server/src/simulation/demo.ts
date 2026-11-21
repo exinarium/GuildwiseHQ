@@ -84,7 +84,7 @@ export async function loadDemoScenario(ctx: Ctx, app: FastifyInstance, orgId: st
       `the simulated workstation is not available${sim.status(orgId).detail ? `: ${sim.status(orgId).detail}` : ''}`,
     );
 
-  const { token } = await createSession(ctx, org.owner_user_id, { userAgent: 'demo-scenario' });
+  const { token } = await createSession(ctx, org.owner_user_id, { userAgent: 'demo-scenario' }, 'demo');
   const headers = { cookie: `aom_sid=${token}`, origin: ctx.config.publicOrigin, 'x-aom-org': orgId };
   const call = async <T = any>(method: 'POST', url: string, body: unknown, want = 201): Promise<T> => {
     const res = await app.inject({ method, url, headers, payload: body as object });

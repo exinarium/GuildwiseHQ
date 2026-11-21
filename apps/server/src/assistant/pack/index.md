@@ -91,6 +91,18 @@ Guildwise HQ is free. Self-hosted, it is free and open source under Apache 2.0: 
 
 Say nothing else about cost. For anything else, point to the Terms (`/terms`) or GitHub Discussions.
 
+## Security (1.10.0)
+
+- Two server settings, both off by default on self-hosted installs and locked on in Guildwise Cloud: "Only signed runners" and "Require two-factor login". A platform administrator changes them on Platform > Security > Security settings.
+- Upgrading a self-hosted install to 1.10.0 locks nobody out with the defaults. Old runners keep working and update themselves, normally within about a day. It is announced as a breaking change for self-hosted installs.
+- Every Guildwise Cloud sign-up sets up two-factor login before anything else.
+- Sign-in lock: 5 wrong answers on an account pause sign-in for 15 minutes, doubling up to 60. A browser that signed in within 30 days still works. Resetting a password on a two-factor account needs a code or a recovery code.
+- Sensitive actions ask "Confirm it's you" (an authenticator or recovery code, or the password without two-factor login); the answer counts for 10 minutes.
+- Lost authenticator and recovery codes: recovery by email with a 24 hour wait, which the user can stop (a normal sign-in or the cancel link); the Owners of the user's organizations are mailed. Platform administrators cannot reset other users' two-factor login.
+- Platform administrators cannot read an organization's projects, cards, workstations, secrets or vaults.
+- Runners: a runner decides locally. Deploy scripts, DevOps work not started on the machine, sudo and install scripts need a yes on the workstation. Passkeys can approve only two kinds of item: a redeploy at a new commit and a recipe change.
+- With "Only signed runners" on, older or unsigned runners are unlinked and must be reinstalled from the server's own installer. Signing is optional for self-hosters, who sign with their own key.
+
 ## How to get access
 
 To run it yourself, follow the self-hosting guide in the GitHub repository. To use Guildwise Cloud, click "Try Guildwise Cloud" on the website to sign up at `/signup`; existing users sign in at `/login`. Questions, a demo, support or sales go to the Contact us page (`/contact`).
@@ -112,7 +124,8 @@ The in-app help articles. The ones that match the visitor's question are attache
 
 - Getting started: The training video, signing up or in, the guided tour, the Get started checklist, the sidebar, the command palette and keyboard shortcuts.
 - Organizations and roles: Four roles, what each can do, members, invitations, guests, temporary passwords, suspension and the platform area.
-- Two-factor login: Setting up two-factor authentication, recovery codes, enforcement and owner reset.
+- Two-factor login: Setting up two-factor authentication, recovery codes, enforcement, recovery by email and member resets.
+- Account security: Sign-in protection and locks, password reset with a code, security mails, Confirm it's you, requiring two-factor login and the platform…
 - Projects: Creating projects, the priority order, project types and workflows, research cards, sharing, archiving and decision policy.
 - Board and cards: Reading the board and its warning banners, creating and editing cards, moving cards, backing off, risk tiers and search.
 - Agents: Hiring agents, seniority, runtime and model, allowed projects, focus, firing and the Agents page.
@@ -120,7 +133,7 @@ The in-app help articles. The ones that match the visitor's question are attache
 - Your desk: Desk items and kinds, your desk, blocking, answering questions, standing orders, the ledger.
 - Ledger and vaults: The ledger, searching it, vaults and shared knowledge, vault conflicts.
 - Intake and outbox: Intake from Jira and GitHub, unmapped tickets, credentials, the outbox and guardrails.
-- The architect: investigate and design: The optional design step before build, investigation-only cards, where reports go, the main branch merge, and what the architect may touch.
+- The architect: investigate and design: The optional design step before build, investigation-only cards, size estimates, where reports go, the main branch merge, and what the…
 - Discovery and documents: Turn an idea into a brief or a PRD with an analyst, optionally with your CEO, and hand the approved PRD to the BA.
 - Testing and finalization: The test stage, how finished work lands (working branch or pull request), the main and working branch, expert mode, the full suite and…
 - Boardroom: Put a question to personas and agents, run by a Chair. Interject, keep a whiteboard, and turn the minutes into a PRD.

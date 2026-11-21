@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { rebuildProjections, unsavedCascadeTargets } from '../src/projections/rebuild.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
+import { designatePlatformTeam } from './helpers/platform-team.ts';
 import { createWorld, ok, type World } from './helpers/world.ts';
 
 let w: World;
@@ -14,13 +15,7 @@ afterAll(async () => {
 
 describe('platform team and projection rebuild', () => {
   it('keeps open pauses (a projection of events) and leaves the operational bug tables alone', async () => {
-    const root = await w.t.superAdminSession();
-    await ok(
-      w.t.req('PUT', '/api/platform/team', {
-        cookie: root.cookie,
-        body: { orgId: w.owner.id, projectId: w.projectId },
-      }),
-    );
+    await designatePlatformTeam(w.t, w.owner.id, w.projectId);
     const other = await ok<any>(
       w.t.req('POST', '/api/projects', { cookie: w.owner.cookie, body: { key: 'OTH', name: 'Other' } }),
       201,

@@ -9,6 +9,7 @@ import {
   useLogout,
   useMe,
 } from '../api/queries/auth.ts';
+import { useWorkstationServing, useWorkstations } from '../api/queries/workstations.ts';
 import { BRAND } from '../brand.ts';
 import { AuthFrame } from '../components/auth/AuthFrame.tsx';
 import { PasswordInput } from '../components/auth/PasswordInput.tsx';
@@ -86,6 +87,13 @@ export function AcceptInvite() {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // R9 (audit F4): which of your workstations work for the organization; asked only of a signed-in invitee.
+  const invitee =
+    !!me.data && !!info.data && me.data.user.email.toLowerCase() === info.data.email.toLowerCase();
+  const stations = useWorkstations({ enabled: invitee });
+  // The real workstations only (a simulated one keeps its own rule): the "Works for" list has exactly those.
+  const real = useWorkstationServing({ enabled: invitee });
+  const [serve, setServe] = useState<Record<string, boolean>>({});
   usePageTitle(info.isError ? 'Invitation unavailable' : 'Accept your invitation');
 
   if (info.isPending || me.isPending)
@@ -123,6 +131,38 @@ export function AcceptInvite() {
     />
   );
   const modeField = startsOrg && <OrgModePicker value={mode} onChange={setMode} />;
+  // A new organization of your own: all your workstations by default; one you join: none until you tick them.
+  const realIds = new Set((real.data ?? []).map((x) => x.workstationId));
+  const myStations = (stations.data ?? []).filter((w) => w.status === 'active' && realIds.has(w.id));
+  const serving = (id: string) => serve[id] ?? startsOrg;
+  const serveIds =
+    stations.data && real.data
+      ? { serveWorkstationIds: myStations.filter((w) => serving(w.id)).map((w) => w.id) }
+      : {};
+  const serveField = myStations.length > 0 && (
+    <fieldset className="flex flex-col gap-2" data-testid="invite-serve">
+      <legend className="mb-1 text-base font-medium text-fg">
+        Which of your workstations may work for {startsOrg ? name || 'the organization' : inv.orgName}?
+      </legend>
+      <p className="text-sm text-muted">
+        {startsOrg
+          ? 'Its agents and DevOps engineer run only on the workstations you tick.'
+          : `${inv.orgName}'s agents and DevOps engineer run only on the workstations you tick. Nobody in ${inv.orgName} can change this; you can switch it later under Works for on the Workstations page.`}
+      </p>
+      {myStations.map((w) => (
+        <label key={w.id} className="flex items-center gap-3 text-base text-fg">
+          <input
+            type="checkbox"
+            className="size-5"
+            checked={serving(w.id)}
+            onChange={(e) => setServe((cur) => ({ ...cur, [w.id]: e.target.checked }))}
+            data-testid={`invite-serve-${w.id}`}
+          />
+          {w.name}
+        </label>
+      ))}
+    </fieldset>
+  );
 
   // 1) A different account is signed in.
   if (signedIn && !sameAccount)
@@ -153,6 +193,7 @@ export function AcceptInvite() {
         <div className="flex flex-col gap-4">
           {orgField}
           {modeField}
+          {serveField}
           <DigestCheckbox checked={digestOn} onChange={setDigest} owner={startsOrg} />
           <ErrorBox error={acceptExisting.error} />
           <div className="flex flex-wrap gap-2">
@@ -167,8 +208,9 @@ export function AcceptInvite() {
                         orgName: name.trim(),
                         blogDigest: digestOn,
                         ...(mode === 'business' ? { mode } : {}),
+                        ...serveIds,
                       }
-                    : { blogDigest: digestOn },
+                    : { blogDigest: digestOn, ...serveIds },
                   {
                     onSuccess: () => nav('/', { replace: true }),
                   },

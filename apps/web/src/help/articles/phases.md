@@ -99,6 +99,18 @@ The page also has a **Releases** switch, **On** or **Paused**. Pausing asks "Pau
 
 The setup lives in the project vault. A git vault is backed up with its repository; a local vault is a folder on the Owner's workstation that you back up yourself (put it in OneDrive, iCloud or another backed-up folder).
 
+## Signing the runner per environment {#runner-signing}
+
+A deploy target can require a **signed runner**. Each environment has its own key: for example a test key for the test site and your offline key for the live site. The secret key never reaches the server or an agent. The project Owner turns the requirement on with the deploy target's signing setting (`PUT /api/deploy-targets/:id/signing`, with **Confirm it's you**); there is no form for it in the deploy-target editor yet.
+
+For such a place the release sheet shows **Runner: waiting for signature**, or **Runner: signed by** the key id once done, and **Release** stays off with "Waiting for a signed runner for" that place. A place with no requirement shows **Runner: not required**. Choose a route:
+
+1. Click **Package the runner for** the place.
+2. Route A, a workstation that holds the key: run `guildwise-runner signing add-key --key-id <id> --key-file <path>` once (it stores only the path). Click **Sign on the workstation**, then `guildwise-runner approve <id>` on that machine. It signs at the keyboard (passphrase keys work) and uploads only the signature.
+3. Route B, an offline key: click **Download manifest.json**, sign it where the key lives (`minisign -S -s <key> -m manifest.json`), and click **Upload signature** with `manifest.json.minisig`.
+
+Until a signature by the target's key exists, a deploy there is refused (409 `runner_signature_required`). Only shipped releases deploy to such a target; dry runs are exempt. A wrong key gives `signature_wrong_key`, another file `signature_invalid`, and packaging again after you downloaded gives `artefact_changed`: download again. Changing the target's key drops artefacts packaged with the old key.
+
 ## Release prep {#release-prep}
 
 Release prep is optional and off by default. The project Owner, or an organization Owner or Admin, switches it on under **Project settings > Release prep (docs and videos)** and ticks the steps: **Analyse changes**, **Update user guide**, **Update Help articles**, **Regenerate assistant knowledge**, **Write changelog**, **Generate videos** and **Commit results**. When it is on, the **Releases** page has a **Release prep** tab with **Run release prep**, the state of each step per repository and what each step produced. While prep has not passed, **Approve release** stays greyed out with the reason; if it fails, choose **Retry prep** or **Skip prep for this release**.

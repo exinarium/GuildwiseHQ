@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireOrg } from '../auth/guards.ts';
 import { whoOf } from '../auth/org-context.ts';
+import { requireStepUp } from '../auth/step-up.ts';
 import {
   cancelWaitCmd,
   continueWaitCmd,
@@ -119,8 +120,10 @@ export function journeyWaitRoutes(ctx: Ctx) {
         return { ok: true };
       },
     );
-    app.post('/api/journeys/:id/hooks/:hookId/rotate', { schema: { params: Hook } }, async (req) =>
-      rotateTrigger(ctx, await member(req), req.params.id, req.params.hookId),
-    );
+    app.post('/api/journeys/:id/hooks/:hookId/rotate', { schema: { params: Hook } }, async (req) => {
+      const a = await requireOrg(ctx, req, { min: 'member' });
+      requireStepUp(ctx, a.session);
+      return rotateTrigger(ctx, whoOf(a), req.params.id, req.params.hookId);
+    });
   };
 }

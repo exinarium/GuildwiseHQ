@@ -2,13 +2,18 @@ import { PasswordSchema } from '@aom/shared';
 import { KeyRound } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
+import { ApiError } from '../api/client.ts';
 import { useConfirmPasswordReset, useResetLinkValid } from '../api/queries/auth.ts';
 import { AuthFrame } from '../components/auth/AuthFrame.tsx';
 import { PasswordInput } from '../components/auth/PasswordInput.tsx';
-import { Button, ButtonLink, EmptyState, Skeleton } from '../components/ui.tsx';
+import { Button, ButtonLink, EmptyState, Skeleton, TextInput } from '../components/ui.tsx';
 import { usePageTitle } from '../lib/usePageTitle.ts';
 
-/** `/reset-password/:token`: choose a new password from the emailed link. It does not sign in: sign in again after. */
+/**
+ * `/reset-password/:token`: choose a new password from the emailed link. It does not sign in: sign in again after. An
+ * account with two-factor login also gives a code from its app or a recovery code (1.10.0, R3); a wrong code says how
+ * many tries are left, and after five the link stops working.
+ */
 export function ResetPassword() {
   usePageTitle('Choose a new password');
   const { token = '' } = useParams();
@@ -17,7 +22,13 @@ export function ResetPassword() {
   const nav = useNavigate();
   const [password, setPassword] = useState('');
   const [again, setAgain] = useState('');
-  const [errors, setErrors] = useState<{ password?: string; again?: string }>({});
+  const [code, setCode] = useState('');
+  const [errors, setErrors] = useState<{ password?: string; again?: string; code?: string }>({});
+  const err = confirm.error instanceof ApiError ? confirm.error : null;
+  // also when two-factor login was switched on after the page loaded
+  const needsCode = link.data?.secondFactor === true || err?.code === 'second_factor_required';
+  // a wrong or missing code keeps the form; anything else means the link is gone
+  const codeProblem = err?.code === 'invalid_code' || err?.code === 'second_factor_required';
 
   if (link.isPending)
     return (
@@ -30,7 +41,7 @@ export function ResetPassword() {
       </AuthFrame>
     );
 
-  if (link.isError || !link.data?.valid || confirm.isError)
+  if (link.isError || !link.data?.valid || (confirm.isError && !codeProblem))
     return (
       <AuthFrame>
         <EmptyState
@@ -53,10 +64,11 @@ export function ResetPassword() {
     const errs: typeof errors = {};
     if (!PasswordSchema.safeParse(password).success) errs.password = 'Use at least 12 characters';
     if (again !== password) errs.again = 'The two passwords do not match';
+    if (needsCode && code.trim().length < 6) errs.code = 'Enter the code from your authenticator app';
     setErrors(errs);
-    if (errs.password || errs.again) return;
+    if (errs.password || errs.again || errs.code) return;
     confirm.mutate(
-      { token, password },
+      { token, password, ...(needsCode ? { code: code.trim() } : {}) },
       { onSuccess: () => nav('/login', { replace: true, state: { passwordReset: true } }) },
     );
   };
@@ -86,10 +98,30 @@ export function ResetPassword() {
           onChange={(e) => setAgain(e.target.value)}
           error={errors.again}
         />
+        {needsCode && (
+          <TextInput
+            label="Two-factor code"
+            name="code"
+            autoComplete="one-time-code"
+            hint="The 6-digit code from your authenticator app, or one of your recovery codes."
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            error={errors.code ?? (codeProblem ? codeError(err) : undefined)}
+            data-testid="reset-code"
+          />
+        )}
         <Button type="submit" variant="primary" size="lg" loading={confirm.isPending} className="w-full">
           Save the password
         </Button>
       </form>
     </AuthFrame>
   );
+}
+
+function codeError(err: ApiError | null): string {
+  if (err?.code === 'second_factor_required') return 'Enter the code from your authenticator app';
+  const left = (err?.details as { attemptsLeft?: number } | undefined)?.attemptsLeft;
+  return typeof left === 'number'
+    ? `That code is not right: ${left} ${left === 1 ? 'try' : 'tries'} left`
+    : 'That code is not right';
 }

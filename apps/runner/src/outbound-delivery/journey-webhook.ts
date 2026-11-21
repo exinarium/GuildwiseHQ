@@ -1,7 +1,10 @@
 import { createHmac } from 'node:crypto';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { join } from 'node:path';
 import type { DeliverySendResult, JourneyWebhookCallPayload } from '@aom/shared';
 import { z } from 'zod';
+import { isPrivateAddress } from '../sandbox/egress-proxy.ts';
 import { SealedFile } from '../secrets/sealed-file.ts';
 
 /** `secrets/webhooks.json` (encrypted): the firm's webhook credentials by name (a header value, or a signing secret). */
@@ -32,8 +35,36 @@ export class JourneyWebhookCaller {
       fetch?: Fetch;
       now?: () => number;
       log?: (line: string) => void;
+      /**
+       * R18-L: `host:port` entries the workstation's owner allowed although they are loopback, private or link-local (the
+       * private-endpoint allow-list). Every other such target is refused.
+       */
+      allowPrivate?: () => readonly string[];
+      /** Test seam: resolves a host name to its addresses (default: the system resolver, every address). */
+      resolve?: (host: string) => Promise<string[]>;
     },
   ) {}
+
+  /** Loopback, private and link-local targets are refused unless listed locally (R18-L). Returns the refusal or null. */
+  private async privateTarget(raw: string): Promise<string | null> {
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      return 'the address is not a URL';
+    }
+    const host = url.hostname.replace(/^\[|\]$/g, '');
+    const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+    const addrs = isIP(host)
+      ? [host]
+      : await (
+          this.deps.resolve ?? (async (h: string) => (await lookup(h, { all: true })).map((a) => a.address))
+        )(host).catch(() => [] as string[]);
+    if (!addrs.some(isPrivateAddress)) return null;
+    const allowed = this.deps.allowPrivate?.() ?? [];
+    if (allowed.includes(`${host}:${port}`) || allowed.includes(`${url.hostname}:${port}`)) return null;
+    return 'the address is on this workstation or its private network, which webhooks may not reach unless the workstation owner allowed it';
+  }
 
   async run(p: JourneyWebhookCallPayload): Promise<DeliverySendResult> {
     const started = Date.now();
@@ -78,6 +109,8 @@ export class JourneyWebhookCaller {
         .update(`${ts}.${hasBody ? p.body : ''}`)
         .digest('hex')}`;
     }
+    const blocked = await this.privateTarget(p.url);
+    if (blocked) return { ok: false, error: blocked, retryable: false };
     const f = this.deps.fetch ?? ((url: string, init: RequestInit) => fetch(url, init));
     const t0 = Date.now();
     try {

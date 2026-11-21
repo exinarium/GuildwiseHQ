@@ -101,6 +101,11 @@ export const DEFAULT_TIMING: RunTiming = {
 
 export interface RunManagerDeps {
   paths: RunnerPaths;
+  /**
+   * R18-L, DIAGNOSIS 7: the workstation allows docker/compose run steps outside the sandbox (policy.json `allowDocker`, setup
+   * done). The server's `run.start.allowDocker` is ANDed with it and can never widen it. Absent: Docker is never allowed.
+   */
+  localAllowDocker?: () => boolean;
   /** This runner's app token probe (its own key store and broker); none: a rebase for a selected app fails closed. */
   appProbe?: AppTokenProbe | null;
   findRepo(normalized: string): Promise<{ localPath: string } | undefined>;
@@ -328,7 +333,7 @@ export class RunManager {
       wanted: p.services,
       portRange: p.portRange,
       ttlAt: p.ttlAt,
-      allowDocker: p.allowDocker,
+      allowDocker: p.allowDocker && (this.deps.localAllowDocker?.() ?? false),
       ...(p.buildGuides?.length ? { buildGuides: p.buildGuides } : {}),
       state: 'preparing',
       activity: 'creating the worktrees',

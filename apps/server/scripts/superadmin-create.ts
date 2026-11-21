@@ -11,14 +11,20 @@ import { one } from '../src/db/sql.ts';
 import { withAppendTx } from '../src/db/tx.ts';
 import { PgEventStore } from '../src/eventstore/pg-event-store.ts';
 import { buildProjectors } from '../src/projections/index.ts';
+import { PASSWORD_STDIN_OPTION, readPassword } from './read-password.ts';
 
 /**
- * `pnpm --filter @aom/server superadmin:create --email a@b.c --name "Ada" [--password ...]` -> SuperAdminCreated.
+ * `pnpm --filter @aom/server superadmin:create --email a@b.c --name "Ada" [--password-stdin | --password ...]` -> SuperAdminCreated.
  * The platform account: no organization, platform routes only, two-factor login required (it sets it up at first
  * sign-in). Created only here; it refuses an email that already has an account.
  */
 const { values } = parseArgs({
-  options: { email: { type: 'string' }, name: { type: 'string' }, password: { type: 'string' } },
+  options: {
+    email: { type: 'string' },
+    name: { type: 'string' },
+    password: { type: 'string' },
+    ...PASSWORD_STDIN_OPTION,
+  },
 });
 
 async function prompt(q: string): Promise<string> {
@@ -30,10 +36,17 @@ async function prompt(q: string): Promise<string> {
   }
 }
 
+if (values['password-stdin'] && (!values.email || !values.name)) {
+  console.error('--password-stdin needs --email and --name (standard input carries the password only)');
+  process.exit(1);
+}
 const email = values.email ?? (await prompt('Email: '));
 const name = values.name ?? (await prompt('Display name: '));
-const password =
-  values.password ?? process.env.AOM_ADMIN_PASSWORD ?? (await prompt('Password (min 12 chars): '));
+const password = await readPassword({
+  password: values.password,
+  passwordStdin: values['password-stdin'],
+  prompt: 'Password (min 12 chars): ',
+});
 if (!email.includes('@') || !name || password.length < 12 || password.length > 256) {
   console.error('a valid email, a name and a password of 12-256 characters are required');
   process.exit(1);

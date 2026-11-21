@@ -71,6 +71,10 @@ import {
   saveIndex,
 } from './pairings.ts';
 import { resolveDataDir, runnerPaths } from './paths.ts';
+import { defaultAuthority } from './policy/authority.ts';
+import { ceoTurn, defaultCliDeps, registerPolicyCommands } from './policy/cli.ts';
+import { decideStartup, probeHost, STARTUP_REFUSED_EXIT } from './policy/startup.ts';
+import { NarrowingStore, PolicyStore, policyDir } from './policy/store.ts';
 import { addRelayIntegration, removeRelayIntegration } from './relay/config.ts';
 import { WhatsAppSecretStore } from './relay/whatsapp/store.ts';
 import { reviewerTokenStatusLines, setReviewerToken } from './review/reviewer-token-cli.ts';
@@ -78,6 +82,8 @@ import { FileReviewerTokenStore } from './review/reviewer-tokens.ts';
 import { probeLocalPort, type TestServicesSeen } from './sandbox/test-services.ts';
 import { fileKeyOf, RunnerKeys } from './secrets/keys.ts';
 import { registerSecret } from './secrets/redact.ts';
+import { ADMIN_DIR } from './setup/admin-command.ts';
+import { registerSetupCommand } from './setup/command.ts';
 import { chromiumPdfRenderer } from './storage/pdf.ts';
 import { clamdClient } from './storage/scan.ts';
 import { detectStacks, viewOf } from './toolchain/detect.ts';
@@ -85,6 +91,7 @@ import { realExecutor } from './toolchain/exec.ts';
 import { preparePairing } from './up.ts';
 import { detectServiceMode, scheduleRestart } from './update/apply.ts';
 import { detectLayout, ensureGuildwiseAlias } from './update/layout.ts';
+import { currentReleaseProof } from './update/proof.ts';
 import { Updater } from './update/updater.ts';
 import { RUNNER_VERSION } from './version.ts';
 
@@ -133,6 +140,11 @@ async function pair(opts: {
     platform: platform(),
     hostname: hostname(),
     runnerVersion: RUNNER_VERSION,
+    // R18-U, R27: the signed-release proof the installer kept (required where "Only signed runners" is on)
+    ...(() => {
+      const release = currentReleaseProof(RUNNER_VERSION);
+      return release ? { release } : {};
+    })(),
   });
   const url = new URL('/api/runner/pair', opts.server).toString();
   const res = await fetch(url, {
@@ -230,6 +242,33 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
     log.info('added the guildwise-runner command next to aom-runner');
   /** The safe-mode pin the server sent before the updater existed (welcome comes first). */
   let pendingPin: string | null = null;
+  // R18-P, R21: the start-up check, before connecting. It refuses where policy.json says so or where a server of this
+  // machine said "Only signed runners" is on (cached from its last welcome); otherwise it only warns.
+  const policyStore = new PolicyStore();
+  const narrowing = new NarrowingStore();
+  const startupPaths = [
+    policyDir(),
+    policyStore.file,
+    ...(layout ? [layout.root, layout.packageDir] : []),
+    ADMIN_DIR,
+  ];
+  const startupCheck = async (serverRequiresSigned: boolean) =>
+    decideStartup({
+      facts: await probeHost({ paths: startupPaths }),
+      policy: policyStore.get(),
+      serverRequiresSigned,
+    });
+  const first = mock ? ({ action: 'ok' } as const) : await startupCheck(narrowing.requireSignedRunners());
+  if (first.action === 'warn')
+    for (const r of first.reasons)
+      log.warn(
+        `start-up check: ${r}. Run \`guildwise-runner setup\` on this workstation (it shows up in every approve prompt until then).`,
+      );
+  if (first.action === 'refuse')
+    log.error(`start-up refused (exit ${STARTUP_REFUSED_EXIT} after telling the server): ${first.reason}`);
+  const policyRead = policyStore.read();
+  if (policyRead.error)
+    log.error(`${policyStore.file} is invalid (${policyRead.error}): the safe defaults apply`);
   const host = new RunnerHost({
     root: paths.root,
     log,
@@ -256,6 +295,12 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
       updater
         ? updater.checkNow()
         : { outcome: 'disabled', version: null, detail: 'self-update is off in this process' },
+    runnerOptions: {
+      authority: defaultAuthority(),
+      releaseProof: () => currentReleaseProof(RUNNER_VERSION),
+      ...(mock ? {} : { startupCheck }),
+      ...(first.action === 'refuse' ? { startupRefused: first.reason } : {}),
+    },
   });
   // Unhandled errors go to the server (sanitised) so the platform team can see them; see health/runner-error.ts.
   const removeErrorHandlers = installErrorHandlers({
@@ -272,7 +317,7 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
     finish = done;
   });
   // Self-update (docs/RUNNER.md "Updates"): never with the mock runtime (tests, demos) or with no pairing to ask.
-  if (!mock && host.running.size > 0) {
+  if (!mock && host.running.size > 0 && first.action !== 'refuse') {
     updater = new Updater({
       layout,
       version: RUNNER_VERSION,
@@ -286,6 +331,7 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
       log,
       mode: serviceMode,
       disabled: process.env.AOM_RUNNER_AUTO_UPDATE === '0',
+      policy: () => policyStore.get(),
     });
     host.setUpdateStatus(updater.current);
     updater.start();
@@ -1443,6 +1489,12 @@ function ceoFullPower(
     throw new Error('use: guildwise-runner ceo full-power on|off|status');
   if (opts.strict && opts.bypass) throw new Error('use --strict or --bypass, not both');
   const { root, entries } = selectPairings(opts);
+  // R18-S: the opt-in lives in the local policy; config.json keeps the permission style
+  if (value !== 'status')
+    new PolicyStore().update((p) => {
+      p.ceo.fullPower = value === 'on';
+      return p;
+    });
   for (const e of entries) {
     const file = entryConfigPath(root, e);
     const config = loadConfig(file);
@@ -1748,6 +1800,33 @@ export function buildProgram(): Command {
     .option(...pairingOpt)
     .option(...dataDirOpt)
     .action(ceoFullPower);
+  ceo
+    .command('turn')
+    .description(
+      'open ONE CEO owner turn with full power from this machine (server-started turns never get it, R18-S)',
+    )
+    .option('--minutes <n>', 'how long the opening stays valid (default 10)', '10')
+    .action((o: { minutes: string }) => {
+      try {
+        ceoTurn(defaultCliDeps(), Number(o.minutes) || 10);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exitCode = 1;
+      }
+    });
+  program
+    .command('key')
+    .description("print this workstation's key fingerprint: check it here, never in the web (R18-S)")
+    .option(...pairingOpt)
+    .option(...dataDirOpt)
+    .action((o: { dataDir?: string; pairing?: string }) => {
+      const { root, entries } = selectPairings(o);
+      for (const e of entries) {
+        const k = new RunnerKeys(join(runnerPaths(entryDir(root, e)).secrets, 'runner-key.pem')).publicKey;
+        console.log(`${e.id}: key ${k.keyId}`);
+      }
+    });
+  registerPolicyCommands(program);
   program
     .command('graph-check <repo>')
     .description(
@@ -1825,6 +1904,7 @@ export function buildProgram(): Command {
     .option(...pairingOpt)
     .option(...dataDirOpt)
     .action(orgFolderList);
+  registerSetupCommand(program);
   return program;
 }
 

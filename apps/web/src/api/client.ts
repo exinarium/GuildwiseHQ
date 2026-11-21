@@ -17,10 +17,37 @@ export class ApiError extends Error {
 export type Method = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 
 /**
+ * "Confirm it's you" (R5): a guarded request answered 403 `step_up_required` asks this handler (the mounted
+ * `StepUpHost`) for a fresh code or password. True: the proof was accepted and the request is sent once more.
+ */
+export type StepUpHandler = (method: 'totp' | 'password') => Promise<boolean>;
+let stepUpHandler: StepUpHandler | null = null;
+
+/** Registers the step-up dialog; returns the function that unregisters it. */
+export function setStepUpHandler(handler: StepUpHandler): () => void {
+  stepUpHandler = handler;
+  return () => {
+    if (stepUpHandler === handler) stepUpHandler = null;
+  };
+}
+
+/**
  * Same-origin JSON fetch with the session cookie. Mutations are JSON-only (server rejects other content types) and
  * the browser sends `Origin` itself. Responses are zod-parsed in dev builds only (docs/ARCHITECTURE.md section 21).
  */
 export async function api<T>(method: Method, path: string, body?: unknown, schema?: ZodType<T>): Promise<T> {
+  try {
+    return await send(method, path, body, schema);
+  } catch (e) {
+    if (!(e instanceof ApiError) || e.code !== 'step_up_required' || !stepUpHandler) throw e;
+    const m = (e.details as { method?: string } | undefined)?.method === 'password' ? 'password' : 'totp';
+    if (!(await stepUpHandler(m))) throw e;
+    // once: a second step_up_required goes to the caller
+    return send(method, path, body, schema);
+  }
+}
+
+async function send<T>(method: Method, path: string, body?: unknown, schema?: ZodType<T>): Promise<T> {
   const init: RequestInit = { method, credentials: 'include', headers: { accept: 'application/json' } };
   // This tab's organization (section 5): every request says which one it is for.
   const org = getActiveOrgId();

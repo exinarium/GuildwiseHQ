@@ -163,4 +163,21 @@ export const videoPostProjectors: Record<string, Projector> = {
       [p.topicId, e.createdAt],
     );
   },
+  // render workers (R16): only the token's sha256 is kept; last_*, version and encoder* are written directly by the API
+  RenderWorkerAdded: async (tx, e) => {
+    const p = (e.event as EventOf<'RenderWorkerAdded'>).payload;
+    await exec(
+      tx,
+      `INSERT INTO render_workers (id, name, token_hash, created_by, created_at) VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT DO NOTHING`,
+      [p.workerId, p.name, p.tokenHash, p.by, e.createdAt],
+    );
+  },
+  RenderWorkerRevoked: async (tx, e) => {
+    const p = (e.event as EventOf<'RenderWorkerRevoked'>).payload;
+    await exec(tx, `UPDATE render_workers SET revoked_at=$2 WHERE id=$1 AND revoked_at IS NULL`, [
+      p.workerId,
+      e.createdAt,
+    ]);
+  },
 };

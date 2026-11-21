@@ -44,8 +44,9 @@ const hireEvents = (org: string) =>
 
 async function newOrg() {
   const owner = await t.userSession(uniqueEmail('own'));
-  await pairWorkstation(t, owner, 'owner-box');
   const org = await t.createOrg(owner.id, 'Initech');
+  // paired after the organization exists, so it works for it (R9)
+  await pairWorkstation(t, owner, 'owner-box');
   return { owner, org };
 }
 
@@ -66,11 +67,23 @@ async function addBroken(org: string, userId: string) {
   fail = false;
 }
 
+/** R9: the member had switched the organization on for these workstations (the serving row as the projector writes it). */
+const serving = (org: string, stations: string[]) =>
+  Promise.all(
+    stations.map((ws) =>
+      q(
+        `INSERT INTO workstation_org_serving (workstation_id, org_id, serving, set_at) VALUES ($1,$2,true,now())`,
+        [ws, org],
+      ),
+    ),
+  );
+
 async function brokenMember(org: string, stations = 2) {
   const u = await t.userSession(uniqueEmail('m'));
   const ws: string[] = [];
   for (let i = 0; i < stations; i++) ws.push((await pairWorkstation(t, u, `box-${i}`)).workstationId);
   await addBroken(org, u.id);
+  await serving(org, ws);
   return { u, ws };
 }
 
@@ -140,6 +153,7 @@ describe('missing DevOps engineers migration', () => {
     const ws = (await pairWorkstation(t, u, 'x')).workstationId;
     await t.addOrgMember(a.org, u.id, 'member'); // engineer for A hired normally
     await addBroken(b.org, u.id);
+    await serving(b.org, [ws]);
     const aBefore = await active(a.org);
     const report = await run();
     expect(report?.byOrg[b.org]).toEqual({ pairs: 1, hired: 1, failed: 0, skipped: 0 });

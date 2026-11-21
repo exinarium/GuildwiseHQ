@@ -9,6 +9,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { requireUser } from '../auth/guards.ts';
 import { orgRoleOf, requestedOrgId, resolveOrgId } from '../auth/org-context.ts';
 import type { AuthSession } from '../auth/sessions.ts';
+import { requireStepUp } from '../auth/step-up.ts';
 import {
   createSchedule,
   deleteSchedule,
@@ -104,6 +105,7 @@ export function scheduleRoutes(ctx: Ctx) {
 
     app.post('/api/schedules/:id/rotate-secret', { schema: { params: IdParamsSchema } }, async (req) => {
       const s = await requireUser(ctx, req);
+      requireStepUp(ctx, s);
       const secret = await rotateWebhookSecret(ctx, s.user, await orgOf(req, s), req.params.id);
       const dto = await getScheduleDto(ctx.pool, s.user.id, req.params.id);
       return {

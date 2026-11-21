@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestApp, type TestApp, uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
-import { ok, pairWorkstation } from './helpers/world.ts';
+import { ok, pairWorkstation, worksFor } from './helpers/world.ts';
 
 let t: TestApp;
 beforeAll(async () => {
@@ -32,6 +32,7 @@ async function acme() {
   const org = await t.createOrg(owner.id, 'Acme');
   await t.addOrgMember(org, admin.id, 'admin');
   await t.addOrgMember(org, member.id, 'member');
+  await worksFor(t, member, member.workstationId, org); // R9: DevOps work happens there with the member's consent
   const as = (who: Person, method: string, url: string, body?: unknown) =>
     t.req(method, url, { cookie: who.cookie, headers: { 'x-aom-org': org }, body });
   return { owner, admin, member, org, as };

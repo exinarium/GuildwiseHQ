@@ -18,6 +18,8 @@ Contents:
 10. [Optional features](#10-optional-features)
 11. [Operations](#11-operations)
 12. [Troubleshooting](#12-troubleshooting)
+13. [Security settings and signed runners](#13-security-settings-and-signed-runners)
+14. [Hardening the host](#14-hardening-the-host)
 
 ---
 
@@ -90,7 +92,7 @@ Put these in `.env` next to `docker-compose.prod.yml`. Compose reads that file a
 | `AOM_DOMAIN` | `guildwise.example.com` | Public name. Caddy uses it for the certificate. Unset means `localhost`. |
 | `AOM_PUBLIC_ORIGIN` | `https://guildwise.example.com` | The address users open. Sets the CSRF origin, the cookie `Secure` flag and the links in invitations. Must match exactly, including the port when it is not 443. |
 | `AOM_SMTP_URL` | `smtp://user:password@smtp.example.com:587` | Relay for mail. Percent-encode special characters in the password. |
-| `AOM_SECRET_KEY` | output of `openssl rand -hex 32` | Encrypts two-factor seeds and stored social and GitHub tokens. At least 16 characters. The server refuses to start in production without it. Keep it with your backups. |
+| `AOM_SECRET_KEY` | output of `openssl rand -hex 32` | Encrypts stored social and GitHub tokens (and the two-factor seeds when `AOM_TWO_FACTOR_KEY` is unset). At least 16 characters. The server refuses to start in production without it. Keep it with your backups. |
 
 ### Recommended
 
@@ -99,6 +101,23 @@ Put these in `.env` next to `docker-compose.prod.yml`. Compose reads that file a
 | `AOM_MAIL_FROM` | `Guildwise HQ <noreply@aom.local>` | From address. Quote it if it has spaces: `"Guildwise HQ <noreply@example.com>"`. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. |
 | `AOM_HTTP_PORT`, `AOM_HTTPS_PORT` | `80`, `443` | Change only if another service uses those ports. |
+| `AOM_TWO_FACTOR_KEY` | unset | Encrypts the two-factor seeds with a key of their own (AES-256-GCM). At least 32 characters (`openssl rand -hex 32`), never the same value as `AOM_SECRET_KEY` (the server refuses to start if it is). Unset: a key derived from `AOM_SECRET_KEY`, with a warning at startup in production. Setting it later locks nobody out: seeds are re-sealed under the new key when they are read. Keep it with your backups. |
+
+### Security
+
+All optional. The defaults below are what a server without the variable does.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `AOM_REQUIRE_SIGNED_RUNNERS` | `false` | Default of the **Only signed runners** setting (section 13). The value saved under Platform > Security wins. |
+| `AOM_ENFORCE_TWO_FACTOR` | `false` | Default of the **Require two-factor login** setting (section 13). The value saved under Platform > Security wins. |
+| `AOM_RUNNER_RELEASE_PUBKEY` | unset | Your own minisign public key (the `RW...` line, or the whole `.pub` text). The server then trusts runners signed with that key instead of the official key. Also a build argument (section 13). |
+| `AOM_LOGIN_LOCKOUT` | `true` | Sign-in lockout: after 5 failed sign-ins an address pauses for 15 minutes (doubling up to 60); 20 failures from one IP in 15 minutes lock that IP for 15 minutes. A browser that signed in to the account in the last 30 days still gets in, a completed password reset clears the lock, and private and proxy addresses are never IP-locked. |
+| `AOM_SIGNIN_NOTICES` | `all` | Who gets a mail on a sign-in from a new device: `all`, `super_admin` or `off`. |
+| `AOM_INVITE_PER_ORG_HOUR`, `AOM_INVITE_PER_ACTOR_DAY`, `AOM_INVITE_PENDING_MAX` | `20`, `50`, `50` | Invitation limits: per organization per hour, per inviter per day, pending per organization. |
+| `AOM_STEP_UP_WINDOW_SEC` | `600` | How long a "Confirm it's you" answer counts as fresh. At most 600 in production (the server refuses to start above it). |
+| `AOM_SUPER_ADMIN_IDLE_SEC` | `1800` | Idle limit of a platform (super-admin) session; the absolute limit is 8 hours. At most 1800 in production. |
+| `AOM_PLATFORM_TEAM_ORG_ID`, `AOM_PLATFORM_TEAM_PROJECT_ID` | unset | The platform team's organization and project ("Guildwise repairs itself"). Set both, then restart. The platform account can no longer choose them in the app. |
 
 ### Advanced
 
@@ -120,13 +139,15 @@ The **platform account** runs the service. It manages organizations, invitations
 ### Create it
 
 ```bash
-docker compose -f docker-compose.prod.yml exec app node dist/superadmin-create.mjs \
+read -rs PW; printf %s "$PW" | docker compose -f docker-compose.prod.yml exec -T app node dist/superadmin-create.mjs \
   --email platform@example.com \
   --name "Platform" \
-  --password 'use-a-long-passphrase'
+  --password-stdin
 ```
 
-Sign in with it. Two-factor login is set up at the first sign-in. Keep the recovery codes.
+Sign in with it. Two-factor login is set up at the first sign-in. Keep the recovery codes. `--password-stdin` keeps the password out of the shell history and the process list; `admin-create` and `superadmin-reset-password` take it too (with `--email`, and `--name` for the create commands). `--password` still works and prints a warning.
+
+What the platform account can do: organizations' details, plan, limits and dates, suspend, reactivate and cancel, invitations, deactivating accounts, password-reset mails, the audit log, the runner update kill switch, the blog, videos and settings. It has no way into an organization's projects, cards, workstations, secrets, vaults or runner commands. Every change it makes asks for a fresh two-factor code ("Confirm it's you"), its sessions last at most 8 hours (30 minutes idle), and a platform session that no real sign-in created is refused and reported by mail.
 
 ### Reset it
 
@@ -135,7 +156,7 @@ docker compose -f docker-compose.prod.yml exec app node dist/superadmin-reset-pa
   --email platform@example.com [--reset-two-factor]
 ```
 
-`--reset-two-factor` also clears two-factor login, so it is set up again at the next sign-in.
+`--reset-two-factor` also clears two-factor login, so it is set up again at the next sign-in. The console is the only way to reset the platform account's two-factor login. It cannot reset anyone else's: other users who lose their authenticator and recovery codes use **Lost your authenticator and your recovery codes?** on the sign-in page (a mailed link, then a 24-hour wait before two-factor login is removed). Either reset clears a sign-in lock on the account.
 
 ### Invite the first organization
 
@@ -169,9 +190,12 @@ curl -fsSL 'https://guildwise.example.com/install/<short-lived-token>/install.sh
 
 - Linux and WSL2 use `install.sh`. macOS uses `install-mac.sh`. Windows uses `install.ps1` in PowerShell.
 - The link works for 30 minutes. It embeds a single-use pairing code, not a long-lived secret.
-- Re-running the installer upgrades the runner and keeps existing pairings.
+- The installer starts by **looking for an older runner** on the machine. It stops it and moves its files into one archive under `~/.guildwise-quarantine/<time>/` (readable by you only, with a `MANIFEST.txt`), or removes them with `--legacy remove`. Nothing from the old install is reused: no token, key, sealed sudo password, policy or clone. Delete the quarantine after you have looked at it. If you gave the old runner sudo, change that user's password.
+- Then it installs the runner and runs **Setting local permissions** (`guildwise-runner setup`): the user the runner runs as (a dedicated `guildwise-runner` user on Linux and macOS, a separate WSL distro on Windows, or your own user), which organizations the DevOps engineer may serve (each defaults to no), whether sudo is on (sealed on the machine, never through the browser), how deploys reach Docker (a narrow root-owned helper, or the docker group, which equals root), and the deploy approval defaults. Root steps go through the root-owned `/usr/local/lib/guildwise/guildwise-admin`, which the runner cannot change. Scripted installs answer with flags; the answers never come from the server. Re-run `guildwise-runner setup` at any time to change them. [docs/RUNNER.md](RUNNER.md) lists the flags.
+- The installer script itself is served by your server. If you do not want to trust that, download the runner package, check it against the signed `manifest.json`, and install it with `--from-file`.
+- The macOS dedicated user and the Windows WSL distro are not yet tested on real hardware.
 
-The installer installs git, bubblewrap and socat (Linux), Node 22 and Claude Code, asks which folders hold your code, runs `guildwise-runner repos add` for each, walks you through the Claude sign-in, and installs a user service (`guildwise-runner` on systemd, a launchd agent on macOS).
+The installer installs git, bubblewrap and socat (Linux), Node 22 and Claude Code, asks which folders hold your code, runs `guildwise-runner repos add` for each, walks you through the Claude sign-in, and installs the service (`guildwise-runner` on systemd, a launchd service on macOS).
 
 ### Pair by hand
 
@@ -218,7 +242,11 @@ guildwise-runner doctor      # Node, Git, Claude CLI, Docker, server reachabilit
 guildwise-runner pairings    # one line per pairing
 ```
 
-Exit codes of `guildwise-runner start`: `0` stopped by a signal; `2` the server rejected the token (pair again); `3` another runner is already connected to the same workstation.
+Exit codes of `guildwise-runner start`: `0` stopped by a signal, or refused by a server with "Only signed runners" on (reinstall, section 13); `2` the server rejected the token (pair again); `3` another runner is already connected to the same workstation; `78` the runner refused to start because its user can act as root (root, passwordless sudo, the docker group, a writable Docker socket) or its files are writable by others. Fix the user (or run `guildwise-runner setup` and accept the risk with a typed confirmation); the service does not restart on `78`.
+
+### Local approvals
+
+The runner decides on the machine what it does. New deploy scripts, recipe changes, vault set-up, secret reseals, release signing and every DevOps task that was not started on the machine wait for `guildwise-runner approve <id>` there (`guildwise-runner pending` lists them). An unchanged redeploy runs by itself; pin it to a commit with `guildwise-runner deploy pin-commit` if pushes to the deployed branch should not reach production unattended. Two routine kinds (a redeploy at a new commit, a recipe change) can also be approved in the browser with a passkey that the workstation trusts (`guildwise-runner passkey trust`). Details: [docs/RUNNER.md](RUNNER.md).
 
 ## 7. HTTPS and domains
 
@@ -334,9 +362,28 @@ curl https://guildwise.example.com/api/health
 Migrations run on boot. Downtime is usually a few seconds. Watch the logs with `docker compose -f docker-compose.prod.yml logs -f app`.
 
 - **Caddy image.** A release that changes the Caddy image tag is picked up with `docker compose -f docker-compose.prod.yml pull caddy` (or `up -d --pull always`).
-- **Keep runners in step.** When a release changes the runner, update the workstations too. The installer re-run upgrades them, and the server offers the runner release it ships.
+- **Keep runners in step.** When a release changes the runner, update the workstations too. Runners with auto-update on take the runner release your server ships by themselves; a re-run of the installer also upgrades them. With **Only signed runners** on, a runner from before 1.10.0 cannot update itself and must be reinstalled (section 13).
+- **Build from a release tag.** The image build verifies the official signed runner release of the version it builds (`RUNNER_RELEASE=official`). Build a release tag (`git checkout v1.10.0`). To build an unreleased commit, set `RUNNER_RELEASE=dev` (unsigned; fine while Only signed runners is off) or sign your own (`own-key`, section 13).
 - **Data migrations.** Some releases include data migrations. They are idempotent, and they run on boot unless `AOM_DATA_MIGRATIONS=false`. Some have a `--dry-run` preview, for example `node dist/orgs-migrate.mjs --dry-run`, run with `docker compose ... exec app`.
 - **Do not** run `down -v` during an upgrade. It deletes the volumes.
+
+### Upgrading to 1.10.0
+
+**1.10.0 is a breaking change for self-hosted installs.** With the defaults nobody is locked out: runners and two-factor logins keep working. This is the complete list of what changes.
+
+1. **Runners keep working.** With **Only signed runners** off (the default) nothing is revoked or refused. Runners with auto-update on move to the runner that ships with 1.10.0 by themselves, normally within a day. On each workstation, run `guildwise-runner setup` once after that: until then sandboxed card work goes on, but DevOps, deploys and other steps outside the sandbox wait. **To opt in** to signed runners: sign your own runner builds (or use the official signed image), set `AOM_RUNNER_RELEASE_PUBKEY` for your own key, reinstall each runner from your server's installer, then turn the setting on (section 13).
+2. **Two-factor logins keep working.** `AOM_TWO_FACTOR_KEY` is optional (a warning in production without it). The `two-factor-reseal` data migration re-seals existing seeds at first boot; nobody enrols again and recovery codes keep working. **To opt in** to enforcement: Platform > Security > Security settings > **Require two-factor login**.
+3. **Removed:**
+   - `/api/admin/workstations` (answers 410);
+   - the platform account's two-factor reset of other users (users recover by email with a 24-hour wait; `superadmin-reset-password --reset-two-factor` stays for the platform account);
+   - choosing the platform team in the app (`PUT /api/platform/team`): set `AOM_PLATFORM_TEAM_ORG_ID` and `AOM_PLATFORM_TEAM_PROJECT_ID`; an existing choice keeps working read-only until you do;
+   - simulation tools on real organizations (only organizations created as simulations have them);
+   - DevOps command text and runner error messages in the platform view (counts only; Owners and workstation owners see their own);
+   - the database-connected remote render worker: `AOM_VIDEO_PUSH_URL` makes the video worker refuse to start; run `video-worker --remote` with a render worker token instead (section 10), and `AOM_VIDEO_WORKER_TOKEN` is no longer accepted as a credential for uploads.
+4. **New behaviour, on by default:** sign-in lockout, new-device mails, invitation limits, a password reset of a two-factor account needs a code, "Confirm it's you" before secrets and platform changes, platform accounts sign in once more after the upgrade, ownership transfers need the Owner's consent, an Owner or Admin cannot reset the password or two-factor login of a member who also belongs to another organization (they send a reset link instead), and a workstation serves only the organizations its owner owns until the owner switches others on under **Works for**.
+5. **New variables and build arguments** (all optional in core, section 4): `AOM_TWO_FACTOR_KEY`, `AOM_REQUIRE_SIGNED_RUNNERS`, `AOM_ENFORCE_TWO_FACTOR`, `AOM_PLATFORM_TEAM_ORG_ID`, `AOM_PLATFORM_TEAM_PROJECT_ID`, `AOM_STEP_UP_WINDOW_SEC` and `AOM_SUPER_ADMIN_IDLE_SEC` (above their maximum the server refuses to start in production), `AOM_INVITE_PER_ORG_HOUR`, `AOM_INVITE_PER_ACTOR_DAY`, `AOM_INVITE_PENDING_MAX`, `AOM_LOGIN_LOCKOUT`, `AOM_SIGNIN_NOTICES`, `AOM_RUNNER_RELEASE_PUBKEY`; build argument `RUNNER_RELEASE` (`official` by default; an unreleased commit needs `dev` or `own-key`).
+
+Back up first (section 9), then upgrade as above.
 
 ## 9. Backups and restore
 
@@ -347,7 +394,7 @@ You are responsible for backing up your own server. Guildwise does not back up s
 | What | Where | Why |
 | --- | --- | --- |
 | The database | `pgdata` volume, dumped with `pg_dump` | The event log and projections. This is the critical data. |
-| `.env` (including `AOM_SECRET_KEY`) | Next to the compose file | Without `AOM_SECRET_KEY`, enrolled authenticator apps and stored tokens cannot be read. |
+| `.env` (including `AOM_SECRET_KEY` and `AOM_TWO_FACTOR_KEY`) | Next to the compose file | Without them, stored tokens and enrolled authenticator apps cannot be read (users then recover two-factor login by email). |
 | Caddy data | `caddy_data` volume | Certificates. Recreated automatically, but keep it to avoid rate limits. |
 | Vault repositories | Your git hosts or the workstations | Vault contents live in git, not on the server. |
 
@@ -371,7 +418,7 @@ gunzip -c backup-YYYY-MM-DD.sql.gz | docker compose -f docker-compose.prod.yml e
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-Use the same `.env` (in particular the same `AOM_SECRET_KEY`) as the server the backup came from.
+Use the same `.env` (in particular the same `AOM_SECRET_KEY` and `AOM_TWO_FACTOR_KEY`) as the server the backup came from.
 
 Point-in-time recovery is not provided. Take dumps often enough for the loss you can accept.
 
@@ -415,12 +462,26 @@ which it builds its library manifest), and the worker image gets the MP4s throug
 file sets (`additional_contexts: media: ./media`). Building the worker by hand:
 `docker build --target video-worker --build-context media=media -t aom-video-worker .`
 
-**Rendering elsewhere.** If the server cannot render (Chromium and the voice need a CPU with AVX), set `AOM_VIDEO_ROLE=publish` in
-`.env` for the worker here and run a second worker with `AOM_VIDEO_ROLE=render` on a machine that can, on the same database. That
-machine sets `AOM_VIDEO_PUSH_URL` (your public URL) and `AOM_VIDEO_WORKER_TOKEN` and pushes each finished file over HTTPS; set the
-same `AOM_VIDEO_WORKER_TOKEN` (a long random string) here, and the publish worker accepts them on `AOM_VIDEO_WORKER_PORT`
-(default 4610, internal network only; the bundled Caddy forwards `/api/worker/video/*` to it). See docs/VIDEO-RENDERER.md "Worker roles and the artifact push". Default
-`AOM_VIDEO_ROLE=all` keeps one worker doing both.
+**Rendering elsewhere (a remote render worker, optionally on a GPU).** If the server cannot render (Chromium and the voice need a CPU
+with AVX), or you want a GPU to encode, set `AOM_VIDEO_ROLE=publish` for the worker here and run a remote render worker on a machine
+that can. The remote worker has **no database access and no `AOM_SECRET_KEY`**: it asks your server for jobs over HTTPS with a token
+of its own, gets only the script it must render and short-lived signed upload links, and the server does every database write.
+
+1. As the platform account, open **Platform > Video > Settings > Render workers** and add a worker. Copy the token (shown once) into a
+   file only the worker can read.
+2. On the render machine, run the `video-worker` image as `node dist/video-worker.mjs --remote` with
+   `AOM_RENDER_SERVER_URL=https://<your host>`, `AOM_RENDER_WORKER_TOKEN_FILE=<the token file>` (or `AOM_RENDER_WORKER_TOKEN`) and a
+   scratch volume for `AOM_VIDEO_DIR`. It refuses plain `http` (loopback aside), `NODE_TLS_REJECT_UNAUTHORIZED=0`, `DATABASE_URL` and
+   `AOM_SECRET_KEY`. A private CA goes in with `NODE_EXTRA_CA_CERTS`.
+3. **GPU (NVIDIA).** The image carries a second ffmpeg with NVENC. Give the container the GPU (`--gpus all`, the NVIDIA container
+   toolkit, `NVIDIA_DRIVER_CAPABILITIES=compute,utility,video`) and install the host's NVENC library for your driver (for example
+   `libnvidia-encode-595` for driver 595). At start the worker tests NVENC; when it works it encodes on the GPU, otherwise on the CPU.
+   A CPU fallback is never silent: the Render workers card shows a warning with the reason, and the platform accounts get one mail per
+   worker a day. `AOM_VIDEO_GPU=off` forces the CPU, `AOM_VIDEO_GPU=require` makes the worker stop when NVENC does not work.
+4. Revoke the worker on the same card to cut it off at once.
+
+The worker on the server (`AOM_VIDEO_ROLE=all`, the default, which renders and publishes) stays CPU-only. `AOM_VIDEO_PUSH_URL` (the
+old database-connected remote worker) is no longer supported: the video worker refuses to start with it. See docs/VIDEO-RENDERER.md.
 
 **Short destinations.** Shorts can also go to Facebook (Reels), Instagram (Reels), X, LinkedIn, Bluesky and TikTok (docs/BLOG-API.md,
 "Short destinations"): the publish worker posts them at the slot. They need nothing but the accounts connected under Social sharing,
@@ -428,7 +489,6 @@ except TikTok, which needs a developer app: set `AOM_TIKTOK_CLIENT_KEY` and `AOM
 `https://<your host>/api/platform/social/tiktok/callback` as its redirect URI and verify your domain in the app. TikTok pulls the
 video from `https://<your host>/api/public/video-media/...` (a signed link that lives under 2 hours), so `AOM_PUBLIC_ORIGIN` must
 be your public HTTPS address, the app must be able to read the video volume, and `AOM_SECRET_KEY` must be the same on the app and the worker.
-`AOM_VIDEO_PUSH_URL` now requires `AOM_VIDEO_WORKER_TOKEN`: the server refuses to start with one and not the other.
 
 The `video` volume must be writable by the worker (uid 1000, user `node`). The app image creates `/data/video` owned by `node`, so a
 new volume is right. A volume that already exists (made by an older image) is root-owned and the worker fails with `EACCES`; fix it once:
@@ -509,7 +569,7 @@ curl https://guildwise.example.com/api/health                 # {"ok":true,"db":
 
 The app container has a health check against `/api/health`.
 
-**Logs** redact invitation tokens and pairing codes in URLs.
+**Logs** redact invitation tokens, pairing codes, password-reset and email-verification links, and signed render links in URLs, and never print passwords, tokens, keys or the configuration's secrets.
 
 **Scaling.** One server instance. Run one instance only, because the dispatcher, scheduler and billing jobs must not run twice.
 
@@ -550,6 +610,22 @@ Browser-side encryption needs a secure context. Open the app over HTTPS, or over
 - Outbound WebSocket on port 443 must not be blocked by a firewall or proxy.
 - The server logs: `docker compose -f docker-compose.prod.yml logs app`.
 
+**A workstation shows "Reinstall required"**
+
+Only signed runners is on and the runner was unsigned or from before 1.10.0. Reinstall it (section 13). Pairing such a runner answers `403 signed_runner_required`; its old update path answers `410 reinstall_required`.
+
+**The runner exits with code 78**
+
+The runner refused to start because its user can act as root or its files are writable by others. Reinstall with the dedicated runner user (`--runner-user dedicated`), or remove the user from the docker group and passwordless sudo. The workstation page shows the reason.
+
+**Someone cannot sign in: `429 too_many_attempts`**
+
+The address (or the IP) is locked after failed sign-ins; the answer says when to try again. A completed password reset clears the lock, and so does `superadmin-reset-password` for the platform account. Platform > Security > Failed sign-ins shows the failures and the locks in force.
+
+**Every page answers `two_factor_setup_required`**
+
+Require two-factor login is on (or the organization requires it) and the account has no two-factor login yet. Sign in and set it up; nothing else works until then.
+
 **Installer fails**
 
 The installer reports each step. Re-run the same command; installers are idempotent. The guided installer's help link is shown on the wizard page.
@@ -569,3 +645,100 @@ desk items, and no answer or file is held. It is deleted when the case closes: t
 continued, the link or the hold expires, or the desk cancels. Closed rows (references and times only) are pruned after 30
 days. The longest an address can be held is the hold days plus the link days (14 by default). Database backups follow your
 own backup retention. Rotating `AOM_SECRET_KEY` makes held addresses unreadable: those cases close as failed with a desk notice.
+
+## 13. Security settings and signed runners
+
+### Security settings
+
+Two settings on **Platform > Security > Security settings** (platform account only) decide how strict your server is. Both are **off by default** in a self-hosted install, so upgrading changes nothing for your runners and users until you turn one on.
+
+| Setting | Variable (default) | When on |
+| --- | --- | --- |
+| **Only signed runners** | `AOM_REQUIRE_SIGNED_RUNNERS` (`false`, off) | The server pairs and accepts only runners signed with the key it trusts and not older than the runner that ships with 1.10.0. Unsigned and older runners are refused and their workstations unlinked; they must be reinstalled (below). |
+| **Require two-factor login** | `AOM_ENFORCE_TWO_FACTOR` (`false`, off) | Anyone who signs in without two-factor login is sent to set it up and can use nothing else until it is done. People whose only memberships are simulation organizations are exempt. |
+
+- **Which value wins:** a lock (below), else the value saved on the Security settings tab, else the variable, else off. The startup log prints both values and where they came from.
+- **Turning one on** asks you to confirm it's you, and every change is in the audit log. The tab shows how many workstations are unsigned and how many users have no two-factor login. Turning Only signed runners on while unsigned workstations exist asks you to confirm that they will be unlinked; they are unlinked in the same step. It is refused (`409 runner_release_unsigned`) while your server's own runner release does not verify, because the server would otherwise refuse to start at its next boot.
+- **Guildwise Cloud** locks both settings on through its extension, so they cannot be turned off there: the switches are disabled with a lock and the text "Set by Guildwise Cloud; cannot be changed here", the API answers `409 setting_locked`, and a `false` in the variables or in the database is ignored. A lock can only make an install stricter. Every Cloud sign-up sets up two-factor login before it can continue.
+
+**What Only signed runners does when on**
+
+- Pairing an unsigned or older runner is refused with `403 signed_runner_required`; the pairing code is not spent.
+- A connected unsigned runner is disconnected and stops cleanly (no restart loop). Its workstation is unlinked at once, and at every boot while the setting is on: its runner token, workstation keys, sealed sudo key and pairing codes are deleted, so nothing can be re-paired in place.
+- The old update path (`/api/runner/release`) answers `410 reinstall_required`, so an old runner can never update itself into a trusted one. Runners from 1.10.0 on use `/api/runner/releases/` (a signed `manifest.json`, its `.minisig` and the package).
+- The server refuses to start when its own runner release does not verify against the trusted key.
+- A runner told that the setting is on refuses to start when its user can act as root (exit `78`).
+- Each owner of an unlinked workstation gets one mail asking to reinstall.
+
+With the setting off, the server still records whether each runner is signed, but refuses nothing, and the old update path keeps serving, so runners update themselves as before.
+
+The server's check of a runner's signature proof cannot prove what code really runs on a remote machine. The protection is the runner's own check: a runner from 1.10.0 on verifies the signature of every update against the key built into it and never installs an older version than its floor.
+
+### Reinstalling unsigned runners
+
+When Only signed runners is on, an unsigned runner (or one from before 1.10.0) cannot be re-paired in place or update itself: pairing it answers `403 signed_runner_required`, and its old update path `410 reinstall_required`. Reinstall it from the installer your own server serves:
+
+1. Open **Workstations**. An unlinked workstation shows **Reinstall required**. Click it, or open **Workstations > Add a workstation**.
+2. Copy the one-line command and run it on that machine. The installer first looks for an older runner, stops it and quarantines its files under `~/.guildwise-quarantine/<time>/` (`--legacy remove` deletes them instead). Nothing from the old install is reused.
+3. Answer **Setting local permissions** (or pass the flags), and let it pair.
+4. Delete the quarantine once you have looked at it. If you gave the old runner sudo, change that user's password: the old runner's sealed sudo password may be known.
+
+Never copy files from the old runner folder into the new one. With the setting off you do not need any of this: runners with auto-update on move to the new runner by themselves, normally within a day.
+
+### Signing your runners with your own key
+
+Signing is **optional** for a self-hosted server. You need it only to turn Only signed runners on. Official releases are signed with the Guildwise release key, and the `official` image build verifies them; a server you build from your own commits signs with **your own** minisign key. The secret key never goes to the server, into the build context or into an image (the build only verifies), so keep it on the machine where you sign.
+
+**What you need.** `minisign` where you sign (`sudo apt install minisign`, or `brew install minisign` on macOS). In the checkout you build the server from: Node 22 (for example from [nodejs.org](https://nodejs.org) or `nvm install 22`) with pnpm (`corepack enable`), network access, and the dependencies installed once (`pnpm install`). Run steps 2 and 4 in that checkout of the release you build, with a copy of `guildwise-runner.pub` there; only step 3 needs the secret key.
+
+1. **Create a key pair** once, on the machine where you sign (a laptop is fine; the passphrase protects the secret key):
+
+   ```bash
+   minisign -G -p guildwise-runner.pub -s ~/.minisign/guildwise-runner.key
+   ```
+
+2. **Build the runner release** with your public key compiled in, so your runners trust only that key:
+
+   ```bash
+   scripts/package-runner.sh --pubkey guildwise-runner.pub --out runner-release
+   ```
+
+   This writes `runner-release/aom-runner-<version>.tgz` and an unsigned `runner-release/manifest.json` (it holds the package's sha256).
+
+3. **Sign the manifest** where the secret key is:
+
+   ```bash
+   scripts/sign-runner-release.sh runner-release/manifest.json --key ~/.minisign/guildwise-runner.key --pub guildwise-runner.pub
+   # or directly:
+   minisign -S -s ~/.minisign/guildwise-runner.key -m runner-release/manifest.json -t "guildwise-runner <version>"
+   ```
+
+   Copy `manifest.json.minisig` back into `runner-release/` if you signed on another machine. Never copy the secret key to the server.
+
+4. **Point the server at your public key and build in own-key mode.** In `.env` (the compose file passes both to the build and the app):
+
+   ```dotenv
+   RUNNER_RELEASE=own-key
+   AOM_RUNNER_RELEASE_PUBKEY=RW...   # the second line of guildwise-runner.pub
+   ```
+
+   Then `docker compose -f docker-compose.prod.yml up -d --build`. The build verifies `runner-release/` with that key and stops if the signature does not match.
+
+5. **Reinstall each runner** from your server's installer (above), so every workstation runs a runner signed with your key.
+6. **Turn on Only signed runners** under Platform > Security > Security settings.
+
+Repeat steps 2 to 4 for every release you build. Without your own key, leave the setting off (or build with `RUNNER_RELEASE=dev` for an unsigned runner): self-hosted servers keep working with unsigned runners.
+
+**Signing per environment from the app.** When Guildwise deploys an app of yours that ships a runner (such as Guildwise itself), a deploy target can require a runner signed with that target's key. The release sheet then offers to package the runner for that place and sign it on a workstation that holds the key (after `guildwise-runner signing add-key`, with a yes on that workstation), or to download `manifest.json` and upload a signature you made offline. The deploy waits until it is signed. See the user guide, "Releases".
+
+## 14. Hardening the host
+
+The bundled compose file publishes only Caddy. Keep it that way.
+
+- Publish nothing else: Postgres and the app listen inside the Docker network only. Do not run a Docker management UI or mount the Docker socket into any container.
+- Firewall: deny incoming by default; allow 80 and 443, and SSH only from where you administer (a VPN is better). Docker publishes ports past `ufw`; set `"ip": "127.0.0.1"` in `/etc/docker/daemon.json` so a published port without an address binds to loopback.
+- SSH: keys only, no root login, no passwords.
+- `.env`: mode `600`, owned by the user that runs compose; no copies (`.env.bak`) next to it. `AOM_TWO_FACTOR_KEY` protects the two-factor seeds against a database-only leak, but it sits in the same `.env`: root on the host still yields every key.
+- Set `AOM_TRUST_PROXY` to exactly your proxy (section 7), so lockouts and limits see the real client address.
+- Keep sign-in notices on (`AOM_SIGNIN_NOTICES=all`), and read the mails: a sign-in from a new device, a lock notice or a "session refused" mail is how you learn of an attack early.
+- Consider turning on Require two-factor login, and Only signed runners with your own key (section 13).

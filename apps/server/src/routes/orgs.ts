@@ -4,6 +4,7 @@ import {
   type OrgDetailResponse,
   OrgMemberParamsSchema,
   type OrgsResponse,
+  PasswordResetSentSchema,
   PatchOrgMemberRequestSchema,
   PatchOrgRequestSchema,
   SetMemberProjectsRequestSchema,
@@ -11,9 +12,10 @@ import {
   SwitchOrgRequestSchema,
   TransferOwnershipRequestSchema,
 } from '@aom/shared';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { requireOrg, requireUser } from '../auth/guards.ts';
 import { membershipsOf, rememberActiveOrg } from '../auth/org-context.ts';
+import { requireStepUp } from '../auth/step-up.ts';
 import {
   changeMemberRole,
   inviteOrgMember,
@@ -28,6 +30,7 @@ import {
   resetMemberPassword,
   resetMemberTwoFactor,
   revokeOrgInvitation,
+  sendMemberPasswordReset,
   setDiagnosticsSharing,
   setMemberProjects,
   setMemberView,
@@ -41,6 +44,11 @@ import { HttpError } from '../errors.ts';
 import { activeOrgDto } from '../orgs/summary.ts';
 import { buildMe, guestOrgs } from '../queries/me.ts';
 import { typed } from './util.ts';
+
+const meta = (req: FastifyRequest) => ({
+  ip: req.ip,
+  userAgent: String(req.headers['user-agent'] ?? '').slice(0, 400),
+});
 
 /** Organization routes (docs/design/organizations.md section 10). All take the request org (`X-AOM-Org`). */
 export function orgRoutes(ctx: Ctx) {
@@ -132,6 +140,7 @@ export function orgRoutes(ctx: Ctx) {
       { schema: { params: OrgMemberParamsSchema, body: PatchOrgMemberRequestSchema } },
       async (req) => {
         const a = await requireOrg(ctx, req, { min: 'owner' });
+        requireStepUp(ctx, a.session);
         await changeMemberRole(ctx, a, req.params.userId, req.body.role);
         return { members: await listMembers(ctx, a.orgId) };
       },
@@ -174,12 +183,30 @@ export function orgRoutes(ctx: Ctx) {
       { schema: { params: OrgMemberParamsSchema } },
       async (req) => {
         const a = await requireOrg(ctx, req, { min: 'owner' });
+        requireStepUp(ctx, a.session);
         await resetMemberTwoFactor(ctx, a, req.params.userId);
         return { ok: true };
       },
     );
 
-    // The temporary password is in this response only; it is not stored, logged or mailed.
+    // The member is mailed a single-use link naming this organization (R6); 3 an hour per person.
+    app.post(
+      '/api/org/members/:userId/send-password-reset',
+      {
+        schema: { params: OrgMemberParamsSchema },
+        config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+      },
+      async (req) => {
+        const a = await requireOrg(ctx, req, { min: 'admin' });
+        requireStepUp(ctx, a.session);
+        return PasswordResetSentSchema.parse(
+          await sendMemberPasswordReset(ctx, a, req.params.userId, meta(req)),
+        );
+      },
+    );
+
+    // The temporary password is in this response only; it is not stored, logged or mailed. Refused (409
+    // `member_has_other_access`) for a member with access in another organization (R6).
     app.post(
       '/api/org/members/:userId/reset-password',
       {
@@ -188,8 +215,9 @@ export function orgRoutes(ctx: Ctx) {
       },
       async (req, reply) => {
         const a = await requireOrg(ctx, req, { min: 'admin' });
+        requireStepUp(ctx, a.session);
         reply.header('Cache-Control', 'no-store');
-        return resetMemberPassword(ctx, a, req.params.userId);
+        return resetMemberPassword(ctx, a, req.params.userId, meta(req));
       },
     );
 
@@ -213,7 +241,8 @@ export function orgRoutes(ctx: Ctx) {
       { schema: { body: CreateOrgInvitationRequestSchema } },
       async (req, reply) => {
         const a = await requireOrg(ctx, req, { min: 'admin' });
-        await inviteOrgMember(ctx, a, req.body);
+        requireStepUp(ctx, a.session);
+        await inviteOrgMember(ctx, a, req.body, meta(req));
         reply.code(201);
         return { invitations: await listOrgInvitations(ctx, a.orgId) };
       },
@@ -221,7 +250,7 @@ export function orgRoutes(ctx: Ctx) {
 
     app.post('/api/org/invitations/:id/resend', { schema: { params: IdParamsSchema } }, async (req) => {
       const a = await requireOrg(ctx, req, { min: 'admin' });
-      await resendOrgInvitation(ctx, a, req.params.id);
+      await resendOrgInvitation(ctx, a, req.params.id, meta(req));
       return { invitations: await listOrgInvitations(ctx, a.orgId) };
     });
 

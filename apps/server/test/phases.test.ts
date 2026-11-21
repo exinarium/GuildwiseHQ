@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { addMember, type Member } from './helpers/members.ts';
-import { createWorld, ok, pairWorkstation, type World } from './helpers/world.ts';
+import { createWorld, ok, pairWorkstation, type World, worksFor } from './helpers/world.ts';
 
 let w: World;
 let member: Member;
@@ -13,6 +13,12 @@ let sshTarget: any;
 beforeAll(async () => {
   w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false', AOM_MOCK_UI: 'true' } });
   member = await addMember(w, 'mgr');
+  await worksFor(
+    w.t,
+    member,
+    member.workstationId,
+    (await q('SELECT org_id FROM projects WHERE id=$1', [w.projectId]))[0]!.org_id,
+  ); // R9: the member's consent
 });
 afterAll(async () => {
   await w.t.close();

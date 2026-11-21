@@ -41,6 +41,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireOrg, requireOrgRole, requireUser } from '../auth/guards.ts';
 import { orgRoleOf } from '../auth/org-context.ts';
+import { requireStepUp } from '../auth/step-up.ts';
 import { loadVisibleProject, projectRole } from '../authz/scope.ts';
 import { setArchitectSettings } from '../commands/architect.ts';
 import { setRepoComponentRules, setRepoReleaseName } from '../commands/component-rules.ts';
@@ -493,6 +494,7 @@ export function projectRoutes(ctx: Ctx) {
       { schema: { params: IdParamsSchema, body: SetClaudeAccountRequestSchema } },
       async (req) => {
         const a = await requireOrg(ctx, req);
+        requireStepUp(ctx, a.session);
         await setClaudeAccount(ctx, a.session.user, { id: a.orgId, role: a.role }, req.params.id, req.body);
         return getProjectDetail(ctx, a.session.user.id, req.params.id);
       },
@@ -504,6 +506,7 @@ export function projectRoutes(ctx: Ctx) {
       { schema: { params: ProviderAccountParamsSchema, body: SetProviderAccountRequestSchema } },
       async (req) => {
         const a = await requireOrg(ctx, req);
+        requireStepUp(ctx, a.session);
         await setProviderAccount(
           ctx,
           a.session.user,

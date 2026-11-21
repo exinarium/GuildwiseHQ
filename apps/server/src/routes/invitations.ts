@@ -9,6 +9,7 @@ import { createSession } from '../auth/sessions.ts';
 import { setDigestPreference } from '../commands/blog-digest.ts';
 import { acceptInvitation, acceptInvitationExisting, invitationInfo } from '../commands/invitations.ts';
 import type { Ctx } from '../context.ts';
+import { HttpError } from '../errors.ts';
 import { meResponse, setSessionCookie } from './auth.ts';
 import { typed } from './util.ts';
 
@@ -32,7 +33,12 @@ export function invitationRoutes(ctx: Ctx) {
         const userId = await acceptInvitation(ctx, req.params.token, req.body);
         if (req.body.blogDigest !== undefined)
           await setDigestPreference(ctx, userId, req.body.blogDigest, 'invite');
-        const s = await createSession(ctx, userId, { userAgent: req.headers['user-agent'], ip: req.ip });
+        const s = await createSession(
+          ctx,
+          userId,
+          { userAgent: req.headers['user-agent'], ip: req.ip },
+          'invitation',
+        );
         setSessionCookie(ctx, reply, s.token, s.maxAgeSec);
         reply.code(201);
         return meResponse(ctx, userId);
@@ -48,6 +54,11 @@ export function invitationRoutes(ctx: Ctx) {
       },
       async (req, reply) => {
         const s = await requireSession(ctx, req);
+        // R28: an account held at the two-factor enrolment joins nothing until it has set it up.
+        if (s.twoFactor.setupRequired)
+          throw new HttpError(403, 'two_factor_setup_required', 'set up two-factor login to continue', {
+            required: true,
+          });
         const orgId = await acceptInvitationExisting(ctx, s, req.params.token, req.body);
         if (req.body.blogDigest !== undefined)
           await setDigestPreference(ctx, s.user.id, req.body.blogDigest, 'invite');

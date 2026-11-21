@@ -32,6 +32,7 @@ import {
   wake,
 } from '../cloud/service.ts';
 import type { Ctx } from '../context.ts';
+import { trustedReleaseKey } from '../installer/release.ts';
 import { typed } from './util.ts';
 
 /**
@@ -174,7 +175,7 @@ export function cloudRoutes(ctx: Ctx) {
       reply
         .type('text/x-shellscript; charset=utf-8')
         .header('cache-control', 'no-store')
-        .send(codespacesBootstrapScript(ctx.config.publicOrigin)),
+        .send(codespacesBootstrapScript(ctx.config.publicOrigin, trustedReleaseKey(ctx.config))),
     );
   };
 }

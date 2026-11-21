@@ -1,6 +1,9 @@
 import {
+  type AddRenderWorkerResponse,
+  AddRenderWorkerResponseSchema,
   type EditVideoPostRequest,
   type PatchVideoSettingsRequest,
+  RenderWorkerListSchema,
   type ScheduleVideoPostRequest,
   type SubmitVideoPostRequest,
   type VideoDestination,
@@ -272,3 +275,21 @@ export function useTikTokCreator(enabled: boolean) {
     },
   });
 }
+
+// ---- render workers (R16, R23: the remote GPU worker's token, last seen and encoder)
+
+export function useRenderWorkers() {
+  return useQuery({
+    queryKey: ['platform', 'video', 'render-workers'],
+    queryFn: () => get('/platform/render-workers', RenderWorkerListSchema),
+    refetchInterval: 30_000,
+  });
+}
+
+export const useAddRenderWorker = () =>
+  useVideoMutation((v: { name: string }) =>
+    post<AddRenderWorkerResponse>('/platform/render-workers', v, AddRenderWorkerResponseSchema),
+  );
+
+export const useRevokeRenderWorker = () =>
+  useVideoMutation((id: string) => post(`/platform/render-workers/${id}/revoke`));

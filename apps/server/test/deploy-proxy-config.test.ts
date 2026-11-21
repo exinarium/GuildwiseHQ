@@ -88,6 +88,11 @@ describe('deploy/Caddyfile log filter', () => {
       ['/invite/FAKE', '/invite/[redacted]'],
       ['/api/invitations/FAKE/accept', '/api/invitations/[redacted]/accept'],
       ['/x?code=FAKE&x=1', '/x?code=[redacted]&x=1'],
+      // R13: reset and verification links
+      ['/api/auth/password-reset/FAKE', '/api/auth/password-reset/[redacted]'],
+      ['/reset-password/FAKE?x=1', '/reset-password/[redacted]?x=1'],
+      ['/verify-email/FAKE', '/verify-email/[redacted]'],
+      ['/api/signup/verify-email/FAKE', '/api/signup/verify-email/[redacted]'],
     ];
     for (const [input, out] of cases) expect(f(input)).toBe(out);
     expect(f('/api/m/desk/FAKE/apply')).not.toContain('FAKE');
@@ -111,6 +116,9 @@ describe('deploy/Caddyfile log filter', () => {
       '/api/invitations/FAKE/accept',
       '/x?token=FAKE',
       '/x?a=1&pairing_code=FAKE',
+      '/api/auth/password-reset/FAKE',
+      '/reset-password/FAKE',
+      '/verify-email/FAKE',
     ];
     for (const s of samples) {
       expect(redactUrl(s)).not.toContain('FAKE');

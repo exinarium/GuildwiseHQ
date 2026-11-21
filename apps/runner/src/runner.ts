@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, platform } from 'node:os';
-import { basename, delimiter, join } from 'node:path';
+import { basename, delimiter, dirname, join } from 'node:path';
 import {
   APP_INTEGRATIONS_CAPABILITY,
+  ApprovalPasskeyPayloadSchema,
   BOARD_VERBS_CAPABILITY,
   CAPABILITY_REGISTRY_FEATURE,
   CEO_DIAGNOSTICS_CAPABILITY,
@@ -23,6 +24,9 @@ import {
   DEPLOY_MOVE_CAPABILITY,
   DEPLOY_SETUP_CAPABILITY,
   DEPLOY_SETUP_V2_CAPABILITY,
+  type DeployExecPayload,
+  DeployExecPayloadSchema,
+  type DeployExecResult,
   DIRECT_MODEL_CAPABILITY,
   defaultHost,
   type EnvEnsurePayload,
@@ -38,6 +42,8 @@ import {
   PACK_CREDENTIALS_BOUND_CAPABILITY,
   PACK_SCRIPT_GATE_CAPABILITY,
   PACKS_CAPABILITY,
+  PasskeyOfferPayloadSchema,
+  PasskeyWithdrawPayloadSchema,
   POST_AS_CAPABILITY,
   POST_AS_V2_CAPABILITY,
   type PostAsPlan,
@@ -64,6 +70,8 @@ import {
   RELEASE_REF_CLEANUP_CAPABILITY,
   RELEASE_SHIP_CAPABILITY,
   REPLAY_CAPABILITY,
+  type ReleasePreparePayload,
+  ReleaseSignPayloadSchema,
   type RepoOpenPrPayload,
   type RepoOpenPrResult,
   type RepoReport,
@@ -84,6 +92,7 @@ import {
   SHIFT_LIMIT_REPORT_CAPABILITY,
   type ShiftLimitSetting,
   type ShiftLimitSource,
+  type SignedReleaseProof,
   STORAGE_CAPABILITY,
   STORAGE_DELETE_CAPABILITY,
   shiftLimitSourceOf,
@@ -163,6 +172,7 @@ import { runSshAction, SshSettingsStore } from './forge/ssh.ts';
 import type { ForgeEnv } from './forge/types.ts';
 import { type CompletionInput, executeCompletion } from './git/completion.ts';
 import type { PrCreator } from './git/gh.ts';
+import { git } from './git/git.ts';
 import { AppIdentityError, type AppTokenProbe, appIdentityWire } from './git/identity.ts';
 import { checkBranchMerged } from './git/merged.ts';
 import { runReleaseDocsPrep } from './git/release-docs-prep.ts';
@@ -197,6 +207,15 @@ import { changeOrgFolder, orgFolderCandidates, orgFolderStates } from './org-fol
 import { JourneyWebhookCaller } from './outbound-delivery/journey-webhook.ts';
 import { OutboundDelivery } from './outbound-delivery/send.ts';
 import { type RunnerPaths, runnerPaths } from './paths.ts';
+import { Approvals } from './policy/approvals.ts';
+import { defaultAuthority, type LocalAuthority } from './policy/authority.ts';
+import { ApprovedBundles, describeBundle } from './policy/deploy-detail.ts';
+import { gateCommand, gateDevopsShift, localEnvEnsure, narrowAccess, setupPending } from './policy/gate.ts';
+import { type HeldRecord, HeldStore } from './policy/held.ts';
+import { PasskeyStore } from './policy/passkey-store.ts';
+import { recordSetupOffer } from './policy/setup-offers.ts';
+import type { StartupDecision } from './policy/startup.ts';
+import { NarrowingStore, policyDir } from './policy/store.ts';
 import { forbiddenReadPath } from './read-repos.ts';
 import { RelayDispatcher } from './relay/dispatch.ts';
 import { FileRelaySink, genericHandler } from './relay/generic.ts';
@@ -221,6 +240,13 @@ import { sweepSessionEnvFiles } from './session/shift-credential.ts';
 import { clearServerLimit, loadServerLimit, saveServerLimit } from './shifts/server-limit.ts';
 import { type ShiftCap, ShiftSupervisor, type SupervisorDeps } from './shifts/supervisor.ts';
 import { writeShims } from './shims.ts';
+import { insideRoot, type PrepareExec, prepareRelease, RELEASE_PREP_DIR } from './signing/release-prepare.ts';
+import {
+  ArtefactIndex,
+  type MinisignRunner,
+  signArtefact,
+  verifyArtefactSignature,
+} from './signing/release-sign.ts';
 import { chromiumPdfRenderer, type PdfRenderer } from './storage/pdf.ts';
 import { StorageService } from './storage/service.ts';
 import { selectDotnet } from './toolchain/dotnet.ts';
@@ -326,6 +352,28 @@ export interface RunnerOptions {
   onRunnerPin?: (version: string | null) => void;
   /** "Check for updates" from the web: the self-updater checks now (one updater per process, whichever pairing asked). */
   onUpdateCheck?: () => Promise<RunnerUpdateCheckResult>;
+  /**
+   * The local authority (R18-S): policy.json and the local actions. Default: the files under `policyDir` (or
+   * `~/.config/aom-runner`). Tests inject their own.
+   */
+  authority?: LocalAuthority;
+  /** Where held items, passkey offers and the server narrowing live (default: `policyDir()`). */
+  policyDir?: string;
+  /** The signed-release proof this process sends at every hello (R18-U, R27); null or absent: none (unsigned build). */
+  releaseProof?: () => SignedReleaseProof | null;
+  /**
+   * The start-up check refused (R21): connect only to report it in `hello`, run nothing, and end with exit 78. The host
+   * sets it before starting the runner.
+   */
+  startupRefused?: string;
+  /** The start-up check again, after a welcome that says signed runners are required (R21). */
+  startupCheck?: (serverRequiresSigned: boolean) => Promise<StartupDecision>;
+  /** Test seam: how `release.prepare` runs the package step (default: bash). */
+  prepareExec?: PrepareExec;
+  /** Test seam: how `release.sign` runs minisign (default: the binary). */
+  minisign?: MinisignRunner;
+  /** Test hook: how often decisions of held items are looked for (default 2 s). */
+  approvalsPollMs?: number;
   /** Test seam: timings of the run supervision (see `runs/manager.ts`). */
   runTiming?: Partial<import('./runs/manager.ts').RunTiming>;
   /** Tests shorten the health polling of a deploy. */
@@ -472,10 +520,52 @@ export class Runner {
 
   /** The connection state last written to the status file. */
   private connected = false;
+  /** R18-S: policy.json and the local actions; held items and their approvals. */
+  readonly authority: LocalAuthority;
+  readonly approvals: Approvals;
+  private readonly narrowing: NarrowingStore;
+  private readonly artefacts: ArtefactIndex;
+  private readonly approvedBundles: ApprovedBundles;
+  /** Deploy commands whose approval text is being read before they are held (a re-delivery is not held twice). */
+  private readonly describing = new Set<string>();
+  /** DevOps shifts whose start was approved on this machine (only they may use `aom sudo`) [rv4-2]. */
+  private readonly locallyApprovedShifts = new Set<string>();
+  /** R21: the reason this runner refuses to start (it then only reports it), or null. */
+  private refusedReason: string | null = null;
+  /** The post-welcome start-up check is running: server messages wait in `checkQueue`. */
+  private startupChecking = false;
+  private readonly checkQueue: ServerToRunner[] = [];
 
   constructor(private readonly opts: RunnerOptions) {
     this.log = opts.log ?? nullLogger;
     this.paths = runnerPaths(opts.dataDir);
+    const pdir = opts.policyDir ?? policyDir();
+    this.authority = opts.authority ?? defaultAuthority(pdir);
+    this.narrowing = new NarrowingStore(pdir);
+    this.artefacts = new ArtefactIndex(pdir);
+    this.approvedBundles = new ApprovedBundles(pdir);
+    this.refusedReason = opts.startupRefused ?? null;
+    const serverOrigin = (() => {
+      try {
+        return new URL(opts.config.serverUrl.replace(/^ws/, 'http')).origin;
+      } catch {
+        return opts.config.serverUrl;
+      }
+    })();
+    this.approvals = new Approvals({
+      policy: { get: () => this.authority.policy() },
+      held: new HeldStore(pdir),
+      passkeys: new PasskeyStore(pdir),
+      pairing: this.paths.root,
+      serverOrigin,
+      send: (type, payload) => {
+        if (this.client.isReady) this.client.send(type, payload);
+      },
+      execute: (r) => this.runApproved(r),
+      refuse: (r, reason) => this.refuseHeld(r, reason),
+      log: this.log,
+      ...(opts.approvalsPollMs ? { pollMs: opts.approvalsPollMs } : {}),
+    });
     // the app repositories of this root survive a restart: a registry entry only ever refuses a push
     appRepos.persist(this.paths.root);
     this.relay = new RelayDispatcher({
@@ -762,6 +852,10 @@ export class Runner {
     this.toolchains.onChange = () => this.reportToolchains(false);
     this.runs = new RunManager({
       paths: this.paths,
+      localAllowDocker: () => {
+        const pol = this.authority.policy();
+        return pol.allowDocker && !setupPending(pol);
+      },
       appProbe: this.appProbe,
       findRepo: (n) => this.findRepo(n),
       send: (type, payload) => void this.client.send(type as never, payload as never),
@@ -813,7 +907,15 @@ export class Runner {
           ? Promise.resolve({ ok: true, result: { worktrees: this.supervisor.worktreePaths() } })
           : method === 'hygiene.change_state'
             ? this.changeState(params)
-            : this.rpc(shiftId, method, params),
+            : // R18-D: an agent's `aom devops` is refused here when the owner chose devopsAgentRequests "deny"; with
+              // "ask" the request goes on and the DevOps shift it causes waits for a local yes (the shift gate)
+              method === 'devops.request' && this.authority.policy().devopsAgentRequests === 'deny'
+              ? Promise.resolve({
+                  ok: false,
+                  error:
+                    'DevOps requests from agents are refused on this workstation (policy.json devopsAgentRequests: "deny")',
+                })
+              : this.rpc(shiftId, method, params),
       shiftCap: () => this.effectiveShiftLimit(),
       maxShiftMsOverride: opts.maxShiftMsOverride,
       ...(opts.idle ? { idle: opts.idle } : {}),
@@ -824,7 +926,7 @@ export class Runner {
       ...(opts.prepareWorktree ? { prepareWorktree: opts.prepareWorktree } : {}),
       ...(opts.checksBudgetMs ? { checksBudgetMs: opts.checksBudgetMs } : {}),
       ...(opts.initWorktreeSubmodules ? { initWorktreeSubmodules: opts.initWorktreeSubmodules } : {}),
-      sudoRun: (cmd, args) => this.sudo.run(cmd, args),
+      sudoRun: (cmd, args, shiftId) => this.localSudo(cmd, args, shiftId),
       git: this.agentGit,
       toolchains: this.toolchains,
       runs: this.runs,
@@ -867,7 +969,9 @@ export class Runner {
     this.chat = new ChatManager({
       capabilities: this.capabilities,
       restart: this.restartAfterReply,
-      ceoFullPower: () => this.freshConfig().ceo.fullPower,
+      // R18-S: the opt-in must be in the local policy too, and each full-power turn needs a local action
+      ceoFullPower: () => this.freshConfig().ceo.fullPower && this.authority.policy().ceo.fullPower,
+      takeOwnerTurn: () => this.authority.takeOwnerTurn(),
       ceoOwnerPermissions: () => this.freshConfig().ceo.ownerPermissions,
       diagnostics: (request) => this.diagnostics(request),
       guardClones: () =>
@@ -889,7 +993,7 @@ export class Runner {
       findLocal: (k) => this.findLocal(k),
       git: this.agentGit,
       toolchains: this.toolchains,
-      sudoRun: (cmd, args) => this.sudo.run(cmd, args),
+      sudoRun: (cmd, args) => this.localSudo(cmd, args, null),
       orgSourceFolder: (orgId) => this.orgSourceFolder(orgId),
       repoRoots: () => this.opts.config.repoRoots,
     });
@@ -928,6 +1032,11 @@ export class Runner {
       log: this.log,
     });
     this.deployExec = new DeployExecutor({
+      // R30: the folder of the signed runner release a signed deploy builds with (prepared and verified here)
+      signedReleaseDir: (p) => {
+        const a = p.signing && p.target.id ? this.artefacts.find(p.signing.releaseId, p.target.id) : null;
+        return a ? dirname(a.path) : null;
+      },
       keys: this.deployKeys,
       paths: this.paths,
       vaults: this.vaults,
@@ -969,9 +1078,18 @@ export class Runner {
       keyOf: (name) => this.keys.deriveFileKey(name),
       // Call id, status and duration only: never the URL, a header or the body.
       log: (line) => this.log.info(line),
+      // R18-L: private targets only where the owner listed them (the private-endpoint allow-list)
+      allowPrivate: () => this.providers.endpoints(),
     });
     this.client.on('message', (m) => this.onMessage(m));
     this.client.on('welcome', (w) => {
+      if (this.refusedReason) {
+        // R21: the refusal is reported (hello.startupRefused); nothing runs, and the process ends with exit 78
+        this.log.error(`start-up refused, reported to the server: ${this.refusedReason}`);
+        this.fatalResolve?.(78);
+        return;
+      }
+      if (this.onWelcomeSecurity(w.requireSignedRunners === true)) return;
       this.serverFeatures = new Set(w.features ?? []);
       // Also with nothing to serve: the server then drops whatever an earlier connection of this runner announced.
       this.announceRelay();
@@ -988,6 +1106,7 @@ export class Runner {
       this.runs.reportAll();
       opts.onConnected?.();
       opts.onRunnerPin?.(w.runnerPin?.version ?? null);
+      this.approvals.publish(true);
       this.applyShiftLimit(w.limits.shiftLimit, w.limits.maxConcurrentShifts, w.limits.source);
       this.writeStatus(true);
       this.scheduleStartupSweep();
@@ -1352,6 +1471,15 @@ export class Runner {
   }
 
   async start(): Promise<void> {
+    if (this.refusedReason) {
+      // R21: connect only to report the refusal; if the server cannot be reached, end anyway (exit 78, no restart loop)
+      this.log.error(`start-up refused: ${this.refusedReason}`);
+      this.client.start();
+      const t = setTimeout(() => this.fatalResolve?.(78), 60_000);
+      t.unref();
+      this.timers.push(t);
+      return;
+    }
     await writeShims(this.paths.bin);
     await this.ipc.start();
     await this.ipc.startSocket().catch((err) => this.log.warn(`IPC socket unavailable: ${String(err)}`));
@@ -1389,6 +1517,7 @@ export class Runner {
     // what the organization vault clone already holds is known before the first sync of this process finishes
     for (const id of this.vaults.configured()) this.indexCapabilities(id);
     this.client.start();
+    this.approvals.start();
     this.sync.start(this.opts.syncIntervalMs);
     const t = setInterval(() => void this.rescan(), this.opts.rescanMs ?? 600_000);
     t.unref();
@@ -1438,6 +1567,11 @@ export class Runner {
 
   async stop(): Promise<void> {
     for (const t of this.timers) clearInterval(t);
+    this.approvals.stop();
+    if (this.refusedReason) {
+      await this.client.stop();
+      return;
+    }
     this.integrations.stop();
     this.sync.stop();
     this.vaults.stop();
@@ -1700,8 +1834,27 @@ export class Runner {
   }
 
   private async buildHello(): Promise<Record<string, unknown>> {
+    const proof = this.opts.releaseProof?.() ?? null;
+    if (this.refusedReason)
+      // R21: a refused runner connects only to say why; it reports nothing else and runs nothing
+      return {
+        runnerVersion: RUNNER_VERSION,
+        protocol: 1,
+        platform: platform(),
+        hostname: hostname(),
+        runtimes: [],
+        repos: [],
+        vaults: [],
+        activeShifts: [],
+        outboxPending: 0,
+        startupRefused: this.refusedReason.slice(0, 300),
+        ...(proof ? { release: proof } : {}),
+      };
     await this.scan();
     return {
+      ...(proof ? { release: proof } : {}),
+      // always sent (true or false): the server then knows grants are held locally (W7 `localAuthority`)
+      setupPending: setupPending(this.authority.policy()),
       runnerVersion: RUNNER_VERSION,
       protocol: 1,
       platform: platform(),
@@ -2034,7 +2187,9 @@ export class Runner {
   }
 
   /** `env.ensure`: detect the stacks of the project's repositories, verify and install their tools. */
-  private ensureEnv(p: EnvEnsurePayload) {
+  private ensureEnv(payload: EnvEnsurePayload) {
+    // R18-S: sudo and Docker only where granted locally, whatever the server's access says
+    const p = localEnvEnsure(this.authority.policy(), payload);
     return ensureEnvironment(p, {
       exec: this.exec,
       platform: this.platform(),
@@ -2045,6 +2200,8 @@ export class Runner {
         selectDotnet({
           ...(this.opts.config.dotnetRoot ? { override: this.opts.config.dotnetRoot } : {}),
         }),
+      // R18-S: installs run their scripts only for repositories allowed on this workstation
+      installScriptsAllowed: (remote) => this.authority.policy().installScripts[remote] === true,
     });
   }
 
@@ -2164,15 +2321,29 @@ export class Runner {
   }
 
   private onMessage(msg: ServerToRunner): void {
+    // R21 (round-1 should-fix 1): a refused runner runs nothing at all; while the post-welcome start-up check runs,
+    // server messages wait and are replayed (or dropped on a refusal)
+    if (this.refusedReason) return;
+    if (this.startupChecking) {
+      if (this.checkQueue.length < 1000) this.checkQueue.push(msg);
+      return;
+    }
     switch (msg.type) {
       case 'shift.start': {
+        if (this.refusedReason) break;
         const urls = msg.kind === 'devops' ? devopsRepoUrls(msg.postAs) : payloadRepoUrls(msg);
         const refused = this.tripwireGate(urls, msg.postAs, 'shift start');
         if (refused) this.supervisor.refuseStart(msg.shiftId, refused);
-        else void this.supervisor.handleStart(msg);
+        else this.startShiftGated(msg);
         break;
       }
       case 'shift.stop':
+        this.approvals.withdraw(
+          (r) =>
+            r.replay.type === 'shift.start' &&
+            (r.replay.body as { shiftId?: string })?.shiftId === msg.shiftId,
+          'the server stopped the shift',
+        );
         void this.supervisor.handleStop(msg.shiftId, msg.reason);
         break;
       case 'shift.kill_tools':
@@ -2214,15 +2385,22 @@ export class Runner {
             break;
           }
         }
-        void this.runCommand(msg.commandId, msg.command, msg.payload);
+        if (this.refusedReason) break;
+        this.runCommandGated(msg.commandId, msg.command, msg.payload);
         break;
       case 'run.follow':
         this.runs.follow(msg.envId, msg.follow);
         break;
       case 'chat.start':
-        void this.chat.handleStart(msg);
+        if (this.refusedReason) break;
+        this.startChatGated(msg);
         break;
       case 'chat.cancel':
+        this.approvals.withdraw(
+          (r) =>
+            r.replay.type === 'chat.start' && (r.replay.body as { chatId?: string })?.chatId === msg.chatId,
+          'the server cancelled the chat',
+        );
         void this.chat.handleCancel(msg.chatId);
         break;
       case 'storage.write.open':
@@ -2258,6 +2436,419 @@ export class Runner {
     }
   }
 
+  // ---------------------------------------------------------------- local authority (R18-S, R21, R22, R30)
+
+  /**
+   * A welcome's security part (R21): cache "Only signed runners" (the next start then refuses before connecting) and run
+   * the start-up check again; when it now refuses, reconnect to report it and end. Returns true when refusing.
+   */
+  private onWelcomeSecurity(requireSigned: boolean): boolean {
+    try {
+      this.narrowing.setRequireSignedRunners(
+        new URL(this.opts.config.serverUrl.replace(/^ws/, 'http')).origin,
+        requireSigned,
+      );
+    } catch (err) {
+      this.log.warn(`could not cache the server's signed-runner setting: ${String(err)}`);
+    }
+    if (!requireSigned || !this.opts.startupCheck) return false;
+    this.startupChecking = true;
+    void this.opts
+      .startupCheck(true)
+      .then(async (d) => {
+        const queued = this.checkQueue.splice(0);
+        this.startupChecking = false;
+        if (d.action !== 'refuse' || this.refusedReason) {
+          for (const m of queued) this.onMessage(m);
+          return;
+        }
+        this.refusedReason = d.reason;
+        this.log.error(
+          `start-up refused after the welcome (the server requires signed runners): ${d.reason}`,
+        );
+        await this.supervisor.stopAll('manager').catch(() => undefined);
+        // reconnect so the hello carries the reason; the next welcome ends the process with exit 78
+        await this.client.stop();
+        this.client.start();
+      })
+      .catch((err) => {
+        // the probe itself failed: the check before connecting already passed, so go on and say so
+        this.log.warn(`the post-welcome start-up check failed to run: ${String(err)}`);
+        const queued = this.checkQueue.splice(0);
+        this.startupChecking = false;
+        for (const m of queued) this.onMessage(m);
+      });
+    return false;
+  }
+
+  /** A server command through the local gate: run it, hold it for `guildwise-runner approve`, or refuse it. */
+  private runCommandGated(
+    commandId: string,
+    command: RunnerCommandName,
+    payload: Record<string, unknown>,
+  ): void {
+    const repo = (payload as { repo?: { repoId?: unknown; remoteUrlNormalized?: unknown } | null }).repo;
+    if (repo) this.learnRepo(repo.repoId, repo.remoteUrlNormalized);
+    const repos = (payload as { repos?: unknown }).repos;
+    if (Array.isArray(repos))
+      for (const r of repos as Array<{ repoId?: unknown; remoteUrlNormalized?: unknown }>)
+        this.learnRepo(r.repoId, r.remoteUrlNormalized);
+    this.learnRepo(payload.repoId, payload.remoteUrlNormalized);
+    const policy = this.authority.policy();
+    const d = gateCommand(policy, command, payload, { remoteOf: (id) => this.remoteOfRepo(id) });
+    if (d.action === 'run' || (d.action === 'hold' && this.authority.autoApprove?.(d.kind))) {
+      // only a deploy waits for its bundle snapshot; every other command is dispatched at once, in arrival order
+      if (command === 'deploy.exec')
+        void this.recordApprovedBundle(command, payload).then(() =>
+          this.runCommand(commandId, command, payload),
+        );
+      else void this.runCommand(commandId, command, payload);
+      return;
+    }
+    if (d.action === 'refuse') {
+      this.log.warn(`command ${command} refused by the local policy: ${d.reason}`);
+      this.client.send('command.result', { commandId, ok: false, error: d.reason });
+      return;
+    }
+    const body: Record<string, unknown> = { commandId, command, payload };
+    if (command === 'release.sign') {
+      const p = ReleaseSignPayloadSchema.parse(payload);
+      body.artefactPath = this.artefacts.find(p.releaseId, p.targetId)?.path ?? null;
+    }
+    if (command === 'deploy.exec') {
+      // the script, env names and diff go into the item BEFORE it is held, so an immediate approve sees them
+      if (this.describing.has(commandId)) return;
+      this.describing.add(commandId);
+      void this.describeDeploy(payload)
+        .then((extra) =>
+          this.holdOrAnswer(commandId, {
+            decision: { ...d, detail: `${d.detail}\n\n${extra}` },
+            commandId,
+            replay: { type: 'command', body },
+          }),
+        )
+        .finally(() => this.describing.delete(commandId));
+      return;
+    }
+    this.holdOrAnswer(commandId, { decision: d, commandId, replay: { type: 'command', body } });
+  }
+
+  /** Holds a command; if it cannot be held, the server gets an error answer instead of silence (Follow-up 3). */
+  private holdOrAnswer(commandId: string, input: Parameters<Approvals['hold']>[0]): void {
+    try {
+      this.approvals.hold(input);
+    } catch (err) {
+      const why = `could not hold the command for a local approval: ${err instanceof Error ? err.message : String(err)}`;
+      this.log.error(why);
+      this.client.send('command.result', { commandId, ok: false, error: why.slice(0, 500) });
+    }
+  }
+
+  /** REVIEW blocker 3: the deploy prompt shows the script, the env names and the diff since the last approved deploy. */
+  private async describeDeploy(payload: Record<string, unknown>): Promise<string> {
+    const p = DeployExecPayloadSchema.parse(payload);
+    try {
+      const snap = await Promise.race([
+        this.deployExec.snapshot(p),
+        new Promise<never>((_, no) =>
+          setTimeout(() => no(new Error('reading the recipe took too long')), 60_000).unref(),
+        ),
+      ]);
+      return describeBundle(p, snap, this.approvedBundles.get(p));
+    } catch (err) {
+      return `WARNING: the recipe could not be read on this workstation (${err instanceof Error ? err.message : String(err)}); the run refuses anything but recipe hash ${p.hash}.`;
+    }
+  }
+
+  /** The bundle a deploy runs with, kept for the next approval's diff. Best effort; never blocks the run. */
+  private async recordApprovedBundle(command: string, payload: Record<string, unknown>): Promise<void> {
+    if (command !== 'deploy.exec') return;
+    try {
+      const p = DeployExecPayloadSchema.parse(payload);
+      const snap = await this.deployExec.snapshot(p);
+      if (snap.hash === p.hash) this.approvedBundles.put(p, snap);
+    } catch {
+      // the run itself reports why the bundle cannot be read
+    }
+  }
+
+  /** A shift start through the local gate: DevOps shifts need a local grant and (unless `auto`) a local yes [rv4-2]. */
+  private startShiftGated(msg: Extract<ServerToRunner, { type: 'shift.start' }>): void {
+    this.learnRepo(msg.worktree?.repoId, msg.worktree?.remoteUrlNormalized);
+    if (!msg.agent?.isDevops && msg.kind !== 'devops') {
+      void this.supervisor.handleStart(msg);
+      return;
+    }
+    const policy = this.authority.policy();
+    const orgId = msg.orgId ?? '';
+    const d = gateDevopsShift(
+      policy,
+      {
+        orgId,
+        agentId: msg.agent.agentId,
+        agentName: msg.agent.name,
+        shiftId: msg.shiftId,
+        ...(msg.devops?.summary
+          ? { request: msg.devops.summary, cardTitle: msg.devops.summary.slice(0, 120) }
+          : {}),
+        ...(msg.devops?.requestedBy?.name ? { requester: msg.devops.requestedBy.name } : {}),
+        kind: msg.kind,
+        ...(msg.devops?.access ? { access: msg.devops.access } : {}),
+      },
+      this.authority.devopsGranted(orgId, msg.agent.agentId),
+    );
+    if (d.action === 'refuse') {
+      // what the server offers becomes a suggestion for `guildwise-runner setup` (W9), never a grant
+      if (orgId)
+        try {
+          recordSetupOffer(this.paths.root, {
+            orgId,
+            orgName: `organization ${orgId.slice(0, 8)}`,
+            role: 'unknown',
+            devopsAgentId: msg.agent.agentId,
+          });
+        } catch (err) {
+          this.log.warn(`could not record the DevOps offer for setup: ${String(err)}`);
+        }
+      this.supervisor.refuseStart(msg.shiftId, d.reason);
+      return;
+    }
+    if (d.action === 'run' || (d.action === 'hold' && this.authority.autoApprove?.(d.kind))) {
+      if (d.action === 'hold') this.locallyApprovedShifts.add(msg.shiftId);
+      void this.supervisor.handleStart(this.narrowShift(msg));
+      return;
+    }
+    this.approvals.hold({ decision: d, replay: { type: 'shift.start', body: msg } });
+  }
+
+  /**
+   * A DevOps chat turn runs as the user, outside the sandbox (REVIEW blocker 1): the same local grant and local yes as a
+   * DevOps shift. Without a grant it is refused; with one each turn waits for `guildwise-runner approve` unless the owner
+   * chose `devopsRequests: auto` (never with sudo). Other chats are not affected.
+   */
+  private startChatGated(msg: Extract<ServerToRunner, { type: 'chat.start' }>): void {
+    if (!msg.agent?.isDevops) {
+      void this.chat.handleStart(msg);
+      return;
+    }
+    const orgId = msg.context?.orgId ?? '';
+    const d = gateDevopsShift(
+      this.authority.policy(),
+      {
+        orgId,
+        agentId: msg.agent.agentId,
+        agentName: msg.agent.name,
+        shiftId: msg.chatId,
+        cardTitle: 'DevOps chat turn',
+        request: msg.message.slice(0, 4000),
+      },
+      this.authority.devopsGranted(orgId, msg.agent.agentId),
+    );
+    if (d.action === 'refuse') {
+      this.chat.refuseStart(msg, d.reason);
+      return;
+    }
+    if (d.action === 'run' || (d.action === 'hold' && this.authority.autoApprove?.(d.kind))) {
+      void this.chat.handleStart(msg);
+      return;
+    }
+    this.approvals.hold({
+      decision: { ...d, summary: `DevOps chat turn for ${msg.agent.name}: ${msg.message}`.slice(0, 300) },
+      replay: { type: 'chat.start', body: msg },
+    });
+  }
+
+  /** The server's DevOps access flags narrowed to what policy.json grants (sudo, Docker); never widened. */
+  private narrowShift(msg: Extract<ServerToRunner, { type: 'shift.start' }>): typeof msg {
+    if (!msg.devops) return msg;
+    return {
+      ...msg,
+      devops: { ...msg.devops, access: narrowAccess(this.authority.policy(), msg.devops.access) },
+    };
+  }
+
+  /** Runs a held item once it was approved (locally, or by a passkey for the two routine kinds). */
+  private async runApproved(r: HeldRecord): Promise<void> {
+    if (r.replay.type === 'shift.start') {
+      const msg = r.replay.body as Extract<ServerToRunner, { type: 'shift.start' }>;
+      this.locallyApprovedShifts.add(msg.shiftId);
+      await this.supervisor.handleStart(this.narrowShift(msg));
+      return;
+    }
+    if (r.replay.type === 'chat.start') {
+      await this.chat.handleStart(r.replay.body as Extract<ServerToRunner, { type: 'chat.start' }>);
+      return;
+    }
+    if (r.replay.type !== 'command') return;
+    const b = r.replay.body as {
+      commandId: string;
+      command: RunnerCommandName;
+      payload: Record<string, unknown>;
+      artefactPath?: string | null;
+    };
+    if (b.command === 'release.sign' && r.signature) {
+      // signed at the keyboard by `guildwise-runner approve` (a passphrase key signs only there)
+      const p = ReleaseSignPayloadSchema.parse(b.payload);
+      this.client.send('command.result', {
+        commandId: b.commandId,
+        ok: true,
+        result: { keyId: p.keyId, artefactSha256: p.artefactSha256, minisig: r.signature },
+      });
+      return;
+    }
+    await this.recordApprovedBundle(b.command, b.payload);
+    await this.runCommand(b.commandId, b.command, b.payload);
+  }
+
+  private refuseHeld(r: HeldRecord, reason: string): void {
+    if (r.replay.type === 'chat.start') {
+      this.chat.refuseStart(r.replay.body as Extract<ServerToRunner, { type: 'chat.start' }>, reason);
+      return;
+    }
+    if (r.replay.type === 'shift.start') {
+      this.supervisor.refuseStart((r.replay.body as { shiftId: string }).shiftId, reason);
+      return;
+    }
+    const commandId = (r.replay.body as { commandId?: string }).commandId;
+    if (commandId) this.client.send('command.result', { commandId, ok: false, error: reason });
+  }
+
+  /**
+   * `aom sudo` (R18-S): sudo must be granted locally (`guildwise-runner sudo enable`), and from a DevOps shift only when
+   * that shift's start was approved on this machine. The DevOps chat has the owner in the conversation, but sudo still
+   * needs the local grant.
+   */
+  private async localSudo(
+    cmd: string,
+    args: string[],
+    shiftId: string | null,
+  ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+    const refuse = (why: string) => ({ exitCode: 1, stdout: '', stderr: `refused: ${why}` });
+    const policy = this.authority.policy();
+    if (!policy.devops.sudo)
+      return refuse('sudo is not granted on this workstation (guildwise-runner sudo enable)');
+    if (setupPending(policy))
+      return refuse('setup pending: run `guildwise-runner setup` on the workstation first');
+    if (shiftId && !this.locallyApprovedShifts.has(shiftId))
+      return refuse('this DevOps task was not approved on the workstation');
+    return this.sudo.run(cmd, args);
+  }
+
+  /** repoId -> normalized remote, learned from server payloads that carry both (the runner has no other map). */
+  private learnRepo(repoId: unknown, remote: unknown): void {
+    if (typeof repoId !== 'string' || typeof remote !== 'string' || !repoId || !remote) return;
+    const file = join(this.paths.root, 'repo-ids.json');
+    let map: Record<string, string> = {};
+    try {
+      map = JSON.parse(readFileSync(file, 'utf8')) as Record<string, string>;
+    } catch {
+      // first entry
+    }
+    if (map[repoId] === remote) return;
+    map[repoId] = remote;
+    try {
+      writeFileSync(file, `${JSON.stringify(map)}\n`, { mode: 0o600 });
+    } catch {
+      // advisory
+    }
+  }
+
+  private remoteOfRepo(repoId: string): string | null {
+    try {
+      const map = JSON.parse(readFileSync(join(this.paths.root, 'repo-ids.json'), 'utf8')) as Record<
+        string,
+        string
+      >;
+      return map[repoId] ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** `release.prepare` after its local approval (R30, W14): package, record, report the exact manifest text. */
+  private async releasePrepare(
+    p: ReleasePreparePayload,
+  ): Promise<{ artefactSha256: string; version: string }> {
+    const remote = this.remoteOfRepo(p.repoId);
+    const repo = remote ? await this.findRepo(remote) : undefined;
+    if (!repo)
+      throw new Error(`repository ${p.repoId} has no clone on this workstation that the runner knows of`);
+    const r = await prepareRelease({
+      payload: p,
+      repoPath: repo.localPath,
+      workRoot: join(this.paths.root, RELEASE_PREP_DIR),
+      git: (cwd, args) => git(cwd, args, { timeoutMs: 300_000 }),
+      ...(this.opts.prepareExec ? { exec: this.opts.prepareExec } : {}),
+    });
+    this.artefacts.record({
+      releaseId: p.releaseId,
+      targetId: p.targetId,
+      path: r.artefactPath,
+      sha256: r.sha256,
+      version: p.version,
+    });
+    this.client.send('release.artefact.prepared', {
+      releaseId: p.releaseId,
+      targetId: p.targetId,
+      artefactSha256: r.sha256,
+      version: p.version,
+      manifest: r.manifest,
+    });
+    return { artefactSha256: r.sha256, version: p.version };
+  }
+
+  /**
+   * R30 gate on the workstation (W14 review item 3): a deploy to a target that requires a signed runner runs only when the
+   * signature verifies against the target's key and the prepared manifest on disk; it is then written beside it.
+   * Returns the refusal, or null to go on.
+   */
+  private checkDeploySignature(p: DeployExecPayload): DeployExecResult | null {
+    if (!p.signing) return null;
+    const refuse = (why: string): DeployExecResult => ({
+      outcome: 'refused',
+      refused: 'runner_signature_invalid',
+      summary: `refused: the runner signature does not hold (${why})`.slice(0, 500),
+      logTail: '',
+      durationMs: 0,
+    });
+    const found = p.target.id ? this.artefacts.find(p.signing.releaseId, p.target.id) : null;
+    if (!found) return refuse('the runner was not prepared for this target on this workstation');
+    if (!insideRoot(join(this.paths.root, RELEASE_PREP_DIR), found.path))
+      return refuse('the artefact is outside the prepared releases');
+    if (found.sha256 !== p.signing.artefactSha256)
+      return refuse('the prepared manifest is not the one that was signed');
+    const v = verifyArtefactSignature({
+      artefactPath: found.path,
+      minisig: p.signing.minisig,
+      targetPublicKey: p.signing.publicKey,
+      expectedSha256: p.signing.artefactSha256,
+      writeBeside: true,
+    });
+    if (!v.ok) return refuse(v.reason);
+    if (v.keyId !== p.signing.keyId) return refuse(`signed by ${v.keyId}, not ${p.signing.keyId}`);
+    return null;
+  }
+
+  /** `release.sign` that runs unattended (a local `autoSign` key without a passphrase) or after a local approval (R30). */
+  private async releaseSign(payload: Record<string, unknown>): Promise<unknown> {
+    const p = ReleaseSignPayloadSchema.parse(payload);
+    const key = this.authority.policy().signingKeys.find((k) => k.keyId === p.keyId);
+    if (!key) throw new Error(`this workstation holds no signing key ${p.keyId}`);
+    const artefact = this.artefacts.find(p.releaseId, p.targetId);
+    if (!artefact)
+      throw new Error(
+        `the artefact of release ${p.releaseId} for ${p.targetName} is not on this workstation`,
+      );
+    return signArtefact({
+      payload: p,
+      key,
+      artefactPath: artefact.path,
+      interactive: false,
+      allowedRoot: join(this.paths.root, RELEASE_PREP_DIR),
+      ...(this.opts.minisign ? { minisign: this.opts.minisign } : {}),
+    });
+  }
+
   private async runCommand(
     commandId: string,
     command: RunnerCommandName,
@@ -2285,6 +2876,17 @@ export class Runner {
             roots: [this.paths.worktrees],
           }),
         );
+      } else if (command === 'release.sign') {
+        done(true, await this.releaseSign(payload));
+      } else if (command === 'passkey.offer') {
+        this.approvals.onPasskeyOffer(PasskeyOfferPayloadSchema.parse(payload));
+        done(true, { pending: true });
+      } else if (command === 'passkey.withdraw') {
+        this.approvals.onPasskeyWithdraw(PasskeyWithdrawPayloadSchema.parse(payload).credentialId);
+        done(true, {});
+      } else if (command === 'approval.passkey') {
+        const r = await this.approvals.onPasskeyAssertion(ApprovalPasskeyPayloadSchema.parse(payload));
+        done(r.ok, r, r.ok ? undefined : r.reason);
       } else if (command === 'runner.pin') {
         // Safe mode: the platform team pinned (or unpinned) this workstation's runner version.
         const p = CommandPayloadSchemas['runner.pin'].parse(payload);
@@ -2414,7 +3016,11 @@ export class Runner {
         done(true, await this.deployMover.run(CommandPayloadSchemas['deploy.move'].parse(payload)));
       } else if (command === 'deploy.exec') {
         // Runs an approved deploy outside any model. A refusal or a failed deploy is an ANSWER: the server never retries it.
-        done(true, await this.deployExec.run(CommandPayloadSchemas['deploy.exec'].parse(payload)));
+        const p = CommandPayloadSchemas['deploy.exec'].parse(payload);
+        const unsigned = this.checkDeploySignature(p);
+        done(true, unsigned ?? (await this.deployExec.run(p)));
+      } else if (command === 'release.prepare') {
+        done(true, await this.releasePrepare(CommandPayloadSchemas['release.prepare'].parse(payload)));
       } else if (command === 'deploy.secret.set') {
         // Ciphertext in, a fact out: the value is never in an answer, a log line or an event.
         done(true, this.deploySecrets.setFor(CommandPayloadSchemas['deploy.secret.set'].parse(payload)));
@@ -2567,6 +3173,7 @@ export class Runner {
                 return { ...r, timedOut: false };
               },
               toolPathDirs: toolchainPathDirs(this.toolchains.resolve().pathDirs, process.env.PATH),
+              formatterPinned: (hash) => this.authority.policy().formatterPins.includes(hash),
             })
           : {
               ok: false,

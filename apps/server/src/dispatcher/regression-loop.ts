@@ -123,6 +123,8 @@ async function redeployDueStep(ctx: Ctx): Promise<void> {
         ({ requestId } = await createDevOpsRequestIn(ctx, tx, {
           workstationId: l.workstation_id,
           orgId: project.org_id,
+          // 1.10.0 (R18-D): the project organization's own engineer only.
+          strictOrg: true,
           // No card link: the DevOps brief would carry the run card's thread, which holds tester text (the paused
           // project hold works through the context's project, as for phase follow-ups).
           requestedBy: { kind: 'system', id: null, name: 'Regression loop' },

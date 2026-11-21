@@ -1002,9 +1002,9 @@ describe('TikTok', () => {
   });
 
   it('connect redirects to TikTok with a server-side state; the callback stores encrypted tokens; a bad state is refused', async () => {
-    const r = await api('GET', '/api/platform/social/tiktok/connect');
-    expect(r.status).toBe(302);
-    const loc = new URL(r.headers.location);
+    const r = await api('POST', '/api/platform/social/tiktok/connect');
+    expect(r.status).toBe(200);
+    const loc = new URL(r.body.url);
     expect(loc.origin + loc.pathname).toBe('https://www.tiktok.com/v2/auth/authorize/');
     expect(loc.searchParams.get('client_key')).toBe('tt-key');
     expect(loc.searchParams.get('scope')).toBe('user.info.basic,video.publish');
@@ -1026,9 +1026,50 @@ describe('TikTok', () => {
     const forged = await api('GET', '/api/platform/social/tiktok/callback?code=abc&state=forged');
     expect(forged.headers.location).toContain('tiktok=error');
     const member = await t.userSession('member-tt@example.com');
-    expect((await api('GET', '/api/platform/social/tiktok/connect', undefined, member.cookie)).status).toBe(
+    expect((await api('POST', '/api/platform/social/tiktok/connect', undefined, member.cookie)).status).toBe(
       404,
     );
+  });
+});
+
+describe('the TikTok state is bound to the session and its step-up (R5 follow-up)', () => {
+  const state = async () =>
+    new URL((await ok<any>(api('POST', '/api/platform/social/tiktok/connect'))).url).searchParams.get(
+      'state',
+    ) as string;
+  const callback = (st: string, cookie = sa.cookie) =>
+    api('GET', `/api/platform/social/tiktok/callback?code=abc&state=${st}`, undefined, cookie);
+
+  it('another session of the same super admin cannot finish it', async () => {
+    const { createSession, SESSION_COOKIE } = await import('../src/auth/sessions.ts');
+    const other = await createSession(t.app.ctx, sa.id, {}, 'password_totp');
+    const cb = await callback(await state(), `${SESSION_COOKIE}=${other.token}`);
+    expect(cb.headers.location).toContain('tiktok=error');
+    expect(new URL(cb.headers.location).searchParams.get('message')).toMatch(/not started from this session/);
+  });
+
+  it('a state without a step-up proof, or with one already stale when it was made, is refused', async () => {
+    const { lookupSession } = await import('../src/auth/sessions.ts');
+    const s = await lookupSession(t.app.ctx, sa.cookie.split('=')[1] as string);
+    const now = t.clock.now();
+    const put = (name: string, value: Record<string, unknown>) =>
+      q(`INSERT INTO platform_settings (key, value, updated_by, updated_at) VALUES ($1,$2::jsonb,$3,$4)`, [
+        `tiktok_oauth_state:${name}`,
+        JSON.stringify(value),
+        sa.id,
+        now,
+      ]);
+    const base = { userId: sa.id, sessionId: s?.sessionId, at: now.toISOString() };
+    await put('noproof', { ...base, stepUpAt: null });
+    await put('staleproof', {
+      ...base,
+      stepUpAt: new Date(now.getTime() - (t.app.ctx.config.stepUpWindowSec + 1) * 1000).toISOString(),
+    });
+    await put('legacy', { userId: sa.id, at: now.toISOString() });
+    for (const st of ['noproof', 'staleproof', 'legacy'])
+      expect((await callback(st)).headers.location, st).toContain('tiktok=error');
+    // the same session with its fresh proof still connects
+    expect((await callback(await state())).headers.location).toContain('tiktok=connected');
   });
 });
 
@@ -1252,7 +1293,7 @@ describe('TikTok token, state and disconnect', () => {
   });
 
   it('a callback state works once, also when two callbacks arrive together; old states are purged', async () => {
-    const loc = new URL((await api('GET', '/api/platform/social/tiktok/connect')).headers.location);
+    const loc = new URL((await api('POST', '/api/platform/social/tiktok/connect')).body.url);
     const state = loc.searchParams.get('state') as string;
     const [x, y] = await Promise.all([
       api('GET', `/api/platform/social/tiktok/callback?code=a&state=${state}`),
@@ -1267,7 +1308,7 @@ describe('TikTok token, state and disconnect', () => {
     await q(
       `INSERT INTO platform_settings (key, value, updated_by, updated_at) VALUES ('tiktok_oauth_state:old','{}'::jsonb,NULL, now() - interval '1 hour')`,
     );
-    await api('GET', '/api/platform/social/tiktok/connect');
+    await api('POST', '/api/platform/social/tiktok/connect');
     expect(await q(`SELECT 1 FROM platform_settings WHERE key='tiktok_oauth_state:old'`)).toHaveLength(0);
   });
 

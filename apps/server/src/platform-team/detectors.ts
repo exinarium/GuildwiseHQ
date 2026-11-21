@@ -6,7 +6,14 @@ import type { Ctx } from '../context.ts';
 import { one, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { expireGrants } from './grants.ts';
-import { drainBugs, markFixedBugs, reportBug, specifyStuckBugCards } from './intake.ts';
+import {
+  drainBugs,
+  markFixedBugs,
+  RUNNER_BUG_SIGNATURE_SQL,
+  reportBug,
+  runnerBugSignature,
+  specifyStuckBugCards,
+} from './intake.ts';
 import { resumeFixedPauses } from './pause.ts';
 import { getPlatformTeam } from './settings.ts';
 
@@ -40,29 +47,90 @@ const clientOf = (orgId: string | null | undefined, platform: string | null): st
 
 // ---------------------------------------------------------------------------------------------- runner errors
 
+/*
+ * 1.10.0 (R18-T, DIAGNOSIS finding 3): any paired runner can send `runner.error`, so its text is attacker-controlled. A
+ * card is built only from what can be pattern-checked: a hash of the signature, the error class, the runner version,
+ * the platform and `file:line` tokens of the top frames. The message (and every other free text) stays in
+ * `runner_errors`, never in a card, its diagnostics, the desk item or a prompt.
+ */
+
+/** The most frames a runner-error card shows. */
+export const RUNNER_ERROR_MAX_FRAMES = 5;
+const FRAME_FILE = /^[A-Za-z0-9_.-]{1,80}\.(?:[cm]?[jt]sx?)$/;
+const FRAME_AT = /(?:^|[\s(])((?:file:\/\/)?[^\s()]+?):(\d{1,6})(?::\d{1,6})?\)?$/;
+const ERROR_CLASS = /^[A-Z][A-Za-z0-9]{0,40}(?:Error|Exception)$/;
+const RUNNER_VERSION_RE = /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:-[0-9A-Za-z.]{1,20})?$/;
+const PLATFORM_RE = /^[a-z0-9_-]{1,20}$/;
+const KNOWN_CONTEXTS = new Set(['uncaughtException', 'unhandledRejection']);
+
+/**
+ * `file:line` tokens of the top frames of a runner-supplied stack: only frames whose file basename looks like a script
+ * file (`aom-runner.mjs:12`), at most `max`; function names and anything else are dropped.
+ */
+export function runnerFrameTokens(stack: string | null | undefined, max = RUNNER_ERROR_MAX_FRAMES): string[] {
+  const out: string[] = [];
+  for (const raw of String(stack ?? '').split('\n')) {
+    const line = raw.trim();
+    if (!line.startsWith('at ')) continue;
+    const m = FRAME_AT.exec(line);
+    if (!m) continue;
+    const file =
+      (m[1] as string)
+        .replace(/[?#].*$/, '')
+        .split(/[\\/]/)
+        .pop() ?? '';
+    if (!FRAME_FILE.test(file)) continue;
+    out.push(`${file}:${Number(m[2])}`);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/** The error class from the runner's signature (`TypeError:...`), when it is one; otherwise `Error`. */
+export function runnerErrorClass(signature: string): string {
+  const head = signature.split(':')[0] ?? '';
+  return ERROR_CLASS.test(head) ? head : 'Error';
+}
+
+const safeVersion = (v: unknown): string =>
+  typeof v === 'string' && RUNNER_VERSION_RE.test(v) ? v : 'unknown';
+const safePlatform = (v: unknown): string | null => (typeof v === 'string' && PLATFORM_RE.test(v) ? v : null);
+
 async function scanRunnerErrors(ctx: Ctx): Promise<number> {
   const list = await rows(
     ctx.pool,
-    `SELECT re.* FROM runner_errors re LEFT JOIN platform_bugs b ON b.signature = 'runner:' || re.signature
+    `SELECT re.*, w.platform AS last_platform FROM runner_errors re
+       LEFT JOIN workstations w ON w.id = re.last_workstation_id
+       LEFT JOIN platform_bugs b ON b.signature = ${RUNNER_BUG_SIGNATURE_SQL('re.signature')}
       WHERE b.signature IS NULL OR re.occurrences > b.occurrences ORDER BY re.last_seen_at LIMIT 50`,
   );
   for (const e of list) {
     const crash = e.context === 'uncaughtException';
+    const signature = runnerBugSignature(String(e.signature));
+    const cls = runnerErrorClass(String(e.signature));
+    const frames = runnerFrameTokens(e.stack);
+    const first = safeVersion(e.first_version);
+    const last = safeVersion(e.last_version);
+    const platform = safePlatform(e.last_platform);
+    const context = KNOWN_CONTEXTS.has(e.context) ? (e.context as string) : null;
+    const where = frames[0] ?? 'an unknown location';
     await reportBug(ctx, {
       source: 'runner_error',
-      signature: `runner:${e.signature}`,
-      title: String(e.message).slice(0, 200) || e.signature,
-      description: String(e.message),
+      signature,
+      title: `Runner ${cls} at ${where} (runner ${last}${platform ? `, ${platform}` : ''})`,
+      description: `The runner reported ${cls} at ${where}.`,
       absoluteCount: Number(e.occurrences),
       diagnostics: {
         kind: 'runner_error',
-        summary: `The runner reported "${String(e.message).slice(0, 300)}" (${e.context ?? 'no context'}).`,
-        runnerSignature: e.signature,
-        context: e.context,
-        topFrames: topFrames(e.stack ?? undefined),
+        summary: `The runner reported ${cls} at ${where} on version ${last}${platform ? ` (${platform})` : ''}${context ? `, ${context}` : ''}. Its message stays with the runner errors (not copied here: runner text is untrusted).`,
+        runnerSignature: signature.slice('runner:'.length),
+        errorClass: cls,
+        ...(context ? { context } : {}),
+        ...(platform ? { platform } : {}),
+        topFrames: frames,
         occurrences: Number(e.occurrences),
         workstations: Number(e.workstation_count),
-        versions: { first: e.first_version, last: e.last_version },
+        versions: { first, last },
       },
       // A crash loop on one workstation is what makes the workstation worth pausing; a handled error is not.
       ...(crash && Number(e.workstation_count) === 1 && e.last_workstation_id

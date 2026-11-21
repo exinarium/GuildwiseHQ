@@ -9,6 +9,7 @@ export * from './move.ts';
 export * from './probe.ts';
 export * from './protocol.ts';
 export * from './recipe.ts';
+export * from './release-signing.ts';
 export * from './setup.ts';
 export * from './setup-compile.ts';
 export { STATE_PATHS_FN } from './setup-compile-direct.ts';

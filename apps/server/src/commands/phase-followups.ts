@@ -12,7 +12,7 @@ import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { Tx } from '../db/tx.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { SYSTEM_ACTOR } from './common.ts';
-import { createDevOpsRequestIn } from './devops.ts';
+import { createDevOpsRequestIn, devopsAgentOn } from './devops.ts';
 import {
   actorOf,
   baTaskCompleted,
@@ -264,6 +264,14 @@ export async function startFollowup(ctx: Ctx, tx: Tx, phase: Row, project: Row, 
       if (!ws) return void (await fail('no workstation with a DevOps engineer is available'));
       stations = [ws];
     }
+    // 1.10.0 (R18-D): only workstations with this organization's own DevOps engineer; a guest's machine is never
+    // asked through its own organization's engineer.
+    const own: Workstation[] = [];
+    for (const s of stations)
+      if (await devopsAgentOn(tx, s.id, project.org_id, { strict: true })) own.push(s);
+    if (own.length === 0)
+      return void (await fail('no workstation has a DevOps engineer of this organization to deploy'));
+    stations = own;
     const requestIds: string[] = [];
     const lines: string[] = [];
     for (const ws of stations) {
@@ -275,6 +283,8 @@ export async function startFollowup(ctx: Ctx, tx: Tx, phase: Row, project: Row, 
         `\nWhen done, report with \`aom devops-done --summary\` stating the deployed commit and the URL you verified.`;
       const { requestId } = await createDevOpsRequestIn(ctx, tx, {
         workstationId: ws.id,
+        orgId: project.org_id,
+        strictOrg: true,
         summary,
         requestedBy: { kind: 'system', id: null, name: `Phase ${phase.ref} follow-up ${n}` },
       });

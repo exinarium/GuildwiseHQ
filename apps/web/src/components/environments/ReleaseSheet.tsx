@@ -3,9 +3,11 @@ import { useState } from 'react';
 import { ApiError } from '../../api/client.ts';
 import { useDeploy, useDeployPreview, useRelease } from '../../api/queries/delivery.ts';
 import { useEnvStatus } from '../../api/queries/environments.ts';
+import { useReleaseSigning } from '../../api/queries/release-signing.ts';
 import { useDebounced } from '../../lib/useDebounced.ts';
 import { Button, Dialog, ErrorBox, Spinner, TextInput, useToast } from '../ui.tsx';
 import { commitSourceText, DeployCommitPreview } from './DeployCommitPreview.tsx';
+import { ReleaseSigning, waitsForSignature } from './ReleaseSigning.tsx';
 
 /**
  * Releasing to a site (docs/design/environments-ux.md journey I): the version, what changed, which places, the facts (a backup
@@ -60,7 +62,19 @@ export function ReleaseSheet({
   const asked = releasePath ? waitingCommit : (settled ?? waitingCommit);
   const preview = useDeployPreview(projectId, env, asked, !status.isPending);
   const showsWaiting = !!asked && asked === waitingCommit && !settled;
-  const previewBlocked = status.isPending || settling || preview.isPending || preview.isError;
+  // R30: a place that takes only a signed runner waits for its signature (the server refuses it as well).
+  const signing = useReleaseSigning(
+    projectId,
+    env,
+    preview.data?.sha ?? asked,
+    !status.isPending && !settling,
+  );
+  const signingFor = releasePath ? chosen.map((p) => p.name) : undefined;
+  const unsigned = (signing.data?.targets ?? []).filter(
+    (t) => waitsForSignature(t) && (!signingFor || signingFor.includes(t.targetName)),
+  );
+  const previewBlocked =
+    status.isPending || settling || preview.isPending || preview.isError || signing.isLoading;
   const pe = preview.error;
   const retryable = pe instanceof ApiError ? pe.status >= 500 || pe.status === 409 : !!pe;
   const go = () => {
@@ -90,7 +104,9 @@ export function ReleaseSheet({
     ? `Waiting for: ${w?.waitingFor.join('; ') || 'the rules to hold'}.`
     : several && chosen.length === 0
       ? 'Tick at least one place to release to.'
-      : null;
+      : unsigned.length > 0
+        ? `Waiting for a signed runner for ${unsigned.map((t) => t.targetName).join(', ')}.`
+        : null;
   return (
     <Dialog
       open
@@ -206,6 +222,14 @@ export function ReleaseSheet({
                   ),
                 )}
               </fieldset>
+            )}
+            {signing.data && (
+              <ReleaseSigning
+                projectId={projectId}
+                commit={preview.data?.sha ?? asked}
+                status={signing.data}
+                only={signingFor}
+              />
             )}
             <p className="text-muted" data-testid="release-backup">
               A backup of the database is taken first. If the new version does not answer afterwards, the

@@ -126,7 +126,7 @@ describe('prompts around a design made before its dependencies landed', () => {
       }),
     );
     expect(text).toContain(
-      'Create `docs/investigations/TOY-2.md` on your branch with exactly the text below',
+      'Create `docs/investigations/TOY-2.md` on your branch with exactly the text inside the block below',
     );
     expect(text).toContain('carried on the card until you commit it');
     expect(text).not.toContain('Read the report before you start');

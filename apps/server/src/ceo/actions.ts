@@ -838,12 +838,14 @@ const devops: ActionDef<z.infer<typeof DevopsP>> = {
     const card = pr.data?.card as Row | undefined;
     const project = pr.data?.project as Row | undefined;
     const target = pr.data?.target as Row | undefined;
-    const agent = await devopsAgentOn(env.ctx.pool, ws.id, env.orgId);
+    // 1.10.0 (R18-D): the CEO asks its own organization's engineer only, never another organization's.
+    const agent = await devopsAgentOn(env.ctx.pool, ws.id, env.orgId, { strict: true });
     if (!agent) throw conflict('no_devops_agent', 'this workstation has no DevOps engineer');
     const r = await withAppendTx(env.ctx.pool, (tx) =>
       createDevOpsRequestIn(env.ctx, tx, {
         workstationId: ws.id,
         orgId: env.orgId,
+        strictOrg: true,
         summary:
           p.kind === 'recipe'
             ? `${recipeRequestPreamble(String(project?.key ?? p.project))}\n\n${p.text}`

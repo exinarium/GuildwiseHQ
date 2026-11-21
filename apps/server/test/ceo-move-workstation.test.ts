@@ -3,7 +3,15 @@ import { uniqueEmail } from './helpers/app.ts';
 import { act, appoint, startCeoShift, wakeNow } from './helpers/ceo.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
-import { createWorld, markOnline, ok, pairWorkstation, type Session, type World } from './helpers/world.ts';
+import {
+  createWorld,
+  markOnline,
+  ok,
+  pairWorkstation,
+  type Session,
+  type World,
+  worksFor,
+} from './helpers/world.ts';
 
 let w: World;
 let r: FakeRunner;
@@ -27,6 +35,7 @@ beforeAll(async () => {
   await w.t.addOrgMember(orgId, m.id, 'member');
   memberBox = ((await pairWorkstation(w.t, m as Session, 'member-box')) as any).workstationId;
   await markOnline(w.t, memberBox);
+  await worksFor(w.t, m as Session, memberBox, orgId); // R9: the member's consent
   const o = await w.t.userSession(uniqueEmail('out'));
   outsiderBox = ((await pairWorkstation(w.t, o as Session, 'outsider-box')) as any).workstationId;
 });

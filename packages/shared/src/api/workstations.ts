@@ -3,6 +3,7 @@ import { RightsReportSchema } from '../devops/environment.ts';
 import { DevOpsAccessSchema } from '../events/devops.ts';
 import { ConnectableForgeSchema, GitConnectionSchema, RepoRefSchema } from '../forge/index.ts';
 import { McpAuthStateSchema } from '../mcp/index.ts';
+import { OrgRoleSchema } from '../orgs/index.ts';
 import {
   JiraStatusSchema,
   OrgFolderStateSchema,
@@ -14,6 +15,8 @@ import {
   ShiftLimitSourceSchema,
   ToolchainInfoSchema,
 } from '../protocol/runner.ts';
+import { HeldItemSchema } from '../protocol/security.ts';
+import { SignedReleaseProofSchema } from '../security/index.ts';
 import { IsoTime } from './common.ts';
 
 /** Where a repository's working branch stands against origin on one workstation (the runner's last check). */
@@ -85,6 +88,21 @@ export const WorkstationDtoSchema = z.object({
     }),
   ),
   pairedAt: IsoTime,
+  /**
+   * 1.10.0 (R18-S): what the runner decides on the workstation itself, as it reports it. The server can request, narrow
+   * or revoke, never grant: with `localPolicy` true, DevOps, sudo and approval changes made here wait for a yes on the
+   * workstation ("confirm on the workstation"). `localPolicy` null: offline, or an older runner that decides nothing
+   * locally. `startupRefused` is kept while the runner is down (it exits after reporting it). `held`: what waits for
+   * `guildwise-runner approve` now (empty while offline).
+   */
+  localAuthority: z
+    .object({
+      localPolicy: z.boolean().nullable(),
+      setupPending: z.boolean(),
+      startupRefused: z.string().nullable(),
+      held: z.array(HeldItemSchema),
+    })
+    .optional(),
   /** M3: what this workstation's DevOps engineer may do without asking, and who it is. */
   devopsAccess: DevOpsAccessSchema.optional(),
   devopsAgentId: z.uuid().nullable().optional(),
@@ -246,6 +264,28 @@ export type RemoveToolchainRequest = z.infer<typeof RemoveToolchainRequestSchema
 export const SetShiftLimitRequestSchema = z.object({ limit: ShiftLimitSettingSchema });
 export type SetShiftLimitRequest = z.infer<typeof SetShiftLimitRequestSchema>;
 
+/**
+ * "Works for" (R9, audit F4): the organizations a workstation of yours runs work for. A workstation works only for the
+ * organizations you own until you switch others on; joining an organization never switches it on by itself.
+ */
+export const WorkstationOrgServingSchema = z.object({
+  orgId: z.uuid(),
+  orgName: z.string(),
+  /** Your role in the organization; null when you only have project access there (a guest). */
+  role: OrgRoleSchema.nullable(),
+  serving: z.boolean(),
+});
+export type WorkstationOrgServing = z.infer<typeof WorkstationOrgServingSchema>;
+/** `GET /api/workstations/serving`: per active workstation of yours, the organizations it may work for. */
+export const WorkstationServingResponseSchema = z.object({
+  workstations: z.array(z.object({ workstationId: z.uuid(), orgs: z.array(WorkstationOrgServingSchema) })),
+});
+export type WorkstationServingResponse = z.infer<typeof WorkstationServingResponseSchema>;
+/** `PUT /api/workstations/:id/orgs/:orgId` (the workstation's owner only). */
+export const WorkstationOrgParamsSchema = z.object({ id: z.uuid(), orgId: z.uuid() });
+export const SetWorkstationServingRequestSchema = z.object({ serving: z.boolean() });
+export type SetWorkstationServingRequest = z.infer<typeof SetWorkstationServingRequestSchema>;
+
 export const PatchWorkstationRequestSchema = z.object({ name: z.string().min(1).max(80) });
 
 /** `POST /api/workstations/pairing-codes` -> `XXXX-XXXX` (Crockford base32), shown once, 10 min TTL. */
@@ -260,6 +300,8 @@ export const RunnerPairRequestSchema = z.object({
   platform: z.string(),
   hostname: z.string(),
   runnerVersion: z.string(),
+  /** 1.10.0 (R18-U, R27): the signed-release proof; required while "Only signed runners" is on (403 `signed_runner_required`). */
+  release: SignedReleaseProofSchema.optional(),
 });
 export type RunnerPairRequest = z.infer<typeof RunnerPairRequestSchema>;
 export const RunnerPairResponseSchema = z.object({

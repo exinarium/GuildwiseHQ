@@ -18,6 +18,7 @@ import { iso, one, type Queryable, rows } from '../db/sql.ts';
 import { conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { workstationServesOrg } from '../simulation/fit.ts';
 import { assertTargetComputerActive } from './computer-removed.ts';
 import { connectBlockedReason } from './connect.ts';
 import { closeDeskNotice, raiseDeskNotice } from './notices.ts';
@@ -83,6 +84,9 @@ export async function requestProbe(
   const targetsOwn = !!target && target.workstation_id === ws.id;
   const mine = ws.user_id === user.id;
   if (!mine && !targetsOwn) throw forbidden('you can only check your own computers');
+  // R9: another member's computer is used for this organization only if its owner switched it on ("Works for")
+  if (!mine && target && !(await workstationServesOrg(ctx.pool, ws.id, project.org_id)))
+    throw conflict('workstation_not_serving', `${ws.name} does not work for this organization`);
   if (!mine && req.scope !== 'ssh_target' && req.scope !== 'ssh_check')
     throw forbidden('only the owner of a computer can look at its Docker or list its servers');
   // `ssh_check` is a newer runner's cheap look: an older runner would refuse the word, so it needs the capability

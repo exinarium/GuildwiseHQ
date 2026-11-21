@@ -97,6 +97,8 @@ export interface ChatDeps {
   delegateUsage?: () => boolean;
   /** The local opt-in `aom-runner ceo full-power on`, read fresh at each turn (default: off). */
   ceoFullPower?: () => boolean;
+  /** R18-S: consumes the one CEO owner turn a local action opened (`guildwise-runner ceo turn`); absent: none. */
+  takeOwnerTurn?: () => boolean;
   /** `ceo.ownerPermissions`, read fresh at each turn (default: `auto`). */
   ceoOwnerPermissions?: () => 'bypass' | 'auto';
   /** `aom runner status|logs` in a full-power owner turn: this workstation's status and logs, secrets masked. */
@@ -285,6 +287,11 @@ export class ChatManager {
       const first = this.terminalFrames.keys().next().value;
       if (first !== undefined) this.terminalFrames.delete(first);
     }
+  }
+
+  /** The runner's local gate refused this chat (R18-S: a DevOps chat without a local grant): it ends with chat.error. */
+  refuseStart(msg: ChatStartMsg, error: string): void {
+    this.error(msg, error);
   }
 
   private error(msg: ChatStartMsg, error: string): void {
@@ -1129,7 +1136,10 @@ export class ChatManager {
     if (msg.session) return this.runSessionTurn(chat);
     const chosen = this.deps.adapters.get(msg.agent.runtime);
     if (chosen?.instructionStyle === 'tools') return this.runDirectChat(chat, chosen);
-    const profile = selectChatProfile(msg, { fullPower: this.deps.ceoFullPower?.() ?? false });
+    const profile = selectChatProfile(msg, {
+      fullPower: this.deps.ceoFullPower?.() ?? false,
+      ...(this.deps.takeOwnerTurn ? { takeLocalTurn: this.deps.takeOwnerTurn } : {}),
+    });
     if (profile.kind === 'refuse') return this.error(msg, profile.error);
     if (profile.kind === 'full') return this.runOwnerTurn(chat, profile.mode);
     const adapter = this.deps.adapters.get(msg.agent.runtime);

@@ -21,9 +21,9 @@ describe('a business card brief', () => {
   it('lists the filled fields under their labels and prints no completion action', () => {
     const p = renderShiftPrompt(business());
     expect(p).toContain('## Details');
-    expect(p).toContain('- Who asked: Mia Jones');
-    expect(p).toContain('- Question: Do you open on Sundays?');
-    expect(p).toContain('- Due by: 2026-11-03');
+    expect(p).toContain('- Who asked:\nORG TEXT (Who asked):\n````org-text\nMia Jones\n````');
+    expect(p).toContain('- Question:\nORG TEXT (Question):\n````org-text\nDo you open on Sundays?\n````');
+    expect(p).toContain('- Due by:\nORG TEXT (Due by):\n````org-text\n2026-11-03\n````');
     expect(p).not.toContain('Channel');
     expect(p).not.toContain('## Completion action');
   });

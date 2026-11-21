@@ -75,4 +75,45 @@ describe('guildwise-runner up', () => {
     const cfg = loadConfig(entryConfigPath(dataDir, entry as never));
     expect(cfg.runtimes['claude-code']).toMatchObject({ authMode: 'api_key', apiKey: 'sk-ant-test' });
   });
+
+  it('sends the signed-release proof at pairing and at codespace enrollment (R18-U, R27)', async () => {
+    const proof = {
+      manifest: '{"version":"1.10.0"}',
+      minisig: 'untrusted comment: x\nAAAA\ntrusted comment: y\nBBBB\n',
+    };
+    const pair = stub();
+    await preparePairing({
+      dataDir: tmp(),
+      fetchImpl: pair.fetchImpl,
+      releaseProof: () => proof,
+      env: { GUILDWISE_SERVER: 'https://hq.example.com', GUILDWISE_PAIR_CODE: 'ABCD-EFGH' },
+    });
+    expect(pair.calls[0]?.body.release).toEqual(proof);
+    const enroll = stub();
+    await preparePairing({
+      dataDir: tmp(),
+      fetchImpl: enroll.fetchImpl,
+      releaseProof: () => proof,
+      env: {
+        GUILDWISE_SERVER: 'https://hq.example.com',
+        CODESPACE_NAME: 'cs-1',
+        GITHUB_TOKEN: 'ghu_abcdefghij',
+      },
+    });
+    expect(enroll.calls[0]?.url).toBe('https://hq.example.com/api/runner/enroll');
+    expect(enroll.calls[0]?.body.release).toEqual(proof);
+    // an unsigned (dev) runner sends none
+    const none = stub();
+    await preparePairing({
+      dataDir: tmp(),
+      fetchImpl: none.fetchImpl,
+      releaseProof: () => null,
+      env: {
+        GUILDWISE_SERVER: 'https://hq.example.com',
+        CODESPACE_NAME: 'cs-2',
+        GITHUB_TOKEN: 'ghu_abcdefghij',
+      },
+    });
+    expect(none.calls[0]?.body).not.toHaveProperty('release');
+  });
 });

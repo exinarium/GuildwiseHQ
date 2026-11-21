@@ -1,8 +1,14 @@
 import { hostname, platform } from 'node:os';
-import { RunnerEnrollRequestSchema, RunnerPairRequestSchema, RunnerPairResponseSchema } from '@aom/shared';
+import {
+  RunnerEnrollRequestSchema,
+  RunnerPairRequestSchema,
+  RunnerPairResponseSchema,
+  type SignedReleaseProof,
+} from '@aom/shared';
 import { loadConfig, saveConfig } from './config.ts';
 import { addPairing, entryConfigPath, loadIndex, normalizeServerUrl } from './pairings.ts';
 import { resolveDataDir } from './paths.ts';
+import { currentReleaseProof } from './update/proof.ts';
 import { RUNNER_VERSION } from './version.ts';
 
 /**
@@ -26,6 +32,8 @@ export interface UpOptions {
   mock?: boolean;
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
+  /** The signed-release proof sent at pairing and enrollment (R18-U, R27). Default: the one the install kept. */
+  releaseProof?: () => SignedReleaseProof | null;
 }
 
 export interface UpResult {
@@ -42,6 +50,9 @@ export async function preparePairing(opts: UpOptions): Promise<UpResult> {
   const f = opts.fetchImpl ?? fetch;
   const name = (opts.name ?? env.GUILDWISE_NAME ?? '').trim() || hostname();
   const code = (opts.code ?? env.GUILDWISE_PAIR_CODE ?? '').trim();
+  // Required where "Only signed runners" is on: without it the pairing or the codespace enrollment gets 403.
+  const proof = (opts.releaseProof ?? (() => currentReleaseProof(RUNNER_VERSION)))();
+  const withRelease = <T extends object>(body: T): T => (proof ? { ...body, release: proof } : body);
 
   let index = loadIndex(root);
   // Already paired with this server (any name): nothing to do, and the (single-use) code is ignored.
@@ -64,7 +75,7 @@ export async function preparePairing(opts: UpOptions): Promise<UpResult> {
         hostname: hostname(),
         runnerVersion: RUNNER_VERSION,
       });
-      paired = await post(f, `${server}/api/runner/pair`, body);
+      paired = await post(f, `${server}/api/runner/pair`, withRelease(body));
       how = 'code';
     } else if (env.CODESPACE_NAME && env.GITHUB_TOKEN) {
       const body = RunnerEnrollRequestSchema.parse({
@@ -75,7 +86,8 @@ export async function preparePairing(opts: UpOptions): Promise<UpResult> {
         hostname: hostname(),
         runnerVersion: RUNNER_VERSION,
       });
-      paired = await post(f, `${server}/api/runner/enroll`, body);
+      // added after parsing: older schemas without `release` would strip it (the server accepts it additively)
+      paired = await post(f, `${server}/api/runner/enroll`, withRelease(body));
       how = 'enroll';
     } else {
       throw new Error(

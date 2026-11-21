@@ -39,6 +39,7 @@ import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { workstationServesOrg } from '../simulation/fit.ts';
 import { cardMessage, projectScope, runnerActor, SYSTEM_ACTOR, userActor } from './common.ts';
 import { createDevOpsRequestIn, threadMessage } from './devops.ts';
 import { isRealConflict, rebaseConflictEvents, rebaseErrorText } from './rebase.ts';
@@ -532,6 +533,12 @@ export async function startRun(
     if (!ws) throw notFound('workstation not found');
     const manager = isOrgManager({ orgRole: await orgRoleOf(tx, user.id, project.org_id) });
     if (ws.user_id !== user.id && !manager) throw notFound('workstation not found');
+    // R9 (audit F4): a branch runs only on a workstation whose user switched this organization on ("Works for").
+    if (!(await workstationServesOrg(tx, ws.id, project.org_id)))
+      throw conflict(
+        'workstation_not_serving',
+        `${ws.name} does not work for this organization: its owner switches it on under Works for on the Workstations page`,
+      );
     const caps = await capsOf(tx, ws.id);
     if (!caps.runs)
       throw conflict(
@@ -1039,7 +1046,9 @@ export async function applyRunReplayFailed(
   }
   const sources = (r.sources ?? []) as Array<{ repoId: string; branch: string }>;
   const names = (r.repo_names ?? {}) as Record<string, string>;
-  const summary = `Run ${sources.map((s) => `${names[s.repoId] ?? 'repository'}@${s.branch}`).join(', ')} of ${r.project_name}${r.card_ref ? ` (card ${r.card_ref})` : ''}. The saved run plan failed (${msg.reason.slice(0, 300)}): repair it.`;
+  const summary = `Run ${sources.map((s) => `${names[s.repoId] ?? 'repository'}@${s.branch}`).join(', ')} of ${r.project_name}${r.card_ref ? ` (card ${r.card_ref})` : ''}. The saved run plan failed (see the replay failure under the run request): repair it.`;
+  // 1.10.0 (R18-T): the failure text holds the program's own output, so it never goes into the summary (shown as the
+  // requester's words); it travels as `replayFailure`, which the prompt fences.
   const requester = r.requested_by
     ? {
         kind: 'user' as const,

@@ -3,6 +3,7 @@ import { createApp } from './app.ts';
 import { loadConfig, parseEncodeThreads } from './config.ts';
 import { clipCatalogForPrompt, loadClipCatalog } from './video/clips.ts';
 import { startPushServer } from './video/push.ts';
+import { refuseRetiredPushMode, runRemoteWorker } from './video/remote-worker.ts';
 import { renderScriptFile } from './video/renders.ts';
 import { videoTick } from './video/sweep.ts';
 
@@ -40,9 +41,12 @@ async function runLoop(intervalSeconds: number): Promise<void> {
  *   node dist/video-worker.mjs --render script.json --out dir [--silent] [--cover name]
  *   node dist/video-worker.mjs --list-clips
  *   node dist/video-worker.mjs --loop [--interval 15]
+ *   node dist/video-worker.mjs --remote
  * `--loop` is the container's command (AOM_VIDEO_ROLE=render|publish|all picks which half runs; see video/sweep.ts): every few seconds a heartbeat, and (only when a YouTube channel is connected and
  * `videoPosts.enabled`) claim one queued render, upload one approved video a day, clean up old files (video/sweep.ts).
  * It shares the database, config and AOM_SECRET_KEY with the app and writes to AOM_VIDEO_DIR.
+ * `--remote` is the remote render worker of a GPU machine (video/remote-worker.ts, core DESIGN R16): no database, no
+ * server key, only the render job API with its own token. The retired tunnel mode (`AOM_VIDEO_PUSH_URL`) is refused.
  * Every heartbeat and every artifact push carries the worker's application version (the newest release in its bundled
  * CHANGELOG). A worker older than the server (the version the app records at boot) claims no render, logs why, and keeps
  * beating so the status shows it as outdated; it renders again by itself once it is updated.
@@ -56,9 +60,12 @@ async function main(): Promise<void> {
       cover: { type: 'string' },
       'list-clips': { type: 'boolean', default: false },
       loop: { type: 'boolean', default: false },
+      remote: { type: 'boolean', default: false },
       interval: { type: 'string', default: '15' },
     },
   });
+  refuseRetiredPushMode();
+  if (values.remote) return runRemoteWorker();
   if (values['list-clips']) {
     console.log(JSON.stringify(clipCatalogForPrompt(loadClipCatalog()), null, 2));
     return;
@@ -66,7 +73,7 @@ async function main(): Promise<void> {
   if (values.loop) return runLoop(Math.max(1, Number(values.interval) || 15));
   if (!values.render || !values.out) {
     console.error(
-      'usage: video-worker --render <script.json> --out <dir> [--silent] [--cover <name>] | --list-clips | --loop',
+      'usage: video-worker --render <script.json> --out <dir> [--silent] [--cover <name>] | --list-clips | --loop | --remote',
     );
     process.exit(2);
   }

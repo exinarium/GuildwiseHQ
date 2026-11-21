@@ -1,0 +1,9 @@
+{
+  "version": "1.10.0",
+  "file": "aom-runner-1.10.0.tgz",
+  "sha256": "c0365f8580934d0be3bfe769275180a302585ba4d547d58093dc2c7428285e41",
+  "minRunner": "1.10.0",
+  "floor": "1.10.0",
+  "allowDowngrade": false,
+  "nodeRuntime": {}
+}

@@ -20,6 +20,8 @@ AOM_HTTP_PORT=$HTTP_PORT
 AOM_HTTPS_PORT=$HTTPS_PORT
 AOM_MAILPIT_PORT=$MAIL_PORT
 AOM_SMTP_URL=smtp://mailpit:1025
+# An unreleased tree has no owner-signed runner assets: the smoke test builds the unsigned dev release (core DESIGN R18-U).
+RUNNER_RELEASE=dev
 ENV
 dc() { docker compose -p "$PROJECT" --env-file "$ENVFILE" -f docker-compose.prod.yml --profile mail "$@"; }
 RUNNER_PID=""

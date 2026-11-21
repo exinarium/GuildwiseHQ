@@ -153,6 +153,7 @@ import {
   RunStopPayloadSchema,
 } from '../runs/types.ts';
 import { VaultFolderSchema } from '../safe.ts';
+import { SignedReleaseProofSchema } from '../security/index.ts';
 import { SessionTurnSpecSchema } from '../sessions/index.ts';
 import {
   DIRECT_UNAVAILABLE_REASONS,
@@ -180,6 +181,15 @@ import {
 } from '../vaults/index.ts';
 import { type AgentRuntimeSpec, AgentRuntimeSpecSchema } from './agent-runtime.ts';
 import { LedgerMatchSchema, RpcMethodSchema, ShiftReportSchema } from './ipc.ts';
+import {
+  ApprovalPasskeyPayloadSchema,
+  ApprovalsHeldPayloadSchema,
+  PasskeyOfferPayloadSchema,
+  PasskeyWithdrawPayloadSchema,
+  ReleaseArtefactPreparedPayloadSchema,
+  ReleasePreparePayloadSchema,
+  ReleaseSignPayloadSchema,
+} from './security.ts';
 
 /**
  * Runner WebSocket protocol (docs/ARCHITECTURE.md section 11.2).
@@ -1524,6 +1534,13 @@ export const RunnerCommandNameSchema = z.enum([
   'pack.persona.read',
   'pack.bundle.request',
   'pack.bundle.put',
+  // 1.10.0 hardening (R22, R30): passkey offers and relayed assertions, release signing on the key holder's workstation
+  'passkey.offer',
+  'passkey.withdraw',
+  'approval.passkey',
+  'release.sign',
+  // W14 (R30): package the runner for a deploy target with its public key before it is signed
+  'release.prepare',
 ]);
 export type RunnerCommandName = z.infer<typeof RunnerCommandNameSchema>;
 
@@ -1655,6 +1672,14 @@ export const CommandPayloadSchemas = {
   'deploy.prepare': DeployPreparePayloadSchema,
   /** Moving to a new server (design v3): one step of the move per command. */
   'deploy.move': DeployMovePayloadSchema,
+  /** Passkey approvals (R22): an offer the runner trusts only after `guildwise-runner passkey trust`; its withdrawal; a relayed assertion. */
+  'passkey.offer': PasskeyOfferPayloadSchema,
+  'passkey.withdraw': PasskeyWithdrawPayloadSchema,
+  'approval.passkey': ApprovalPasskeyPayloadSchema,
+  /** Release signing per deploy target (R30): held until a local approval unless the key has `autoSign`. */
+  'release.sign': ReleaseSignPayloadSchema,
+  /** Packaging the runner for one target with that target's public key (R30, W14); answered by `release.artefact.prepared`. */
+  'release.prepare': ReleasePreparePayloadSchema,
 } as const;
 
 /** Announced in `hello.capabilities`-style lists by runners that apply a version pin (`runner.pin`, `welcome.runnerPin`). */
@@ -1761,6 +1786,12 @@ export const HelloSchema = msg('hello', {
   maxRunEnvironments: z.number().int().positive().optional(),
   /** The runner supports connecting integrations from the web (docs/design/integrations-page.md). Absent from older runners. */
   integrationsVersion: z.number().int().positive().optional(),
+  /** 1.10.0 (R18-U, R27): the installer-kept `manifest.json` and `manifest.json.minisig`. Absent: an unsigned (dev) or older runner. */
+  release: SignedReleaseProofSchema.optional(),
+  /** 1.10.0 (R21): the runner refused to start (root-equivalent or unsafe files) and connected only to say why; it runs nothing. */
+  startupRefused: z.string().min(1).max(300).optional(),
+  /** 1.10.0 (R20): no local `guildwise-runner setup` yet, so unsandboxed steps are held ("setup pending"). */
+  setupPending: z.boolean().optional(),
 });
 export const OutboxFlushedSchema = msg('outbox.flushed', {});
 export const HeartbeatSchema = msg('heartbeat', {
@@ -2269,6 +2300,13 @@ export const DeployProgressSchema = msg('deploy.progress', {
   detail: z.string().max(300).optional(),
 });
 export const VaultConflictSchema = msg('vault.conflict', { vaultId: z.string(), files: z.array(z.string()) });
+/** 1.10.0 (R18-S, R22): the items held for a local approval right now (replaces the previous list; not acked). */
+export const ApprovalsHeldSchema = msg('approvals.held', ApprovalsHeldPayloadSchema.shape);
+/** 1.10.0 (R30): a deploy's package step produced the artefact to sign for a target (acked). */
+export const ReleaseArtefactPreparedSchema = msg(
+  'release.artefact.prepared',
+  ReleaseArtefactPreparedPayloadSchema.shape,
+);
 
 // ----------------------------------------------------------------- server -> runner
 
@@ -2294,6 +2332,11 @@ export const WelcomeSchema = msg('welcome', {
     .optional(),
   /** Additive: what this server understands beyond the base protocol (`CHAT_ACTIVITY_FEATURE`). */
   features: z.array(z.string()).optional(),
+  /**
+   * 1.10.0 (R21, R27): "Only signed runners" is on here. The runner caches it and then refuses to start when its user is
+   * root-equivalent, whatever its local `startupRefusal` says (the server may narrow, never widen).
+   */
+  requireSignedRunners: z.boolean().optional(),
 });
 export const ShiftStartSchema = msg('shift.start', {
   shiftId: z.uuid(),
@@ -2754,6 +2797,8 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   StorageGrantOffsetSchema,
   StorageGrantVerifiedSchema,
   StorageDirectReportSchema,
+  ApprovalsHeldSchema,
+  ReleaseArtefactPreparedSchema,
   AckSchema,
 ]);
 export type RunnerToServer = z.infer<typeof RunnerToServerSchema>;
@@ -2812,6 +2857,7 @@ export const RUNNER_ACKED_TYPES: ReadonlySet<string> = new Set<RunnerToServerTyp
   'integration.session',
   'storage.report',
   'storage.auth',
+  'release.artefact.prepared',
 ]);
 export const SERVER_ACKED_TYPES: ReadonlySet<string> = new Set<ServerToRunnerType>(['shift.stop']);
 

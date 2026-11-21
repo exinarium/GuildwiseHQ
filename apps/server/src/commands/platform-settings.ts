@@ -3,6 +3,7 @@ import type { AuthSession } from '../auth/sessions.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one } from '../db/sql.ts';
 import type { MailMessage } from '../mail/mailer.ts';
+import { securityNoticeMail } from '../mail/security-notices.ts';
 import { resetAuditCursor } from './platform-notify.ts';
 
 // The platform administrator's notification settings: who is mailed about new organizations, audit events and (in a
@@ -66,6 +67,7 @@ export async function patchPlatformSettings(
     notifyAuditEvents?: boolean | undefined;
   },
 ): Promise<PlatformSettings> {
+  const changed: Array<{ field: keyof typeof SETTING_KEYS; before: string[] }> = [];
   for (const field of Object.keys(NOTIFY_KEYS) as Array<keyof typeof NOTIFY_KEYS>) {
     const v = patch[field];
     if (v === undefined) continue;
@@ -82,6 +84,8 @@ export async function patchPlatformSettings(
     const v = patch[field];
     if (v === undefined) continue;
     const key = SETTING_KEYS[field];
+    const before = field === 'supportEmail' ? await supportAddresses(ctx) : await contactAddresses(ctx);
+    changed.push({ field, before });
     if (v === '') await exec(ctx.pool, `DELETE FROM platform_settings WHERE key=$1`, [key]);
     else
       await exec(
@@ -91,5 +95,44 @@ export async function patchPlatformSettings(
         [key, JSON.stringify(splitEmails(v).join(', ')), by.id, ctx.clock.now()],
       );
   }
+  for (const c of changed) {
+    const after = c.field === 'supportEmail' ? await supportAddresses(ctx) : await contactAddresses(ctx);
+    await mailOldAddresses(ctx, c.field, c.before, after, by);
+  }
   return platformSettings(ctx);
+}
+
+/**
+ * R17-7: changing where support (or Contact us) mail goes tells the addresses that received it until now, so a
+ * compromised super admin cannot quietly steer the notices away. Nothing is sent when the addresses stay the same.
+ */
+async function mailOldAddresses(
+  ctx: Ctx,
+  field: keyof typeof SETTING_KEYS,
+  before: string[],
+  after: string[],
+  by: AuthSession['user'],
+): Promise<void> {
+  const same = before.length === after.length && before.every((a) => after.includes(a));
+  if (same) return;
+  const label = field === 'supportEmail' ? 'support' : 'Contact us';
+  for (const to of before)
+    await sendQuietly(
+      ctx,
+      securityNoticeMail({
+        to,
+        subject: `The ${label} address of ${ctx.config.publicOrigin} changed`,
+        heading: `The ${label} address changed`,
+        paragraphs: [
+          `${label === 'support' ? 'Support requests and platform notices' : 'Contact us messages'} for ${ctx.config.publicOrigin} no longer come to this address only.`,
+          'If you did not expect this, check the platform account that made the change.',
+        ],
+        facts: [
+          ['Before', before.join(', ') || '(none)'],
+          ['Now', after.join(', ') || '(none)'],
+          ['Changed by', by.email],
+        ],
+        origin: ctx.config.publicOrigin,
+      }),
+    );
 }

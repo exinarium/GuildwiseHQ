@@ -32,7 +32,9 @@ const order = (over: Record<string, unknown> = {}) => {
 describe('profile selection (pure)', () => {
   it('owner turn: full only with the CEO agent and the local opt-in', () => {
     const agent = { roleKey: 'ceo' };
-    expect(selectChatProfile({ ceoMode: 'owner', agent }, { fullPower: true })).toEqual({
+    expect(
+      selectChatProfile({ ceoMode: 'owner', agent }, { fullPower: true, takeLocalTurn: () => true }),
+    ).toEqual({
       kind: 'full',
       mode: 'owner',
     });
@@ -40,37 +42,54 @@ describe('profile selection (pure)', () => {
       kind: 'degraded',
       degraded: 'full_power_off',
     });
-    expect(selectChatProfile({ agent }, { fullPower: true })).toEqual({ kind: 'restricted' });
+    expect(selectChatProfile({ agent }, { fullPower: true, takeLocalTurn: () => true })).toEqual({
+      kind: 'restricted',
+    });
   });
 
   it('a non-CEO agent never gets full power, whatever the server says', () => {
     for (const roleKey of ['builder', 'devops', 'ba'])
-      expect(selectChatProfile({ ceoMode: 'owner', agent: { roleKey } }, { fullPower: true })).toEqual({
+      expect(
+        selectChatProfile(
+          { ceoMode: 'owner', agent: { roleKey } },
+          { fullPower: true, takeLocalTurn: () => true },
+        ),
+      ).toEqual({
         kind: 'restricted',
       });
   });
 
   it('order turn: refused without the owner mark, on a hash mismatch, or without the opt-in', () => {
     const agent = { roleKey: 'ceo' };
-    expect(selectChatProfile({ ceoMode: 'order', agent, order: order() }, { fullPower: true })).toEqual({
+    expect(
+      selectChatProfile(
+        { ceoMode: 'order', agent, order: order() },
+        { fullPower: true, takeLocalTurn: () => true },
+      ),
+    ).toEqual({
       kind: 'full',
       mode: 'order',
     });
-    expect(selectChatProfile({ ceoMode: 'order', agent }, { fullPower: true })).toEqual({
+    expect(
+      selectChatProfile({ ceoMode: 'order', agent }, { fullPower: true, takeLocalTurn: () => true }),
+    ).toEqual({
       kind: 'refuse',
       error: 'order_not_authorized',
     });
     expect(
       selectChatProfile(
         { ceoMode: 'order', agent, order: order({ ownerMarked: false }) },
-        { fullPower: true },
+        { fullPower: true, takeLocalTurn: () => true },
       ),
     ).toEqual({
       kind: 'refuse',
       error: 'order_not_authorized',
     });
     expect(
-      selectChatProfile({ ceoMode: 'order', agent, order: order({ body: 'tampered' }) }, { fullPower: true }),
+      selectChatProfile(
+        { ceoMode: 'order', agent, order: order({ body: 'tampered' }) },
+        { fullPower: true, takeLocalTurn: () => true },
+      ),
     ).toEqual({
       kind: 'refuse',
       error: 'order_not_authorized',
@@ -79,6 +98,21 @@ describe('profile selection (pure)', () => {
       kind: 'refuse',
       error: 'full_power_off',
     });
+  });
+
+  it('R18-S: without a local action (guildwise-runner ceo turn) neither an owner nor an order turn gets full power', () => {
+    const agent = { roleKey: 'ceo' };
+    expect(selectChatProfile({ ceoMode: 'owner', agent }, { fullPower: true })).toEqual({
+      kind: 'degraded',
+      degraded: 'full_power_off',
+    });
+    expect(selectChatProfile({ ceoMode: 'order', agent, order: order() }, { fullPower: true })).toEqual({
+      kind: 'refuse',
+      error: 'local_turn_required',
+    });
+    expect(
+      selectChatProfile({ ceoMode: 'owner', agent }, { fullPower: true, takeLocalTurn: () => false }),
+    ).toMatchObject({ kind: 'degraded' });
   });
 
   it('a shift is always restricted', () => {

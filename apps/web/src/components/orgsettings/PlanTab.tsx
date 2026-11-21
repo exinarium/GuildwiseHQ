@@ -118,6 +118,10 @@ export function PlanTab({ org }: { org: OrgDetailResponse }) {
       </Panel>
 
       <Panel title="Features">
+        <p className="mb-3 text-xs text-subtle" data-testid="features-set-by-platform">
+          Set by the platform: your plan decides them, and a change Guildwise support makes is announced on
+          the Owner's desk and by mail.
+        </p>
         <ul className="grid gap-2 text-sm sm:grid-cols-2" data-testid="features">
           {Object.entries(org.features).map(([k, on]) => (
             <li key={k}>

@@ -7,6 +7,7 @@ import { triageBug } from '../src/platform-team/intake.ts';
 import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
+import { designatePlatformTeam } from './helpers/platform-team.ts';
 import { freshState } from './helpers/shifts.ts';
 import { createWorld, fullFields, ok, until, type World } from './helpers/world.ts';
 
@@ -20,7 +21,8 @@ let platformProjectId: string;
 
 beforeAll(async () => {
   releaseDir = mkdtempSync(join(tmpdir(), 'aom-release-'));
-  for (const v of ['0.1.20', '0.1.24']) writeFileSync(join(releaseDir, `aom-runner-${v}.tgz`), `fake ${v}`);
+  for (const v of ['0.1.70', '1.10.1', '1.10.2'])
+    writeFileSync(join(releaseDir, `aom-runner-${v}.tgz`), `fake ${v}`);
   w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false', AOM_RUNNER_RELEASE_DIR: releaseDir } });
   ctx = w.t.app.ctx;
   r = await w.connectRunner({ capabilities: ['runner-pin:1'] });
@@ -53,12 +55,7 @@ beforeEach(async () => {
        workstation_role_blocks RESTART IDENTITY CASCADE`,
   );
   await q(`DELETE FROM platform_settings WHERE key IN ('platform.team','runners.version_pin')`);
-  await ok(
-    w.t.req('PUT', '/api/platform/team', {
-      cookie: root.cookie,
-      body: { orgId, projectId: platformProjectId },
-    }),
-  );
+  await designatePlatformTeam(w.t, orgId, platformProjectId);
 });
 
 const api = (method: string, url: string, body?: unknown, cookie = w.owner.cookie) =>
@@ -167,11 +164,11 @@ describe('deploy policy and audit trail', () => {
     expect((await q(`SELECT kind FROM platform_deploy_audit WHERE kind='rollback'`)).length).toBe(1);
   });
 
-  it('is for the platform organisation and the super admin only', async () => {
+  it('is for the platform organisation only (R17: not the super admin either)', async () => {
     const stranger = await w.t.userSession(uniqueEmail('stranger'));
     expect((await api('POST', '/api/platform-team/deploy/check', FIX, stranger.cookie)).status).toBe(404);
     expect((await api('GET', '/api/platform-team/overview', undefined, stranger.cookie)).status).toBe(404);
-    expect((await api('GET', '/api/platform-team/overview', undefined, root.cookie)).status).toBe(200);
+    expect((await api('GET', '/api/platform-team/overview', undefined, root.cookie)).status).toBe(404);
   });
 });
 
@@ -396,16 +393,16 @@ describe('safe mode: runner version pin', () => {
     const res = await ok<any>(
       api('PUT', '/api/platform-team/runner-pin', {
         workstationId: w.workstationId,
-        version: '0.1.20',
+        version: '1.10.1',
         reason: 'roll back to the last good version',
       }),
     );
     expect(res.notified).toBe(1);
     const cmd = await r.waitFor('command', (f) => f.command === 'runner.pin', 5000, from);
-    expect(cmd.payload).toEqual({ version: '0.1.20' });
+    expect(cmd.payload).toEqual({ version: '1.10.1' });
     // the workstation page shows it, and the runner can fetch exactly that release
-    const rel = await ok<any>(w.t.req('GET', '/api/runner/release?version=0.1.20'));
-    expect(rel.version).toBe('0.1.20');
+    const rel = await ok<any>(w.t.req('GET', '/api/runner/release?version=1.10.1'));
+    expect(rel.version).toBe('1.10.1');
     expect((await w.t.req('GET', '/api/runner/release?version=9.9.9')).status).toBe(404);
     // unpin
     const from2 = r.received.length;
@@ -414,38 +411,51 @@ describe('safe mode: runner version pin', () => {
     expect(cmd2.payload).toEqual({ version: null });
     // pinned again: a runner that connects again is told in welcome (the old connection is replaced)
     await ok(
-      api('PUT', '/api/platform-team/runner-pin', { workstationId: w.workstationId, version: '0.1.20' }),
+      api('PUT', '/api/platform-team/runner-pin', { workstationId: w.workstationId, version: '1.10.1' }),
     );
     const r2 = await w.connectRunner({ capabilities: ['runner-pin:1'] });
     try {
       const welcome = r2.of('welcome').at(-1);
-      expect(welcome?.runnerPin).toEqual({ version: '0.1.20' });
+      expect(welcome?.runnerPin).toEqual({ version: '1.10.1' });
     } finally {
       r2.close();
     }
   });
 
-  it('pins all workstations, refuses an unknown release, and the super admin may pin too', async () => {
+  it('pins all workstations, refuses an unknown release; the super admin cannot pin (R17)', async () => {
     expect(
       (await api('PUT', '/api/platform-team/runner-pin', { workstationId: null, version: '0.0.1' })).status,
     ).toBe(400);
+    expect(
+      (
+        await w.t.req('PUT', '/api/platform-team/runner-pin', {
+          cookie: root.cookie,
+          body: { workstationId: null, version: '1.10.2', reason: 'freeze' },
+        })
+      ).status,
+    ).toBe(404);
+    // a release this server still has, but below the floor of the signed runner (R18-U): refused, not stored
+    const low = await api('PUT', '/api/platform-team/runner-pin', { workstationId: null, version: '0.1.70' });
+    expect(low.status).toBe(409);
+    expect(low.body.error.code).toBe('runner_pin_below_floor');
     const res = await ok<any>(
-      w.t.req('PUT', '/api/platform-team/runner-pin', {
-        cookie: root.cookie,
-        body: { workstationId: null, version: '0.1.24', reason: 'freeze' },
+      api('PUT', '/api/platform-team/runner-pin', {
+        workstationId: null,
+        version: '1.10.2',
+        reason: 'freeze',
       }),
     );
     expect(res.notified).toBeGreaterThanOrEqual(1);
     const pins = await ok<any>(api('GET', '/api/platform-team/runner-pins'));
     expect(pins.pins).toHaveLength(1);
-    expect(pins.pins[0]).toMatchObject({ workstationId: null, version: '0.1.24' });
+    expect(pins.pins[0]).toMatchObject({ workstationId: null, version: '1.10.2' });
     // a workstation's own pin wins over the all-pin
     await ok(
-      api('PUT', '/api/platform-team/runner-pin', { workstationId: w.workstationId, version: '0.1.20' }),
+      api('PUT', '/api/platform-team/runner-pin', { workstationId: w.workstationId, version: '1.10.1' }),
     );
     const r3 = await w.connectRunner({ capabilities: ['runner-pin:1'] });
     try {
-      expect(r3.of('welcome').at(-1)?.runnerPin).toEqual({ version: '0.1.20' });
+      expect(r3.of('welcome').at(-1)?.runnerPin).toEqual({ version: '1.10.1' });
     } finally {
       r3.close();
     }

@@ -240,8 +240,9 @@ export async function startTestRunIn(
   if (!replay) {
     const agent = await one(
       tx,
-      `SELECT 1 AS ok FROM agents WHERE workstation_id=$1 AND is_devops AND status='active' LIMIT 1`,
-      [ws.id],
+      // 1.10.0 (R18-D): the project organization's own engineer (the request below is strict about it).
+      `SELECT 1 AS ok FROM agents WHERE workstation_id=$1 AND org_id=$2 AND is_devops AND status='active' LIMIT 1`,
+      [ws.id, project.org_id],
     );
     if (!agent) return { skip: 'there is no run plan and no DevOps engineer on its workstation to make one' };
   }
@@ -282,6 +283,7 @@ export async function startTestRunIn(
       await createDevOpsRequestIn(ctx, tx, {
         workstationId: ws.id,
         orgId: project.org_id,
+        strictOrg: true,
         summary,
         requestedBy: { kind: 'system', id: null, name: 'Integration tests' },
         cardId: card.id,

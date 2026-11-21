@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   effectiveFeatures,
   type OrgLimits,
@@ -11,24 +12,29 @@ import {
   streamId,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
-import { disableTwoFactorIn } from '../auth/two-factor.ts';
-import { ceoOwnerChangeEvents } from '../ceo/provision.ts';
 import type { Ctx } from '../context.ts';
 import { exec, iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { type Tx, withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { securityNoticeMail } from '../mail/security-notices.ts';
 import { orgUsage } from '../orgs/limits.ts';
-import { orgScope, userActor } from './common.ts';
+import { orgScope, SYSTEM_ACTOR, userActor } from './common.ts';
 import { removeOrgMemberIn } from './orgs.ts';
+import { sendQuietly } from './platform-settings.ts';
+import { pendingTransferOf } from './platform-transfer.ts';
 import { removeMemberIn } from './sharing.ts';
 import { unlinkWorkstationIn } from './workstations.ts';
 
 /**
  * The platform area (docs/design/organizations.md sections 9, 10 and 11.3): the super admin sees and edits organization
  * metadata (plan, status, limits, dates, flags) and accounts. Nothing here reads an organization's projects, cards,
- * desk, vaults, ledger, chats or agents.
+ * desk, vaults, ledger, chats or agents (R17). An ownership transfer waits for the Owner (`platform-transfer.ts`); there
+ * is no two-factor reset (users recover by email, `two-factor-recovery.ts`).
  */
+
+/** Desk subkind of the Owner's notice about features the platform switched (R17-6). */
+export const FEATURE_OVERRIDE_SUBKIND = 'platform_feature_override';
 
 export interface Meta {
   ip?: string | undefined;
@@ -67,6 +73,7 @@ async function toSummary(db: Queryable, o: Row): Promise<PlatformOrgSummary> {
     requireTwoFactor: Boolean(o.require_two_factor),
     simulation: Boolean(o.simulation),
     simulationPace: (o.simulation_pace ?? 'normal') as 'fast' | 'normal' | 'slow',
+    createdAsSimulation: Boolean(o.created_as_simulation),
     createdAt: iso(o.created_at) as string,
     lastActiveAt: iso(o.last_active_at),
   };
@@ -188,6 +195,7 @@ export async function getPlatformOrg(
     shifts30d: shifts?.n ?? 0,
     admins: admins.map((a) => ({ id: a.id, displayName: a.display_name, email: a.email })),
     recentAudit: audit.rows,
+    pendingTransfer: await pendingTransferOf(ctx.pool, orgId),
   };
 }
 
@@ -200,6 +208,9 @@ export async function patchPlatformOrg(
   meta?: Meta,
 ): Promise<void> {
   if (!patch.note) throw badRequest('reason_required', 'say why: the change is written to the audit log');
+  let featureNotice: string[] = [];
+  let owner: string | null = null;
+  let orgName = '';
   await withAppendTx(ctx.pool, async (tx) => {
     const o = await one(tx, 'SELECT * FROM organizations WHERE id=$1 FOR UPDATE', [orgId]);
     if (!o) throw notFound('organization not found');
@@ -256,13 +267,93 @@ export async function patchPlatformOrg(
           ...m,
         },
       });
-    if (patch.features !== undefined)
+    if (patch.features !== undefined) {
       push({
         type: 'OrgFeaturesSet',
         payload: { orgId, features: patch.features, previous: o.features ?? {}, note, ...m },
       });
+      featureNotice = featureChanges(o.features ?? {}, patch.features);
+      if (featureNotice.length)
+        events.push(featureDeskItem(orgId, o.owner_user_id, featureNotice, note ?? ''));
+    }
+    owner = o.owner_user_id;
+    orgName = o.name;
     if (events.length) await ctx.store.append(events, { tx });
   });
+  if (featureNotice.length && owner)
+    await mailFeatureNotice(ctx, owner, orgName, featureNotice, patch.note ?? '');
+}
+
+/** "browserTools on", "outbound back to the plan default": the feature overrides a patch really changes. */
+function featureChanges(
+  before: Record<string, boolean>,
+  after: Partial<Record<string, boolean | null>>,
+): string[] {
+  const out: string[] = [];
+  for (const [k, v] of Object.entries(after)) {
+    if (v === undefined) continue;
+    if ((before[k] ?? null) === v) continue;
+    out.push(`${k} ${v === null ? 'back to the plan default' : v ? 'on' : 'off'}`);
+  }
+  return out;
+}
+
+/** R17-6: the Owner's desk names every feature the platform switched for the organization. */
+function featureDeskItem(orgId: string, ownerId: string, changes: string[], note: string): AppendInput {
+  const deskItemId = randomUUID();
+  return {
+    streamId: streamId.desk(deskItemId),
+    event: {
+      type: 'DeskItemCreated',
+      payload: {
+        deskItemId,
+        kind: 'alert',
+        subkind: FEATURE_OVERRIDE_SUBKIND,
+        title: `The platform changed your features: ${changes.join(', ')}`.slice(0, 200),
+        body: `Guildwise support changed these features of your organization: ${changes.join('; ')}. Reason given: ${note}. These settings are set by the platform; ask support if you did not expect the change.`,
+        options: [],
+        blocking: false,
+        pinned: false,
+        affectedCardIds: [],
+        askedBy: { kind: 'system' },
+        addresseeUserId: ownerId,
+        data: { changes },
+      },
+    },
+    actor: SYSTEM_ACTOR,
+    scope: orgScope(orgId),
+  };
+}
+
+async function mailFeatureNotice(
+  ctx: Ctx,
+  ownerId: string,
+  orgName: string,
+  changes: string[],
+  note: string,
+): Promise<void> {
+  const u = await one(ctx.pool, `SELECT email, display_name FROM users WHERE id=$1 AND status='active'`, [
+    ownerId,
+  ]);
+  if (!u) return;
+  await sendQuietly(
+    ctx,
+    securityNoticeMail({
+      to: u.email,
+      subject: `Features of ${orgName} changed by the platform`,
+      heading: 'The platform changed your features',
+      paragraphs: [
+        `Hello ${u.display_name},`,
+        `Guildwise support changed features of ${orgName}. They show as "set by the platform" in your organization settings.`,
+      ],
+      facts: [
+        ['Changes', changes.join(', ')],
+        ['Reason given', note],
+      ],
+      cta: { label: 'Open organization settings', url: `${ctx.config.publicOrigin}/settings/org` },
+      origin: ctx.config.publicOrigin,
+    }),
+  );
 }
 
 const STATUS_ACTION: Record<'suspend' | 'reactivate' | 'cancel', OrgStatus> = {
@@ -341,43 +432,6 @@ async function releaseOrgClaims(ctx: Ctx, tx: Tx, actorId: string, orgId: string
     scope: { orgId, projectId: c.project_id, audience: 'project' },
   }));
   if (events.length) await ctx.store.append(events, { tx });
-}
-
-/** Support case (owner decision 6): hands the organization to one of its Admins; a reason is mandatory and audited. */
-export async function platformTransferOwnership(
-  ctx: Ctx,
-  admin: AuthSession,
-  orgId: string,
-  toUserId: string,
-  reason: string,
-  meta?: Meta,
-): Promise<void> {
-  await withAppendTx(ctx.pool, async (tx) => {
-    const o = await one(tx, 'SELECT owner_user_id FROM organizations WHERE id=$1 FOR UPDATE', [orgId]);
-    if (!o) throw notFound('organization not found');
-    const target = await one(
-      tx,
-      `SELECT role FROM org_members WHERE org_id=$1 AND user_id=$2 AND status='active'`,
-      [orgId, toUserId],
-    );
-    if (target?.role !== 'admin')
-      throw conflict('not_an_admin', 'ownership can only move to an existing Admin of the organization');
-    await ctx.store.append(
-      [
-        {
-          streamId: streamId.org(orgId),
-          event: {
-            type: 'OrgOwnershipTransferred',
-            payload: { orgId, fromUserId: o.owner_user_id, toUserId, reason, ...metaOf(meta) },
-          },
-          actor: actorOf(admin),
-          scope: orgScope(orgId),
-        },
-        ...(await ceoOwnerChangeEvents(tx, orgId, toUserId)),
-      ],
-      { tx },
-    );
-  });
 }
 
 // ---------------------------------------------------------------------------------------------------- users
@@ -499,21 +553,4 @@ export async function patchPlatformUser(
     }
   });
   if (status === 'deactivated') ctx.services.browser.closeUser(userId);
-}
-
-/** Resets a user's two-factor login (lost phone and recovery codes): they set it up again at next sign-in. */
-export async function resetUserTwoFactor(
-  ctx: Ctx,
-  admin: AuthSession,
-  userId: string,
-  meta?: Meta,
-): Promise<void> {
-  await withAppendTx(ctx.pool, async (tx) => {
-    const u = await one(tx, 'SELECT two_factor_enabled FROM users WHERE id=$1', [userId]);
-    if (!u) throw notFound('user not found');
-    if (!u.two_factor_enabled) throw conflict('two_factor_off', 'this account has no two-factor login');
-    await disableTwoFactorIn(ctx, tx, userId, admin.user.id, 'reset', actorOf(admin), meta as never);
-    await exec(tx, 'DELETE FROM auth_sessions WHERE user_id=$1', [userId]);
-  });
-  ctx.services.browser.closeUser(userId);
 }

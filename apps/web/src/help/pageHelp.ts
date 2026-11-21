@@ -17,6 +17,7 @@ export const NO_PAGE_HELP = [
   '/m/desk/:token',
   '/forgot-password',
   '/reset-password/:token',
+  '/recover-2fa',
 ];
 
 /** Routes that show another route's page (the Help centre's articles and glossary): they use its help. */

@@ -64,6 +64,8 @@ The Guildwise HQ server holds the board, the desk and the records. It never hold
 - **Budgets and costs.** Monthly budgets per project and per organization, a cost breakdown, and loop protection.
 - **Governance.** A "What it may do" view per agent, an audit log with CSV export, and an offboarding checklist.
 - **Isolation.** Organizations are separated from each other, and two-factor login is available for everyone.
+- **Account security.** Failed sign-ins lock an address for a while, a password reset of a two-factor account needs a code, secrets and platform changes ask you to confirm it's you, and every sign-in is recorded.
+- **The workstation decides.** Deploys, DevOps grants, sudo and other privileged steps wait for a yes on the workstation itself, so a compromised server cannot run commands on your machine. Runner releases can be signed, and the runner checks every update.
 
 **Knowledge**
 - **Vaults.** Git repositories of notes, synced to the workstations that need them.
@@ -122,18 +124,19 @@ cd GuildwiseHQ
 cp .env.prod.example .env
 ```
 
-### 2. Generate two secrets
+### 2. Generate three secrets
 
 ```bash
 openssl rand -hex 32   # use this as POSTGRES_PASSWORD
 openssl rand -hex 32   # use this as AOM_SECRET_KEY
+openssl rand -hex 32   # use this as AOM_TWO_FACTOR_KEY
 ```
 
 Hex output is used on purpose: it contains no characters that break the database URL.
 
 ### 3. Fill in `.env`
 
-Open `.env` and set these five values (everything else can stay as it is). The stack will not start without `POSTGRES_PASSWORD`, `AOM_PUBLIC_ORIGIN` and `AOM_SECRET_KEY`, and invitations will not send without a real `AOM_SMTP_URL`:
+Open `.env` and set these six values (everything else can stay as it is). The stack will not start without `POSTGRES_PASSWORD`, `AOM_PUBLIC_ORIGIN` and `AOM_SECRET_KEY`, and invitations will not send without a real `AOM_SMTP_URL`:
 
 ```dotenv
 POSTGRES_PASSWORD=<first value from step 2>
@@ -141,9 +144,11 @@ AOM_DOMAIN=guildwise.example.com
 AOM_PUBLIC_ORIGIN=https://guildwise.example.com
 AOM_SMTP_URL=smtp://user:password@smtp.example.com:587
 AOM_SECRET_KEY=<second value from step 2>
+AOM_TWO_FACTOR_KEY=<third value from step 2>
 ```
 
-- `AOM_SECRET_KEY` is required. It encrypts two-factor secrets and stored account tokens at rest. Keep it with your backups. Changing it later invalidates enrolled authenticator apps.
+- `AOM_SECRET_KEY` is required. It encrypts stored account tokens at rest. Keep it with your backups.
+- `AOM_TWO_FACTOR_KEY` is recommended. It encrypts the two-factor seeds with a key of their own (at least 32 characters, never the same value as `AOM_SECRET_KEY`). Without it the server derives one from `AOM_SECRET_KEY` and warns at startup. Keep it with your backups: losing the key that sealed the seeds means users recover their two-factor login by email.
 - Keep `.env` private. It is in `.gitignore`; never commit it.
 
 ### 4. Start the stack
@@ -162,13 +167,13 @@ The first build takes a few minutes. Migrations run automatically on first start
 The platform account runs the service. It manages organizations and invitations, and it cannot see anyone's work.
 
 ```bash
-docker compose -f docker-compose.prod.yml exec app node dist/superadmin-create.mjs \
+read -rs PW; printf %s "$PW" | docker compose -f docker-compose.prod.yml exec -T app node dist/superadmin-create.mjs \
   --email platform@example.com \
   --name "Platform" \
-  --password 'use-a-long-passphrase'
+  --password-stdin
 ```
 
-Sign in at your public address with that account. You are asked to set up two-factor login. Keep the recovery codes.
+`--password-stdin` keeps the password out of your shell history and the process list (`--password` still works, with a warning). Sign in at your public address with that account. You are asked to set up two-factor login. Keep the recovery codes. Every platform change asks you to confirm it's you with a fresh code.
 
 ### 6. Invite the first organization
 
@@ -186,7 +191,7 @@ docker compose -f docker-compose.prod.yml exec app node dist/admin-create.mjs \
 
 Sign in as the organization owner. Then:
 
-1. Open **Workstations > Add a workstation** and copy the one-line command for your system (Linux, macOS or WSL2). Run it on the workstation. It installs the runner, pairs it and starts it as a background service.
+1. Open **Workstations > Add a workstation** and copy the one-line command for your system (Linux, macOS or WSL2). Run it on the workstation. It looks for an older runner first (stops it and puts its files in quarantine, never reusing them), installs the runner, asks a few questions about what the runner may do on this machine (**Setting local permissions**), pairs it and starts it as a background service.
 2. Sign in to Claude on that workstation, either with `claude` (your subscription) or with an API key.
 3. Choose the folders that hold your code. The runner finds the repositories in them.
 
@@ -207,6 +212,22 @@ With `AOM_DOMAIN` set to a public name, Caddy gets a Let's Encrypt certificate b
 ```bash
 docker compose -f docker-compose.prod.yml logs -f caddy
 ```
+
+### Security settings
+
+Two settings on **Platform > Security > Security settings** decide how strict your server is. Both are **off by default**, so a self-hosted server works as before, and upgrading to 1.10.0 with the defaults means nobody is locked out: existing runners keep connecting (with auto-update on they move to the new runner by themselves, normally within a day) and existing two-factor logins keep working.
+
+| Setting | Env default | Off (default) | On |
+| --- | --- | --- | --- |
+| **Only signed runners** | `AOM_REQUIRE_SIGNED_RUNNERS=false` | Unsigned runners pair, connect and update as before. | Only runners signed with the key your server trusts can pair or connect. Unsigned and older runners are unlinked and must be reinstalled. |
+| **Require two-factor login** | `AOM_ENFORCE_TWO_FACTOR=false` | Two-factor login is optional (an organization can still require it for its members). | Anyone who signs in without two-factor login must set it up before they can do anything else. |
+
+- The value saved on the Security settings tab wins over the env default. Turning a setting on is your choice; the tab shows first how many workstations and users it affects.
+- **Guildwise Cloud** locks both settings on. They cannot be turned off there: the switches show a lock, the API refuses the change, and the config cannot unset them. Every Cloud sign-up sets up two-factor login before it can continue.
+- **Signing is optional for self-hosters.** To use "Only signed runners" you sign your own runner builds with your own minisign key and point the server at the public key (`AOM_RUNNER_RELEASE_PUBKEY`). The steps are in [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md#signing-your-runners-with-your-own-key).
+- **Reinstalling unsigned runners.** With "Only signed runners" on, an unsigned runner cannot be re-paired in place or update itself. Its workstation shows **Reinstall required**: open **Workstations > Add a workstation** and run the installer your server serves on that machine. The installer stops the old runner and quarantines its files. Details: [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md#reinstalling-unsigned-runners).
+
+**Upgrading to 1.10.0 is a breaking change for self-hosted installs**: some routes and super-admin powers are removed and new behaviour is on by default (sign-in lockout, new-device mails, "Confirm it's you"). The full list and how to opt in to each setting are in [docs/SELF-HOSTING.md, "Upgrading to 1.10.0"](docs/SELF-HOSTING.md#upgrading-to-1100) and the [CHANGELOG](CHANGELOG.md).
 
 Done. For upgrades, backups, optional features and troubleshooting, read **[docs/SELF-HOSTING.md](docs/SELF-HOSTING.md)**.
 

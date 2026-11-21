@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { OfficeHoursSchema } from '../cloud/hours.ts';
+import { SignedReleaseProofSchema } from '../security/index.ts';
 import { IsoTime } from './common.ts';
 
 /**
@@ -140,5 +141,7 @@ export const RunnerEnrollRequestSchema = z.object({
   platform: z.string(),
   hostname: z.string(),
   runnerVersion: z.string(),
+  /** 1.10.0 (R18-U, R27): the signed-release proof the bootstrap kept; required while "Only signed runners" is on. */
+  release: SignedReleaseProofSchema.optional(),
 });
 export type RunnerEnrollRequest = z.infer<typeof RunnerEnrollRequestSchema>;

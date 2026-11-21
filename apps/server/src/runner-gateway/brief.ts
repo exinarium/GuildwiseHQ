@@ -25,6 +25,7 @@ import {
   type PackPersonaRef,
   packAgentBriefOf,
   type ReadRepo,
+  renderOrgText,
   renderUntrusted,
   resolveReportTarget,
   type Seniority,
@@ -58,7 +59,7 @@ import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import type { ClaimResult } from '../dispatcher/claim.ts';
 import { dependencyStates } from '../dispatcher/dependencies.ts';
 import { isGated } from '../governance/gates.ts';
-import { cardLedgerEntries, standingOrdersFor, standingOrdersForProjects } from '../queries/ledger.ts';
+import { cardLedgerEntries, standingOrdersFor } from '../queries/ledger.ts';
 import { reviewSettingsOf } from '../queries/misc.ts';
 import { orgReadRepos, referenceReadRepos } from './read-repos.ts';
 import { localReadRepos } from './workstation-repos.ts';
@@ -1048,8 +1049,10 @@ export async function withRequestContext(ctx: Ctx, req: Record<string, any>): Pr
     if (d) lines.push(`Desk item: ${d.title}`);
   }
   if (c.errorText) lines.push(`Last error:\n${c.errorText}`);
+  // 1.10.0 (R18-T): the names, titles and error text come from other people and agents, not from the person who asked.
+  // They are fenced even in the workstation owner's own request, which the DevOps prompt shows as the instruction.
   return lines.length
-    ? `${req.summary}\n\nContext the user was looking at:\n${lines.join('\n')}`
+    ? `${req.summary}\n\nContext the user was looking at:\n${renderOrgText('Context the user was looking at', lines.join('\n'))}`
     : req.summary;
 }
 
@@ -1068,27 +1071,49 @@ async function devopsProjectIds(ctx: Ctx, req: Row, orgId: string): Promise<stri
   return [...ids];
 }
 
+type Order = { title: string; body: string };
+
 /**
  * Standing orders for a DevOps shift (backlog #75): the organization-wide ones, those of every project the request
  * touches, and the owner's standing orders for the DevOps role. Before this the brief carried none, so the engineer never saw them.
+ *
+ * 1.10.0 (R18-T): a DevOps shift runs outside the sandbox, so only orders the workstation owner wrote bind it
+ * (`binding`). Everything else (orders by other people or agents, and the role's extension orders, which record no
+ * author) is `context`: the prompt shows it fenced. The runner may also pin orders locally (`guildwise-runner orders pin`).
  */
 export async function devopsStandingOrders(
   ctx: Ctx,
   req: Row,
   orgId: string,
   roleKey: string,
-): Promise<Array<{ title: string; body: string }>> {
+  workstationUserId: string,
+): Promise<{ binding: Order[]; context: Order[] }> {
   const ext = await one(ctx.pool, 'SELECT extensions FROM role_extensions WHERE org_id=$1 AND role_key=$2', [
     orgId,
     roleKey,
   ]);
-  const own = ((ext?.extensions as { standingOrders?: string[] } | undefined)?.standingOrders ?? []).map(
-    (body, i) => ({ title: `Owner standing order for DevOps ${i + 1}`, body }),
+  const roleOrders = (
+    (ext?.extensions as { standingOrders?: string[] } | undefined)?.standingOrders ?? []
+  ).map((body, i) => ({ title: `Owner standing order for DevOps ${i + 1}`, body }));
+  // The same orders `standingOrdersForProjects` returns, with their authors.
+  const projectIds = [...new Set(await devopsProjectIds(ctx, req, orgId))];
+  const entries = await rows(
+    ctx.pool,
+    `SELECT e.title, e.body, e.created_by_kind, e.created_by_id, p.key AS project_key
+       FROM ledger_entries e LEFT JOIN projects p ON p.id = e.project_id
+      WHERE e.org_id=$1 AND e.scope='standing_order' AND e.superseded_by IS NULL AND e.retired_at IS NULL
+        AND (e.project_id IS NULL OR e.project_id = ANY($2::uuid[]))
+      ORDER BY e.project_id NULLS FIRST, e.created_at, e.id`,
+    [orgId, projectIds],
   );
-  return [
-    ...(await standingOrdersForProjects(ctx.pool, orgId, await devopsProjectIds(ctx, req, orgId))),
-    ...own,
-  ];
+  const binding: Order[] = [];
+  const context: Order[] = [];
+  for (const e of entries) {
+    const order = { title: e.project_key ? `${e.project_key}: ${e.title}` : e.title, body: e.body };
+    if (e.created_by_kind === 'user' && e.created_by_id === workstationUserId) binding.push(order);
+    else context.push(order);
+  }
+  return { binding, context: [...context, ...roleOrders] };
 }
 
 /**
@@ -1113,7 +1138,7 @@ export async function buildDevopsShiftStart(
   const req = await one(ctx.pool, 'SELECT * FROM devops_requests WHERE id=$1', [requestId]);
   if (!req) return null;
   const agent = await one(ctx.pool, 'SELECT * FROM agents WHERE id=$1', [req.devops_agent_id]);
-  const ws = await one(ctx.pool, 'SELECT id, name, devops_access FROM workstations WHERE id=$1', [
+  const ws = await one(ctx.pool, 'SELECT id, name, user_id, devops_access FROM workstations WHERE id=$1', [
     req.workstation_id,
   ]);
   if (!agent || !ws) return null;
@@ -1157,6 +1182,9 @@ export async function buildDevopsShiftStart(
     note?: string;
   } | null;
   const placeholder = { id: requestId, key: 'DEVOPS', name: 'DevOps', ref: 'DEVOPS' };
+  const orders = await devopsStandingOrders(ctx, req, agent.org_id, role.definition.key, ws.user_id);
+  // Only the workstation owner's own words are an instruction to a shift outside the sandbox (R18-T, R18-D).
+  const fromWorkstationOwner = req.requested_by_kind === 'user' && req.requested_by_id === ws.user_id;
   const brief: ShiftBrief = {
     shift: {
       id: shiftId,
@@ -1198,8 +1226,8 @@ export async function buildDevopsShiftStart(
     handoffs: [],
     reviewComments: [],
     thread: [],
-    // Binding like every other agent's: the organization's orders plus those of each project the request touches.
-    standingOrders: await devopsStandingOrders(ctx, req, agent.org_id, role.definition.key),
+    // Binding: only the workstation owner's orders; the organization's and its projects' others travel as context.
+    standingOrders: orders.binding,
     ledger: [],
   };
   return {
@@ -1222,6 +1250,8 @@ export async function buildDevopsShiftStart(
       },
       card,
       workstationName: ws.name,
+      ...(fromWorkstationOwner ? { fromWorkstationOwner: true } : {}),
+      ...(orders.context.length ? { contextOrders: orders.context } : {}),
       access: DevOpsAccessSchema.parse(ws.devops_access ?? {}),
       ...(await mergeWaiver(ctx, req.card_id)),
       hygiene: req.hygiene ?? undefined,

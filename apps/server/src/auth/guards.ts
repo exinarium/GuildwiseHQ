@@ -1,7 +1,7 @@
 import type { OrgFeature, OrgRole } from '@aom/shared';
 import type { FastifyRequest } from 'fastify';
 import type { Ctx } from '../context.ts';
-import { forbidden, HttpError, notFound, unauthorized } from '../errors.ts';
+import { HttpError, notFound, unauthorized } from '../errors.ts';
 import {
   loadOrg,
   type OrgAccess,
@@ -13,6 +13,7 @@ import {
   resolveOrgId,
 } from './org-context.ts';
 import { type AuthSession, lookupSession, SESSION_COOKIE } from './sessions.ts';
+import { requireStepUp } from './step-up.ts';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -55,7 +56,10 @@ function assertTwoFactorSetUp(s: AuthSession, req: FastifyRequest): void {
     });
 }
 
-/** Super admin session or 404: the platform routes do not advertise themselves to anyone else. */
+/**
+ * Super admin session or 404: the platform routes do not advertise themselves to anyone else. Every write (any method
+ * but GET and HEAD) also needs a fresh "Confirm it's you" (R5): 403 `step_up_required {method}` otherwise.
+ */
 export async function requireSuperAdmin(ctx: Ctx, req: FastifyRequest): Promise<AuthSession> {
   let s: AuthSession;
   try {
@@ -66,6 +70,7 @@ export async function requireSuperAdmin(ctx: Ctx, req: FastifyRequest): Promise<
   }
   if (s.user.kind !== 'super_admin') throw notFound();
   assertTwoFactorSetUp(s, req);
+  if (req.method !== 'GET' && req.method !== 'HEAD') requireStepUp(ctx, s);
   return s;
 }
 
@@ -105,12 +110,5 @@ export async function requireUserWithFeature(
 
 /** `requireOrg` with a minimum role. */
 export const requireOrgRole = (ctx: Ctx, req: FastifyRequest, min: OrgRole) => requireOrg(ctx, req, { min });
-
-/** Retired with the app-wide administrator role: only the legacy /api/admin routes still call it. */
-export async function requireAdmin(ctx: Ctx, req: FastifyRequest): Promise<AuthSession> {
-  const s = await requireUser(ctx, req);
-  if (s.user.role !== 'admin') throw forbidden('administrator access required');
-  return s;
-}
 
 export { notFound };

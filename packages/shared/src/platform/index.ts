@@ -118,15 +118,13 @@ export const PlatformTeamSettingsSchema = z.object({
   projectKey: z.string().nullable(),
   projectName: z.string().nullable(),
   updatedAt: z.iso.datetime().nullable(),
+  /**
+   * Where the designation comes from (R17-1): `env` (`AOM_PLATFORM_TEAM_ORG_ID`/`_PROJECT_ID`), or `legacy` (a row the
+   * old super-admin setting wrote; read-only until env is set). Null when none is designated.
+   */
+  source: z.enum(['env', 'legacy']).nullable().optional(),
 });
 export type PlatformTeamSettings = z.infer<typeof PlatformTeamSettingsSchema>;
-
-/** `PUT /api/platform/team`: designate (both ids) or clear (orgId null). */
-export const SetPlatformTeamRequestSchema = z.object({
-  orgId: z.uuid().nullable(),
-  projectId: z.uuid().nullable().optional(),
-});
-export type SetPlatformTeamRequest = z.infer<typeof SetPlatformTeamRequestSchema>;
 
 // ----------------------------------------------------------------------------------------------- bugs
 

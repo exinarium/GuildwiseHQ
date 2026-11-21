@@ -150,14 +150,6 @@ export function usePatchPlatformUser() {
   });
 }
 
-export function useResetUserTwoFactor() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => post(`/platform/users/${id}/reset-two-factor`, {}),
-    onSuccess: () => refresh(qc),
-  });
-}
-
 export function useSendPasswordReset() {
   const qc = useQueryClient();
   return useMutation({

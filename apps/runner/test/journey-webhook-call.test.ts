@@ -48,6 +48,8 @@ const caller = () =>
     keyOf,
     now: () => 1_800_000_000_000,
     log: (l) => lines.push(l),
+    // the local test server is a private target: listed by the "owner" (R18-L)
+    allowPrivate: () => [`127.0.0.1:${port}`, '127.0.0.1:9'],
   });
 const payload = (over: Record<string, unknown> = {}) => ({
   callId: '0198f2a0-0000-7000-8000-0000000000aa',
@@ -129,5 +131,29 @@ describe('journey.webhook.call', () => {
     expect(log).toContain('0198f2a0-0000-7000-8000-0000000000aa');
     for (const s of [SECRET, SIGN, '/hook', 'Ann', String(port)]) expect(log).not.toContain(s);
     expect(redact(`x Bearer ${SECRET}`)).not.toContain(SECRET);
+  });
+});
+
+describe('private targets (R18-L)', () => {
+  it('a loopback, private or link-local target is refused unless the owner listed it, and nothing is sent', async () => {
+    const strict = new JourneyWebhookCaller({ secretsDir: dir, keyOf, log: () => undefined });
+    for (const url of [
+      `http://127.0.0.1:${port}/hook`,
+      'http://169.254.169.254/latest/meta-data',
+      'http://10.0.0.5/x',
+    ])
+      expect(await strict.run(payload({ url }))).toMatchObject({
+        ok: false,
+        retryable: false,
+        error: expect.stringMatching(/private network/),
+      });
+    // a public name that resolves to a private address is refused too
+    const rebind = new JourneyWebhookCaller({
+      secretsDir: dir,
+      keyOf,
+      resolve: async () => ['192.168.1.10'],
+    });
+    expect(await rebind.run(payload({ url: 'https://crm.example.com/hook' }))).toMatchObject({ ok: false });
+    expect(seen).toEqual([]);
   });
 });

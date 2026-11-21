@@ -29,16 +29,21 @@ const TOKEN = 'abcdefghijklmnopqrstuvwxyz012345';
 describe('forgot and reset password', () => {
   const calls: Array<{ url: string; body?: unknown }> = [];
   let valid = true;
+  let secondFactor = false;
+  let confirmAnswers: Array<() => Response> = [];
   beforeEach(() => {
     calls.length = 0;
     valid = true;
+    secondFactor = false;
+    confirmAnswers = [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string, init?: RequestInit) => {
         calls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined });
         if (String(url).includes('/password-reset/request')) return res(200, { ok: true });
-        if (String(url).includes('/password-reset/confirm')) return res(200, { ok: true });
-        if (String(url).includes('/password-reset/')) return res(200, { valid });
+        if (String(url).includes('/password-reset/confirm'))
+          return confirmAnswers.shift()?.() ?? res(200, { ok: true });
+        if (String(url).includes('/password-reset/')) return res(200, { valid, secondFactor });
         return res(200, {});
       }),
     );
@@ -75,6 +80,54 @@ describe('forgot and reset password', () => {
       token: TOKEN,
       password: 'a-long-enough-password',
     });
+  });
+
+  it('asks a two-factor account for its code, says how many tries are left, then saves (R3)', async () => {
+    secondFactor = true;
+    confirmAnswers = [
+      () =>
+        res(400, {
+          error: { code: 'invalid_code', message: 'that code is not right', details: { attemptsLeft: 4 } },
+        }),
+    ];
+    const user = userEvent.setup();
+    wrap(<ResetPassword />, `/reset-password/${TOKEN}`);
+    await user.type(await screen.findByLabelText('New password'), 'a-long-enough-password');
+    await user.type(screen.getByLabelText('Repeat the password'), 'a-long-enough-password');
+    await user.click(screen.getByRole('button', { name: 'Save the password' }));
+    expect(screen.getByText('Enter the code from your authenticator app')).toBeInTheDocument();
+    expect(calls.find((c) => c.url.includes('/confirm'))).toBeUndefined();
+    await user.type(screen.getByLabelText('Two-factor code'), '000000');
+    await user.click(screen.getByRole('button', { name: 'Save the password' }));
+    expect(await screen.findByText('That code is not right: 4 tries left')).toBeInTheDocument();
+    await user.clear(screen.getByLabelText('Two-factor code'));
+    await user.type(screen.getByLabelText('Two-factor code'), '123456');
+    await user.click(screen.getByRole('button', { name: 'Save the password' }));
+    await waitFor(() => expect(screen.getByText('login page')).toBeInTheDocument());
+    expect(calls.filter((c) => c.url.includes('/confirm')).at(-1)?.body).toEqual({
+      token: TOKEN,
+      password: 'a-long-enough-password',
+      code: '123456',
+    });
+  });
+
+  it('shows the code field when the server asks for one the page did not expect', async () => {
+    confirmAnswers = [
+      () => res(400, { error: { code: 'second_factor_required', message: 'enter the code', details: {} } }),
+    ];
+    const user = userEvent.setup();
+    wrap(<ResetPassword />, `/reset-password/${TOKEN}`);
+    await user.type(await screen.findByLabelText('New password'), 'a-long-enough-password');
+    await user.type(screen.getByLabelText('Repeat the password'), 'a-long-enough-password');
+    await user.click(screen.getByRole('button', { name: 'Save the password' }));
+    expect(await screen.findByLabelText('Two-factor code')).toBeInTheDocument();
+    expect(screen.queryByText('This link is no longer valid')).toBeNull();
+  });
+
+  it('shows no code field for an account without two-factor', async () => {
+    wrap(<ResetPassword />, `/reset-password/${TOKEN}`);
+    await screen.findByLabelText('New password');
+    expect(screen.queryByLabelText('Two-factor code')).toBeNull();
   });
 
   it('says so when the link is no longer valid', async () => {

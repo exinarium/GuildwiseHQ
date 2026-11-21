@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChecksumMismatchError } from '../src/update/apply.ts';
 import { readFailed, readPending, writeFailed, writePending } from '../src/update/layout.ts';
 import { Updater, type UpdaterOptions, type UpdateStatus } from '../src/update/updater.ts';
+import { TEST_PUB } from './minisign-helper.ts';
 import { addVersion, makeInstall, releaseFetch, until } from './update-helpers.ts';
 
 const FAST = {
@@ -29,8 +30,8 @@ function setup(opts: {
   mode?: UpdaterOptions['mode'];
   timing?: UpdaterOptions['timing'];
 }) {
-  const install = makeInstall(opts.version ?? '0.1.0');
-  const state = { server: opts.server ?? { version: '0.1.1' } };
+  const install = makeInstall(opts.version ?? '2.1.0');
+  const state = { server: opts.server ?? { version: '2.1.1' } };
   const reports: UpdateStatus[] = [];
   const restart = vi.fn();
   const stage =
@@ -38,7 +39,7 @@ function setup(opts: {
     vi.fn(async (_layout, release: { version: string }) => addVersion(install.root, release.version));
   const updater = new Updater({
     layout: install.layout,
-    version: opts.version ?? '0.1.0',
+    version: opts.version ?? '2.1.0',
     serverUrl: () => 'http://server.test',
     isIdle: opts.idle ?? (() => true),
     restart,
@@ -49,6 +50,8 @@ function setup(opts: {
     timing: { ...FAST, ...opts.timing },
     stage: stage as UpdaterOptions['stage'],
     scheduleRestartFn: vi.fn(),
+    // releases are signed with the test fixture key (R18-U); the versions are above the floor
+    trustedKey: TEST_PUB,
   });
   running.push(updater);
   return { ...install, state, reports, restart, stage, updater };
@@ -59,16 +62,16 @@ describe('update check', () => {
     const t = setup({});
     await t.updater.check();
     await until(() => t.restart.mock.calls.length > 0);
-    expect(readlinkSync(t.layout.current)).toBe(join(t.root, '0.1.1', 'aom-runner'));
+    expect(readlinkSync(t.layout.current)).toBe(join(t.root, '2.1.1', 'aom-runner'));
     expect(readlinkSync(t.layout.previous)).toBe(t.pkg);
     const pending = readPending(t.layout);
-    expect(pending).toMatchObject({ from: '0.1.0', to: '0.1.1' });
+    expect(pending).toMatchObject({ from: '2.1.0', to: '2.1.1' });
     expect((pending?.deadline ?? 0) * 1000).toBeGreaterThan(Date.now());
     expect(t.updater.current.state).toBe('updating');
   });
 
   it('does nothing when the server offers the same or an older version', async () => {
-    for (const v of ['0.1.0', '0.0.9']) {
+    for (const v of ['2.1.0', '2.0.9']) {
       const t = setup({ server: { version: v } });
       await t.updater.check();
       expect(t.updater.current).toMatchObject({ state: 'up_to_date', latestVersion: v });
@@ -77,8 +80,8 @@ describe('update check', () => {
     }
   });
 
-  it('compares versions numerically (0.1.10 is newer than 0.1.9)', async () => {
-    const t = setup({ version: '0.1.9', server: { version: '0.1.10' } });
+  it('compares versions numerically (2.1.10 is newer than 2.1.9)', async () => {
+    const t = setup({ version: '2.1.9', server: { version: '2.1.10' } });
     await t.updater.check();
     expect(t.stage).toHaveBeenCalledOnce();
   });
@@ -106,12 +109,12 @@ describe('update check', () => {
 
   it('does not try a version again that was rolled back on this machine', async () => {
     const t = setup({});
-    writeFailed(t.layout, { version: '0.1.1', at: 1, reason: 'no connection' });
+    writeFailed(t.layout, { version: '2.1.1', at: 1, reason: 'no connection' });
     await t.updater.check();
     expect(t.stage).not.toHaveBeenCalled();
     expect(t.updater.current.state).toBe('rolled_back');
     // a newer release is tried
-    t.state.server = { version: '0.1.2' };
+    t.state.server = { version: '2.1.2' };
     await t.updater.check();
     expect(t.stage).toHaveBeenCalledOnce();
   });
@@ -130,20 +133,20 @@ describe('idle wait', () => {
     expect(existsSync(t.layout.pendingFile)).toBe(false);
     busy = false;
     await until(() => t.restart.mock.calls.length > 0);
-    expect(readlinkSync(t.layout.current)).toBe(join(t.root, '0.1.1', 'aom-runner'));
+    expect(readlinkSync(t.layout.current)).toBe(join(t.root, '2.1.1', 'aom-runner'));
   });
 
   it('updates anyway once the maximum delay is over', async () => {
     const t = setup({ idle: () => false, timing: { maxIdleWaitMs: 40 } });
     await t.updater.check();
     await until(() => t.restart.mock.calls.length > 0);
-    expect(readPending(t.layout)?.to).toBe('0.1.1');
+    expect(readPending(t.layout)?.to).toBe('2.1.1');
   });
 });
 
 describe('kill switch', () => {
   it('does not download while the server says updates are paused', async () => {
-    const t = setup({ server: { version: '0.1.1', paused: true } });
+    const t = setup({ server: { version: '2.1.1', paused: true } });
     await t.updater.check();
     expect(t.updater.current.state).toBe('paused');
     expect(t.stage).not.toHaveBeenCalled();
@@ -155,7 +158,7 @@ describe('kill switch', () => {
     const t = setup({ idle: () => !busy });
     await t.updater.check();
     expect(t.updater.current.state).toBe('pending');
-    t.state.server = { version: '0.1.1', paused: true };
+    t.state.server = { version: '2.1.1', paused: true };
     busy = false;
     await until(() => t.updater.current.state === 'paused');
     expect(t.restart).not.toHaveBeenCalled();
@@ -163,9 +166,9 @@ describe('kill switch', () => {
   });
 
   it('resumes when the switch is turned off again', async () => {
-    const t = setup({ server: { version: '0.1.1', paused: true } });
+    const t = setup({ server: { version: '2.1.1', paused: true } });
     await t.updater.check();
-    t.state.server = { version: '0.1.1', paused: false };
+    t.state.server = { version: '2.1.1', paused: false };
     await t.updater.check();
     await until(() => t.restart.mock.calls.length > 0);
   });
@@ -182,7 +185,7 @@ describe('unmanaged installs', () => {
   it('never updates without the installer layout', () => {
     const u = new Updater({
       layout: null,
-      version: '0.1.0',
+      version: '2.1.0',
       serverUrl: () => 'http://server.test',
       isIdle: () => true,
       restart: vi.fn(),
@@ -195,10 +198,10 @@ describe('unmanaged installs', () => {
   });
 
   it('can be turned off on the machine', () => {
-    const { layout } = makeInstall('0.1.0');
+    const { layout } = makeInstall('2.1.0');
     const off = new Updater({
       layout,
-      version: '0.1.0',
+      version: '2.1.0',
       serverUrl: () => 'http://server.test',
       isIdle: () => true,
       restart: vi.fn(),
@@ -217,21 +220,21 @@ describe('probation after an update', () => {
   const nowSec = () => Math.floor(Date.now() / 1000);
 
   it('rolls back to the previous version when the new one never connects', async () => {
-    const t = setup({ version: '0.1.1' });
-    const oldPkg = addVersion(t.root, '0.1.0');
-    writePending(t.layout, { from: '0.1.0', to: '0.1.1', deadline: nowSec() - 1 });
+    const t = setup({ version: '2.1.1' });
+    const oldPkg = addVersion(t.root, '2.1.0');
+    writePending(t.layout, { from: '2.1.0', to: '2.1.1', deadline: nowSec() - 1 });
     t.updater.start();
     await until(() => t.restart.mock.calls.length > 0);
     expect(readlinkSync(t.layout.current)).toBe(oldPkg);
     expect(existsSync(t.layout.pendingFile)).toBe(false);
-    expect(readFailed(t.layout)?.version).toBe('0.1.1');
+    expect(readFailed(t.layout)?.version).toBe('2.1.1');
     expect(t.updater.current.state).toBe('rolled_back');
   });
 
   it('does not roll back while the server is unreachable', async () => {
-    const t = setup({ version: '0.1.1', server: 'down' });
-    addVersion(t.root, '0.1.0');
-    writePending(t.layout, { from: '0.1.0', to: '0.1.1', deadline: nowSec() - 1 });
+    const t = setup({ version: '2.1.1', server: 'down' });
+    addVersion(t.root, '2.1.0');
+    writePending(t.layout, { from: '2.1.0', to: '2.1.1', deadline: nowSec() - 1 });
     t.updater.start();
     await new Promise((r) => setTimeout(r, 80));
     expect(t.restart).not.toHaveBeenCalled();
@@ -239,35 +242,38 @@ describe('probation after an update', () => {
   });
 
   it('confirms the update when the new version connects, and prunes older versions', () => {
-    const t = setup({ version: '0.1.1' });
-    addVersion(t.root, '0.1.0');
-    addVersion(t.root, '0.0.9');
-    writePending(t.layout, { from: '0.1.0', to: '0.1.1', deadline: nowSec() + 300 });
+    const t = setup({ version: '2.1.1' });
+    addVersion(t.root, '2.1.0');
+    addVersion(t.root, '2.0.9');
+    writePending(t.layout, { from: '2.1.0', to: '2.1.1', deadline: nowSec() + 300 });
     t.updater.start();
     t.updater.noteConnected();
     expect(existsSync(t.layout.pendingFile)).toBe(false);
-    expect(existsSync(join(t.root, '0.0.9'))).toBe(false);
-    expect(existsSync(join(t.root, '0.1.0'))).toBe(true);
+    expect(existsSync(join(t.root, '2.0.9'))).toBe(false);
+    expect(existsSync(join(t.root, '2.1.0'))).toBe(true);
     expect(t.restart).not.toHaveBeenCalled();
     expect(t.updater.current.state).toBe('up_to_date');
   });
 
   it('reports a rollback that the launcher already did', () => {
-    const t = setup({ version: '0.1.0' });
-    writeFileSync(t.layout.failedFile, 'version=0.1.1\nat=1\nreason=did not start or connect in time\n');
+    const t = setup({ version: '2.1.0' });
+    writeFileSync(t.layout.failedFile, 'version=2.1.1\nat=1\nreason=did not start or connect in time\n');
     t.updater.start();
     expect(t.updater.current.state).toBe('rolled_back');
-    expect(t.updater.current.detail).toMatch(/0\.1\.1/);
+    expect(t.updater.current.detail).toMatch(/2\.1\.1/);
   });
 });
 
 describe('safe mode: a runner version pin from the platform team', () => {
   const SHA = 'a'.repeat(64);
-  /** A server that offers 0.1.5 as the latest release and any pinned version on request. */
+  /** A server that offers 2.1.5 as the latest release and any pinned version on request. */
   const pinServer = (paused = false): typeof fetch =>
     (async (input: URL | string) => {
       const asked = new URL(String(input)).searchParams.get('version');
-      const version = asked ?? '0.1.5';
+      const version = asked ?? '2.1.5';
+      // the 1.10.0 paths: a manifest signed with the test fixture key, and its signature
+      const path = new URL(String(input)).pathname;
+      if (path.startsWith('/api/runner/releases/')) return releaseFetch(() => ({ version, paused }))(input);
       return new Response(
         JSON.stringify({
           version,
@@ -299,46 +305,47 @@ describe('safe mode: a runner version pin from the platform team', () => {
       timing: FAST,
       stage: stage as UpdaterOptions['stage'],
       scheduleRestartFn: vi.fn(),
+      trustedKey: TEST_PUB,
     });
     running.push(updater);
     return { ...install, restart, stage, updater };
   }
 
   it('rolls back to an OLDER pinned version (the normal cycle never goes down)', async () => {
-    const t = setupPin('0.1.4');
-    t.updater.setPin('0.1.2');
+    const t = setupPin('2.1.4');
+    t.updater.setPin('2.1.2');
     await until(() => t.restart.mock.calls.length > 0);
-    expect(readlinkSync(t.layout.current)).toBe(join(t.root, '0.1.2', 'aom-runner'));
-    expect(readPending(t.layout)).toMatchObject({ from: '0.1.4', to: '0.1.2' });
+    expect(readlinkSync(t.layout.current)).toBe(join(t.root, '2.1.2', 'aom-runner'));
+    expect(readPending(t.layout)).toMatchObject({ from: '2.1.4', to: '2.1.2' });
   });
 
   it('stays where it is when already on the pinned version, and does not follow the newer release', async () => {
-    const t = setupPin('0.1.2');
-    t.updater.setPin('0.1.2');
+    const t = setupPin('2.1.2');
+    t.updater.setPin('2.1.2');
     await t.updater.check();
     expect(t.stage).not.toHaveBeenCalled();
     expect(t.restart).not.toHaveBeenCalled();
-    expect(t.updater.current.detail).toMatch(/Pinned to 0\.1\.2/);
+    expect(t.updater.current.detail).toMatch(/Pinned to 2\.1\.2/);
   });
 
   it('follows the pin even while automatic updates are paused, and unpinning goes back to the latest', async () => {
-    const t = setupPin('0.1.4', true);
-    t.updater.setPin('0.1.3');
+    const t = setupPin('2.1.4', true);
+    t.updater.setPin('2.1.3');
     await until(() => t.restart.mock.calls.length > 0);
-    expect(readPending(t.layout)).toMatchObject({ to: '0.1.3' });
-    const u = setupPin('0.1.3');
-    u.updater.setPin('0.1.3');
+    expect(readPending(t.layout)).toMatchObject({ to: '2.1.3' });
+    const u = setupPin('2.1.3');
+    u.updater.setPin('2.1.3');
     await u.updater.check();
     u.updater.setPin(null);
     await until(() => u.restart.mock.calls.length > 0);
-    expect(readPending(u.layout)).toMatchObject({ from: '0.1.3', to: '0.1.5' });
+    expect(readPending(u.layout)).toMatchObject({ from: '2.1.3', to: '2.1.5' });
   });
 });
 
 describe('checkNow ("Check for updates" in the web app)', () => {
   it('says up to date when the server offers the same version', async () => {
-    const t = setup({ server: { version: '0.1.0' } });
-    expect(await t.updater.checkNow()).toMatchObject({ outcome: 'up_to_date', version: '0.1.0' });
+    const t = setup({ server: { version: '2.1.0' } });
+    expect(await t.updater.checkNow()).toMatchObject({ outcome: 'up_to_date', version: '2.1.0' });
     expect(t.stage).not.toHaveBeenCalled();
     expect(quiet.info).toHaveBeenCalledWith(expect.stringContaining('update check on request: up_to_date'));
   });
@@ -346,14 +353,14 @@ describe('checkNow ("Check for updates" in the web app)', () => {
   it('finds a newer version and reuses the download path, then waits for idle before switching', async () => {
     let idle = false;
     const t = setup({ idle: () => idle });
-    expect(await t.updater.checkNow()).toMatchObject({ outcome: 'update_found', version: '0.1.1' });
+    expect(await t.updater.checkNow()).toMatchObject({ outcome: 'update_found', version: '2.1.1' });
     expect(t.stage).toHaveBeenCalledOnce();
     expect(t.updater.current.state).toBe('pending');
     await new Promise((r) => setTimeout(r, 40));
     expect(t.restart).not.toHaveBeenCalled(); // busy: no forced restart
     idle = true;
     await until(() => t.restart.mock.calls.length > 0);
-    expect(readPending(t.layout)).toMatchObject({ from: '0.1.0', to: '0.1.1' });
+    expect(readPending(t.layout)).toMatchObject({ from: '2.1.0', to: '2.1.1' });
   });
 
   it('joins a check or download already running instead of starting another', async () => {
@@ -381,16 +388,16 @@ describe('checkNow ("Check for updates" in the web app)', () => {
   });
 
   it('reports paused and downloads nothing while the platform kill switch is on', async () => {
-    const t = setup({ server: { version: '0.1.1', paused: true } });
-    expect(await t.updater.checkNow()).toMatchObject({ outcome: 'paused', version: '0.1.1' });
+    const t = setup({ server: { version: '2.1.1', paused: true } });
+    expect(await t.updater.checkNow()).toMatchObject({ outcome: 'paused', version: '2.1.1' });
     expect(t.stage).not.toHaveBeenCalled();
   });
 
   it('reports disabled when AOM_RUNNER_AUTO_UPDATE=0 or the install is not managed', async () => {
-    const { layout } = makeInstall('0.1.0');
+    const { layout } = makeInstall('2.1.0');
     const off = new Updater({
       layout,
-      version: '0.1.0',
+      version: '2.1.0',
       serverUrl: () => 'http://server.test',
       isIdle: () => true,
       restart: vi.fn(),

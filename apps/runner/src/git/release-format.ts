@@ -1,6 +1,7 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { stripAnsi } from '../checks/attribute.ts';
 
 /** Runs one program of the repository (no shell); same shape as the Release prep exec. */
@@ -23,6 +24,11 @@ export interface ReleaseFormatInput {
   exec?: ReleaseExec;
   /** Defaults to `process.platform`; tests pin it. */
   platform?: NodeJS.Platform;
+  /**
+   * R18-S [rv3-2]: the formatter runs only while its configuration is unchanged since it was approved on this workstation
+   * (policy.json `formatterPins`). Given: an unpinned config skips the formatter and the notice says so.
+   */
+  formatterPinned?: (configHash: string) => boolean;
 }
 
 export type ReleaseFormatOutcome =
@@ -97,6 +103,69 @@ export function detectReleaseFormatter(worktree: string): FormatterSpec | null {
   return null;
 }
 
+/** The files that decide which formatter package gets installed in a clone (REVIEW blocker 5). */
+const PACKAGE_FILES = [
+  'package.json',
+  'package-lock.json',
+  'npm-shrinkwrap.json',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  'bun.lockb',
+];
+
+/** The nearest package.json at or above the binary's real file (the installed formatter package, with its version). */
+function ownPackageJson(realBin: string): string | null {
+  let dir = dirname(realBin);
+  for (let i = 0; i < 6; i++) {
+    const f = join(dir, 'package.json');
+    if (existsSync(f)) return f;
+    const up = dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return null;
+}
+
+/**
+ * What `guildwise-runner formatter pin <sha256>` approves (R18-S [rv3-2]): the formatter configuration that selected the
+ * tool (file name and bytes; for `package.json`, its `prettier` key) AND the program that will run: the clone's
+ * `package.json` and lockfiles (which decide the installed package), the resolved binary's real file and the installed
+ * package's own `package.json` (its version). A changed config, dependency, lockfile or binary makes it unpinned.
+ */
+export function formatterConfigHash(
+  worktree: string,
+  spec: FormatterSpec,
+  program?: { repoPath: string; bin: string },
+): string {
+  const h = createHash('sha256').update(`${spec.tool}\0${spec.config}\0`);
+  if (spec.config === 'package.json') {
+    try {
+      const pkg = JSON.parse(readFileSync(join(worktree, 'package.json'), 'utf8')) as { prettier?: unknown };
+      h.update(JSON.stringify(pkg.prettier ?? null));
+    } catch {
+      h.update('unreadable');
+    }
+  } else h.update(readFileSync(join(worktree, spec.config)));
+  if (program) {
+    for (const f of PACKAGE_FILES) {
+      const file = join(program.repoPath, f);
+      h.update(`\0${f}\0`);
+      if (existsSync(file)) h.update(readFileSync(file));
+    }
+    let real = program.bin;
+    try {
+      real = realpathSync(program.bin);
+    } catch {
+      // a dangling link: hash its path only
+    }
+    h.update(`\0bin\0${relative(program.repoPath, real)}\0`);
+    if (existsSync(real)) h.update(readFileSync(real));
+    const pkg = existsSync(real) ? ownPackageJson(real) : null;
+    if (pkg) h.update(readFileSync(pkg));
+  }
+  return h.digest('hex');
+}
+
 /** The repository's own binary: the clone's node_modules/.bin first, then the PATH folders. Never npx, never an install. */
 export function resolveFormatterBinary(tool: string, repoPath: string, pathDirs: string[]): string | null {
   for (const dir of [join(repoPath, 'node_modules', '.bin'), ...pathDirs.filter(Boolean)]) {
@@ -139,6 +208,15 @@ export async function formatReleaseFiles(input: ReleaseFormatInput): Promise<Rel
       state: 'skipped',
       reason: `${spec.config} is in the repository but no ${spec.tool} program was found in ${join(input.repoPath, 'node_modules', '.bin')} or on the toolchain PATH`,
     };
+  if (input.formatterPinned) {
+    // the pin covers the configuration and the very program resolved above (the binary that will run)
+    const hash = formatterConfigHash(input.worktree, spec, { repoPath: input.repoPath, bin });
+    if (!input.formatterPinned(hash))
+      return {
+        state: 'skipped',
+        reason: `the ${spec.tool} configuration and program (${spec.config}, its package and lockfile, sha256 ${hash}) are not approved on this workstation, so the formatter did not run (approve it with \`guildwise-runner formatter pin ${hash}\`)`,
+      };
+  }
   // './' keeps a path from ever being read as an option
   const fileArgs = files.map((f) => `./${f}`);
   const fixArgs = [...spec.fixArgs, ...fileArgs];

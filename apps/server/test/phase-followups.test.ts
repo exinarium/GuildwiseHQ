@@ -6,7 +6,7 @@ import type { FakeRunner } from './helpers/fake-runner.ts';
 import { addMember, connectMemberRunner, type Member } from './helpers/members.ts';
 import { pipeline, testFail } from './helpers/pipeline.ts';
 import { seed } from './helpers/seed.ts';
-import { createWorld, ok, type World } from './helpers/world.ts';
+import { createWorld, ok, type World, worksFor } from './helpers/world.ts';
 
 let w: World;
 let r: FakeRunner;
@@ -19,7 +19,21 @@ beforeAll(async () => {
   w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false', AOM_MOCK_UI: 'true' } });
   r = await w.connectRunner();
   member = await addMember(w, 'mgr');
+  await worksFor(
+    w.t,
+    member,
+    member.workstationId,
+    (await q('SELECT org_id FROM projects WHERE id=$1', [w.projectId]))[0]!.org_id,
+  ); // R9: the member's consent
   memberRunner = await connectMemberRunner(w, member);
+  // 1.10.0 (R18-D): a follow-up goes only to an engineer of the project's organization. The member's machine got one
+  // engineer for the member's own organization at pairing; give it one of the project's organization too.
+  await q(
+    `INSERT INTO agents SELECT (jsonb_populate_record(NULL::agents, to_jsonb(a) || jsonb_build_object(
+        'id', gen_random_uuid(), 'workstation_id', $2::uuid, 'name', 'Atlas for mgr-box'))).*
+       FROM agents a WHERE a.is_devops AND a.status='active' AND a.workstation_id=$1 AND a.org_id=$3`,
+    [w.workstationId, member.workstationId, w.owner.id],
+  );
   local = await ok<any>(
     owner('POST', `/api/projects/${w.projectId}/deploy-targets`, {
       name: 'local',
@@ -432,6 +446,63 @@ describe('a local deploy skips workstations that are offline', () => {
     await q(`UPDATE workstations SET connected=true WHERE id = ANY($1::uuid[])`, [
       [w.workstationId, member.workstationId],
     ]);
+  });
+});
+
+describe("a follow-up never reaches another organization's engineer (1.10.0, R18-D)", () => {
+  it("skips a member's workstation that has only the member's own organization engineer", async () => {
+    const { phase, itemId } = await awaitingApproval('Own org only', [
+      { kind: 'deploy', targetId: local.id },
+    ]);
+    await approve(itemId);
+    await dispatcher().runPass();
+    await q(`UPDATE agents SET status='retired' WHERE workstation_id=$1 AND is_devops AND org_id=$2`, [
+      member.workstationId,
+      w.owner.id,
+    ]);
+    try {
+      await phasePass(w.t.app.ctx);
+      const f1 = (await followups(phase.id))[0]!;
+      const reqs = await requestsOf(f1.id);
+      expect(reqs.map((x) => x.workstation_id)).toEqual([w.workstationId]);
+      expect(
+        (
+          await q('SELECT org_id FROM agents WHERE id = ANY($1::uuid[])', [
+            reqs.map((x) => x.devops_agent_id),
+          ])
+        ).map((a) => a.org_id),
+      ).toEqual([w.owner.id]);
+      await completeRequest(reqs[0]?.id, 'done', 'deployed');
+      await phasePass(w.t.app.ctx);
+    } finally {
+      await q(`UPDATE agents SET status='active' WHERE workstation_id=$1 AND is_devops AND org_id=$2`, [
+        member.workstationId,
+        w.owner.id,
+      ]);
+    }
+  });
+
+  it('fails with the reason when only other organizations have an engineer there', async () => {
+    const { phase, itemId } = await awaitingApproval('Other org only', [
+      { kind: 'deploy', targetId: remote.id },
+    ]);
+    await approve(itemId);
+    await dispatcher().runPass();
+    await q(`UPDATE agents SET status='retired' WHERE workstation_id=$1 AND is_devops AND org_id=$2`, [
+      member.workstationId,
+      w.owner.id,
+    ]);
+    try {
+      await phasePass(w.t.app.ctx);
+      const f1 = (await followups(phase.id))[0]!;
+      expect(f1.status).toBe('failed');
+      expect(await requestsOf(f1.id)).toEqual([]);
+    } finally {
+      await q(`UPDATE agents SET status='active' WHERE workstation_id=$1 AND is_devops AND org_id=$2`, [
+        member.workstationId,
+        w.owner.id,
+      ]);
+    }
   });
 });
 

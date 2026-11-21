@@ -1,4 +1,11 @@
-import type { ActiveOrg, OrgLimits, OrgRole } from '@aom/shared';
+import {
+  type ActiveOrg,
+  type LockedSecuritySettings,
+  type OrgLimits,
+  type OrgRole,
+  type ScreenPurpose,
+  SECURITY_SETTING_KEYS,
+} from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import type { OrgRow } from './auth/org-context.ts';
 import type { Config } from './config.ts';
@@ -105,6 +112,24 @@ export interface ServerExtension {
   preservedTables?: PreservedTable[];
   /** Printed at boot when set. */
   startupWarning?(config: Config): string | undefined;
+  /**
+   * Hosted address policy (R1, the disposable-domain list): called by `screenAddress` (auth/address-policy.ts) after the
+   * core block list, unless an `allow_domain` entry matches. Return `{reason}` to refuse the address, null to let it pass.
+   * Must not throw for an ordinary refusal; a thrown error fails the request.
+   */
+  screenAddress?(ctx: Ctx, input: ScreenAddressInput): Promise<{ reason: string } | null>;
+  /**
+   * Security settings this build locks on (R27, R28): neither the UI, the API nor the config can turn them off. Only
+   * `true` is accepted, so a lock can only make an install stricter (`createExtensionHost` refuses anything else).
+   */
+  lockedSecuritySettings?: LockedSecuritySettings;
+}
+
+/** What `screenAddress` is asked about. `email` is lower-cased and trimmed; `ip` is the request's client address. */
+export interface ScreenAddressInput {
+  email: string;
+  ip: string | null;
+  purpose: ScreenPurpose;
 }
 
 /** What `ctx.ext` holds: the registered extensions and a bag for their runtime services. */
@@ -113,6 +138,25 @@ export interface ExtensionHost {
   /** Runtime services, keyed by extension name (set in `setup`). */
   state: Record<string, unknown>;
   planLimits: PlanLimitsProvider;
+  /** The union of the extensions' locks: a key is locked on when any extension locks it. */
+  lockedSecuritySettings: LockedSecuritySettings;
+}
+
+/** Merges the extensions' `lockedSecuritySettings`; a value other than `true` (or an unknown key) is a programming error. */
+export function mergeSecurityLocks(extensions: readonly ServerExtension[]): LockedSecuritySettings {
+  const out: LockedSecuritySettings = {};
+  for (const e of extensions) {
+    for (const [k, v] of Object.entries(e.lockedSecuritySettings ?? {})) {
+      if (!(SECURITY_SETTING_KEYS as readonly string[]).includes(k))
+        throw new Error(`server extension "${e.name}" locks an unknown security setting "${k}"`);
+      if (v !== true)
+        throw new Error(
+          `server extension "${e.name}" may only lock "${k}" on (true): a lock can never make an install less strict`,
+        );
+      out[k as keyof LockedSecuritySettings] = true;
+    }
+  }
+  return out;
 }
 
 export const unlimitedLimits = (): OrgLimits => ({
@@ -142,6 +186,7 @@ export function createExtensionHost(extensions: readonly ServerExtension[] = [])
     list: extensions,
     state: {},
     planLimits: providers[0]?.planLimits ?? UNLIMITED_PROVIDER,
+    lockedSecuritySettings: mergeSecurityLocks(extensions),
   };
 }
 

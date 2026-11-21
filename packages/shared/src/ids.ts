@@ -76,6 +76,10 @@ export const streamId = {
   pack: (id: string) => `pack-${id}`,
   /** What a project's checkout carries (.agents/skills ...). */
   projectCapabilities: (projectId: string) => `project-capabilities-${projectId}`,
+  /** Platform security: the block list and the security settings (1.10.0). */
+  platformSecurity: () => 'platform-security',
+  /** A remote render worker of the render job API (R16). */
+  renderWorker: (id: string) => `render-worker-${id}`,
 } as const;
 
 export const ProjectKeySchema = z

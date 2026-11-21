@@ -35,6 +35,7 @@ import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { orgScope, userActor } from './common.ts';
 import { releaseClaimsOfAgentEvents } from './devops-retire.ts';
 import { mcpServerCandidates } from './mcp-servers.ts';
+import { serveOnHireIn } from './workstation-serving.ts';
 
 // A name in this pool that is also an ordinary word must be added to ORDINARY_WORD_HANDLES (packages/shared/src/release/changelog-entries.ts).
 const NAMES: Record<string, string[]> = {
@@ -316,7 +317,7 @@ export async function hireAgentIn(
   // Own workstation; or the organization's simulated workstation (a simulation organization's agents run there).
   const ws = await one(
     tx,
-    `SELECT id, simulation_org_id FROM workstations WHERE id=$1 AND status='active' AND (user_id=$2 OR simulation_org_id=$3)`,
+    `SELECT id, user_id, simulation_org_id FROM workstations WHERE id=$1 AND status='active' AND (user_id=$2 OR simulation_org_id=$3)`,
     [req.workstationId, user.id, org.id],
   );
   if (!ws) throw notFound('workstation not found');
@@ -407,6 +408,14 @@ export async function hireAgentIn(
     ? await qualifiedSkillKeys(tx, orgId, req.skills, { projectId: anchor ?? null, userId: user.id })
     : roleDef.definition.skills;
   const skills = [...new Set([...base, ...(extra.addSkills ?? [])])];
+  // R9 (audit F4): hiring onto your own workstation is your consent that it works for this organization [rv 8].
+  await serveOnHireIn(
+    ctx,
+    tx,
+    user.id,
+    ws as { id: string; user_id: string; simulation_org_id: string | null },
+    orgId,
+  );
   await ctx.store.append(
     [
       {

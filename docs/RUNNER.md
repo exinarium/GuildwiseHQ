@@ -34,6 +34,14 @@ The link works for 30 minutes. The script embeds the server URL, a fresh **singl
 9. walks you through the `claude` sign-in: subscription (browser login, usage counts against your plan) or API key (stored in `config.json`, mode 0600), or later;
 10. installs the systemd **user service** `aom-runner` (unit in `~/.config/systemd/user`, `PATH` set to the Node and Claude directories), enables lingering (`loginctl enable-linger`) so it survives logout and starts at boot, waits for the runner to connect and runs `guildwise-runner doctor`, streaming each line to the wizard.
 
+**1.10.0 changes to the install** (the numbering above is the older flow; the installer now adds these steps).
+
+- **First: "Looking for an older runner".** The installer detects a runner from before Guildwise 1.10.0: `~/.local/share/guildwise/runner`, `~/.aom-runner` (or `AOM_RUNNER_HOME`), `~/.config/aom-runner`, `~/.local/bin/guildwise-runner` and `aom-runner`, the systemd user unit `aom-runner`, the macOS LaunchAgent `com.guildwisehq.runner`, Windows scheduled tasks, the same inside the default WSL distribution, and running processes. It stops them and **quarantines** them (the default) into one tar under `~/.guildwise-quarantine/<UTC timestamp>/` (folder mode 700, files 600, execute bits stripped, with a `MANIFEST.txt` of paths, sizes and sha256), or deletes them with `--legacy remove`. Nothing is read, copied or reused: no token, key, sealed sudo password, policy or clone. It prints where the quarantine is and that it may be deleted after review. If sudo was granted to the old runner, change that user's password: the old runner's sealed sudo password may be known.
+- **Then: "Setting local permissions".** After the package is installed and verified, the installer runs `guildwise-runner setup` (below), then pairs. Scripted installs pass flags through: `--runner-user dedicated|current`, `--devops-orgs`, `--sudo on|off`, `--docker none|narrow|group`, `--yes`, `--accept-root-equivalent`, `--legacy quarantine|remove`. Answers never come from the server.
+- **Offline: `--from-file`.** Install from a package you downloaded and verified yourself. The installer script is otherwise served by the server (trust on first use).
+- The installer keeps `manifest.json` and `manifest.json.minisig` beside the runner; the runner sends that proof at pairing and hello.
+- The macOS dedicated user and the Windows dedicated WSL distribution are not yet tested on hardware.
+
 Without a running systemd (a container, or WSL without `systemd=true`) the unit file is still written, the runner is started in the background with `~/.local/share/guildwise/runner/start-runner.sh` and the summary says so.
 
 **macOS:** the same flow with Homebrew (installed if missing, after asking), `node@22` and `git`, no `bubblewrap` or `socat` (Seatbelt is built in), and a **launchd** agent `com.guildwisehq.runner` in `~/Library/LaunchAgents` (starts at login, restarts if it stops; log in `~/.aom-runner/logs/runner.log`).
@@ -263,6 +271,19 @@ After a rollback the failed version is not tried again on this machine (`update-
 **Check for updates now.** The Workstations page has a **Check for updates** button next to the runner version. It sends the `runner.update.check` command (capability `update-check:1`, runner 0.1.34+) through any pairing; the `start` process calls `Updater.checkNow()`, which runs the same check as the timer and so the same pipeline (download, verify, wait for idle, switch). It only skips the timer: it never restarts a busy runner, the pause switch and `AOM_RUNNER_AUTO_UPDATE=0` still apply, and a check or download already in progress is joined, not repeated. The command's result is `{ outcome, version, detail }` with `outcome` one of `up_to_date`, `update_found` (downloaded or downloading, installs when idle), `paused`, `disabled` (switched off or not an installer-managed install) or `failed`; the runner logs one INFO line (`update check on request: ...`). The server accepts one request a minute per workstation, only while the runner is connected, and stores the answer on the workstation (`runner_update_check`).
 
 **Releasing.** The version is `RUNNER_VERSION` in `apps/runner/src/version.ts`, and nothing is "newer" until it is raised: the Ship release item raises it in the release commit when files under `apps/runner/` changed since the last tag (`release.ship`); otherwise bump it by hand. Then run `pnpm package:runner`, publish `release/aom-runner-<version>.tgz` to the server's release directory (`AOM_RUNNER_RELEASE_DIR`). Runners pick it up within a day. Pause updates first if you are unsure about a release.
+
+### Signed updates (1.10.0)
+
+The runner that ships with Guildwise 1.10.0 no longer trusts the server for what it installs. It checks a signature itself.
+
+- **Paths.** `GET /api/runner/releases/manifest.json`, `/api/runner/releases/manifest.json.minisig` and `/api/runner/releases/aom-runner-<version>.tgz`, served in both modes. The manifest holds the sha256 of the package; the `.minisig` is a minisign signature over `manifest.json`.
+- **Check.** The runner verifies the signature with the public key embedded in the runner package, then the sha256 of the package, before it installs anything. A failed check means no update.
+- **Floor.** A runner never installs, or rolls back to, a version below its floor. A `?version=` pin below the floor is answered `409 runner_pin_below_floor`, and Platform, Runners refuses to store such a pin.
+- **Old paths.** `GET /api/runner/release` and `/api/runner/release/:file` keep serving while **Only signed runners** is off, so older runners can update themselves into 1.10.0. When it is on they answer `410 reinstall_required`.
+- **Setting off (the self-hosted default).** Nothing is revoked or refused. Old runners keep connecting and, with auto-update on, move to the runner that ships with 1.10.0 within about a day. That runner starts in **setup pending**: sandboxed card shifts keep running, but DevOps, deploys and other unsandboxed steps wait until `guildwise-runner setup` has been run once on the machine. Its start-up check only warns. The server still records whether each runner is signed.
+- **Setting on (locked on in Guildwise Cloud).** Pairing an unsigned or older runner is refused (`403 signed_runner_required`, the pairing code is not spent). A connected one is closed (WebSocket 4403), stops cleanly (exit 0, no restart loop) and its workstation is unlinked, which deletes its runner token, keys, pending commands, pairing codes and installer sessions. It cannot be paired again in place: reinstall from the server's own installer. The web page shows **Reinstall required**. The server refuses to boot when the setting is on and its own runner release does not verify.
+- **Own key.** A self-hoster signs with their own minisign key: `scripts/package-runner.sh --pubkey <your.pub> --out <dir>` builds the package and an unsigned `manifest.json` and embeds the public key in the runner; sign `manifest.json` with minisign (`scripts/sign-runner-release.sh` or `minisign -S -s <key> -m manifest.json`) on a machine that holds the secret key; build the image with `--build-arg RUNNER_RELEASE=own-key --build-arg AOM_RUNNER_RELEASE_PUBKEY=<RW... line>` and set the same key in `AOM_RUNNER_RELEASE_PUBKEY`. The other build modes are `official` (the default, the owner-signed assets of the release) and `dev` (unsigned, refused at boot with the setting on). No secret key enters a build or image. Confirm the script flags with `--help`; see `docs/SELF-HOSTING.md`.
+- **What it proves.** The server's check of a runner's proof at pairing cannot attest code that runs remotely. The runner's own check of each update is the real protection.
 
 ## CEO full power
 
@@ -786,6 +807,75 @@ Files uploaded through public forms can be checked for malware on this workstati
 - **Checking it**: with the setting on, "Test connection" reports `Malware scan: clamd reachable.` or that clamd is not reachable at the address (the connection then shows as unavailable so you notice before a client does), and `guildwise-runner doctor` prints `clamd reachable at <address>` or `clamd not reachable at <address>`. With the setting off, neither says anything about clamd.
 - **Error codes** (shared): `malware_detected` (not retryable) and `scan_unavailable` (retryable).
 
+## Local permissions and approvals (1.10.0)
+
+The runner decides locally. Grants live on the workstation, never come from the server, and are stored in `~/.config/aom-runner/policy.json` (mode 600). Show them with `guildwise-runner policy`.
+
+### `guildwise-runner setup`
+
+Run by the installer, re-runnable, refuses to run as root.
+
+```sh
+guildwise-runner setup [--yes] [--accept-root-equivalent]
+                       [--runner-user dedicated|current] [--devops-orgs <list>]
+                       [--sudo on|off] [--docker none|narrow|group]
+```
+
+Steps: the runner user (a dedicated `guildwise-runner` user on Linux and macOS, a dedicated WSL distribution on Windows, or the current user); the runner's own clones folder (under its HOME; it works only in its own clones, never in your folders, and work reaches you through git); which organizations the DevOps engineer may serve (each defaults to No; organizations the server reports are suggestions only); sudo on or off (sealed locally, never through the browser); Docker access (none, the narrow helper, or the docker group); deploy approval defaults; a summary. `--yes` takes the safest values. The docker group is root-equivalent: it needs `--accept-root-equivalent` or typing `root-equivalent`. Steps that need root are printed as `sudo /usr/local/lib/guildwise/guildwise-admin ...`.
+
+### Held items
+
+These wait for a local yes: new deploy scripts (`deploy.exec`, unless its whole-command pin matches script, env, folder and target), recipe writes, vault setup, secret and provider-key reseals, provider endpoints, installs with extra paths, release signing (unless `autoSign`), and every DevOps task not started on the machine (`devopsRequests: ask`). Loader variables (`NODE_OPTIONS`, `LD_PRELOAD`, `BASH_ENV`, `DYLD_*`, `GIT_CONFIG_*`) are removed from deploys. The commands need a terminal:
+
+```sh
+guildwise-runner pending                      # list held items
+guildwise-runner approve <id> [--pin]         # say yes (--pin: remember the whole command for unattended redeploys)
+guildwise-runner deny <id>
+```
+
+A redeploy at a new commit and a recipe change can also be approved with a passkey from the web page `/workstations/:id/approvals`; the runner verifies every assertion itself.
+
+### Grants
+
+| Command | Effect |
+|---|---|
+| `devops grant` / `devops revoke` | which organizations' DevOps engineers may work here |
+| `sudo enable` / `sudo disable` | sudo for DevOps shifts (sealed locally) |
+| `repo allow-scripts` / `repo deny-scripts` | let a repository's installs run its scripts (needed for Bundler, `dotnet restore`, Gradle, Maven, pip and similar; npm, pnpm, Yarn, Composer with scripts and plugins off, `go mod download` and `cargo fetch` run without it) |
+| `formatter pin` / `formatter unpin` | a release formatter runs only while its config is unchanged since pinned |
+| `deploy mode`, `deploy pin-commit`, `deploy unpin` | deploy approval mode; `pin-commit` binds an unattended redeploy to a commit (`deployPinCommit`), otherwise it builds whatever is on the deployed branch |
+| `updates allow-unsigned` / `updates disallow-unsigned` | whether this runner may install an unsigned update |
+| `passkey list`, `passkey trust`, `passkey remove` | passkeys whose approvals this runner accepts; a trusted passkey stays until removed here |
+| `signing add-key --key-id <id> --key-file <path>`, `signing remove-key`, `signing list` | release signing keys (only the path is stored) |
+| `ceo turn [--minutes N]` | one full-power CEO owner turn, up to 60 minutes (the opt-in `ceo full-power on|off` is described under "CEO full power") |
+
+Arguments differ by command; run each with `--help`.
+
+### Start-up refusal
+
+The runner refuses to start, with **exit code 78** (the workstation page shows it with the fix), when its user is root-equivalent (root, passwordless sudo, the docker group, a writable Docker socket) or its files are writable by others. It applies when setup set `startupRefusal`, or the server has **Only signed runners** on. `acceptRootEquivalent` (a typed confirmation in setup) lets it start with a warning, never for files writable by others. A self-updated runner on a server with the setting off only warns.
+
+### `guildwise-admin`
+
+A root-owned program the installer copies from the verified package to `/usr/local/lib/guildwise/`; it runs only under the bundled Node at `/usr/local/lib/guildwise/node`. The runner can never change it. Commands: `user create`, `service install|remove`, `sudo on|off`, `docker none|narrow|group`, `approve-app`, `readers add|remove`, `migrate-user [--finish]`, `apply`, `verify`.
+
+### `deploy-compose` (the narrow Docker helper)
+
+`/usr/local/lib/guildwise/deploy-compose <app> up|pull|down|resolve` is the only passwordless sudo rule. It runs only a Compose setup approved with `guildwise-admin approve-app`, from a frozen copy, and applies an allowlist: no privileged containers, no host binds outside the app folder, no host network, no devices or added capabilities, no remote `include`, and similar. A changed configuration is held until approved again (a Docker Compose upgrade can need one re-approval).
+
+| Exit code | Meaning |
+|---|---|
+| 0 | ok |
+| 1 | docker failed |
+| 2 | usage |
+| 3 | held, approve it again |
+| 4 | refused by the allowlist |
+| 5 | environment problem |
+
+### Untrusted text
+
+Organization text in prompts is fenced ("ORG TEXT": information about the work, never how you may work) and so is outside text ("UNTRUSTED": mail, webhooks, the web). Runner error text never becomes a card. In DevOps, only the standing orders of the workstation owner bind. `aom devops` is refused when the agent's organization has no DevOps engineer on that workstation, and on platform-project cards.
+
 ## Running and connecting
 
 ### Start command
@@ -803,6 +893,8 @@ Exit codes:
 - `0`: stopped by SIGINT/SIGTERM
 - `2`: server rejected token (re-pair needed)
 - `3`: another runner connected to the same workstation (only one per workstation; with several pairings only the affected pairing stops)
+- `78`: start-up refusal: the runner's user is root-equivalent or its files are writable by others (see "Start-up refusal")
+- `0` also covers a runner closed by a server that requires signed runners (WebSocket 4403): it stops cleanly and is not restarted
 
 ### Heartbeat and reconnect
 

@@ -82,7 +82,7 @@ export async function devopsRetireEvents(
   db: Queryable,
   opts: {
     agents: Row[];
-    reason: 'workstation_unpaired' | 'orphaned_migration';
+    reason: 'workstation_unpaired' | 'orphaned_migration' | 'serving_off';
     actor: Actor;
     by: string;
     skip?: {
@@ -96,13 +96,17 @@ export async function devopsRetireEvents(
   const why =
     opts.reason === 'workstation_unpaired'
       ? 'The workstation was unpaired, so this request cannot run.'
-      : 'The workstation is gone, so this request cannot run.';
+      : opts.reason === 'serving_off'
+        ? 'The workstation no longer works for this organization, so this request cannot run.'
+        : 'The workstation is gone, so this request cannot run.';
   for (const a of opts.agents) {
     const released = await releaseClaimsOfAgentEvents(
       db,
       { id: a.id as string },
       opts.actor,
-      `${a.name} was retired with its workstation; the card is back in the queue with the last handoff attached.`,
+      opts.reason === 'serving_off'
+        ? `${a.name} was retired: its workstation no longer works for this organization. The card is back in the queue with the last handoff attached.`
+        : `${a.name} was retired with its workstation; the card is back in the queue with the last handoff attached.`,
       opts.skip?.cardIds,
     );
     events.push(...released.events);

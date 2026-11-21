@@ -1,5 +1,6 @@
 # ---------------------------------------------------------------------------------------------------------------------
-# Linux (and Windows via WSL2): Node 22, git, Claude Code, sandbox tools, the runner, a systemd user service.
+# Linux (and Windows via WSL2): Node 22, git, Claude Code, sandbox tools, the runner and its service: a system service for
+# the dedicated guildwise-runner user (the default for a new install), or a systemd user service for your own user.
 # ---------------------------------------------------------------------------------------------------------------------
 PKG=""
 SUDO=""
@@ -183,7 +184,11 @@ install_docker() {
 # The browser that makes the PDF copy of a form's answers. Never fatal: the copies stay off until it works.
 install_pdf_renderer() {
   note "Installing the browser for PDF copies of form answers (a download of roughly 100 MB) ..."
-  if [ "${PKG}" = apt ] && { [ -n "${SUDO}" ] || [ "$(id -u)" -eq 0 ]; }; then
+  if [ -n "${RUNNER_AS}" ]; then
+    # The dedicated user has no sudo: you install the system packages, it installs the browser for itself.
+    if [ "${PKG}" = apt ]; then pkg_install fonts-noto-core >/dev/null 2>&1 || true; fi
+    if runner pdf-renderer install >/dev/null 2>&1; then good "PDF renderer installed for ${RUNNER_NAME}"; return; fi
+  elif [ "${PKG}" = apt ] && { [ -n "${SUDO}" ] || [ "$(id -u)" -eq 0 ]; }; then
     pkg_install fonts-noto-core >/dev/null 2>&1 || true
     if runner pdf-renderer install --with-deps >/dev/null 2>&1; then good "PDF renderer installed"; return; fi
   elif runner pdf-renderer install >/dev/null 2>&1; then
@@ -228,6 +233,8 @@ Environment="PATH=$(service_path)"
 ExecStart="${RUNNER_ROOT}/current/aom-runner" start
 Restart=always
 RestartSec=10
+# 78: the runner refused to start (R18-P); restarting would only repeat the refusal.
+RestartPreventExitStatus=78
 StandardOutput=journal
 StandardError=journal
 
@@ -258,7 +265,37 @@ LAUNCH
   FALLBACK_LAUNCHER="${f}"
 }
 
+# The home folder of a user (from the user database).
+user_home() { getent passwd "$1" 2>/dev/null | cut -d: -f6; }
+
+# The dedicated user runs as a system service, so it needs systemd (a container or WSL without systemd cannot).
+dedicated_supported() {
+  { [ -d /run/systemd/system ] && have systemctl; } ||
+    die "The dedicated runner user needs systemd, which is not running here." "Use --runner-user current on this computer (or turn systemd on), then run the command again."
+}
+
+# Stops an old runner of your user: its systemd user service (any process left is stopped by the caller).
+stop_legacy_services() {
+  if user_systemd_works; then systemctl --user disable --now aom-runner >/dev/null 2>&1 || true; fi
+}
+
+# The system service of the dedicated user: guildwise-admin writes the unit (User=guildwise-runner, the runner root below)
+# and enables and starts it; a restart picks up an upgraded runner.
+# Stops the dedicated user's system service (if there is one yet).
+stop_dedicated_service() { as_root systemctl stop guildwise-runner.service >/dev/null 2>&1 || true; }
+
+install_dedicated_service() {
+  as_root "${ADMIN}" service install --runner-root "${RUNNER_ROOT}" --start ||
+    die "guildwise-admin could not install the guildwise-runner service." "Run: sudo ${ADMIN} service install --runner-root ${RUNNER_ROOT} --start   to see why, then run the command again."
+  as_root systemctl restart guildwise-runner.service ||
+    die "The service could not be started." "Run \`sudo systemctl status guildwise-runner\` to see why, then run the command again."
+  good "Service enabled and started (system service \"guildwise-runner\", running as ${RUNNER_NAME})"
+  SERVICE_MODE=systemd; record_service_mode systemd
+  report "Service" ok "systemd system service running as ${RUNNER_NAME}"
+}
+
 install_service() {
+  if [ -n "${RUNNER_AS}" ]; then install_dedicated_service; return; fi
   write_unit_file
   if user_systemd_works; then
     systemctl --user daemon-reload
@@ -283,22 +320,27 @@ install_service() {
 }
 
 main() {
-  case " $* " in *" --choose-folders "*) CHOOSE_FOLDERS=1 ;; esac
-  STEP_TOTAL=10
+  parse_flags "$@"
+  if [ "${OPT_LEGACY_ONLY}" = 1 ]; then legacy_only; return 0; fi
+  STEP_TOTAL=15
   say "${C_BOLD}${APP_NAME}: set up this computer as a workstation${C_RESET}"
   say "${C_DIM}Safe to run again at any time: it upgrades or repairs what is already here.${C_RESET}"
   report "installer" start "linux"
 
   step "Checking this computer"; detect_system
+  step "Looking for an older runner"; handle_legacy; choose_runner_user
   step "Installing git and the sandbox tools"; install_system_packages
   step "Installing Node 22"; install_node
-  step "Installing Claude Code"; install_claude_code
   step "Optional extras"; install_ytdlp; install_docker
-  step "Downloading the runner"; install_runner_release
+  step "Downloading the runner"; stage_runner_release
+  step "Runner user"; setup_runner_user
+  step "Installing the runner"; place_runner_release
+  step "Installing Claude Code"; if [ -n "${RUNNER_AS}" ]; then install_claude_for_runner; else install_claude_code; fi
   step "Pairing with ${APP_NAME}"; pair_runner
   step "Installing the PDF renderer"; install_pdf_renderer
   step "Choosing your code folder"; add_repo_folders
   step "Signing in to Claude"; sign_in_to_claude
+  step "Setting local permissions"; set_local_permissions
   step "Starting the runner and checking everything"
   install_service
   if wait_until_connected; then good "The runner is connected to ${SERVER_URL}"; report "Connected" ok "runner connected"

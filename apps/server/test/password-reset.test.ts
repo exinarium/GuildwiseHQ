@@ -47,13 +47,19 @@ describe('forgot password', () => {
     const mail = (await waitForMessages(email, 1))[0];
     expect(await messageText(mail?.ID as string)).toContain(`${ORIGIN}/reset-password/${token}`);
 
-    expect((await t.req('GET', `/api/auth/password-reset/${token}`)).body).toEqual({ valid: true });
+    expect((await t.req('GET', `/api/auth/password-reset/${token}`)).body).toEqual({
+      valid: true,
+      secondFactor: false,
+    });
     expect((await confirm(token, 'short')).status).toBe(400);
     expect((await confirm(token)).status).toBe(200);
 
     // single use, old password gone, old session gone, and the reset itself created no session
     expect((await confirm(token, `${NEW_PW}-again`)).status).toBe(400);
-    expect((await t.req('GET', `/api/auth/password-reset/${token}`)).body).toEqual({ valid: false });
+    expect((await t.req('GET', `/api/auth/password-reset/${token}`)).body).toEqual({
+      valid: false,
+      secondFactor: false,
+    });
     expect((await t.req('POST', '/api/auth/login', { body: { email, password: PASSWORD } })).status).toBe(
       401,
     );
@@ -77,7 +83,12 @@ describe('forgot password', () => {
     const u = await t.userSession(email);
     await t.enableTwoFactor(u.id);
     await request(email);
-    expect((await confirm(await tokenFrom(email))).status).toBe(200);
+    // 1.10.0 (R3): the reset itself needs the second factor too (password-reset-2fa.test.ts covers the refusals)
+    const token = await tokenFrom(email);
+    const done = await t.req('POST', '/api/auth/password-reset/confirm', {
+      body: { token, password: NEW_PW, code: await t.totpCode(u.id) },
+    });
+    expect(done.status).toBe(200);
     const login = await t.req('POST', '/api/auth/login', { body: { email, password: NEW_PW } });
     expect(login.body).toMatchObject({ twoFactorRequired: true });
     expect(login.cookie).toBeUndefined();
@@ -87,7 +98,10 @@ describe('forgot password', () => {
     const sa = await t.superAdminSession();
     await request(sa.email);
     const token = await tokenFrom(sa.email);
-    expect((await confirm(token)).status).toBe(200);
+    const done = await t.req('POST', '/api/auth/password-reset/confirm', {
+      body: { token, password: NEW_PW, code: await t.totpCode(sa.id) },
+    });
+    expect(done.status).toBe(200);
     const login = await t.req('POST', '/api/auth/login', { body: { email: sa.email, password: NEW_PW } });
     expect(login.body).toMatchObject({ twoFactorRequired: true });
   });

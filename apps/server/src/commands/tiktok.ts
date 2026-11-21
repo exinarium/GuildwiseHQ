@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { decryptSecret, encryptSecret } from '../auth/secrets.ts';
 import type { AuthSession } from '../auth/sessions.ts';
+import { requireStepUp } from '../auth/step-up.ts';
 import type { Ctx } from '../context.ts';
 import { exec, one } from '../db/sql.ts';
 import { badRequest, conflict, HttpError, notFound } from '../errors.ts';
@@ -34,8 +35,13 @@ function appCreds(ctx: Ctx): { clientKey: string; clientSecret: string } {
   return { clientKey, clientSecret };
 }
 
-/** The TikTok authorize URL; the state is stored server-side (one use, 10 minutes) and bound to the admin who asked. */
-export async function tiktokConnectUrl(ctx: Ctx, by: AuthSession['user']): Promise<string> {
+/**
+ * The TikTok authorize URL; the state is stored server-side (one use, 10 minutes) and bound to the session that asked and
+ * to the fresh "Confirm it's you" it made to start (R5): the callback is a GET page navigation that cannot ask itself.
+ */
+export async function tiktokConnectUrl(ctx: Ctx, s: AuthSession): Promise<string> {
+  requireStepUp(ctx, s);
+  const by = s.user;
   const { clientKey } = appCreds(ctx);
   // states nobody came back with
   await exec(ctx.pool, `DELETE FROM platform_settings WHERE key LIKE $1 AND updated_at < $2`, [
@@ -48,7 +54,12 @@ export async function tiktokConnectUrl(ctx: Ctx, by: AuthSession['user']): Promi
     `INSERT INTO platform_settings (key, value, updated_by, updated_at) VALUES ($1,$2::jsonb,$3,$4)`,
     [
       `${STATE_PREFIX}${state}`,
-      JSON.stringify({ userId: by.id, at: ctx.clock.now().toISOString() }),
+      JSON.stringify({
+        userId: by.id,
+        sessionId: s.sessionId,
+        stepUpAt: s.secondFactorAt?.toISOString() ?? null,
+        at: ctx.clock.now().toISOString(),
+      }),
       by.id,
       ctx.clock.now(),
     ],
@@ -66,7 +77,7 @@ export async function tiktokConnectUrl(ctx: Ctx, by: AuthSession['user']): Promi
 /** The redirect back from TikTok: checks the state, swaps the code for tokens and stores the channel. */
 export async function tiktokCallback(
   ctx: Ctx,
-  by: AuthSession['user'],
+  s: AuthSession,
   query: {
     code?: string | undefined;
     state?: string | undefined;
@@ -78,9 +89,24 @@ export async function tiktokCallback(
   const key = `${STATE_PREFIX}${query.state}`;
   // one use, atomically: of two callbacks with the same state only one gets the row
   const row = await one(ctx.pool, 'DELETE FROM platform_settings WHERE key=$1 RETURNING value', [key]);
-  const v = row?.value as { userId?: string; at?: string } | undefined;
+  const by = s.user;
+  const v = row?.value as
+    | { userId?: string; sessionId?: string; stepUpAt?: string | null; at?: string }
+    | undefined;
   if (!v || v.userId !== by.id || ctx.clock.now().getTime() - Date.parse(v.at ?? '') > STATE_TTL_MS)
     throw badRequest('bad_state', 'the TikTok sign-in expired or was not started here: press Connect again');
+  // the same session started it, with a proof that was fresh when it did (states from before this rule have neither)
+  const startedAt = Date.parse(v.at ?? '');
+  const proofAt = Date.parse(v.stepUpAt ?? '');
+  if (
+    v.sessionId !== s.sessionId ||
+    !Number.isFinite(proofAt) ||
+    proofAt + ctx.config.stepUpWindowSec * 1000 <= startedAt
+  )
+    throw badRequest(
+      'bad_state',
+      "the TikTok sign-in was not started from this session after confirming it's you: press Connect again",
+    );
   if (query.error) throw badRequest('tiktok_denied', `TikTok: ${query.error_description ?? query.error}`);
   if (!query.code) throw badRequest('bad_state', 'TikTok sent no authorization code');
   const app = appCreds(ctx);

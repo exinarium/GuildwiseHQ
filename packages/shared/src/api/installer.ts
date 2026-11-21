@@ -94,3 +94,20 @@ export const RunnerUpdateSettingsSchema = z.object({
 });
 export type RunnerUpdateSettings = z.infer<typeof RunnerUpdateSettingsSchema>;
 export const SetRunnerUpdateSettingsRequestSchema = z.object({ paused: z.boolean() });
+
+/**
+ * `GET /api/workstations/signed-runners` (signed in, R21): whether this server accepts only signed runners (the "Add a
+ * workstation" page then warns that an old runner is refused and removed), and the caller's workstations that were
+ * unpaired because they ran an unsigned or outdated runner and are not reinstalled yet ("Reinstall required").
+ */
+export const SignedRunnersStatusSchema = z.object({
+  requireSignedRunners: z.boolean(),
+  /** The oldest runner version (the runner's own 0.1.x numbering) this server lets pair while the setting is on. */
+  minRunner: z.string(),
+  /** The product release that user text names ("Guildwise 1.10.0"): runners from before it are refused. */
+  since: z.string(),
+  reinstallRequired: z.array(
+    z.object({ id: z.uuid(), name: z.string(), hostname: z.string(), unlinkedAt: IsoTime }),
+  ),
+});
+export type SignedRunnersStatus = z.infer<typeof SignedRunnersStatusSchema>;

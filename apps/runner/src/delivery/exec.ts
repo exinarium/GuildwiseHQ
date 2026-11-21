@@ -14,6 +14,7 @@ import {
 import { git } from '../git/git.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
+import { stripDeployEnv } from '../policy/deploy-pin.ts';
 import { probeHttp, probeTcp } from '../runs/health.ts';
 import { signalGroup } from '../runs/proc.ts';
 import { redactSecrets, registerSecret } from '../secrets/redact.ts';
@@ -41,6 +42,8 @@ export interface DeployVaults {
 }
 
 export interface DeployExecDeps {
+  /** R30: the folder of the signed runner release this deploy builds with (verified by the runner before the run). */
+  signedReleaseDir?: (p: DeployExecPayload) => string | null;
   paths: RunnerPaths;
   vaults: DeployVaults;
   secrets: {
@@ -182,6 +185,17 @@ export class DeployExecutor {
       .finally(() => this.inflight.delete(p.runId));
     this.inflight.set(p.runId, t);
     return t;
+  }
+
+  /** The recipe bundle as a deploy approval shows it (R18-S): text files, hash. Throws when it cannot be read. */
+  async snapshot(
+    p: DeployExecPayload,
+  ): Promise<{ hash: string; files: Array<{ path: string; content: string }> }> {
+    const b = await this.loadBundle(p);
+    return {
+      hash: b.hash,
+      files: b.files.map((f) => ({ path: f.path, content: f.content.toString('utf8') })),
+    };
   }
 
   private async loadBundle(p: DeployExecPayload): Promise<Bundle> {
@@ -426,24 +440,38 @@ export class DeployExecutor {
   ): NodeJS.ProcessEnv {
     const base: NodeJS.ProcessEnv = {};
     // The user's own environment, minus the runner's own settings (a script gets no runner credentials).
-    for (const [k, v] of Object.entries(this.deps.baseEnv ?? process.env))
-      if (v !== undefined && !k.startsWith('AOM_')) base[k] = v;
-    return {
-      ...base,
-      AOM_DEPLOY_COMMIT: commit,
-      AOM_DEPLOY_CHECKOUT: vars.checkout ?? '',
-      AOM_DEPLOY_ENV: p.env,
-      AOM_DEPLOY_PROJECT_ID: p.projectId,
-      AOM_DEPLOY_TARGET: p.target.name,
-      AOM_DEPLOY_HOST: p.target.host ?? '',
-      ...(this.deps.keys?.deploySsh(p.target.id, p.target.host)
-        ? { AOM_DEPLOY_SSH: this.deps.keys.deploySsh(p.target.id, p.target.host) as string }
-        : {}),
-      AOM_DEPLOY_APP_URL: p.target.appUrl ?? '',
-      AOM_DEPLOY_DRY_RUN: p.dryRun ? '1' : '0',
-      ...(env.envFile ? { AOM_DEPLOY_ENV_FILE: expandHome(env.envFile, this.deps.home) } : {}),
-      ...secrets,
-    };
+    const own = this.deps.baseEnv ?? process.env;
+    for (const [k, v] of Object.entries(own)) if (v !== undefined && !k.startsWith('AOM_')) base[k] = v;
+    // R18-S: loader and interpreter variables are removed from every deploy env (pinned or not), after the secrets
+    // (a secret may not be named NODE_OPTIONS either), and PATH is the runner's own.
+    return stripDeployEnv(
+      {
+        ...base,
+        AOM_DEPLOY_COMMIT: commit,
+        AOM_DEPLOY_CHECKOUT: vars.checkout ?? '',
+        AOM_DEPLOY_ENV: p.env,
+        AOM_DEPLOY_PROJECT_ID: p.projectId,
+        AOM_DEPLOY_TARGET: p.target.name,
+        AOM_DEPLOY_HOST: p.target.host ?? '',
+        ...(this.deps.keys?.deploySsh(p.target.id, p.target.host)
+          ? { AOM_DEPLOY_SSH: this.deps.keys.deploySsh(p.target.id, p.target.host) as string }
+          : {}),
+        AOM_DEPLOY_APP_URL: p.target.appUrl ?? '',
+        AOM_DEPLOY_DRY_RUN: p.dryRun ? '1' : '0',
+        ...(env.envFile ? { AOM_DEPLOY_ENV_FILE: expandHome(env.envFile, this.deps.home) } : {}),
+        ...secrets,
+        // R30: a target that requires a signed runner builds the image in own-key mode with the target's key (after the
+        // secrets, so no secret can name another key)
+        ...(p.signing
+          ? {
+              RUNNER_RELEASE: 'own-key',
+              AOM_RUNNER_RELEASE_PUBKEY: p.signing.publicKey,
+              AOM_DEPLOY_RUNNER_RELEASE_DIR: this.deps.signedReleaseDir?.(p) ?? '',
+            }
+          : {}),
+      },
+      own.PATH ?? own.Path,
+    );
   }
 
   private runScript(o: {

@@ -36,6 +36,20 @@ export async function pairWorkstation(t: TestApp, s: Session, name = 'Desk') {
   return r;
 }
 
+/**
+ * R9 (audit F4): the workstation's owner switches an organization on under "Works for". A workstation works only for
+ * the organizations its user owned when it was paired; a member's machine needs this before that organization's agents,
+ * sessions or DevOps work may use it.
+ */
+export async function worksFor(t: TestApp, s: Session, workstationId: string, orgId: string) {
+  await ok(
+    t.req('PUT', `/api/workstations/${workstationId}/orgs/${orgId}`, {
+      cookie: s.cookie,
+      body: { serving: true },
+    }),
+  );
+}
+
 /** Marks a workstation online in the DB without a socket (dispatcher tests). */
 export async function markOnline(
   t: TestApp,

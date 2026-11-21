@@ -27,6 +27,7 @@ import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { wsServesOrgSql } from '../simulation/fit.ts';
 import { RELEASES_PAUSED_REASON, RELEASES_RESUMED_REASON, releasesPaused } from './mode.ts';
 import { closeDeskNotice, raiseDeskNotice } from './notices.ts';
 
@@ -75,7 +76,10 @@ export async function projectVault(db: Queryable, projectId: string): Promise<Pr
 export const NO_PROJECT_VAULT =
   'this project has no vault yet: every project gets one (a git repository is recommended; without one it is a local folder on the Owner’s workstation)';
 
-/** A workstation that can read the vault: the local one for a local vault, else the audience's, a connected one first. */
+/**
+ * A workstation that can read the vault: the local one for a local vault, else the audience's that works for the
+ * organization (R9, "Works for"), a connected one first.
+ */
 export async function workstationForVault(
   db: Queryable,
   projectId: string,
@@ -92,9 +96,9 @@ export async function workstationForVault(
   const w = await one<{ id: string }>(
     db,
     `SELECT w.id FROM workstations w
-      WHERE w.status='active' AND w.user_id = ANY($1::uuid[])
+      WHERE w.status='active' AND w.user_id = ANY($1::uuid[]) AND ${wsServesOrgSql('w', '$2::uuid')}
       ORDER BY w.connected DESC, w.last_seen_at DESC NULLS LAST, w.paired_at LIMIT 1`,
-    [audience],
+    [audience, orgId],
   );
   return w?.id ?? null;
 }

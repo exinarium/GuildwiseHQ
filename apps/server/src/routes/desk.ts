@@ -5,19 +5,36 @@ import {
   DeskItemParamsSchema,
   DeskQuerySchema,
   DismissDeskItemRequestSchema,
+  PLATFORM_DESK_SUBKIND,
   ResolveDeskItemRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../auth/guards.ts';
 import { requestedOrgId, resolveOrgId } from '../auth/org-context.ts';
+import type { AuthSession } from '../auth/sessions.ts';
+import { requireStepUp } from '../auth/step-up.ts';
 import { acknowledgeAllCeoDecisions, acknowledgeCeoDecision, correctCeoDecision } from '../ceo/decisions.ts';
 import { answerDeskItem, dismissDeskItem, resolveDeskItem } from '../commands/desk.ts';
 import type { Ctx } from '../context.ts';
+import { one } from '../db/sql.ts';
 import { notFound } from '../errors.ts';
 import { applyDeskAction, previewDeskAction } from '../push/desk-actions.ts';
 import { getDeskDto, listDesk } from '../queries/desk.ts';
 import { typed } from './util.ts';
+
+/** Approvals that grant rights or access: approving one needs a fresh "Confirm it's you" (R5); rejecting does not. */
+const STEP_UP_APPROVALS: ReadonlySet<string> = new Set(['devops', PLATFORM_DESK_SUBKIND.grantRequest]);
+
+async function requireStepUpToApprove(ctx: Ctx, s: AuthSession, itemId: string, resolution: string) {
+  if (resolution !== 'approved') return;
+  const item = await one<{ kind: string; subkind: string | null }>(
+    ctx.pool,
+    'SELECT kind, subkind FROM desk_items WHERE id=$1',
+    [itemId],
+  );
+  if (item?.kind === 'approval' && item.subkind && STEP_UP_APPROVALS.has(item.subkind)) requireStepUp(ctx, s);
+}
 
 export function deskRoutes(ctx: Ctx) {
   return async (fastify: FastifyInstance) => {
@@ -78,6 +95,11 @@ export function deskRoutes(ctx: Ctx) {
     app.post('/api/m/desk/:token/apply', { schema: { params: TokenParams } }, async (req, reply) => {
       void reply.header('cache-control', 'no-store');
       const s = await requireUser(ctx, req);
+      // checked before the token is spent, so the retry after the step-up can still use it; a link that is not this
+      // person's (or not valid) is refused and audited by applyDeskAction itself
+      const preview = await previewDeskAction(ctx, s.user, req.params.token).catch(() => null);
+      if (preview?.state === 'ready' && preview.action === 'approve')
+        await requireStepUpToApprove(ctx, s, preview.deskItemId, 'approved');
       return applyDeskAction(ctx, s.user, req.params.token);
     });
 
@@ -96,6 +118,7 @@ export function deskRoutes(ctx: Ctx) {
       { schema: { params: DeskItemParamsSchema, body: ResolveDeskItemRequestSchema } },
       async (req) => {
         const s = await requireUser(ctx, req);
+        await requireStepUpToApprove(ctx, s, req.params.id, req.body.resolution);
         await resolveDeskItem(ctx, s.user, req.params.id, req.body);
         return dto(s.user.id, req.params.id);
       },

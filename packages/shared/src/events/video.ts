@@ -124,4 +124,17 @@ export const videoEvents = [
     z.object({ topicId: Id, reason: z.string().min(1).max(500), by: Id.nullable() }),
   ),
   defineEvent('VideoTopicMoved', z.object({ topicId: Id, by: Id })),
+  // ---- render job API (R16): stream `render-worker-<id>`, platform audit `always`
+  /** The super admin added a remote render worker; only the sha256 of its `aomv_` token is kept (shown once). */
+  defineEvent(
+    'RenderWorkerAdded',
+    z.object({
+      workerId: Id,
+      name: z.string().min(1).max(80),
+      tokenHash: z.string().regex(/^[0-9a-f]{64}$/),
+      by: Id,
+    }),
+  ),
+  /** The worker's token stops working at once (401 on its next request). */
+  defineEvent('RenderWorkerRevoked', z.object({ workerId: Id, by: Id })),
 ] as const;

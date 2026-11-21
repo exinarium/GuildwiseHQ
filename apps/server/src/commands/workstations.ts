@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { canUnlinkWorkstation, type ShiftLimitSetting, streamId } from '@aom/shared';
+import {
+  type Actor,
+  canUnlinkWorkstation,
+  type ShiftLimitSetting,
+  type SignedReleaseProof,
+  streamId,
+} from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import { ceoBindEvents } from '../ceo/provision.ts';
 import type { Ctx } from '../context.ts';
@@ -17,9 +23,11 @@ import {
   runnerAppliesShiftLimit,
   shiftLimitSourceFor,
 } from '../runner-gateway/shift-limit.ts';
+import { pairingRelease } from '../runner-gateway/signed-sweep.ts';
 import { cardMessage, orgScope, runnerActor, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
 import { devopsHireEvents as devopsHireEventsNew } from './devops.ts';
 import { devopsRetireEvents, failDevopsRequestEvents } from './devops-retire.ts';
+import { ownedOrgIds, servingEvent } from './workstation-serving.ts';
 
 const CODE_TTL_MS = 10 * 60_000;
 const MAX_ACTIVE_CODES = 3;
@@ -77,10 +85,14 @@ export async function pairRunner(
     platform: string;
     hostname: string;
     runnerVersion: string;
+    /** The signed-release proof (R18-U, R27): required while "Only signed runners" is on. */
+    release?: SignedReleaseProof | undefined;
     /** Server-internal pairing of a simulation organization's simulated workstation. */
     simulationOrgId?: string;
   },
 ) {
+  // Refused with 403 `signed_runner_required` before the code is spent, while "Only signed runners" is on (R21).
+  const release = await pairingRelease(ctx, input);
   const now = ctx.clock.now();
   const runnerToken = `aomr_${randomToken(32)}`;
   const workstationId = randomUUID();
@@ -105,9 +117,21 @@ export async function pairRunner(
       now,
       workstationId,
     ]);
-    // Every workstation gets its own DevOps engineer, hired in the same append (docs/ARCHITECTURE.md section 16.2).
-    // One DevOps engineer per organization the user belongs to (owner decision 15), hired in the same append.
-    const devopsHires = await devopsHireEventsNew(tx, c.user_id, workstationId, input.simulationOrgId);
+    // R9 (audit F4): a new real workstation works only for the organizations its user owns right now; any other
+    // organization needs the user's explicit yes later ("Works for", accept, or a hire of their own).
+    const serves = input.simulationOrgId ? [] : await ownedOrgIds(tx, c.user_id);
+    const serving = serves.map((orgId) =>
+      servingEvent({ workstationId, orgId, serving: true, by: c.user_id, reason: 'owner_org' }, c.user_id),
+    );
+    // Every workstation gets its own DevOps engineer, hired in the same append (docs/ARCHITECTURE.md section 16.2):
+    // one per organization the user belongs to (owner decision 15) that the workstation works for (R9).
+    const devopsHires = await devopsHireEventsNew(
+      tx,
+      c.user_id,
+      workstationId,
+      input.simulationOrgId,
+      input.simulationOrgId ? undefined : serves,
+    );
     // The CEO of an organization this user owns, with no home yet, lives on their first workstation.
     const ceoBinds = await ceoBindEvents(tx, c.user_id, workstationId, input.simulationOrgId);
     await ctx.store.append(
@@ -125,11 +149,13 @@ export async function pairRunner(
               runnerVersion: input.runnerVersion,
               tokenHash: sha256Hex(runnerToken),
               ...(input.simulationOrgId ? { simulationOrgId: input.simulationOrgId } : {}),
+              ...(release ? { release } : {}),
             },
           },
           actor: SYSTEM_ACTOR,
           scope: userScope(c.user_id),
         },
+        ...serving,
         ...devopsHires,
         ...ceoBinds,
       ],
@@ -233,7 +259,9 @@ export async function unlinkWorkstationIn(
   actorUserId: string,
   id: string,
   wsOwnerId: string,
-  by: 'owner' | 'admin',
+  by: 'owner' | 'admin' | 'signed_required',
+  /** Who the events name (default: the acting user); the signed-runner sweep at boot acts as the system. */
+  actor: Actor = userActor(actorUserId),
 ): Promise<void> {
   const ws = { user_id: wsOwnerId };
   const user = { id: actorUserId };
@@ -242,7 +270,7 @@ export async function unlinkWorkstationIn(
       {
         streamId: streamId.workstation(id),
         event: { type: 'WorkstationUnlinked', payload: { workstationId: id, by } },
-        actor: userActor(user.id),
+        actor,
         scope: userScope(ws.user_id),
       },
     ];
@@ -264,7 +292,7 @@ export async function unlinkWorkstationIn(
             reason: 'workstation_unlinked',
           },
         },
-        actor: userActor(user.id),
+        actor,
         scope: { orgId: c.org_id, projectId: c.project_id, audience: 'project' },
       });
       events.push(
@@ -298,7 +326,10 @@ export async function unlinkWorkstationIn(
     }
     // DevOps requests that were queued or in progress for this workstation can never run: fail them with the reason.
     const wsName = (await one<{ name: string }>(tx, 'SELECT name FROM workstations WHERE id=$1', [id]))?.name;
-    const why = `The workstation${wsName ? ` "${wsName}"` : ''} was unpaired${by === 'admin' ? ' by a platform administrator' : ''}, so this request cannot run. Pair the machine again and ask once more.`;
+    const why =
+      by === 'signed_required'
+        ? `The workstation${wsName ? ` "${wsName}"` : ''} was unpaired because it runs an unsigned or outdated runner, so this request cannot run. Reinstall the runner with this server's installer and ask once more.`
+        : `The workstation${wsName ? ` "${wsName}"` : ''} was unpaired${by === 'admin' ? ' by a platform administrator' : ''}, so this request cannot run. Pair the machine again and ask once more.`;
     const requests = await rows(
       tx,
       `SELECT id, org_id, thread_id, approval FROM devops_requests
@@ -319,7 +350,7 @@ export async function unlinkWorkstationIn(
       ...(await devopsRetireEvents(tx, {
         agents: devops,
         reason: 'workstation_unpaired',
-        actor: userActor(user.id),
+        actor,
         by: user.id,
         skip: {
           cardIds: new Set(claimed.map((c) => c.id as string)),

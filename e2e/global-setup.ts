@@ -158,6 +158,10 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     AOM_WEB_DIST: paths.webDist,
     AOM_RATE_LIMIT: 'false',
     AOM_TEST_CLOCK: 'true',
+    // "Confirm it's you" and the super-admin idle limit (R4, R5): a day, so stored sessions (storageState) and the clock
+    // jumps of /api/test/clock stay fresh; production refuses values above 600 and 1800 at boot
+    AOM_STEP_UP_WINDOW_SEC: '86400',
+    AOM_SUPER_ADMIN_IDLE_SEC: '86400',
     AOM_ALLOW_LOCAL_REMOTES: 'true',
     AOM_MOCK_UI: 'true',
     // The existing e2e flows were written for the code workflow; new projects default to lean team in production.

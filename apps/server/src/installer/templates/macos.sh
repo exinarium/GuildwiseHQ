@@ -1,5 +1,7 @@
 # ---------------------------------------------------------------------------------------------------------------------
-# macOS: Homebrew, Node 22, git, Claude Code, the runner, a launchd agent. The sandbox (Seatbelt) is built into macOS.
+# macOS: Homebrew, Node 22, git, Claude Code, the runner and its service: a LaunchDaemon for the dedicated guildwise-runner
+# user (the default for a new install), or a launchd agent for your own user. The sandbox (Seatbelt) is built into macOS.
+# The dedicated-user path is not yet tested on Mac hardware (release notes).
 # ---------------------------------------------------------------------------------------------------------------------
 LABEL="com.guildwisehq.runner"
 PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
@@ -78,7 +80,32 @@ service_path() {
   printf '%s' "${BIN_DIR}:$(dirname "$(command -v node)"):$(dirname "$(command -v claude 2>/dev/null || echo /usr/local/bin/claude)"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 }
 
+# The home folder of a user (from Directory Services).
+user_home() { dscl . -read "/Users/$1" NFSHomeDirectory 2>/dev/null | awk '{print $2}'; }
+
+dedicated_supported() { :; }
+
+# Stops an old runner of your user: its launchd agent (any process left is stopped by the caller).
+stop_legacy_services() {
+  launchctl bootout "gui/$(id -u)/${LABEL}" >/dev/null 2>&1 || true
+}
+
+# The LaunchDaemon of the dedicated user: guildwise-admin writes it (UserName guildwise-runner, the runner root below) and
+# loads and starts it; a kickstart picks up an upgraded runner.
+# Stops the dedicated user's LaunchDaemon (if there is one yet).
+stop_dedicated_service() { as_root launchctl bootout "system/${LABEL}" >/dev/null 2>&1 || true; }
+
+install_dedicated_service() {
+  as_root "${ADMIN}" service install --runner-root "${RUNNER_ROOT}" --start ||
+    die "guildwise-admin could not install the runner's LaunchDaemon." "Run: sudo ${ADMIN} service install --runner-root ${RUNNER_ROOT} --start   to see why, then run the command again."
+  as_root launchctl kickstart -k "system/${LABEL}" >/dev/null 2>&1 || true
+  good "The runner starts at boot as ${RUNNER_NAME} (LaunchDaemon ${LABEL})"
+  SERVICE_MODE=launchd; record_service_mode launchd
+  report "Service" ok "launchd daemon running as ${RUNNER_NAME}"
+}
+
 install_service() {
+  if [ -n "${RUNNER_AS}" ]; then install_dedicated_service; return; fi
   mkdir -p "${HOME}/Library/LaunchAgents" "${DATA_DIR}/logs"
   cat >"${PLIST}" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -120,22 +147,27 @@ PLIST
 }
 
 main() {
-  case " $* " in *" --choose-folders "*) CHOOSE_FOLDERS=1 ;; esac
-  STEP_TOTAL=10
+  parse_flags "$@"
+  if [ "${OPT_LEGACY_ONLY}" = 1 ]; then legacy_only; return 0; fi
+  STEP_TOTAL=15
   say "${C_BOLD}${APP_NAME}: set up this Mac as a workstation${C_RESET}"
   say "${C_DIM}Safe to run again at any time: it upgrades or repairs what is already here.${C_RESET}"
   report "installer" start "macos"
 
   step "Checking this Mac"; detect_system
+  step "Looking for an older runner"; handle_legacy; choose_runner_user
   step "Homebrew"; install_homebrew
   step "Installing Node 22 and git"; install_tools
-  step "Installing Claude Code"; install_claude_code
   step "Optional extras"; install_extras
-  step "Downloading the runner"; install_runner_release
+  step "Downloading the runner"; stage_runner_release
+  step "Runner user"; setup_runner_user
+  step "Installing the runner"; place_runner_release
+  step "Installing Claude Code"; if [ -n "${RUNNER_AS}" ]; then install_claude_for_runner; else install_claude_code; fi
   step "Pairing with ${APP_NAME}"; pair_runner
   step "Installing the PDF renderer"; install_pdf_renderer
   step "Choosing your code folder"; add_repo_folders
   step "Signing in to Claude"; sign_in_to_claude
+  step "Setting local permissions"; set_local_permissions
   step "Starting the runner and checking everything"
   install_service
   if wait_until_connected; then good "The runner is connected to ${SERVER_URL}"; report "Connected" ok "runner connected"

@@ -18,6 +18,7 @@ import {
   SHIFT_LIMIT_REPORT_CAPABILITY,
   streamId,
 } from '@aom/shared';
+import { securitySetting } from '../auth/security-settings.ts';
 import { applyCapabilitiesReport } from '../capabilities/registry.ts';
 import { ceoRpc } from '../ceo/gateway.ts';
 import { announceRestart } from '../ceo/restart.ts';
@@ -67,6 +68,7 @@ import {
 import { applyPersonaReadResult } from '../commands/pack-hire.ts';
 import { applyPackCredentialResult } from '../commands/pack-holders.ts';
 import { applyPacksReport, applyProjectCapabilitiesReport, queuePacksSync } from '../commands/packs.ts';
+import { applyPasskeyCommandResult } from '../commands/passkeys.ts';
 import { applyBranchCheckResult } from '../commands/phases.ts';
 import { applyAppAccessCheckResult } from '../commands/post-as.ts';
 import { applyPrListResult } from '../commands/pr-only.ts';
@@ -149,12 +151,18 @@ import { packScriptGateRpc } from '../governance/gates.ts';
 import { applyJourneyWebhookResult } from '../journeys/webhook-calls.ts';
 import { pinForWelcome } from '../platform-team/pins.ts';
 import { platformTriageRpc } from '../platform-team/rpc.ts';
+import { getPlatformTeam } from '../platform-team/settings.ts';
 import { applyRunUsage } from '../provider-keys/live-usage.ts';
 import { applyReleaseDocsPrepResult } from '../release/docs-prep.ts';
 import { endReleasePrepShift } from '../release/docs-prep-tasks.ts';
 import { applyReleaseFactsResult } from '../release/facts.ts';
 import { applyReleasePublishResult } from '../release/publish.ts';
 import { applyReleaseShipResult } from '../release/ship.ts';
+import {
+  applyArtefactPrepared,
+  applyReleasePrepareResult,
+  applyReleaseSignResult,
+} from '../release/signing.ts';
 import { delegateRpc } from '../sessions/delegate.ts';
 import { playbookRunRpc } from '../sessions/playbooks.ts';
 import type { SessionTerminal } from '../sessions/turns.ts';
@@ -165,6 +173,7 @@ import {
   failCommandFinal,
   requeueSentCommands,
 } from './commands-queue.ts';
+import { recordHeldItems } from './held-items.ts';
 import { ledgerRetireRpc, ledgerSearchRpc } from './ledger-rpc.ts';
 import type { RunnerConn } from './registry.ts';
 import { issueRotatedToken } from './rotation.ts';
@@ -386,6 +395,18 @@ export class RunnerHandlers {
           await applyShiftEnded(this.ctx, tx, ws, msg);
         });
         return this.ack(conn, msg);
+      case 'release.artefact.prepared': {
+        // R30: recorded only for a `release.prepare` this workstation was sent, with the manifest it hashes (W14).
+        const { result } = await this.withInbox(conn, msg.id, async (tx) => ({
+          refused: await applyArtefactPrepared(this.ctx, tx, conn.workstationId, msg),
+        }));
+        if (result?.refused)
+          this.ctx.log.warn(
+            { workstationId: conn.workstationId, releaseId: msg.releaseId, targetId: msg.targetId },
+            `release.artefact.prepared not recorded: ${result.refused}`,
+          );
+        return this.ack(conn, msg);
+      }
       case 'rpc.request':
         return this.rpc(conn, msg);
       case 'worktrees.query':
@@ -523,6 +544,11 @@ export class RunnerHandlers {
       case 'deploy.progress':
         await applyDeployProgress(this.ctx, conn.workstationId, msg);
         return;
+      case 'approvals.held':
+        // What the runner holds for a local approval (R18-S): shown on the workstation page, never approved here (R22).
+        // Both views of the list: the passkey relay (held-items.ts, R22) and the workstation page (localAuthority).
+        recordHeldItems(conn, msg.items, this.ctx.clock.now());
+        return this.approvalsHeld(conn, msg);
       case 'vault.conflict':
         await this.withInbox(conn, msg.id, (tx) => applyVaultConflict(this.ctx, tx, ws, msg));
         return this.ack(conn, msg);
@@ -673,6 +699,20 @@ export class RunnerHandlers {
       // Terminal: the release commit is recorded, or the failure is on the desk with Retry (no blind redelivery).
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyReleaseShipResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'release.prepare') {
+      // R30 (W14): the artefact came as `release.artefact.prepared`; a failure is final and shown on the release sheet.
+      await applyReleasePrepareResult(this.ctx, msg.commandId, msg.ok, msg.error);
+    } else if (cmd?.type === 'release.sign') {
+      // R30 (W14): the signature is verified against the target's key and the packaged artefact before it is stored.
+      await applyReleaseSignResult(
+        this.ctx,
+        conn.workstationId,
+        msg.commandId,
+        cmd.payload,
+        msg.ok,
+        msg.result,
+        msg.error,
+      );
     } else if (cmd?.type === 'release.ref_cleanup') {
       // Terminal: a refusal cannot change by retrying and a missing ref is already a success; nothing else to record.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
@@ -995,6 +1035,8 @@ export class RunnerHandlers {
         msg.ok,
         msg.result,
       );
+    } else if (await applyPasskeyCommandResult(this.ctx, cmd?.type, msg.commandId, msg.ok, msg.error)) {
+      // passkey offer, withdrawal or relayed assertion (R22): a refusal is final
     } else {
       await completeCommand(this.ctx.pool, msg.commandId, msg.ok, msg.error, this.ctx.clock.now());
     }
@@ -1084,12 +1126,19 @@ export class RunnerHandlers {
     conn.limitChangedAt = now;
     conn.reportsShiftLimit = (msg.capabilities ?? []).includes(SHIFT_LIMIT_REPORT_CAPABILITY);
     conn.lastRepos = msg.repos;
+    // 1.10.0 (R18-S): what the runner decides itself. A runner that reports any of it keeps its grants locally, so the
+    // web shows "confirm on the workstation" for them. The held list arrives with `approvals.held`.
+    conn.setupPending = msg.setupPending === true;
+    conn.startupRefused = msg.startupRefused ?? undefined;
+    conn.heldItems = [];
+    conn.localPolicy = msg.setupPending !== undefined || msg.startupRefused !== undefined;
     conn.helloShiftIds = msg.activeShifts.map((s) => s.shiftId);
     conn.helloChatIds = msg.activeChats ?? [];
     await exec(
       ctx.pool,
-      // runner_update is cleared: a runner that can update itself reports it again right after `welcome`.
-      `UPDATE workstations SET runtimes=$2, runner_version=$3, hostname=$4, platform=$5, last_seen_at=$6, runner_update=NULL, integrations_version=$7 WHERE id=$1`,
+      // runner_update is cleared: a runner that can update itself reports it again right after `welcome`. The start-up
+      // refusal is kept after the runner exits (it connects only to say why), and cleared by a hello without one.
+      `UPDATE workstations SET runtimes=$2, runner_version=$3, hostname=$4, platform=$5, last_seen_at=$6, runner_update=NULL, integrations_version=$7, startup_refused=$8 WHERE id=$1`,
       [
         conn.workstationId,
         JSON.stringify(msg.runtimes),
@@ -1098,6 +1147,7 @@ export class RunnerHandlers {
         msg.platform,
         now,
         msg.integrationsVersion ?? null,
+        msg.startupRefused ?? null,
       ],
     );
     // The public key the sudo password is encrypted with (the private half stays on the runner).
@@ -1205,6 +1255,8 @@ export class RunnerHandlers {
         PACKS_CAPABILITY,
         RELAY_FEATURE,
       ],
+      // R21, R27: the runner then refuses to start as a root-equivalent user, whatever its local policy says.
+      ...((await securitySetting(ctx, 'requireSignedRunners')) ? { requireSignedRunners: true } : {}),
     });
     await sendStorageSync(ctx, conn.workstationId).catch((err) =>
       ctx.log.warn({ err }, 'storage sync not queued'),
@@ -1565,6 +1617,16 @@ export class RunnerHandlers {
     }
   }
 
+  /**
+   * `approvals.held` (1.10.0, R18-S): the full list of what the runner holds until a local approval (replaces the last
+   * one; not acked). The server only shows it ("waiting for a yes on the workstation"); it never approves anything.
+   * Kept in memory with the connection: it is the runner's live state, and a reconnect sends it again.
+   */
+  private approvalsHeld(conn: RunnerConn, msg: RunnerToServerOf<'approvals.held'>): void {
+    conn.localPolicy = true;
+    conn.heldItems = msg.items;
+  }
+
   /** `aom devops "<text>"` from a running shift: a request for this workstation's DevOps engineer (non-terminal). */
   private async devopsRequest(
     conn: RunnerConn,
@@ -1574,22 +1636,53 @@ export class RunnerHandlers {
     const text = String(params.text ?? params.summary ?? '').trim();
     if (!text) return [false, undefined, 'a request text is required'];
     if (shift.kind === 'devops') return [false, undefined, 'the DevOps engineer cannot ask itself'];
-    const agent = await one(this.ctx.pool, 'SELECT id, name FROM agents WHERE id=$1', [shift.agent_id]);
-    const r = await withAppendTx(this.ctx.pool, (tx) =>
-      createDevOpsRequestIn(this.ctx, tx, {
-        workstationId: conn.workstationId,
-        summary: text,
-        requestedBy: { kind: 'agent', id: shift.agent_id, name: agent?.name },
-        cardId: shift.card_id ?? undefined,
-      }),
-    );
+    const agent = await one(this.ctx.pool, 'SELECT id, name, org_id FROM agents WHERE id=$1', [
+      shift.agent_id,
+    ]);
+    if (!agent) return [false, undefined, 'unknown agent'];
+    // 1.10.0 (R18-D): the platform project's cards carry text from every tenant (bug intake); its shifts never reach DevOps.
+    const team = await getPlatformTeam(this.ctx.pool);
+    const cardId = (await cardOfShift(this.ctx, shift)).card_id;
+    const card = cardId
+      ? await one(this.ctx.pool, 'SELECT project_id FROM cards WHERE id=$1', [cardId])
+      : undefined;
+    if (team && card?.project_id === team.projectId)
+      return [
+        false,
+        undefined,
+        '`aom devops` is not available to the platform team: describe the need in your handoff',
+      ];
+    // Scoped to the agent's own organization: only that organization's DevOps engineer on this workstation takes it,
+    // never another organization's (before 1.10.0 the oldest engineer on the machine did). Checked inside the append
+    // transaction (`strictOrg`), so an engineer retired in between cannot make it fall back.
+    let r: { requestId: string; threadId: string };
+    try {
+      r = await withAppendTx(this.ctx.pool, (tx) =>
+        createDevOpsRequestIn(this.ctx, tx, {
+          workstationId: conn.workstationId,
+          summary: text,
+          requestedBy: { kind: 'agent', id: shift.agent_id, name: agent.name },
+          cardId: shift.card_id ?? undefined,
+          orgId: agent.org_id,
+          strictOrg: true,
+        }),
+      );
+    } catch (err) {
+      if ((err as { code?: string }).code !== 'no_devops_agent') throw err;
+      return [
+        false,
+        undefined,
+        'this workstation has no DevOps engineer for your organization: describe the need in your handoff',
+      ];
+    }
     this.ctx.services.dispatcher.trigger();
     return [
       true,
       {
         requestId: r.requestId,
         threadId: r.threadId,
-        message: 'Request sent to the DevOps engineer. Continue your work; do not wait for it.',
+        message:
+          'Request sent to the DevOps engineer. It may wait for a yes from the owner on the workstation itself. Continue your work; do not wait for it.',
       },
     ];
   }

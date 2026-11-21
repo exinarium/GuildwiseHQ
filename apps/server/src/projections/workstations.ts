@@ -8,8 +8,8 @@ export const workstationProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `INSERT INTO workstations (id, user_id, name, platform, hostname, runner_version, token_hash, status, paired_at,
-         simulation_org_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'active',$8,$9)`,
+         simulation_org_id, release_signed, release_key_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'active',$8,$9,$10,$11)`,
       [
         p.workstationId,
         p.userId,
@@ -20,6 +20,9 @@ export const workstationProjectors: Record<string, Projector> = {
         p.tokenHash,
         e.createdAt,
         p.simulationOrgId ?? null,
+        // A release the server verified at pairing (R21, R27); `hello` keeps it current.
+        !!p.release?.keyId,
+        p.release?.keyId ?? null,
       ],
     );
   },
@@ -61,5 +64,23 @@ export const workstationProjectors: Record<string, Projector> = {
   WorkstationDisconnected: async (tx, e) => {
     const p = (e.event as EventOf<'WorkstationDisconnected'>).payload;
     await exec(tx, 'UPDATE workstations SET connected=false WHERE id=$1', [p.workstationId]);
+  },
+  /** Passkeys registered for approvals (R22). The runner trusts one only after a local `guildwise-runner passkey trust`. */
+  WorkstationPasskeyAdded: async (tx, e) => {
+    const p = (e.event as EventOf<'WorkstationPasskeyAdded'>).payload;
+    await exec(
+      tx,
+      `INSERT INTO workstation_passkeys (id, workstation_id, user_id, credential_id, public_key, alg, name, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
+      [p.passkeyId, p.workstationId, p.by, p.credentialId, p.publicKey, p.alg, p.name, e.createdAt],
+    );
+  },
+  WorkstationPasskeyRemoved: async (tx, e) => {
+    const p = (e.event as EventOf<'WorkstationPasskeyRemoved'>).payload;
+    await exec(
+      tx,
+      'UPDATE workstation_passkeys SET removed_at=$3 WHERE id=$1 AND workstation_id=$2 AND removed_at IS NULL',
+      [p.passkeyId, p.workstationId, e.createdAt],
+    );
   },
 };

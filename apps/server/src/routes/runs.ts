@@ -19,6 +19,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../auth/guards.ts';
+import { requireStepUp } from '../auth/step-up.ts';
 import { confirmSuite, getIntegrationTests, setIntegrationTests } from '../commands/integration-tests.ts';
 import {
   allowPlanOnWorkstation,
@@ -252,6 +253,7 @@ export function runRoutes(ctx: Ctx) {
       { schema: { params: IdParamsSchema, body: SetTargetSecretRequestSchema } },
       async (req, reply) => {
         const s = await requireUser(ctx, req);
+        requireStepUp(ctx, s);
         await setTargetSecret(ctx, s.user, req.params.id, req.body);
         reply.code(202);
         return { queued: true };

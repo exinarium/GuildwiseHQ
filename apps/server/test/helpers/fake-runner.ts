@@ -24,6 +24,11 @@ export interface HelloOptions {
   legacyVaults?: boolean;
   maxRunEnvironments?: number;
   integrationsVersion?: number;
+  /** The version the runner reports (default `0.0.0-test`). */
+  runnerVersion?: string;
+  /** 1.10.0: the signed-release proof (installer-kept manifest and signature). */
+  release?: { manifest: string; minisig: string };
+  startupRefused?: string;
 }
 
 /**
@@ -142,7 +147,7 @@ export class FakeRunner {
 
   hello(o: HelloOptions = {}): string {
     return this.send('hello', {
-      runnerVersion: '0.0.0-test',
+      runnerVersion: o.runnerVersion ?? '0.0.0-test',
       protocol: 1,
       platform: 'linux',
       hostname: 'fake-host',
@@ -161,6 +166,8 @@ export class FakeRunner {
         : {}),
       ...(o.maxRunEnvironments ? { maxRunEnvironments: o.maxRunEnvironments } : {}),
       ...(o.integrationsVersion ? { integrationsVersion: o.integrationsVersion } : {}),
+      ...(o.release ? { release: o.release } : {}),
+      ...(o.startupRefused ? { startupRefused: o.startupRefused } : {}),
     });
   }
 

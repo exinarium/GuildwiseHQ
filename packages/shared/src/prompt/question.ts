@@ -3,6 +3,7 @@ import type { QuestionShift } from '../intake/index.ts';
 import type { ShiftBrief } from '../protocol/runner.ts';
 import { AOM_NO_PIPES_NOTE } from './commands.ts';
 import { renderShiftPrompt } from './shift-prompt.ts';
+import { ORG_TEXT_NOTICE, oneLineText, renderOrgText } from './untrusted.ts';
 
 export const ANSWER_COMMAND = 'aom answer --item <id> --text "<your answer>" [--option <option id>]';
 export const ESCALATE_COMMAND =
@@ -71,33 +72,41 @@ export function renderQuestionPrompt(brief: ShiftBrief, q: QuestionShift): strin
   out.push('## Ledger entries that matched');
   out.push(
     q.ledgerMatches.length > 0
-      ? q.ledgerMatches
-          .map((m) => `- [${m.scope}] ${m.title} (id ${m.id})\n  ${m.body.trim().replace(/\n/g, '\n  ')}`)
-          .join('\n')
+      ? renderOrgText(
+          'Ledger entries',
+          q.ledgerMatches
+            .map((m) => `- [${m.scope}] ${m.title} (id ${m.id})\n  ${m.body.trim().replace(/\n/g, '\n  ')}`)
+            .join('\n'),
+        )
       : 'None.',
   );
   if (q.trail.length > 0) {
     out.push('## Already looked at by');
-    out.push(q.trail.map((t) => `- ${t}`).join('\n'));
+    out.push(q.trail.map((t) => `- ${oneLineText(t, 300)}`).join('\n'));
   }
   out.push(`# Question ${q.deskItemId}`);
   out.push(
-    `Asked by ${q.askedBy.name}${q.askedBy.role ? ` (${q.askedBy.role})` : ''} on ${brief.card.ref} ${brief.card.title}${q.blocking ? '; the card is blocked until it is answered' : ' (non-blocking)'}.`,
+    `Asked by ${oneLineText(q.askedBy.name, 80)}${q.askedBy.role ? ` (${oneLineText(q.askedBy.role, 60)})` : ''} on ${brief.card.ref} ${oneLineText(brief.card.title)}${q.blocking ? '; the card is blocked until it is answered' : ' (non-blocking)'}.`,
   );
+  // The question and what the asker did are a colleague's text (R18-T): fenced like the card's (the notice is in the card part).
+  out.push(ORG_TEXT_NOTICE);
   if (q.doing.trim()) {
     out.push('## What the asker was doing');
-    out.push(q.doing.trim());
+    out.push(renderOrgText('What the asker was doing', q.doing));
   }
   if (q.options.length > 0) {
     out.push('## Options offered');
     out.push(
       q.options
-        .map((o) => `- ${o.id}: ${o.label}${q.recommendation === o.id ? ' (recommended by the asker)' : ''}`)
+        .map(
+          (o) =>
+            `- ${o.id}: ${oneLineText(o.label, 300)}${q.recommendation === o.id ? ' (recommended by the asker)' : ''}`,
+        )
         .join('\n'),
     );
   }
   out.push('## The question');
-  out.push(q.text.trim());
+  out.push(renderOrgText('The question', q.text));
   out.push('## Your job in this shift');
   out.push(
     [

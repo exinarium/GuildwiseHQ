@@ -35,6 +35,7 @@ import { exec, iso, one, type Queryable, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
+import { wsServesOrgSql } from '../simulation/fit.ts';
 import { rowComputerRemoved } from './computer-removed.ts';
 import { connectBlockedReason, listKeyDtos } from './connect.ts';
 import { workingSetup } from './environments.ts';
@@ -132,8 +133,9 @@ export async function getSetupState(
     `SELECT w.id, w.name, w.connected, w.user_id, c.capabilities
        FROM workstations w LEFT JOIN workstation_capabilities c ON c.workstation_id = w.id
        JOIN project_members pm ON pm.user_id = w.user_id AND pm.project_id=$1 AND pm.status='active'
-      WHERE w.status='active' ORDER BY (w.user_id = $2) DESC, w.connected DESC, w.name, w.id`,
-    [projectId, user.id],
+      WHERE w.status='active' AND ${wsServesOrgSql('w', '$3::uuid')}
+      ORDER BY (w.user_id = $2) DESC, w.connected DESC, w.name, w.id`,
+    [projectId, user.id, p.org_id],
   );
   const workstations: SetupWorkstationDto[] = [];
   for (const w of stations) {

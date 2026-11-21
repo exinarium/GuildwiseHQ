@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { invalidateSecuritySettings } from '../src/auth/security-settings.ts';
 import { type GithubApi, GithubError } from '../src/cloud/github.ts';
 import { type SshConnectOptions, type SshConnector, SshError } from '../src/cloud/ssh.ts';
 import { cloudTick } from '../src/cloud/tick.ts';
+import { PASSWORD } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { createWorld, markOnline, ok, pairWorkstation, type World } from './helpers/world.ts';
 
@@ -268,6 +270,7 @@ describe('GitHub Codespaces', () => {
   it('serves the bootstrap script', async () => {
     const r = await w.t.req('GET', '/api/runner/codespaces-bootstrap.sh');
     expect(r.status).toBe(200);
+    expect(r.body).toContain('/api/runner/releases/manifest.json');
     expect(r.body).toContain('aom-runner" up --server');
     expect(r.body).toContain('sha256sum');
   });
@@ -286,6 +289,17 @@ describe('GitHub Codespaces', () => {
       });
     expect((await enroll('someone-else-token')).status).toBe(401);
     expect((await enroll('codespace-token-ok', 'unknown-name')).status).toBe(401);
+    // R21: while "Only signed runners" is on, a codespace without the signed-release proof is refused before anything
+    // changes (the bootstrap keeps the proof beside the runner; signed-runner-setting.test.ts covers valid proofs).
+    await q(
+      `INSERT INTO platform_settings (key, value, updated_at) VALUES ('security.require_signed_runners', 'true', now())`,
+    );
+    invalidateSecuritySettings(w.t.app.ctx);
+    const refused = await enroll('codespace-token-ok');
+    expect(refused.status).toBe(403);
+    expect(refused.body.error.code).toBe('signed_runner_required');
+    await q(`DELETE FROM platform_settings WHERE key='security.require_signed_runners'`);
+    invalidateSecuritySettings(w.t.app.ctx);
     const r = await enroll('codespace-token-ok');
     expect(r.status).toBe(200);
     expect(r.body.runnerToken).toMatch(/^aomr_/);
@@ -380,7 +394,8 @@ describe('a Codespace only world', () => {
     );
     const list = await ok<any>(w.t.req('GET', '/api/cloud-workstations', { cookie: cookie() }));
     expect(list.hasDockerCapableWorkstation).toBe(false);
-    // a deploy target cannot point at a Codespace workstation
+    // a deploy target cannot point at a Codespace workstation (the clock moved past the step-up window above: R5)
+    await ok(w.t.req('POST', '/api/auth/step-up', { cookie: cookie(), body: { password: PASSWORD } }));
     const r = await w.t.req('POST', `/api/projects/${w.projectId}/deploy-targets`, {
       cookie: cookie(),
       body: { name: 'prod', kind: 'remote_ssh', host: 'h.example.com', workstationId: ws.workstationId },

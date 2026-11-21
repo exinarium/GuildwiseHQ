@@ -34,6 +34,8 @@ export interface FakeServerOptions {
   rpc?: (msg: RunnerToServerOf<'rpc.request'>) => { ok: boolean; result?: unknown; error?: string };
   pairCode?: string;
   /** Answer to each `worktrees.query`: the paths still in use. Unset: the query is not answered. */
+  /** `welcome.requireSignedRunners` (1.10.0, R21): undefined sends none. */
+  requireSignedRunners?: boolean;
   /** Never answer `hello` (upgrade succeeds, no welcome). */
   noWelcome?: boolean;
   /** Accept TCP but never complete the HTTP upgrade. */
@@ -169,6 +171,9 @@ export class FakeServer {
           ...(this.opts.shiftLimit !== undefined ? { shiftLimit: this.opts.shiftLimit } : {}),
         },
         ...(this.opts.features ? { features: this.opts.features } : {}),
+        ...(this.opts.requireSignedRunners !== undefined
+          ? { requireSignedRunners: this.opts.requireSignedRunners }
+          : {}),
       });
       return;
     }

@@ -10,6 +10,8 @@ import {
   canSetOrgSecurity,
   canTransferOwnership,
   DIAGNOSTICS_CONSENT_VERSION,
+  INVITE_LIMIT,
+  MEMBER_HAS_OTHER_ACCESS,
   OFFBOARDING_GRACE_DAYS,
   type OffboardingReport,
   type OrgGuestDto,
@@ -18,19 +20,19 @@ import {
   type OrgMode,
   type OrgRemovalPreview,
   type OrgRole,
+  PENDING_INVITATIONS_CAP,
   streamId,
 } from '@aom/shared';
 import { type OrgAccess, orgRoleOf } from '../auth/org-context.ts';
 import { hashPassword, verifyPassword } from '../auth/password.ts';
-import { disableTwoFactorIn } from '../auth/two-factor.ts';
 import { ceoOwnerChangeEvents } from '../ceo/provision.ts';
 import { withdrawTopicsOfOrgs } from '../ceo/topics-handoff.ts';
 import type { Ctx } from '../context.ts';
 import { randomToken, sha256Hex } from '../crypto.ts';
 import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
-import { type Tx, withAppendTx } from '../db/tx.ts';
+import { type Tx, withAppendTx, withTx } from '../db/tx.ts';
 import { userAvatarOf } from '../dto.ts';
-import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
+import { badRequest, conflict, forbidden, HttpError, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import {
   type OffboardingRun,
@@ -39,13 +41,16 @@ import {
   runOffboardingIn,
 } from '../governance/offboarding.ts';
 import { senderName } from '../mail/layout.ts';
-import { orgInvitationMail } from '../mail/templates.ts';
+import type { MailMessage } from '../mail/mailer.ts';
+import { memberResetNoticeMail, orgInvitationMail, passwordResetMail } from '../mail/templates.ts';
 import { diagnosticsConsentAvailable } from '../orgs/diagnostics.ts';
 import { assertWithinLimit } from '../orgs/limits.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import { orgScope, projectScope, userActor } from './common.ts';
-import { invitationLink } from './invitations.ts';
+import { assertAddressAccepted, invitationLink } from './invitations.ts';
+import { issue as issueResetLink, resetLink } from './password-reset.ts';
 import { removeMemberIn } from './sharing.ts';
+import { mailOwnerTwoFactorReset, scheduleOwnerTwoFactorReset } from './two-factor-recovery.ts';
 
 const INVITE_TTL_MS = 7 * 24 * 3600_000;
 
@@ -574,17 +579,88 @@ export async function transferOwnership(
   });
 }
 
-/** An Owner resets a member's two-factor login (lost phone and recovery codes): they set it up again at next sign-in. */
+interface ResetMeta {
+  ip?: string | undefined;
+  userAgent?: string | undefined;
+}
+
+/**
+ * Whether the person has access anywhere but this organization (R6, audit F1): another active membership, or active
+ * project access in another organization. Their account is global, so an Owner or Admin here may not reset it.
+ */
+async function hasOtherAccess(db: Queryable, orgId: string, userId: string): Promise<boolean> {
+  return !!(await one(
+    db,
+    `SELECT 1 FROM org_members WHERE user_id=$1 AND org_id<>$2 AND status='active'
+     UNION ALL
+     SELECT 1 FROM project_members pm JOIN projects p ON p.id = pm.project_id
+      WHERE pm.user_id=$1 AND pm.status='active' AND p.org_id IS DISTINCT FROM $2
+     LIMIT 1`,
+    [userId, orgId],
+  ));
+}
+
+const OTHER_ACCESS_MESSAGE =
+  'this person also has access to another organization, so their account cannot be reset from here: email them a reset link';
+
+async function refuseOtherAccess(db: Queryable, orgId: string, userId: string): Promise<void> {
+  if (await hasOtherAccess(db, orgId, userId)) throw conflict(MEMBER_HAS_OTHER_ACCESS, OTHER_ACCESS_MESSAGE);
+}
+
+const actorName = (a: OrgAccess) =>
+  senderName({ displayName: a.session.user.displayName, email: a.session.user.email });
+
+async function sendMemberMail(ctx: Ctx, a: OrgAccess, msg: MailMessage): Promise<boolean> {
+  try {
+    await ctx.mailer.send({ ...msg, orgId: a.orgId });
+    return true;
+  } catch (err) {
+    ctx.log.error({ err }, 'failed to send a member account mail');
+    return false;
+  }
+}
+
+/** Every admin reset mails the person (R6): what, by whom, when and from where. A failed mail never undoes the reset. */
+async function mailResetNotice(
+  ctx: Ctx,
+  a: OrgAccess,
+  target: Row,
+  what: 'password' | 'two_factor',
+  meta: ResetMeta,
+): Promise<void> {
+  await sendMemberMail(
+    ctx,
+    a,
+    memberResetNoticeMail({
+      to: target.email,
+      name: target.display_name,
+      orgName: a.org.name,
+      what,
+      by: actorName(a),
+      when: ctx.clock.now(),
+      ip: meta.ip ?? null,
+      origin: ctx.config.publicOrigin,
+    }),
+  );
+}
+
+/**
+ * An Owner resets a member's two-factor login (lost phone and recovery codes): they set it up again at next sign-in.
+ * Refused first (409 `member_has_other_access`) when the member has access in another organization (R6); otherwise
+ * scheduled for 24 hours and mailed (R17-2), so no instant notice with the request's IP is sent here.
+ */
 export async function resetMemberTwoFactor(ctx: Ctx, a: OrgAccess, userId: string): Promise<void> {
   if (a.role !== 'owner') throw forbidden('only the Owner can reset a member’s two-factor login');
-  await withAppendTx(ctx.pool, async (tx) => {
+  const scheduled = await withAppendTx(ctx.pool, async (tx) => {
     await activeMember(tx, a.orgId, userId);
     const has = await one(tx, 'SELECT two_factor_enabled FROM users WHERE id=$1', [userId]);
     if (!has?.two_factor_enabled) throw conflict('two_factor_off', 'this member has no two-factor login');
-    await disableTwoFactorIn(ctx, tx, userId, a.session.user.id, 'reset', userActor(a.session.user.id));
-    await tx.query('DELETE FROM auth_sessions WHERE user_id=$1', [userId]);
+    // R6 (F1): refused when the member has access in another organization.
+    await refuseOtherAccess(tx, a.orgId, userId);
+    // R17-2: never instantly; the member is mailed and can cancel during the 24-hour wait.
+    return scheduleOwnerTwoFactorReset(ctx, tx, userId);
   });
-  ctx.services.browser.closeUser(userId);
+  await mailOwnerTwoFactorReset(ctx, userId, a.session.user.displayName, a.org.name, scheduled);
 }
 
 /** Letters and digits without look-alikes (no 0/O, 1/l/I), so a password read out or typed by hand is not misread. */
@@ -606,28 +682,22 @@ export function generateTemporaryPassword(): string {
  * An Owner or Admin sets a temporary password for a member (they lost their password and the reset mail does not reach them).
  * The server makes it, returns it ONCE for the Owner to pass on, and never logs it: only its hash is stored, in an
  * event that carries no clear text. Every session of the member ends, and at next sign-in they must choose their
- * own password before anything else (two-factor still applies). The account is global: if the member belongs to other
- * organizations, their password changes there too.
+ * own password before anything else (two-factor still applies). The account is global, so a member with access in
+ * another organization is refused (409 `member_has_other_access`, R6): no temporary password is ever made for them,
+ * the reset link (`sendMemberPasswordReset`) is the way. The member is mailed about every reset.
  */
 export async function resetMemberPassword(
   ctx: Ctx,
   a: OrgAccess,
   userId: string,
+  meta: ResetMeta = {},
 ): Promise<{ temporaryPassword: string }> {
-  if (a.role !== 'owner' && a.role !== 'admin')
-    throw forbidden('only an Owner or an Admin can reset a member’s password');
-  if (userId === a.session.user.id)
-    throw conflict('use_change_password', 'change your own password under Account, Security');
+  // Checked before the temporary password exists, so a refused reset never makes one.
+  await resettableMember(ctx.pool, a, userId);
   const temporaryPassword = generateTemporaryPassword();
   const passwordHash = await hashPassword(temporaryPassword);
-  await withAppendTx(ctx.pool, async (tx) => {
-    const target = await activeMember(tx, a.orgId, userId);
-    // Owners reset Members and Admins; Admins reset Members only (never an Owner or another Admin).
-    if (a.role === 'admin' && target.role !== 'member')
-      throw forbidden('an Admin can reset the password of a Member only; ask the Owner');
-    const u = await one(tx, 'SELECT kind, status FROM users WHERE id=$1 FOR UPDATE', [userId]);
-    if (u?.kind === 'super_admin') throw forbidden('platform accounts are managed on the server');
-    if (u?.status !== 'active') throw conflict('user_deactivated', 'this account is deactivated');
+  const target = await withAppendTx(ctx.pool, async (tx) => {
+    const target = await resettableMember(tx, a, userId, true, true);
     await ctx.store.append(
       [
         {
@@ -644,9 +714,120 @@ export async function resetMemberPassword(
     );
     await tx.query('DELETE FROM login_challenges WHERE user_id=$1', [userId]);
     await tx.query('DELETE FROM auth_sessions WHERE user_id=$1', [userId]);
+    return target;
   });
   ctx.services.browser.closeUser(userId);
+  await mailResetNotice(ctx, a, target, 'password', meta);
   return { temporaryPassword };
+}
+
+/**
+ * The member a password reset may target: active here, a Member for an Admin (an Owner resets Members and Admins), not
+ * the caller, not a platform account, not deactivated. With `exclusive` (the temporary password) also refused when the
+ * member has access in another organization (R6). `lock` takes the user row lock (inside the reset transaction).
+ */
+async function resettableMember(
+  db: Queryable,
+  a: OrgAccess,
+  userId: string,
+  exclusive = true,
+  lock = false,
+): Promise<Row> {
+  if (a.role !== 'owner' && a.role !== 'admin')
+    throw forbidden('only an Owner or an Admin can reset a member’s password');
+  if (userId === a.session.user.id)
+    throw conflict('use_change_password', 'change your own password under Account, Security');
+  const target = await activeMember(db, a.orgId, userId);
+  // Owners reset Members and Admins; Admins reset Members only (never an Owner or another Admin).
+  if (a.role === 'admin' && target.role !== 'member')
+    throw forbidden('an Admin can reset the password of a Member only; ask the Owner');
+  const u = await one(db, `SELECT kind, status FROM users WHERE id=$1${lock ? ' FOR UPDATE' : ''}`, [userId]);
+  if (u?.kind === 'super_admin') throw forbidden('platform accounts are managed on the server');
+  if (u?.status !== 'active') throw conflict('user_deactivated', 'this account is deactivated');
+  if (exclusive) await refuseOtherAccess(db, a.orgId, userId);
+  return target;
+}
+
+/** Reset links an Owner or Admin may send one person per hour (R6), counted in the database across organizations. */
+const MEMBER_RESET_LINKS_PER_HOUR = 3;
+
+/**
+ * "Email a reset link" (R6): an Owner or Admin (same rules as the temporary password) has the server mail the member a
+ * single-use link that names this organization. Works for members with access elsewhere too, because only the person
+ * themselves can use it. At most 3 an hour per person (429 `too_many_requests`, under a per-person lock); a mail that
+ * fails is 502, does not count and leaves the person's earlier links valid (the transaction rolls back); otherwise,
+ * like every new link (`issue`), it ends their earlier unused links. Appends `PasswordResetLinkSent{orgId}`.
+ */
+export async function sendMemberPasswordReset(
+  ctx: Ctx,
+  a: OrgAccess,
+  userId: string,
+  meta: ResetMeta = {},
+): Promise<{ sentTo: string; expiresAt: string }> {
+  const target = await resettableMember(ctx.pool, a, userId, false);
+  // One send per person at a time: the count, the new link and the mail run in one transaction on one connection,
+  // under a per-person lock that is tried, never waited for. A request that finds it held answers 429 at once, so
+  // parallel requests can neither pass the limit together nor pile up holding pool connections.
+  const { expiresAt } = await withTx(ctx.pool, async (tx) => {
+    const got = await one<{ ok: boolean }>(
+      tx,
+      `SELECT pg_try_advisory_xact_lock(hashtext('member_reset:' || $1::text)) AS ok`,
+      [userId],
+    );
+    if (!got?.ok)
+      throw new HttpError(
+        429,
+        'too_many_requests',
+        'a reset link for this person is being sent; try again in a moment',
+      );
+    const recent = await one<{ n: number }>(
+      tx,
+      `SELECT count(*)::int AS n FROM password_resets WHERE user_id=$1 AND requested_by IS NOT NULL AND created_at > $2`,
+      [userId, new Date(ctx.clock.now().getTime() - 3600_000)],
+    );
+    if ((recent?.n ?? 0) >= MEMBER_RESET_LINKS_PER_HOUR)
+      throw new HttpError(
+        429,
+        'too_many_requests',
+        'a reset link was sent to this person 3 times in the last hour',
+      );
+    const link = await issueResetLink(ctx, userId, a.session.user.id, meta.ip ?? null, tx);
+    const sent = await sendMemberMail(
+      ctx,
+      a,
+      passwordResetMail({
+        to: target.email,
+        name: target.display_name,
+        link: resetLink(ctx, link.token),
+        expiresAt: link.expiresAt,
+        origin: ctx.config.publicOrigin,
+        byOrg: a.org.name,
+      }),
+    );
+    // throwing rolls the transaction back: no new link, and the earlier unused links stay valid
+    if (!sent) throw new HttpError(502, 'mail_failed', 'the email could not be sent; try again in a moment');
+    return link;
+  });
+  await ctx.store.append([
+    {
+      streamId: streamId.user(userId),
+      event: {
+        type: 'PasswordResetLinkSent',
+        payload: {
+          userId,
+          by: a.session.user.id,
+          orgId: a.orgId,
+          meta: {
+            ...(meta.ip ? { ip: meta.ip } : {}),
+            ...(meta.userAgent ? { userAgent: meta.userAgent.slice(0, 400) } : {}),
+          },
+        },
+      },
+      actor: userActor(a.session.user.id),
+      scope: orgScope(a.orgId),
+    },
+  ]);
+  return { sentTo: target.email, expiresAt: expiresAt.toISOString() };
 }
 
 // ----------------------------------------------------------------------------------------- invitations
@@ -702,11 +883,67 @@ async function sendOrgInvitationMail(
   }
 }
 
-/** Invites someone to join the organization: Owner (any role) or Admin (Member only). Guests do not count; invitees do. */
+const HOUR_MS = 3600_000;
+/** Resends of one invitation per hour (R10). */
+const RESENDS_PER_HOUR = 3;
+
+/**
+ * The invitation limits (R10, audit F5), counted in the database under a per-organization lock: invitations per
+ * organization per hour and per actor per day (429 `invite_limit`), and pending invitations per organization (409
+ * `pending_invitations_cap`). Defaults 20, 50 and 50 (`AOM_INVITE_PER_ORG_HOUR`, `_PER_ACTOR_DAY`, `_PENDING_MAX`).
+ */
+async function assertInviteLimits(ctx: Ctx, tx: Tx, a: OrgAccess): Promise<void> {
+  const now = ctx.clock.now().getTime();
+  const limits = ctx.config.invites;
+  const c = await one<{ org_hour: number; actor_day: number; pending: number }>(
+    tx,
+    `SELECT
+       (SELECT count(*)::int FROM invitations WHERE kind='org_member' AND org_id=$1 AND created_at > $3) AS org_hour,
+       (SELECT count(*)::int FROM invitations WHERE kind='org_member' AND invited_by=$2 AND created_at > $4) AS actor_day,
+       (SELECT count(*)::int FROM invitations
+         WHERE kind='org_member' AND org_id=$1 AND status='pending' AND expires_at > $5) AS pending`,
+    [a.orgId, a.session.user.id, new Date(now - HOUR_MS), new Date(now - 24 * HOUR_MS), new Date(now)],
+  );
+  if ((c?.org_hour ?? 0) >= limits.perOrgHour)
+    throw new HttpError(
+      429,
+      INVITE_LIMIT,
+      'too many invitations from this organization in the last hour; try later',
+      {
+        scope: 'org_hour',
+        limit: limits.perOrgHour,
+      },
+    );
+  if ((c?.actor_day ?? 0) >= limits.perActorDay)
+    throw new HttpError(429, INVITE_LIMIT, 'you sent too many invitations in the last 24 hours; try later', {
+      scope: 'actor_day',
+      limit: limits.perActorDay,
+    });
+  if ((c?.pending ?? 0) >= limits.pendingMax)
+    throw conflict(
+      PENDING_INVITATIONS_CAP,
+      'this organization has too many pending invitations; revoke some or wait until they are accepted',
+      { limit: limits.pendingMax },
+    );
+}
+
+/** A platform (super admin) account: it is invited like anyone else, but no mail goes out and accept refuses (R8, F3). */
+async function isPlatformAccount(db: Queryable, email: string): Promise<boolean> {
+  return (
+    (await one(db, `SELECT kind FROM users WHERE lower(email)=lower($1)`, [email]))?.kind === 'super_admin'
+  );
+}
+
+/**
+ * Invites someone to join the organization: Owner (any role) or Admin (Member only). Guests do not count; invitees do.
+ * The address is screened (R1) and the invitation limits apply (R10). A platform account's email gets the same answer
+ * as any other (201, listed) but no mail (R8).
+ */
 export async function inviteOrgMember(
   ctx: Ctx,
   a: OrgAccess,
   input: { email: string; role: AssignableOrgRole; projectIds: string[] },
+  meta: { ip?: string | undefined } = {},
 ): Promise<string> {
   if (!canInviteOrgMember({ orgRole: a.role }, input.role))
     throw forbidden(
@@ -714,16 +951,17 @@ export async function inviteOrgMember(
         ? 'only the Owner can invite an Admin'
         : 'only the Owner and Admins can invite members',
     );
+  await assertAddressAccepted(ctx, input.email, meta.ip);
   const token = randomToken(32);
   const invitationId = randomUUID();
   const expiresAt = new Date(ctx.clock.now().getTime() + INVITE_TTL_MS);
-  await withAppendTx(ctx.pool, async (tx) => {
+  const silent = await withAppendTx(ctx.pool, async (tx) => {
+    // One invitation of an organization at a time, so concurrent invites cannot all pass the limits.
+    await tx.query(`SELECT pg_advisory_xact_lock(hashtext('org_invitations:' || $1::text))`, [a.orgId]);
     const existing = await one(tx, 'SELECT id, status, kind FROM users WHERE lower(email)=lower($1)', [
       input.email,
     ]);
-    if (existing?.kind === 'super_admin')
-      throw conflict('super_admin_cannot_join', 'platform accounts cannot join organizations');
-    if (existing && (await orgRoleOf(tx, existing.id, a.orgId)))
+    if (existing && existing.kind !== 'super_admin' && (await orgRoleOf(tx, existing.id, a.orgId)))
       throw conflict('already_member', 'this person is already a member of the organization');
     if (
       await one(
@@ -733,6 +971,7 @@ export async function inviteOrgMember(
       )
     )
       throw conflict('invitation_pending', 'a pending invitation for this email exists; resend or revoke it');
+    await assertInviteLimits(ctx, tx, a);
     await assertWithinLimit(ctx, tx, a.orgId, 'members');
     if (input.projectIds.length) {
       const ok = await rows<{ id: string }>(
@@ -767,18 +1006,21 @@ export async function inviteOrgMember(
       ],
       { tx },
     );
+    return existing?.kind === 'super_admin';
   });
-  await sendOrgInvitationMail(
-    ctx,
-    input.email,
-    token,
-    a.org.name,
-    input.role,
-    // The inviter's display name; the mail names the organization separately.
-    senderName({ displayName: a.session.user.displayName, email: a.session.user.email }),
-    expiresAt,
-    a.orgId,
-  );
+  // Never awaited, for anyone: a platform account (no mail) and anyone else answer in the same time (R8).
+  if (!silent)
+    void sendOrgInvitationMail(
+      ctx,
+      input.email,
+      token,
+      a.org.name,
+      input.role,
+      // The inviter's display name; the mail names the organization separately.
+      senderName({ displayName: a.session.user.displayName, email: a.session.user.email }),
+      expiresAt,
+      a.orgId,
+    );
   return invitationId;
 }
 
@@ -795,12 +1037,34 @@ async function ownInvitation(tx: Queryable, a: OrgAccess, id: string): Promise<R
   return inv;
 }
 
-export async function resendOrgInvitation(ctx: Ctx, a: OrgAccess, invitationId: string): Promise<void> {
+/** Resends a pending invitation: at most 3 an hour per invitation (429 `invite_limit`), screened again (R1, R10). */
+export async function resendOrgInvitation(
+  ctx: Ctx,
+  a: OrgAccess,
+  invitationId: string,
+  meta: { ip?: string | undefined } = {},
+): Promise<void> {
   if (!canAddPeople({ orgRole: a.role })) throw forbidden('only the Owner and Admins can invite');
   const token = randomToken(32);
   const expiresAt = new Date(ctx.clock.now().getTime() + INVITE_TTL_MS);
   const inv = await withAppendTx(ctx.pool, async (tx) => {
     const i = await ownInvitation(tx, a, invitationId);
+    await assertAddressAccepted(ctx, i.email, meta.ip);
+    const resent = await one<{ n: number }>(
+      tx,
+      `SELECT count(*)::int AS n FROM events WHERE stream_id=$1 AND type='InvitationResent' AND created_at > $2`,
+      [streamId.invitation(invitationId), new Date(ctx.clock.now().getTime() - HOUR_MS)],
+    );
+    if ((resent?.n ?? 0) >= RESENDS_PER_HOUR)
+      throw new HttpError(
+        429,
+        INVITE_LIMIT,
+        'this invitation was resent 3 times in the last hour; try later',
+        {
+          scope: 'resend_hour',
+          limit: RESENDS_PER_HOUR,
+        },
+      );
     await ctx.store.append(
       [
         {
@@ -815,19 +1079,22 @@ export async function resendOrgInvitation(ctx: Ctx, a: OrgAccess, invitationId: 
       ],
       { tx },
     );
-    return i;
+    const silent = await isPlatformAccount(tx, i.email);
+    return { ...i, silent } as Row;
   });
-  await sendOrgInvitationMail(
-    ctx,
-    inv.email,
-    token,
-    a.org.name,
-    inv.org_role,
-    // The inviter's display name; the mail names the organization separately.
-    senderName({ displayName: a.session.user.displayName, email: a.session.user.email }),
-    expiresAt,
-    a.orgId,
-  );
+  // Never awaited, as at invite (R8): the answer takes the same time whether a mail goes out or not.
+  if (!inv.silent)
+    void sendOrgInvitationMail(
+      ctx,
+      inv.email,
+      token,
+      a.org.name,
+      inv.org_role,
+      // The inviter's display name; the mail names the organization separately.
+      senderName({ displayName: a.session.user.displayName, email: a.session.user.email }),
+      expiresAt,
+      a.orgId,
+    );
 }
 
 export async function revokeOrgInvitation(ctx: Ctx, a: OrgAccess, invitationId: string): Promise<void> {

@@ -145,6 +145,14 @@ export function useResetMemberTwoFactor() {
   });
 }
 
+/** "Email a reset link" (R6): the server mails the member a single-use link naming the organization. */
+export function useSendMemberPasswordReset() {
+  return useMutation({
+    mutationFn: (userId: string) =>
+      post<{ sentTo: string; expiresAt: string }>(`/org/members/${userId}/send-password-reset`, {}),
+  });
+}
+
 /** The temporary password comes back in this response only: show it once, never store it. */
 export function useResetMemberPassword() {
   return useMutation({

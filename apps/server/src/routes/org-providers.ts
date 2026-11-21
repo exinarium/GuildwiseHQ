@@ -9,6 +9,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireOrg } from '../auth/guards.ts';
+import { requireStepUp } from '../auth/step-up.ts';
 import { listOrgModelPrices, removeOrgModelPrice, setOrgModelPrice } from '../commands/org-model-prices.ts';
 import {
   listOrgProviders,
@@ -42,6 +43,7 @@ export function orgProviderRoutes(ctx: Ctx) {
       { schema: { params: ProviderParamsSchema, body: SetOrgProviderKeyRequestSchema } },
       async (req, reply) => {
         const a = await requireOrg(ctx, req, { min: 'admin' });
+        requireStepUp(ctx, a.session);
         await setOrgProviderKey(ctx, a.session.user, a.orgId, req.params.provider, req.body);
         reply.code(202);
         return { queued: true };
@@ -53,6 +55,7 @@ export function orgProviderRoutes(ctx: Ctx) {
       { schema: { params: ProviderParamsSchema } },
       async (req, reply) => {
         const a = await requireOrg(ctx, req, { min: 'admin' });
+        requireStepUp(ctx, a.session);
         await revokeOrgProviderKey(ctx, a.session.user, a.orgId, req.params.provider);
         reply.code(202);
         return { queued: true };
@@ -64,6 +67,7 @@ export function orgProviderRoutes(ctx: Ctx) {
       { schema: { params: ProviderParamsSchema, body: ShareOrgProviderKeyRequestSchema } },
       async (req, reply) => {
         const a = await requireOrg(ctx, req, { min: 'admin' });
+        requireStepUp(ctx, a.session);
         await shareOrgProviderKey(ctx, a.session.user, a.orgId, req.params.provider, req.body);
         reply.code(202);
         return { queued: true };
@@ -75,6 +79,7 @@ export function orgProviderRoutes(ctx: Ctx) {
       { schema: { params: ProviderParamsSchema, body: ReshareOrgProviderKeyRequestSchema } },
       async (req, reply) => {
         const a = await requireOrg(ctx, req, { min: 'admin' });
+        requireStepUp(ctx, a.session);
         await reshareOrgProviderKey(ctx, a.session.user, a.orgId, req.params.provider, req.body);
         reply.code(202);
         return { queued: true };

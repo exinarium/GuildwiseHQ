@@ -15,6 +15,7 @@ import {
   UnlinkImpactResponseSchema,
   type UpdateCheckResponse,
   UpdateCheckResponseSchema,
+  WorkstationServingResponseSchema,
   WorkstationsResponseSchema,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -43,6 +44,28 @@ export function useRemoveToolchain() {
     onSuccess: () => {
       for (const ms of [800, 2000, 5000])
         setTimeout(() => qc.invalidateQueries({ queryKey: ['workstations'] }), ms);
+    },
+  });
+}
+
+/** "Works for" (R9): per workstation of yours, the organizations it may work for and whether it does. */
+export function useWorkstationServing(opts: { enabled?: boolean } = {}) {
+  return useQuery({
+    enabled: opts.enabled ?? true,
+    queryKey: ['workstations', 'serving'],
+    queryFn: async () => (await get('/workstations/serving', WorkstationServingResponseSchema)).workstations,
+  });
+}
+
+/** Switch an organization on or off for one of your workstations (off: its agents there need a new home). */
+export function useSetWorkstationServing() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { workstationId: string; orgId: string; serving: boolean }) =>
+      put(`/workstations/${v.workstationId}/orgs/${v.orgId}`, { serving: v.serving }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['workstations'] });
+      qc.invalidateQueries({ queryKey: ['agents'] });
     },
   });
 }

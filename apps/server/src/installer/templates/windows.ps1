@@ -1,5 +1,8 @@
 # ---------------------------------------------------------------------------------------------------------------------
-# Windows: turns on WSL2 and Ubuntu, keeps them running, then runs the Linux installer inside Ubuntu.
+# Windows: turns on WSL2, gives the runner its own WSL distribution (guildwise-runner, cut off from Windows: no Windows
+# programs, no Windows PATH, no Windows drives), keeps it running, then runs the Linux installer inside it. An existing
+# runner in your Ubuntu is kept (unless this server requires signed runners or you ask to replace it); choosing to stay in
+# your default distribution is possible with GUILDWISE_WSL_DISTRO=default, without that isolation.
 # Safe to run again at any time. If Windows must restart, this script continues by itself when you sign in again.
 # ---------------------------------------------------------------------------------------------------------------------
 # Native commands (wsl.exe) write progress to stderr; cmdlets that must fail loudly say -ErrorAction Stop.
@@ -13,8 +16,19 @@ $SelfPath = Join-Path $WorkDir 'install.ps1'
 $LinuxScriptPath = Join-Path $WorkDir 'install-linux.sh'
 $StatePath = Join-Path $WorkDir 'state.json'
 $script:StepNumber = 0
-$script:StepTotal = 8
+$script:StepTotal = 9
 $script:CurrentStep = 'installer'
+$RunnerTaskName = "$AppName runner"
+$OldTaskName = 'WSL Boot'
+# The runner's own distribution [rv6-4] and the pinned Ubuntu 24.04 WSL image it is made from (sha256 from Canonical's
+# SHA256SUMS of that release folder).
+$DedicatedDistro = 'guildwise-runner'
+$UbuntuRootfs = @{
+  amd64 = @{ Url = 'https://cloud-images.ubuntu.com/wsl/releases/24.04/20240423/ubuntu-noble-wsl-amd64-24.04lts.rootfs.tar.gz'; Sha256 = '2a790896740b14d637dbdc583cce1ba081ac53b9e9cdb46dc09a2f73abbd9934' }
+  arm64 = @{ Url = 'https://cloud-images.ubuntu.com/wsl/releases/24.04/20240423/ubuntu-noble-wsl-arm64-24.04lts.rootfs.tar.gz'; Sha256 = 'e113b8c49af3ab49b992b8e29550fc921e689f211abc338176f8243786173a32' }
+}
+# Installer choices that may be set in Windows and are passed on to the Linux installer (never values from the server).
+$ForwardedVars = @('GUILDWISE_YES', 'GUILDWISE_LEGACY', 'GUILDWISE_DEVOPS_ORGS', 'GUILDWISE_SUDO', 'GUILDWISE_DOCKER', 'GUILDWISE_ACCEPT_ROOT_EQUIVALENT', 'GUILDWISE_APPROVE_APPS', 'GUILDWISE_DEPLOY', 'GUILDWISE_DEPLOY_PIN_COMMIT', 'GUILDWISE_ALLOW_UNSIGNED_FROM', 'GUILDWISE_WITH_DOCKER', 'GUILDWISE_WITH_YTDLP', 'GUILDWISE_SKIP_CLAUDE_INSTALL')
 
 function Write-Info([string]$Text) { Write-Host "    $Text" -ForegroundColor DarkGray }
 function Write-Good([string]$Text) { Write-Host "    [ok] $Text" -ForegroundColor Green }
@@ -188,6 +202,207 @@ function Enable-WslFeatures {
   return $changed
 }
 
+# ---- Docker Desktop and the runner's distribution [rv7-11] -----------------------------------------------------------------
+# Docker Desktop's WSL integration gives a distribution its socket, which is root on the Docker Desktop VM, and that VM
+# mounts the Windows drives: it must stay off for the runner's distribution.
+function Get-DockerDesktopSettingsText {
+  foreach ($n in @('settings-store.json', 'settings.json')) {
+    $p = Join-Path $env:APPDATA "Docker\$n"
+    if (Test-Path -LiteralPath $p) { return [System.IO.File]::ReadAllText($p) }
+  }
+  return ''
+}
+# '' when the integration is off for $Distro (or Docker Desktop is not installed); otherwise what is wrong.
+function Get-DockerIntegrationProblem([string]$SettingsText, [string]$Distro, [bool]$IsDefault) {
+  if (-not $SettingsText -or -not $SettingsText.Trim()) { return '' }
+  try { $s = $SettingsText | ConvertFrom-Json -ErrorAction Stop } catch { return "Docker Desktop's settings could not be read, so its WSL integration cannot be confirmed off for $Distro" }
+  if (@($s.integratedWslDistros | Where-Object { $_ -eq $Distro }).Count -gt 0) { return "Docker Desktop's WSL integration is on for $Distro" }
+  if ($IsDefault -and $s.enableIntegrationWithDefaultWslDistro -eq $true) { return "Docker Desktop's WSL integration is on for your default WSL distribution, which is $Distro" }
+  return ''
+}
+function Get-DefaultDistroName {
+  try {
+    $lxss = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss'
+    $guid = (Get-ItemProperty -Path $lxss -ErrorAction Stop).DefaultDistribution
+    if (-not $guid) { return '' }
+    return [string](Get-ItemProperty -Path (Join-Path $lxss $guid) -ErrorAction Stop).DistributionName
+  } catch { return '' }
+}
+function Assert-NoDockerIntegration([string]$Distro) {
+  $problem = Get-DockerIntegrationProblem (Get-DockerDesktopSettingsText) $Distro ((Get-DefaultDistroName) -eq $Distro)
+  if ($problem) {
+    Stop-Install "$problem. Its socket is root on the Docker Desktop VM, which mounts your Windows drives, so the runner would not be cut off from Windows." "Open Docker Desktop > Settings > Resources > WSL integration, switch off $Distro (and 'Enable integration with my default WSL distro' while $Distro is your default), choose Apply & restart, then run the command again. For deploys, install Docker Engine inside $Distro instead."
+  }
+}
+
+# /etc/wsl.conf of the runner's distribution: no Windows programs (interop), no Windows PATH, no Windows drives, systemd
+# on; with -WithUser also the default user. Root inside the distribution can change this file, which is why the runner
+# gets no sudo by default.
+function Get-DedicatedWslConfScript([switch]$WithUser) {
+  $user = if ($WithUser) { "`n[user]`ndefault=$DedicatedDistro" } else { '' }
+  return @'
+set -e
+cat > /etc/wsl.conf <<'CONF'
+# Written by the workstation installer: the runner's own Linux, cut off from Windows.
+[boot]
+systemd=true
+
+[interop]
+enabled=false
+appendWindowsPath=false
+
+[automount]
+enabled=false
+mountFsTab=false
+'@ + $user + @'
+
+CONF
+echo 'wsl.conf written'
+'@
+}
+
+# The bash line that exports the forwarded installer choices (each value travels as base64, so no quoting can break).
+function Get-ForwardedExports {
+  $parts = @()
+  foreach ($n in $ForwardedVars) {
+    $v = [Environment]::GetEnvironmentVariable($n)
+    if ($v) { $parts += "export $n=`"`$(echo $(ConvertTo-Base64Unix $v) | base64 -d)`";" }
+  }
+  return ($parts -join ' ')
+}
+
+# Keeps a distribution running in the background: vmIdleTimeout=-1 in .wslconfig and a task that starts it at sign-in.
+function Register-KeepAlive([string]$Distro) {
+  $wslConfig = Join-Path $env:USERPROFILE '.wslconfig'
+  $lines = @()
+  if (Test-Path $wslConfig) { $lines = @([System.IO.File]::ReadAllLines($wslConfig)) }
+  $hasSetting = $lines | Where-Object { $_ -match '^\s*vmIdleTimeout\s*=\s*-1\s*$' }
+  $configChanged = $false
+  if (-not $hasSetting) {
+    $lines = @($lines | Where-Object { $_ -notmatch '^\s*vmIdleTimeout\s*=' })
+    $at = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match '^\s*\[wsl2\]\s*$' })
+    if ($at -ge 0) { $lines = @($lines[0..$at]) + @('vmIdleTimeout=-1') + @($(if ($at + 1 -lt $lines.Count) { $lines[($at + 1)..($lines.Count - 1)] } else { @() })) }
+    else { $lines = @($lines) + @('', '[wsl2]', 'vmIdleTimeout=-1') }
+    # UTF-8 without a byte order mark, whatever the file held (Set-Content -Encoding ASCII turns accents into '?').
+    [System.IO.File]::WriteAllLines($wslConfig, [string[]]$lines, [System.Text.UTF8Encoding]::new($false))
+    $configChanged = $true
+  }
+  $taskArgs = "-d $Distro --exec sleep infinity"
+  $action = New-ScheduledTaskAction -Execute 'wsl.exe' -Argument $taskArgs
+  $trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
+  $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
+  $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+  Register-ScheduledTask -TaskName $RunnerTaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "Keeps $Distro running so the $AppName runner stays online." -Force -ErrorAction Stop | Out-Null
+  # Older installs called this task "WSL Boot". Remove it, but only when it is ours: it starts wsl.exe in a distribution
+  # with `--exec sleep infinity`. A task of that name that does something else is left alone.
+  $oldTask = Get-ScheduledTask -TaskName $OldTaskName -ErrorAction SilentlyContinue
+  if ($oldTask) {
+    if (Test-OurKeepAliveTask $oldTask '') {
+      try { Unregister-ScheduledTask -TaskName $OldTaskName -Confirm:$false -ErrorAction Stop; Write-Info "Removed the old $OldTaskName task (it is now called $RunnerTaskName)." }
+      catch { Write-Info "Could not remove the old $OldTaskName task: $($_.Exception.Message)" }
+    } else { Write-Info "A task called $OldTaskName exists but is not ours; it was left alone." }
+  }
+  if ($configChanged) { & wsl.exe --shutdown 2>&1 | Out-Null }
+  Start-ScheduledTask -TaskName $RunnerTaskName
+}
+# A keep-alive task of ours: wsl.exe with `--exec sleep infinity`, in $Distro when one is named.
+function Test-OurKeepAliveTask($Task, [string]$Distro) {
+  $a = @($Task.Actions) | Select-Object -First 1
+  if (-not $a -or [string]$a.Execute -notmatch 'wsl(\.exe)?$' -or [string]$a.Arguments -notmatch '--exec\s+sleep\s+infinity') { return $false }
+  if ($Distro) { return ([string]$a.Arguments -match ('-d\s+' + [regex]::Escape($Distro) + '(\s|$)')) }
+  return $true
+}
+
+# Waits for systemd in a distribution; with a user name, lets that user's services run without a login.
+function Wait-Systemd([string]$Distro, [string]$LingerUser) {
+  $linger = if ($LingerUser) { "loginctl enable-linger '$LingerUser' >/dev/null 2>&1 || true" } else { '' }
+  $settle = @"
+for i in `$(seq 1 40); do
+  s=`$(systemctl is-system-running 2>/dev/null || true)
+  case "`$s" in running|degraded) break ;; esac
+  sleep 1
+done
+$linger
+systemctl is-system-running 2>/dev/null || true
+"@
+  return (Invoke-WslBash $Distro 'root' $settle)
+}
+
+# The dedicated-distribution path (after step 2b): its own steps, then the end of the install.
+function Install-DedicatedDistro {
+  $script:StepTotal = $script:StepNumber + 5
+  Start-Step "Creating the runner's own Linux ($DedicatedDistro)"
+  if (-not (Get-Distros | Where-Object { $_ -eq $DedicatedDistro })) {
+    $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
+    $rootfs = $UbuntuRootfs[$arch]
+    $file = Join-Path $WorkDir "ubuntu-24.04-wsl-$arch.rootfs.tar.gz"
+    if (-not (Test-Path $file) -or (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLower() -ne $rootfs.Sha256) {
+      Write-Info 'Downloading Ubuntu 24.04 for the runner (about 350 MB) ...'
+      try { Invoke-WebRequest -UseBasicParsing -Uri $rootfs.Url -OutFile $file -ErrorAction Stop }
+      catch { Stop-Install "Could not download Ubuntu for the runner: $($_.Exception.Message)" 'Check that this PC can reach cloud-images.ubuntu.com, then run the command again.' }
+    }
+    $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLower()
+    if ($got -ne $rootfs.Sha256) {
+      Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+      Stop-Install "The Ubuntu download did not match its pinned checksum (got $($got.Substring(0, 12))...)." 'Run the command again; if it repeats, contact us.'
+    }
+    $before = Get-DefaultDistroName
+    $dir = Join-Path $WorkDir "wsl\$DedicatedDistro"
+    New-Item -ItemType Directory -Path $dir -Force -ErrorAction Stop | Out-Null
+    $out = (& wsl.exe --import $DedicatedDistro $dir $file --version 2 2>&1 | Out-String) -replace "`0", ''
+    if (-not (Get-Distros | Where-Object { $_ -eq $DedicatedDistro })) {
+      Stop-Install (Format-WslFailure "Could not create the $DedicatedDistro distribution." $out) "Run the command again. Help: $VirtHelp"
+    }
+    # Importing the first distribution makes it the default: your own distribution stays the default when there is one.
+    if ($before -and $before -ne $DedicatedDistro) { & wsl.exe --set-default $before 2>&1 | Out-Null }
+  }
+  $r = Invoke-WslBash $DedicatedDistro 'root' (Get-DedicatedWslConfScript)
+  if ($r.Text -notmatch 'wsl\.conf written') { Stop-Install (Format-WslFailure "Could not write /etc/wsl.conf in $DedicatedDistro." $r.Text) 'Run the command again.' }
+  & wsl.exe --terminate $DedicatedDistro 2>&1 | Out-Null
+  Complete-Step "$DedicatedDistro is ready: no Windows programs, no Windows PATH and no Windows drives inside it; systemd is on"
+
+  Start-Step 'Checking Docker Desktop'
+  Assert-NoDockerIntegration $DedicatedDistro
+  Complete-Step "Docker Desktop's WSL integration is off for $DedicatedDistro (deploys that need Docker use Docker Engine inside it)"
+
+  Start-Step "Keeping $DedicatedDistro running in the background"
+  Register-KeepAlive $DedicatedDistro
+  Complete-Step "vmIdleTimeout=-1 is set and the $RunnerTaskName task starts $DedicatedDistro when you sign in"
+
+  Start-Step "Running the Linux installer inside $DedicatedDistro"
+  $null = Wait-Systemd $DedicatedDistro ''
+  # No Windows drives inside: the Linux installer is copied in through the distribution's own share.
+  $copied = $false
+  foreach ($share in @("\\wsl.localhost\$DedicatedDistro\root", "\\wsl$\$DedicatedDistro\root")) {
+    try { Copy-Item -LiteralPath $LinuxScriptPath -Destination (Join-Path $share 'guildwise-install.sh') -Force -ErrorAction Stop; $copied = $true; break } catch { }
+  }
+  if (-not $copied) { Stop-Install "Could not copy the Linux installer into $DedicatedDistro." 'Run the command again.' }
+  Write-Info "The next lines come from $DedicatedDistro. It creates the runner user there, with no sudo by default."
+  $name = if ($DefaultName) { $DefaultName } else { "$env:COMPUTERNAME (WSL2)" }
+  $line = "export GUILDWISE_NAME=`"`$(echo $(ConvertTo-Base64Unix $name) | base64 -d)`" GUILDWISE_ALLOW_ROOT=1 GUILDWISE_RUNNER_USER=dedicated; $(Get-ForwardedExports) exec bash /root/guildwise-install.sh"
+  $runB64 = ConvertTo-Base64Unix $line
+  & wsl.exe -d $DedicatedDistro -u root --cd '/root' -- bash -c "echo $runB64 | base64 -d | bash"
+  $code = $LASTEXITCODE
+  if ($code -ne 0) { Stop-Install "The Linux installer inside $DedicatedDistro finished with problems (exit code $code)." "Read the lines above (they come from $DedicatedDistro), fix what they say, and run the command again." }
+  $r = Invoke-WslBash $DedicatedDistro 'root' (Get-DedicatedWslConfScript -WithUser)
+  if ($r.Text -notmatch 'wsl\.conf written') { Write-Warn "Could not set $DedicatedDistro as the default user of its distribution: $($r.Text)" }
+  & wsl.exe --terminate $DedicatedDistro 2>&1 | Out-Null
+  Start-ScheduledTask -TaskName $RunnerTaskName
+  Assert-NoDockerIntegration $DedicatedDistro
+  Complete-Step "The runner is installed in $DedicatedDistro as the user $DedicatedDistro"
+
+  Start-Step 'Finishing'
+  Complete-Step "The runner runs in $DedicatedDistro and starts when you sign in to Windows"
+  Write-Host ''
+  Write-Host "$AppName is ready." -ForegroundColor Green
+  Write-Host "  Open $ServerUrl/workstations to see this PC, then hire an agent onto it."
+  Write-Host "  The runner works only in its own clones inside $DedicatedDistro; you get its work through git."
+  Write-Host "  If you turn sudo on for the runner, root inside $DedicatedDistro could switch Windows interop back on (/etc/wsl.conf)."
+  Write-Host '  Run the same command again any time to upgrade or repair.'
+  Read-Host 'Press Enter to close this window' | Out-Null
+  exit 0
+}
+
 trap { Stop-Install "Unexpected problem: $($_.Exception.Message)" 'Run the command again; if it repeats, contact us.' }
 
 # ---- 0. administrator rights, and keep a copy of ourselves for the restart --------------------------------------------
@@ -301,6 +516,53 @@ Set-StateValue 'wslRestarts' 0
 & wsl.exe --set-default-version 2 2>&1 | Out-Null
 Complete-Step 'WSL2 is on'
 
+# ---- 2b. an older runner (R21) --------------------------------------------------------------------------------------------
+# The Linux installer decides, with the same rules as on Linux: an existing runner is kept unless this server requires signed
+# runners and it is not one this installer verified, or GUILDWISE_LEGACY=quarantine|remove asks to replace it.
+Start-Step 'Looking for an older runner'
+$script:LegacyResult = 'none'
+$LegacyDistro = Get-Distros | Where-Object { $_ -like 'Ubuntu*' } | Select-Object -First 1
+if ($LegacyDistro) {
+  $legacyUser = (& wsl.exe -d $LegacyDistro -- whoami 2>$null | Out-String).Trim()
+  if ($legacyUser -and $legacyUser -ne 'root') {
+    if ($RequireSignedRunners) { Write-Info 'This server accepts only signed runners: a runner in your Ubuntu that this installer did not verify is stopped and quarantined.' }
+    $env:GUILDWISE_SCRIPT = $LinuxScriptPath
+    $env:WSLENV = 'GUILDWISE_SCRIPT/p:GUILDWISE_LEGACY/u'
+    $legacyB64 = ConvertTo-Base64Unix 'exec bash "$GUILDWISE_SCRIPT" --legacy-only'
+    $legacyLines = ''
+    & wsl.exe -d $LegacyDistro -u $legacyUser --cd '~' -- bash -c "echo $legacyB64 | base64 -d | bash" 2>&1 | Tee-Object -Variable legacyLines | Out-Host
+    $legacyCode = $LASTEXITCODE
+    $legacyText = ($legacyLines | Out-String) -replace "`0", ''
+    if ($legacyCode -ne 0) { Stop-Install "Could not deal with the older runner in $LegacyDistro (exit code $legacyCode)." 'Read the lines above, fix what they say, and run the command again.' }
+    if ($legacyText -match 'LEGACY_RESULT=(none|kept|quarantined|removed)') { $script:LegacyResult = $Matches[1] }
+  }
+}
+if ($script:LegacyResult -in @('quarantined', 'removed')) {
+  # Its keep-alive tasks go too, and the distribution is stopped so nothing of the old runner keeps running.
+  foreach ($t in @($RunnerTaskName, $OldTaskName)) {
+    $task = Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue
+    if ($task -and (Test-OurKeepAliveTask $task $LegacyDistro)) {
+      try { Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction Stop; Write-Info "Removed the old runner's task $t." } catch { Write-Info "Could not remove the task ${t}: $($_.Exception.Message)" }
+    }
+  }
+  & wsl.exe --terminate $LegacyDistro 2>&1 | Out-Null
+  Complete-Step "The older runner in $LegacyDistro is stopped and $($script:LegacyResult)"
+} elseif ($script:LegacyResult -eq 'kept') {
+  Complete-Step "The runner in $LegacyDistro is kept"
+} else {
+  Complete-Step 'No older runner on this PC'
+}
+
+$WslMode = [string]$env:GUILDWISE_WSL_DISTRO
+if (-not $WslMode) { $WslMode = if ($script:LegacyResult -eq 'kept') { 'default' } else { 'dedicated' } }
+if ($WslMode -notin @('dedicated', 'default')) { Stop-Install "GUILDWISE_WSL_DISTRO is dedicated or default (it is $WslMode)." 'Fix it, then run the command again.' }
+if ($WslMode -eq 'dedicated' -and $script:LegacyResult -eq 'kept') {
+  Stop-Install "A runner is still installed in $LegacyDistro." 'Keep it there: set GUILDWISE_WSL_DISTRO=default. Replace it with the isolated runner: set GUILDWISE_LEGACY=quarantine. Then run the command again.'
+}
+if ($WslMode -eq 'dedicated') { Install-DedicatedDistro }
+Write-Warn 'No isolation from Windows: the runner can start Windows programs and write your Windows profile (you chose your own Ubuntu; the default is a separate guildwise-runner distribution).'
+Send-Report $script:CurrentStep 'warn' 'default WSL distribution: no isolation from Windows'
+
 # ---- 3. Ubuntu --------------------------------------------------------------------------------------------------------------
 Start-Step 'Installing Ubuntu'
 $Distro = Get-Distros | Where-Object { $_ -like 'Ubuntu*' } | Select-Object -First 1
@@ -382,55 +644,12 @@ Complete-Step 'systemd=true and the default user are set in /etc/wsl.conf'
 
 # ---- 5. keep WSL alive (.wslconfig) -----------------------------------------------------------------------------------------
 Start-Step 'Keeping Ubuntu running in the background'
-$wslConfig = Join-Path $env:USERPROFILE '.wslconfig'
-$lines = @()
-if (Test-Path $wslConfig) { $lines = @([System.IO.File]::ReadAllLines($wslConfig)) }
-$hasSetting = $lines | Where-Object { $_ -match '^\s*vmIdleTimeout\s*=\s*-1\s*$' }
-$configChanged = $false
-if (-not $hasSetting) {
-  $lines = @($lines | Where-Object { $_ -notmatch '^\s*vmIdleTimeout\s*=' })
-  $at = [Array]::FindIndex([string[]]$lines, [Predicate[string]]{ param($l) $l -match '^\s*\[wsl2\]\s*$' })
-  if ($at -ge 0) { $lines = @($lines[0..$at]) + @('vmIdleTimeout=-1') + @($(if ($at + 1 -lt $lines.Count) { $lines[($at + 1)..($lines.Count - 1)] } else { @() })) }
-  else { $lines = @($lines) + @('', '[wsl2]', 'vmIdleTimeout=-1') }
-  # UTF-8 without a byte order mark, whatever the file held (Set-Content -Encoding ASCII turns accents into '?').
-  [System.IO.File]::WriteAllLines($wslConfig, [string[]]$lines, [System.Text.UTF8Encoding]::new($false))
-  $configChanged = $true
-}
-$RunnerTaskName = "$AppName runner"
-$OldTaskName = 'WSL Boot'
-$taskArgs = "-d $Distro --exec sleep infinity"
-$action = New-ScheduledTaskAction -Execute 'wsl.exe' -Argument $taskArgs
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
-$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-Register-ScheduledTask -TaskName $RunnerTaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "Keeps Ubuntu running so the $AppName runner stays online." -Force -ErrorAction Stop | Out-Null
-# Older installs called this task "WSL Boot". Remove it, but only when it is ours: it starts wsl.exe in this distribution
-# with `--exec sleep infinity`. A task of that name that does something else is left alone.
-$oldTask = Get-ScheduledTask -TaskName $OldTaskName -ErrorAction SilentlyContinue
-if ($oldTask) {
-  $oldAction = @($oldTask.Actions) | Select-Object -First 1
-  $isOurs = $oldAction -and ([string]$oldAction.Execute -match 'wsl(\.exe)?$') -and ([string]$oldAction.Arguments -match '--exec\s+sleep\s+infinity') -and ([string]$oldAction.Arguments -match ('-d\s+' + [regex]::Escape($Distro)))
-  if ($isOurs) {
-    try { Unregister-ScheduledTask -TaskName $OldTaskName -Confirm:$false -ErrorAction Stop; Write-Info "Removed the old $OldTaskName task (it is now called $RunnerTaskName)." }
-    catch { Write-Info "Could not remove the old $OldTaskName task: $($_.Exception.Message)" }
-  } else { Write-Info "A task called $OldTaskName exists but is not ours; it was left alone." }
-}
-if ($configChanged) { & wsl.exe --shutdown 2>&1 | Out-Null }
-Start-ScheduledTask -TaskName $RunnerTaskName
+Register-KeepAlive $Distro
 Complete-Step "vmIdleTimeout=-1 is set and the $RunnerTaskName task starts Ubuntu when you sign in"
 
 # ---- 6. let the Ubuntu user run services without a login ----------------------------------------------------------------
 Start-Step 'Starting Ubuntu services'
-$settle = @"
-for i in `$(seq 1 40); do
-  s=`$(systemctl is-system-running 2>/dev/null || true)
-  case "`$s" in running|degraded) break ;; esac
-  sleep 1
-done
-loginctl enable-linger '$LinuxUser' >/dev/null 2>&1 || true
-systemctl is-system-running 2>/dev/null || true
-"@
-$r = Invoke-WslBash $Distro 'root' $settle
+$r = Wait-Systemd $Distro $LinuxUser
 if ($r.Text -match 'running|degraded') { Complete-Step 'systemd is running in Ubuntu' }
 else { Write-Warn "systemd did not report ready ($($r.Text)). The installer continues and will tell you if the service could not start."; Send-Report $script:CurrentStep 'warn' $r.Text }
 
@@ -439,7 +658,8 @@ Start-Step 'Running the Linux installer inside Ubuntu'
 Write-Info 'The next lines come from Ubuntu. It may ask for your Ubuntu password to install tools.'
 $env:GUILDWISE_NAME = if ($DefaultName) { $DefaultName } else { "$env:COMPUTERNAME (WSL2)" }
 $env:GUILDWISE_SCRIPT = $LinuxScriptPath
-$env:WSLENV = 'GUILDWISE_NAME/u:GUILDWISE_SCRIPT/p'
+# Your choices travel with it (WSLENV); GUILDWISE_RUNNER_USER too, since here the runner may run as you or as its own user.
+$env:WSLENV = (@('GUILDWISE_NAME/u', 'GUILDWISE_SCRIPT/p', 'GUILDWISE_RUNNER_USER/u') + @($ForwardedVars | ForEach-Object { "$_/u" })) -join ':'
 # The command carries no quote characters of its own (Windows PowerShell 5.1 strips embedded double quotes from native
 # arguments, which would split a path with spaces such as C:\Users\Jane Doe): the line to run travels as base64.
 $runB64 = ConvertTo-Base64Unix 'exec bash "$GUILDWISE_SCRIPT"'

@@ -8,7 +8,7 @@ import {
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import type { Ctx } from '../context.ts';
-import { exec, one, rows } from '../db/sql.ts';
+import { exec, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { conflict, notFound } from '../errors.ts';
 import { deleteOrgRows } from '../simulation/wipe.ts';
@@ -22,9 +22,22 @@ export const WIPE_BACKUP_NOTE =
   'The server has no built-in database backup. Take one (pg_dump) before wiping a simulation organization on a production database.';
 
 /**
- * Turns simulation mode on for an empty organization, or changes the pace of a simulation one (audited; an event like
- * any other org setting). Turning it off is refused.
+ * The simulation tools (pace, wipe, demo scenario) work only on an organization created as a simulation (R17-5): a
+ * real organization never turns into one, so a super admin cannot wipe it or act in it as its Owner. 409
+ * `not_created_as_simulation` otherwise.
  */
+export async function assertCreatedAsSimulation(db: Queryable, orgId: string): Promise<Row> {
+  const o = await one(db, 'SELECT * FROM organizations WHERE id=$1', [orgId]);
+  if (!o) throw notFound('organization not found');
+  if (!o.created_as_simulation)
+    throw conflict(
+      'not_created_as_simulation',
+      'Only an organization created as a simulation takes the simulation tools. Create a new simulation organization instead.',
+    );
+  return o;
+}
+
+/** Changes the pace of a simulation organization (audited; an event like any other org setting). */
 export async function setOrgSimulation(
   ctx: Ctx,
   admin: AuthSession,
@@ -35,6 +48,7 @@ export async function setOrgSimulation(
   await withAppendTx(ctx.pool, async (tx) => {
     const o = await one(tx, 'SELECT * FROM organizations WHERE id=$1 FOR UPDATE', [orgId]);
     if (!o) throw notFound('organization not found');
+    await assertCreatedAsSimulation(tx, orgId);
     const pace = req.pace ?? (o.simulation_pace as 'fast' | 'normal' | 'slow');
     // A simulation organization stays one until it is deleted: test data must never turn into a real organization.
     if (!req.enabled)
@@ -43,18 +57,6 @@ export async function setOrgSimulation(
         'A simulation organization stays one until it is deleted. Use "Delete simulation organization" to remove it.',
       );
     if (o.simulation && pace === o.simulation_pace) throw conflict('no_change', 'simulation is already on');
-    // A real organization can become a simulation only while it is empty: no project (archived ones count), and
-    // nothing an extension holds for it (a live billing subscription).
-    if (!o.simulation) {
-      const project = await one(tx, 'SELECT 1 FROM projects WHERE org_id=$1 LIMIT 1', [orgId]);
-      for (const e of ctx.ext.list)
-        await e.simulation?.assertCanEnable?.(tx, orgId, { hasProjects: !!project });
-      if (project)
-        throw conflict(
-          'simulation_not_empty',
-          'Only an empty organization can be switched to simulation: this one has projects (archived ones count). Create a new simulation organization instead.',
-        );
-    }
     await ctx.store.append(
       [
         {
@@ -76,9 +78,6 @@ export async function setOrgSimulation(
       ],
       { tx },
     );
-    // Extensions clean up their own state (a simulation organization is never billed).
-    if (req.enabled && !o.simulation)
-      for (const e of ctx.ext.list) await e.simulation?.onEnabled?.(ctx, tx, orgId, admin.user.id, meta);
   });
   ctx.services.simulation?.reconcile(orgId);
   ctx.services.dispatcher.trigger();
@@ -139,6 +138,7 @@ export async function wipeSimulationOrg(
         'not_simulation',
         'only a simulation organization can be wiped: turn simulation on first',
       );
+    await assertCreatedAsSimulation(tx, orgId);
     if (req.confirmName.trim() !== o.name)
       throw conflict('name_mismatch', 'the typed name does not match the organization name');
 
