@@ -291,7 +291,8 @@ export async function socialProblems(
 /**
  * Posts that have no share row yet get one per connected, healthy channel (no backlog from before the connection):
  * published blog articles, and approved release posts (`source = 'social'`, counted from their approval). Both only
- * while fresh (48 hours).
+ * while fresh (48 hours). Carried-over posts never get one: their sent rows came with them (articles are `launch`, release
+ * posts `origin_system = 'carried-over'`), so a network they were not sent to is not added later either.
  */
 async function createMissingShares(ctx: Ctx): Promise<void> {
   const now = ctx.clock.now();
@@ -313,6 +314,7 @@ async function createMissingShares(ctx: Ctx): Promise<void> {
        FROM social_posts p CROSS JOIN social_channels c
       WHERE p.status='approved' AND c.status='ok' AND c.network IN ('facebook','linkedin','x','bluesky')
         AND p.approved_at >= c.connected_at AND p.approved_at > $2
+        AND p.origin_system IS DISTINCT FROM 'carried-over'
      ON CONFLICT (post_id, network) DO NOTHING`,
     [now, fresh],
   );

@@ -237,6 +237,27 @@ tags from the fixed list; a descriptive cover alt text; Facebook and LinkedIn ca
 
 Four articles ship with the product (`apps/server/src/blog/launch/*.md`: Markdown with YAML frontmatter for title, slug, summary, tags, cover, sources, seo and the Facebook, LinkedIn, X and Bluesky captions) and are imported once on boot by the data migration `blog-launch-2026-10`: `what-is-an-ai-agent-team`, `keeping-humans-in-charge-of-ai-agents`, `from-idea-to-tested-change` and `ai-automation-for-small-businesses-2026`. The owner signed the content off, so they skip the review queue. Blog on: published at boot time. Blog off (kill switch): drafts, to be published by the super admin. A slug that already exists is skipped and no other post is touched. They carry the `launch` flag: they are not shared to social networks, not in the digest, and do not start the two-week review period. They appear in the API like any other post and can be edited or unpublished in Platform > Blog.
 
+## Carried-over articles
+
+`blog-bundle-import` (an admin CLI with no route; docs/SELF-HOSTING.md "Carry blog articles to a new install") loads a
+bundle exported from an older install. It appends three events, each with the original dates and the bundle id (the
+sha256 of its manifest), actor = the importing super admin, audience `admin`, and one platform audit line each:
+
+- `BlogPostImported {postId, content, contentHash, origin:{userId}, manual?:{authorName}, wasLaunch, createdAt,
+  updatedAt, publishedAt, bundle}` on `blog-<postId>`. Projected `published` with `launch = true` (not shared, not in
+  the digest, no video drafted, does not start the review period) and the payload dates.
+- `SocialPostImported {postId, kind:'release', ref, content, origin, createdAt, approvedAt, bundle}` on
+  `social-post-<postId>`. Projected `approved` with `origin_system = 'carried-over'`; the share sweep never gives it a
+  new row.
+- `VideoPostImported {postId, kind, format, ref, parentId?, meta, destinations, origin, createdAt, approvedAt, bundle}` on
+  `video-<postId>`. Projected `approved` with no script, no render and no slot. `destinations` are exactly the networks it
+  was sent to.
+
+The import also inserts the bundle's `sent` rows into `social_shares` (operational): the network's post id, URL and dates,
+plus the YouTube `videoId/privacy/publishAt/verifiedAt/uploadedAt` in `detail`. Every (post, destination) pair therefore
+already has a `sent` row, so nothing is posted again. The import is recorded in `data_migrations` as
+`blog-carryover:<bundle id>`.
+
 ## Weekly digest
 
 Mondays 08:00 Africa/Johannesburg, one mail per person for the posts published since the previous digest (nothing when

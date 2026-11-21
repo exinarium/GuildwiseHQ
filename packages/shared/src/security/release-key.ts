@@ -2,6 +2,7 @@
 // Do not edit by hand. Runner releases are signed with the matching secret key, which never leaves the owner's machine.
 
 /** The official minisign public key line (`RW...`) that runner releases are signed with, or `PLACEHOLDER`. */
-export const OFFICIAL_RUNNER_RELEASE_PUBKEY: string = 'RWTY52ThbO8DBHZ9c41CxcwPQPpDjuRWwWPkVk6Ayf7gnPaagxlQp1/H';
+export const OFFICIAL_RUNNER_RELEASE_PUBKEY: string =
+  'RWTY52ThbO8DBHZ9c41CxcwPQPpDjuRWwWPkVk6Ayf7gnPaagxlQp1/H';
 /** Its key id (16 upper-case hex characters), or null while it is the placeholder. */
 export const OFFICIAL_RUNNER_RELEASE_KEY_ID: string | null = '0403EF6CE164E7D8';

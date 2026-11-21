@@ -1,4 +1,5 @@
 export * from './article.ts';
+export * from './bundle.ts';
 export * from './constants.ts';
 export * from './hashtags.ts';
 export * from './markdown.ts';

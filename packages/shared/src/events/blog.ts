@@ -5,6 +5,9 @@ import { AnySocialPostContentSchema, SOCIAL_POST_KINDS } from '../blog/social-po
 import { TOPIC_LIMITS, TopicAreaSchema } from '../blog/topic.ts';
 import { defineEvent, Id, IsoDate } from './define.ts';
 
+/** The sha256 (hex) of a carried-over bundle's manifest: which bundle an imported item came from. */
+const BundleId = z.string().regex(/^[0-9a-f]{64}$/);
+
 /** Who wrote a post: a platform API key, or a super admin typing in the platform UI. */
 export const BlogOriginSchema = z.object({
   apiKeyId: Id.optional(),
@@ -14,7 +17,7 @@ export const BlogOriginSchema = z.object({
 });
 
 /** The writer shape parses first (so every stored writer payload is unchanged); a hand-written article may be looser. */
-const BlogEventContentSchema = BlogContentSchema.or(ManualBlogContentSchema);
+export const BlogEventContentSchema = BlogContentSchema.or(ManualBlogContentSchema);
 
 const SettingsChange = z.object({
   enabled: z.boolean().optional(),
@@ -62,6 +65,29 @@ export const blogEvents = [
   defineEvent(
     'BlogPostPublished',
     z.object({ postId: Id, auto: z.boolean(), by: BlogOriginSchema.optional() }),
+  ),
+  /**
+   * A published article carried over from an older install (`blog-bundle-import`, docs/SELF-HOSTING.md). It keeps its
+   * id, slug and dates (the projector inserts them from here, not from the event's own time), so existing URLs and social
+   * links resolve. Always projected with `launch`: never shared again, never in the digest, no video drafted.
+   */
+  defineEvent(
+    'BlogPostImported',
+    z.object({
+      postId: Id,
+      content: BlogEventContentSchema,
+      contentHash: z.string().regex(/^[0-9a-f]{64}$/),
+      /** The super admin who ran the import. */
+      origin: z.object({ userId: Id }),
+      /** A hand-written article's byline; absent on writer posts (their byline is `BLOG_AUTHOR`). */
+      manual: z.object({ authorName: z.string().min(1).max(80) }).optional(),
+      /** The post was a launch-set article on the old install. */
+      wasLaunch: z.boolean(),
+      createdAt: IsoDate,
+      updatedAt: IsoDate,
+      publishedAt: IsoDate,
+      bundle: BundleId,
+    }),
   ),
   defineEvent('BlogPostRejected', z.object({ postId: Id, reason: z.string().min(1).max(2000), by: Id })),
   defineEvent(
@@ -158,6 +184,20 @@ export const blogEvents = [
   defineEvent(
     'SocialPostRevised',
     z.object({ postId: Id, content: AnySocialPostContentSchema, by: BlogOriginSchema }),
+  ),
+  /** An approved release announcement carried over from an older install (`blog-bundle-import`); its shares were sent there. */
+  defineEvent(
+    'SocialPostImported',
+    z.object({
+      postId: Id,
+      kind: z.literal('release'),
+      ref: z.string().min(1).max(100),
+      content: AnySocialPostContentSchema,
+      origin: z.object({ userId: Id }),
+      createdAt: IsoDate,
+      approvedAt: IsoDate,
+      bundle: BundleId,
+    }),
   ),
   /** A draft goes to the super admin's review queue. */
   defineEvent('SocialPostReviewRequested', z.object({ postId: Id, by: Id })),

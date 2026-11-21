@@ -63,6 +63,8 @@ describe('set-runner-release-key.sh', () => {
     expect(ts).toContain(`OFFICIAL_RUNNER_RELEASE_KEY_ID: string | null = '${TEST_KEY_ID}'`);
     expect(ts).toContain(TEST_PUB.split('\n')[1] as string);
     expect(ts).not.toContain("= 'PLACEHOLDER'");
+    // the layout biome's formatter prints, so `biome check .` stays clean after a run
+    expect(ts).toContain(`OFFICIAL_RUNNER_RELEASE_PUBKEY: string =\n  '${TEST_PUB.split('\n')[1]}';`);
   });
 
   it('refuses a secret key and writes nothing', () => {

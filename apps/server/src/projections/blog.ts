@@ -49,6 +49,36 @@ export const blogProjectors: Record<string, Projector> = {
         [p.topicId, p.postId, e.createdAt],
       );
   },
+  /** A post carried over from an older install: its own dates, published, `launch` (never shared, digested or drafted again). */
+  BlogPostImported: async (tx, e) => {
+    const p = (e.event as EventOf<'BlogPostImported'>).payload;
+    const s = stats(p.content.bodyMarkdown);
+    await exec(
+      tx,
+      `INSERT INTO blog_posts (id, slug, content, title, summary, tags, status, content_hash, origin_key_id,
+         origin_user_id, warnings, word_count, reading_minutes, review_since, published_at, created_at, updated_at, launch,
+         origin_system, origin_kind, author_name)
+       VALUES ($1,$2,$3,$4,$5,$6,'published',$7,NULL,$8,'[]',$9,$10,NULL,$11,$12,$13,true,NULL,$14,$15)
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        p.postId,
+        p.content.slug,
+        JSON.stringify(p.content),
+        p.content.title,
+        p.content.summary,
+        p.content.tags,
+        p.contentHash,
+        p.origin.userId,
+        s.words,
+        s.minutes,
+        p.publishedAt,
+        p.createdAt,
+        p.updatedAt,
+        p.manual ? 'manual' : 'writer',
+        p.manual?.authorName ?? null,
+      ],
+    );
+  },
   BlogPostRevised: async (tx, e) => {
     const p = (e.event as EventOf<'BlogPostRevised'>).payload;
     const s = stats(p.content.bodyMarkdown);

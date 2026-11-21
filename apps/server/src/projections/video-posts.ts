@@ -37,6 +37,33 @@ export const videoPostProjectors: Record<string, Projector> = {
         [p.ref, p.postId, e.createdAt],
       );
   },
+  /**
+   * A video already published on an older install: approved, no script (nothing renders it), no slot, and only the
+   * destinations it was sent to (each has a `sent` share row, so `createMissingUploads` adds nothing).
+   */
+  VideoPostImported: async (tx, e) => {
+    const p = (e.event as EventOf<'VideoPostImported'>).payload;
+    await exec(
+      tx,
+      `INSERT INTO video_posts (id, kind, format, ref, parent_id, script, meta, title, revision, status, origin_user_id,
+         origin_system, review_since, approved_at, created_at, updated_at, destinations)
+       VALUES ($1,$2,$3,$4,$5,NULL,$6,$7,1,'approved',$8,NULL,NULL,$9,$10,$9,$11::text[])
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        p.postId,
+        p.kind,
+        p.format,
+        p.ref,
+        p.parentId ?? null,
+        JSON.stringify(p.meta),
+        p.meta.title,
+        p.origin.userId,
+        p.approvedAt,
+        p.createdAt,
+        p.destinations,
+      ],
+    );
+  },
   VideoPostRevised: async (tx, e) => {
     const p = (e.event as EventOf<'VideoPostRevised'>).payload;
     await exec(

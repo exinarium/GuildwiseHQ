@@ -25,6 +25,30 @@ export const socialPostProjectors: Record<string, Projector> = {
       ],
     );
   },
+  /**
+   * An approved release announcement carried over from an older install, with its own dates. `origin_system`
+   * `carried-over`: it was shared there, so the share sweep never gives it a new row (`createMissingShares`).
+   */
+  SocialPostImported: async (tx, e) => {
+    const p = (e.event as EventOf<'SocialPostImported'>).payload;
+    await exec(
+      tx,
+      `INSERT INTO social_posts (id, kind, ref, content, title, status, origin_user_id, origin_system, review_since,
+         approved_at, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,'approved',$6,'carried-over',NULL,$7,$8,$7)
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        p.postId,
+        p.kind,
+        p.ref,
+        JSON.stringify(p.content),
+        p.content.title,
+        p.origin.userId,
+        p.approvedAt,
+        p.createdAt,
+      ],
+    );
+  },
   SocialPostRevised: async (tx, e) => {
     const p = (e.event as EventOf<'SocialPostRevised'>).payload;
     await exec(

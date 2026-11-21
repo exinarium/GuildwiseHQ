@@ -3,7 +3,7 @@ import { VideoPostMetaSchema } from '../video/post.ts';
 import { VIDEO_DESTINATIONS, VideoCaptionsSchema, VideoDestinationOptionsSchema } from '../video/schedule.ts';
 import { VIDEO_FORMATS, VIDEO_KINDS, VideoScriptSchema } from '../video/schema.ts';
 import { BlogOriginSchema } from './blog.ts';
-import { defineEvent, Id } from './define.ts';
+import { defineEvent, Id, IsoDate } from './define.ts';
 
 /**
  * The YouTube push. Streams `video-<postId>` (posts) and `video-topics` / `video-settings`. Renders and the upload are
@@ -27,6 +27,27 @@ export const videoEvents = [
       status: z.enum(['draft', 'in_review']),
       /** Default captions per destination from the drafter (optional; the owner edits them when scheduling). */
       captions: VideoCaptionsSchema.optional(),
+    }),
+  ),
+  /**
+   * A video already published on an older install (`blog-bundle-import`). Projected `approved` with no script and no slot:
+   * nothing renders it. `destinations` are exactly the networks it was sent to, and the import inserts a `sent` share row
+   * for each, so the publisher never queues it again.
+   */
+  defineEvent(
+    'VideoPostImported',
+    z.object({
+      postId: Id,
+      kind: z.enum(VIDEO_KINDS),
+      format: z.enum(VIDEO_FORMATS),
+      ref: z.string().min(1).max(120),
+      parentId: Id.optional(),
+      meta: VideoPostMetaSchema,
+      destinations: z.array(z.enum(VIDEO_DESTINATIONS)).min(1),
+      origin: z.object({ userId: Id }),
+      createdAt: IsoDate,
+      approvedAt: IsoDate,
+      bundle: z.string().regex(/^[0-9a-f]{64}$/),
     }),
   ),
   /** An edit. `rerender`: the render changes (new revision, new render); else only metadata changed. */

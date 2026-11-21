@@ -426,6 +426,74 @@ Use the same `.env` (in particular the same `AOM_SECRET_KEY` and `AOM_TWO_FACTOR
 
 Point-in-time recovery is not provided. Take dumps often enough for the loss you can accept.
 
+### Carry blog articles to a new install
+
+To start a new install with an empty database but keep the published blog, use a bundle. It brings over the published
+articles, the approved release announcements and the video publishing log, and nothing else. The articles keep their
+addresses, so existing links and social posts still work. Videos and posts that were already published are never posted
+again.
+
+**1. Export (on a development machine with the source, never on the server).** The export reads an old install's plain
+`pg_dump` file (`.sql` or `.sql.gz`) as text. It never runs the file and never loads it into PostgreSQL, so it is safe on
+an untrusted backup. It reads only `blog_posts`, `social_posts`, `video_posts` and `social_shares`, and only the columns it
+needs. It never reads users, sessions, API keys or channel tokens.
+
+```bash
+cd apps/server
+npx tsx scripts/blog-bundle-export.ts --dump old-backup.sql.gz [--compare later-copy.sql.gz] --out ./bundle
+cd bundle && sha256sum -c SHA256SUMS && sha256sum manifest.json   # the manifest's sha256 is the bundle id
+```
+
+- `--out` must be a new or empty directory.
+- `--compare` checks the rows against a later copy of the same database. Every difference is listed in `REPORT.md`, and
+  the export refuses if a row it would carry over differs.
+- The bundle contains:
+  - `posts.json`: published articles;
+  - `releases.json`: approved release announcements;
+  - `videos.json`: videos sent to at least one network;
+  - `shares.json`: only the share rows marked `sent`;
+  - `REPORT.md`: counts, differences, content findings and what was left out;
+  - `manifest.json`;
+  - `SHA256SUMS`.
+- Every row is checked with the same schemas and content rules as the blog renderer. If any content would need cleaning
+  (raw HTML, scripts, event handlers, unsafe links, images, control characters, an invalid share id or URL), the export
+  refuses. Read `REPORT.md` before you import.
+
+**2. Import (on the new server).** Run it after the platform account exists (section 5), and preferably before you
+connect social channels.
+
+```bash
+docker compose -f docker-compose.prod.yml cp ./bundle app:/tmp/blog-bundle
+docker compose -f docker-compose.prod.yml exec -u root app chown -R node:node /tmp/blog-bundle
+# dry run (the default): checks everything and prints the plan, writes nothing
+docker compose -f docker-compose.prod.yml exec app node dist/blog-bundle-import.mjs --bundle /tmp/blog-bundle --author you@example.com
+# import
+docker compose -f docker-compose.prod.yml exec app node dist/blog-bundle-import.mjs --bundle /tmp/blog-bundle --author you@example.com --apply
+docker compose -f docker-compose.prod.yml exec -u root app rm -rf /tmp/blog-bundle
+```
+
+- **Checks before any write.** The checksums, the file list (an extra file is refused), a 20 MB size cap, the format
+  (an unknown field is refused) and the content rules are all checked again.
+- **`--author`** must be an active platform (super admin) account. It is recorded as the importer. The public byline does
+  not change: "The Guildwise HQ team" for writer articles, the written byline for hand-written ones.
+- **The plan.** Each item is one of:
+  - `create`;
+  - `present`: already imported;
+  - `launch-present`: one of the four launch articles this install created at boot, which is skipped;
+  - `conflict`: the same slug, release or video exists under another id, or a share row differs.
+
+  Any conflict writes nothing, and the command exits with status 1.
+- **`--apply`** writes everything in one transaction. Slugs and the original created, updated and published dates are
+  kept.
+- **Idempotent.** Running it again finds everything `present` and writes nothing.
+- **What the imported items do afterwards.**
+  - Articles are marked like launch articles: never shared again, not in the digest, no video drafted, and they do not
+    start the two-week review period.
+  - Release announcements get no new share rows.
+  - Videos are published with no render, and their destinations are exactly the networks they were sent to. The
+    publisher therefore never queues them again.
+- Delete every copy of the bundle when you are done.
+
 **Deleting data.** Deleting a simulation organization removes its events from the log permanently. Take a dump first.
 
 ## 10. Optional features

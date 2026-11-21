@@ -379,6 +379,14 @@ export const platformAuditProjectors: Record<string, Projector> = {
       details: { postId: p.postId, slug: p.content.slug, origin: p.origin, warnings: p.warnings },
     };
   }),
+  BlogPostImported: always(async (_tx, e) => {
+    const p = ev<'BlogPostImported'>(e).payload;
+    return {
+      action: e.event.type,
+      summary: `Blog post carried over from the old install: ${p.content.title}`,
+      details: { postId: p.postId, slug: p.content.slug, publishedAt: p.publishedAt, bundle: p.bundle },
+    };
+  }),
   BlogPostRevised: always(async (_tx, e) => {
     const p = ev<'BlogPostRevised'>(e).payload;
     return {
@@ -498,6 +506,14 @@ export const platformAuditProjectors: Record<string, Projector> = {
       details: { postId: p.postId, kind: p.kind, ref: p.ref, origin: p.origin },
     };
   }),
+  SocialPostImported: always(async (_tx, e) => {
+    const p = ev<'SocialPostImported'>(e).payload;
+    return {
+      action: e.event.type,
+      summary: `Release post carried over from the old install: ${p.content.title}`,
+      details: { postId: p.postId, kind: p.kind, ref: p.ref, bundle: p.bundle },
+    };
+  }),
   SocialPostRevised: always(async (_tx, e) => {
     const p = ev<'SocialPostRevised'>(e).payload;
     return {
@@ -539,6 +555,21 @@ export const platformAuditProjectors: Record<string, Projector> = {
       action: e.event.type,
       summary: `Video ${p.format === 'short' ? 'Short ' : ''}drafted${p.origin.system ? ' by the blog writer' : ''}: ${p.meta.title}`,
       details: { postId: p.postId, kind: p.kind, format: p.format, ref: p.ref, origin: p.origin },
+    };
+  }),
+  VideoPostImported: always(async (_tx, e) => {
+    const p = ev<'VideoPostImported'>(e).payload;
+    return {
+      action: e.event.type,
+      summary: `Published video carried over from the old install: ${p.meta.title}`,
+      details: {
+        postId: p.postId,
+        kind: p.kind,
+        format: p.format,
+        ref: p.ref,
+        destinations: p.destinations,
+        bundle: p.bundle,
+      },
     };
   }),
   VideoPostRevised: always(async (_tx, e) => {
