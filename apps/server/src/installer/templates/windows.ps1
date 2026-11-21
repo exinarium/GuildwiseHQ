@@ -28,7 +28,7 @@ $UbuntuRootfs = @{
   arm64 = @{ Url = 'https://cloud-images.ubuntu.com/wsl/releases/24.04/20240423/ubuntu-noble-wsl-arm64-24.04lts.rootfs.tar.gz'; Sha256 = 'e113b8c49af3ab49b992b8e29550fc921e689f211abc338176f8243786173a32' }
 }
 # Installer choices that may be set in Windows and are passed on to the Linux installer (never values from the server).
-$ForwardedVars = @('GUILDWISE_YES', 'GUILDWISE_LEGACY', 'GUILDWISE_DEVOPS_ORGS', 'GUILDWISE_SUDO', 'GUILDWISE_DOCKER', 'GUILDWISE_ACCEPT_ROOT_EQUIVALENT', 'GUILDWISE_APPROVE_APPS', 'GUILDWISE_DEPLOY', 'GUILDWISE_DEPLOY_PIN_COMMIT', 'GUILDWISE_ALLOW_UNSIGNED_FROM', 'GUILDWISE_WITH_DOCKER', 'GUILDWISE_WITH_YTDLP', 'GUILDWISE_SKIP_CLAUDE_INSTALL')
+$ForwardedVars = @('GUILDWISE_YES', 'GUILDWISE_LEGACY', 'GUILDWISE_DEVOPS_ORGS', 'GUILDWISE_DOCKER', 'GUILDWISE_DOCKER_SOCKET', 'GUILDWISE_ACCEPT_ROOT_EQUIVALENT', 'GUILDWISE_ACCEPT_SHARED_DAEMON', 'GUILDWISE_SKIP_BASELINE', 'GUILDWISE_DEPLOY', 'GUILDWISE_DEPLOY_PIN_COMMIT', 'GUILDWISE_ALLOW_UNSIGNED_FROM', 'GUILDWISE_WITH_YTDLP', 'GUILDWISE_SKIP_CLAUDE_INSTALL')
 
 function Write-Info([string]$Text) { Write-Host "    $Text" -ForegroundColor DarkGray }
 function Write-Good([string]$Text) { Write-Host "    [ok] $Text" -ForegroundColor Green }
@@ -237,7 +237,7 @@ function Assert-NoDockerIntegration([string]$Distro) {
 
 # /etc/wsl.conf of the runner's distribution: no Windows programs (interop), no Windows PATH, no Windows drives, systemd
 # on; with -WithUser also the default user. Root inside the distribution can change this file, which is why the runner
-# gets no sudo by default.
+# never gets sudo (1.10.0 has no sudo grant at all).
 function Get-DedicatedWslConfScript([switch]$WithUser) {
   $user = if ($WithUser) { "`n[user]`ndefault=$DedicatedDistro" } else { '' }
   return @'
@@ -377,7 +377,7 @@ function Install-DedicatedDistro {
     try { Copy-Item -LiteralPath $LinuxScriptPath -Destination (Join-Path $share 'guildwise-install.sh') -Force -ErrorAction Stop; $copied = $true; break } catch { }
   }
   if (-not $copied) { Stop-Install "Could not copy the Linux installer into $DedicatedDistro." 'Run the command again.' }
-  Write-Info "The next lines come from $DedicatedDistro. It creates the runner user there, with no sudo by default."
+  Write-Info "The next lines come from $DedicatedDistro. It installs the baseline, creates the runner user there (never with sudo) and its own rootless Docker."
   $name = if ($DefaultName) { $DefaultName } else { "$env:COMPUTERNAME (WSL2)" }
   $line = "export GUILDWISE_NAME=`"`$(echo $(ConvertTo-Base64Unix $name) | base64 -d)`" GUILDWISE_ALLOW_ROOT=1 GUILDWISE_RUNNER_USER=dedicated; $(Get-ForwardedExports) exec bash /root/guildwise-install.sh"
   $runB64 = ConvertTo-Base64Unix $line
@@ -397,7 +397,7 @@ function Install-DedicatedDistro {
   Write-Host "$AppName is ready." -ForegroundColor Green
   Write-Host "  Open $ServerUrl/workstations to see this PC, then hire an agent onto it."
   Write-Host "  The runner works only in its own clones inside $DedicatedDistro; you get its work through git."
-  Write-Host "  If you turn sudo on for the runner, root inside $DedicatedDistro could switch Windows interop back on (/etc/wsl.conf)."
+  Write-Host "  The runner has no sudo inside $DedicatedDistro; its Docker is its own rootless engine there (not Docker Desktop)."
   Write-Host '  Run the same command again any time to upgrade or repair.'
   Read-Host 'Press Enter to close this window' | Out-Null
   exit 0

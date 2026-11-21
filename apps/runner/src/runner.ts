@@ -234,7 +234,6 @@ import { removeOrphanAgentTmps, sharedCacheRoot, sweepAgentTmps, wipeAgent } fro
 import { sweepAgentScratch } from './sandbox/scratch.ts';
 import { DeploySecrets } from './secrets/deploy.ts';
 import { RunnerKeys } from './secrets/keys.ts';
-import { SudoVault } from './secrets/sudo.ts';
 import { TargetSecrets } from './secrets/targets.ts';
 import { sweepSessionEnvFiles } from './session/shift-credential.ts';
 import { clearServerLimit, loadServerLimit, saveServerLimit } from './shifts/server-limit.ts';
@@ -313,7 +312,7 @@ export interface RunnerOptions {
   sharedCap?: () => number;
   /** Test seam: the fetch the runner uses for its own HTTP calls to the server (attachment bytes). */
   serverFetch?: typeof fetch;
-  /** Test hook: runs the commands of toolchain installs, rights checks and sudo (default: real processes). */
+  /** Test hook: runs the commands of toolchain installs and rights checks (default: real processes). */
   executor?: Executor;
   /**
    * Report the git-host connections (`git.report`). Default on, off with the mock runtime and under tests so nothing
@@ -424,14 +423,13 @@ export class Runner {
   /** The project graph: indexes repositories into the project vault and answers `aom graph` (docs/design/project-graphs.md). */
   readonly graph: GraphService;
   private readonly repoAccess: RepoAccessUpdater;
-  /** The key pair for secrets the manager sends (the sudo password) and the store that holds the password. */
+  /** The key pair for secrets the manager sends (provider keys, target secrets): the workstation sealing key. */
   readonly keys: RunnerKeys;
   /** Comment-only tokens reviewers post with: sealed here, only present/missing is ever reported. */
   readonly reviewerTokens: FileReviewerTokenStore;
   /** `pr_review.run` / `pr_review.post`: the first reviewer of a PR-only repository. */
   private readonly prReviews: PrReviewCommands;
   private readonly packCredentials: PackCredentialStore;
-  readonly sudo: SudoVault;
   /** Test accounts for deploy targets (docs/design/run-and-integration-tests.md D11): ciphertext only on disk. */
   readonly targetSecrets: TargetSecrets;
   readonly deploySecrets: DeploySecrets;
@@ -528,8 +526,6 @@ export class Runner {
   private readonly approvedBundles: ApprovedBundles;
   /** Deploy commands whose approval text is being read before they are held (a re-delivery is not held twice). */
   private readonly describing = new Set<string>();
-  /** DevOps shifts whose start was approved on this machine (only they may use `aom sudo`) [rv4-2]. */
-  private readonly locallyApprovedShifts = new Set<string>();
   /** R21: the reason this runner refuses to start (it then only reports it), or null. */
   private refusedReason: string | null = null;
   /** The post-welcome start-up check is running: server messages wait in `checkQueue`. */
@@ -625,11 +621,6 @@ export class Runner {
       this.log.warn(
         'relay: a whatsapp_cloud entry in the config is ignored; use `guildwise-runner whatsapp-connect <integration-id>`',
       );
-    this.sudo = new SudoVault({
-      file: join(this.paths.secrets, 'sudo.enc'),
-      keys: this.keys,
-      exec: this.exec,
-    });
     this.targetSecrets = new TargetSecrets({
       file: join(this.paths.secrets, 'targets.json'),
       keys: this.keys,
@@ -926,7 +917,6 @@ export class Runner {
       ...(opts.prepareWorktree ? { prepareWorktree: opts.prepareWorktree } : {}),
       ...(opts.checksBudgetMs ? { checksBudgetMs: opts.checksBudgetMs } : {}),
       ...(opts.initWorktreeSubmodules ? { initWorktreeSubmodules: opts.initWorktreeSubmodules } : {}),
-      sudoRun: (cmd, args, shiftId) => this.localSudo(cmd, args, shiftId),
       git: this.agentGit,
       toolchains: this.toolchains,
       runs: this.runs,
@@ -993,7 +983,6 @@ export class Runner {
       findLocal: (k) => this.findLocal(k),
       git: this.agentGit,
       toolchains: this.toolchains,
-      sudoRun: (cmd, args) => this.localSudo(cmd, args, null),
       orgSourceFolder: (orgId) => this.orgSourceFolder(orgId),
       repoRoots: () => this.opts.config.repoRoots,
     });
@@ -1612,7 +1601,7 @@ export class Runner {
     const done = (async () => {
       if ((await this.pdf.status()).ready || abort.signal.aborted) return;
       this.log.info('pdf renderer: browser missing, installing in the background');
-      await this.pdf.install({ withDeps: false, log: () => undefined, signal: abort.signal });
+      await this.pdf.install({ log: () => undefined, signal: abort.signal });
       this.log.info('pdf renderer: browser installed');
     })().catch(() => {
       if (!abort.signal.aborted)
@@ -2188,12 +2177,11 @@ export class Runner {
 
   /** `env.ensure`: detect the stacks of the project's repositories, verify and install their tools. */
   private ensureEnv(payload: EnvEnsurePayload) {
-    // R18-S: sudo and Docker only where granted locally, whatever the server's access says
+    // R18-S: Docker only where granted locally, whatever the server's access says
     const p = localEnvEnsure(this.authority.policy(), payload);
     return ensureEnvironment(p, {
       exec: this.exec,
       platform: this.platform(),
-      root: this.sudo,
       findRepo: (n) => this.findRepo(n),
       logFile: join(this.paths.envLogs, `${p.projectId}.log`),
       dotnet: () =>
@@ -2614,7 +2602,6 @@ export class Runner {
       return;
     }
     if (d.action === 'run' || (d.action === 'hold' && this.authority.autoApprove?.(d.kind))) {
-      if (d.action === 'hold') this.locallyApprovedShifts.add(msg.shiftId);
       void this.supervisor.handleStart(this.narrowShift(msg));
       return;
     }
@@ -2624,7 +2611,7 @@ export class Runner {
   /**
    * A DevOps chat turn runs as the user, outside the sandbox (REVIEW blocker 1): the same local grant and local yes as a
    * DevOps shift. Without a grant it is refused; with one each turn waits for `guildwise-runner approve` unless the owner
-   * chose `devopsRequests: auto` (never with sudo). Other chats are not affected.
+   * chose `devopsRequests: auto`. Other chats are not affected.
    */
   private startChatGated(msg: Extract<ServerToRunner, { type: 'chat.start' }>): void {
     if (!msg.agent?.isDevops) {
@@ -2658,7 +2645,7 @@ export class Runner {
     });
   }
 
-  /** The server's DevOps access flags narrowed to what policy.json grants (sudo, Docker); never widened. */
+  /** The server's DevOps access flags narrowed to what policy.json grants (Docker; never sudo); never widened. */
   private narrowShift(msg: Extract<ServerToRunner, { type: 'shift.start' }>): typeof msg {
     if (!msg.devops) return msg;
     return {
@@ -2671,7 +2658,6 @@ export class Runner {
   private async runApproved(r: HeldRecord): Promise<void> {
     if (r.replay.type === 'shift.start') {
       const msg = r.replay.body as Extract<ServerToRunner, { type: 'shift.start' }>;
-      this.locallyApprovedShifts.add(msg.shiftId);
       await this.supervisor.handleStart(this.narrowShift(msg));
       return;
     }
@@ -2711,27 +2697,6 @@ export class Runner {
     }
     const commandId = (r.replay.body as { commandId?: string }).commandId;
     if (commandId) this.client.send('command.result', { commandId, ok: false, error: reason });
-  }
-
-  /**
-   * `aom sudo` (R18-S): sudo must be granted locally (`guildwise-runner sudo enable`), and from a DevOps shift only when
-   * that shift's start was approved on this machine. The DevOps chat has the owner in the conversation, but sudo still
-   * needs the local grant.
-   */
-  private async localSudo(
-    cmd: string,
-    args: string[],
-    shiftId: string | null,
-  ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-    const refuse = (why: string) => ({ exitCode: 1, stdout: '', stderr: `refused: ${why}` });
-    const policy = this.authority.policy();
-    if (!policy.devops.sudo)
-      return refuse('sudo is not granted on this workstation (guildwise-runner sudo enable)');
-    if (setupPending(policy))
-      return refuse('setup pending: run `guildwise-runner setup` on the workstation first');
-    if (shiftId && !this.locallyApprovedShifts.has(shiftId))
-      return refuse('this DevOps task was not approved on the workstation');
-    return this.sudo.run(cmd, args);
   }
 
   /** repoId -> normalized remote, learned from server payloads that carry both (the runner has no other map). */
@@ -3316,18 +3281,7 @@ export class Runner {
         done(true, await this.ensureEnv(CommandPayloadSchemas['env.ensure'].parse(payload)));
       } else if (command === 'rights.verify') {
         const p = CommandPayloadSchemas['rights.verify'].parse(payload);
-        done(
-          true,
-          await verifyRights(p.access, {
-            exec: this.exec,
-            root: this.sudo,
-            platform: this.platform(),
-            sudoPasswordStored: this.sudo.has(),
-          }),
-        );
-      } else if (command === 'sudo.set') {
-        // The payload is ciphertext; the answer never contains the password.
-        done(true, await this.sudo.set(CommandPayloadSchemas['sudo.set'].parse(payload)));
+        done(true, await verifyRights(p.access, { exec: this.exec, platform: this.platform() }));
       } else if (command === 'git.status') {
         await this.reportGit(true);
         done(true, { reported: true });
@@ -3383,9 +3337,6 @@ export class Runner {
       } else if (command.startsWith('storage.')) {
         // Typed errors are answers (ok:true with `error`), never a retry; no secret is ever in an answer.
         done(true, await this.storage.handle(command, payload));
-      } else if (command === 'sudo.clear') {
-        this.sudo.clear();
-        done(true, { cleared: true });
       } else if (command === 'env.secret.set') {
         // Ciphertext in, a fact out: the value is never in an answer, a log line or an event.
         done(true, this.targetSecrets.set(CommandPayloadSchemas['env.secret.set'].parse(payload)));

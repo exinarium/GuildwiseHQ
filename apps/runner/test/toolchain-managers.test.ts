@@ -1,7 +1,7 @@
 import type { DevOpsAccess, EnvEnsurePayload } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { checkInstall } from '../src/devops/rights.ts';
-import { ensureEnvironment, type RootRunner } from '../src/toolchain/ensure.ts';
+import { ensureEnvironment, SYSTEM_DEPENDENCY } from '../src/toolchain/ensure.ts';
 import type { ExecResult, Executor } from '../src/toolchain/exec.ts';
 import { detectManagers } from '../src/toolchain/managers.ts';
 import type { Platform } from '../src/toolchain/types.ts';
@@ -34,11 +34,6 @@ const access = (over: Partial<DevOpsAccess> = {}): DevOpsAccess => ({
   sudo: false,
   ...over,
 });
-const root = (mode: 'root' | 'passwordless' | 'none'): RootRunner => ({
-  mode: async () => ({ mode, detail: mode }),
-  run: async () => ok(),
-});
-
 describe('package manager detection per distribution', () => {
   it.each([
     ['Debian/Ubuntu', ['apt-get'], 'apt'],
@@ -75,129 +70,85 @@ describe('package manager detection per distribution', () => {
   });
 });
 
-describe('rights: install on each distribution', () => {
-  const linux = (present: string[], mode: 'root' | 'none') => ({
-    exec: machine(present).exec,
-    root: root(mode),
-    platform: 'linux' as Platform,
-    sudoPasswordStored: false,
-  });
-
-  it.each(['apt-get', 'dnf', 'yum', 'pacman', 'zypper', 'apk'])(
-    '%s is found and needs administrator rights',
+describe('rights: install is user space on every distribution', () => {
+  it.each(['apt-get', 'dnf', 'yum', 'pacman', 'zypper', 'apk', '/home/linuxbrew/.linuxbrew/bin/brew'])(
+    'with %s present: verified against the toolchains folder, no package manager asked',
     async (cmd) => {
-      const a = await checkInstall(linux([cmd], 'none'), access());
-      expect(a.status).toBe('failed');
-      expect(a.reason).toContain('administrator rights');
-      const b = await checkInstall(linux([cmd], 'root'), access());
-      expect(b).toMatchObject({ status: 'verified' });
+      const m = machine([cmd]);
+      const r = await checkInstall({ exec: m.exec, platform: 'linux', toolchainsRoot: tmp('aom-tc-') });
+      expect(r.status).toBe('verified');
+      expect(r.reason).toContain('as the runner user');
+      expect(m.calls).toEqual([]);
     },
   );
 
-  it('Arch: pacman found, verified as root', async () => {
-    const r = await checkInstall(linux(['pacman'], 'root'), access());
-    expect(r.reason).toContain('pacman');
-  });
-
-  it('Homebrew on Linux needs no administrator rights', async () => {
-    expect(
-      (await checkInstall(linux(['/home/linuxbrew/.linuxbrew/bin/brew'], 'none'), access())).status,
-    ).toBe('verified');
-  });
-
-  it('no manager: names everything it looked for and how to get one', async () => {
-    const r = await checkInstall(linux([], 'none'), access());
+  it('Windows: the tools go into the WSL distro', async () => {
+    const r = await checkInstall({
+      exec: machine([]).exec,
+      platform: 'win32',
+      toolchainsRoot: tmp('aom-tc-'),
+    });
     expect(r.status).toBe('failed');
-    for (const c of ['apt-get', 'dnf', 'yum', 'pacman', 'zypper', 'apk', 'brew'])
-      expect(r.reason).toContain(c);
-    expect(r.fix).toContain('pacman');
-    expect(r.fix).toContain('Homebrew');
-  });
-
-  it('macOS: Homebrew found at /opt/homebrew even though PATH lacks it', async () => {
-    const r = await checkInstall(
-      {
-        exec: machine(['/opt/homebrew/bin/brew']).exec,
-        root: root('none'),
-        platform: 'darwin',
-        sudoPasswordStored: false,
-      },
-      access(),
-    );
-    expect(r.status).toBe('verified');
+    expect(r.fix).toContain('WSL');
   });
 });
 
-describe('env.ensure installs with the detected manager', () => {
-  async function run(
-    present: string[],
-    rootMode: 'passwordless' | 'none' = 'passwordless',
-    platform: Platform = 'linux',
-  ) {
+describe("env.ensure never runs a package manager: it names the owner's command", () => {
+  async function run(present: string[], platform: Platform = 'linux') {
     const m = machine(present);
     const dir = tmp('aom-mgr-');
     const { writeFileSync } = await import('node:fs');
-    writeFileSync(`${dir}/go.mod`, 'go 1.22\n');
-    const rootCalls: string[] = [];
-    const rr: RootRunner = {
-      mode: async () => ({ mode: rootMode, detail: rootMode }),
-      run: async (cmd, args) => {
-        rootCalls.push([cmd, ...args].join(' '));
-        return ok();
-      },
-    };
+    writeFileSync(`${dir}/Gemfile`, '');
     const payload: EnvEnsurePayload = {
       requestId: '0190aaaa-0000-7000-8000-00000000ffff',
       projectId: '0190aaaa-0000-7000-8000-000000000001',
       repos: [{ repoId: '0190aaaa-0000-7000-8000-0000000000a1', name: 'app', remoteUrlNormalized: 'x/y' }],
-      access: access({ sudo: true }),
+      access: access(),
     };
     const r = await ensureEnvironment(payload, {
       exec: m.exec,
       platform,
-      root: rr,
+      userInstaller: { install: async () => ({ ok: false, detail: 'not in this test' }) },
       findRepo: async () => ({ localPath: dir }),
       installDependencies: false,
     });
-    return { r, calls: m.calls, rootCalls };
+    return { r, calls: m.calls, ruby: r.tools.find((t) => t.tool === 'Ruby') };
   }
 
   it.each([
-    ['apt-get', 'apt-get install -y golang-go'],
-    ['dnf', 'dnf install -y golang'],
-    ['yum', 'yum install -y golang'],
-    ['pacman', 'pacman -S --noconfirm --needed go'],
-    ['zypper', 'zypper --non-interactive install go'],
-    ['apk', 'apk add go'],
-  ])('%s installs Go as root', async (cmd, line) => {
-    const { rootCalls } = await run([cmd]);
-    expect(rootCalls).toEqual([line]);
+    ['apt-get', 'sudo apt-get install -y ruby-full'],
+    ['dnf', 'sudo dnf install -y ruby'],
+    ['yum', 'sudo yum install -y ruby'],
+    ['pacman', 'sudo pacman -S --noconfirm --needed ruby'],
+    ['zypper', 'sudo zypper --non-interactive install ruby'],
+    ['apk', 'sudo apk add ruby'],
+  ])('%s: the owner is shown the command; it never runs', async (cmd, line) => {
+    const { ruby, calls } = await run([cmd]);
+    expect(ruby).toMatchObject({ status: 'failed', detail: SYSTEM_DEPENDENCY });
+    expect(ruby?.fix).toContain(`Ask the machine owner to run: ${line}`);
+    expect(
+      calls.filter((c) => !c.endsWith('--version') && !c.startsWith('ruby') && !c.startsWith('bundle')),
+    ).toEqual([]);
   });
 
-  it('Linux Homebrew is a fallback with no root, run by its absolute path', async () => {
+  it('Linux Homebrew outside PATH: shown by its absolute path, without sudo, not run', async () => {
     const brew = '/home/linuxbrew/.linuxbrew/bin/brew';
-    const { calls, rootCalls } = await run([brew], 'none');
-    expect(rootCalls).toEqual([]);
-    expect(calls).toContain(`${brew} install go`);
+    const { ruby, calls } = await run([brew]);
+    expect(ruby?.fix).toContain(`run: ${brew} install ruby`);
+    expect(ruby?.fix).not.toContain('sudo');
+    expect(calls).not.toContain(`${brew} install ruby`);
   });
 
-  it('with administrator rights missing, a system manager is skipped for Homebrew', async () => {
-    const { calls, rootCalls } = await run(['pacman', 'brew'], 'none');
-    expect(rootCalls).toEqual([]);
-    expect(calls).toContain('brew install go');
+  it('macOS (not yet tested on hardware): brew from /opt/homebrew is advice only', async () => {
+    const { ruby, calls } = await run(['/opt/homebrew/bin/brew'], 'darwin');
+    expect(ruby?.fix).toContain('/opt/homebrew/bin/brew install ruby');
+    expect(calls).not.toContain('/opt/homebrew/bin/brew install ruby');
   });
 
-  it('macOS: brew from /opt/homebrew is run by path', async () => {
-    const { calls } = await run(['/opt/homebrew/bin/brew'], 'none', 'darwin');
-    expect(calls).toContain('/opt/homebrew/bin/brew install go');
-  });
-
-  it('no package manager: a clear message that lists what was looked for', async () => {
-    const { r } = await run([]);
-    const go = r.tools.find((t) => t.tool === 'Go');
-    expect(go?.status).toBe('failed');
-    expect(go?.detail).toContain('no package manager found');
-    expect(go?.detail).toContain('pacman');
-    expect(go?.fix).toContain('Install one of');
+  it('no package manager: the manual text and that Guildwise does not install system packages', async () => {
+    const { ruby } = await run([]);
+    expect(ruby?.status).toBe('failed');
+    expect(ruby?.fix).toContain('ruby-lang.org');
+    expect(ruby?.fix).toContain('Guildwise does not install system packages');
   });
 });

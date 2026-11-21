@@ -4,9 +4,15 @@
  * `stacks.ts`; adding a stack means adding one object there (and a fixture test in `test/toolchain-detect.test.ts`).
  */
 
+import type { UserInstallResolver } from './user-install.ts';
+
 export type Platform = 'linux' | 'darwin' | 'win32';
 
-/** `any`: the same steps whatever the package manager (corepack, rustup, dotnet-install). */
+/**
+ * A package manager names system packages for the owner's command (advice only: Guildwise never runs a package manager,
+ * 1.10.0). `any`: steps run as the runner user whatever the platform (`dotnet workload install`, `sdkmanager`, `npm -g
+ * --prefix <toolchains>`).
+ */
 export type Manager =
   | 'apt'
   | 'dnf'
@@ -44,8 +50,6 @@ export interface Detection {
 export interface Step {
   cmd: string;
   args: string[];
-  /** Needs administrator rights (apt, dnf, system-wide installs). */
-  root?: boolean;
 }
 
 export interface Check {
@@ -65,8 +69,13 @@ export interface ToolSpec {
   checks: (p: Params, platform: Platform) => Check[];
   /** Minimal version (dotted numbers, compared segment by segment) the repository asks for. */
   minVersion?: (p: Params) => string | undefined;
-  /** Installers per package manager. A tool without any recipe can only be reported. */
+  /**
+   * Per package manager: the system packages, shown to the owner as the command to run (never run here). `any`: steps
+   * the runner user runs itself.
+   */
   recipes: (p: Params, platform: Platform) => Partial<Record<Manager, Step[]>>;
+  /** The user-space install into the toolchains root (`user-install.ts`, checksum verified). */
+  userInstall?: UserInstallResolver;
   /** Tools (by id) that must be fine first; otherwise this one is skipped. */
   after?: string[];
   /** Needs the manager to have allowed Docker (`allowDocker`) in addition to installing. */

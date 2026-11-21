@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the workstation runner as a self-contained tarball plus its UNSIGNED release manifest (core DESIGN R18-U, R30):
 #   <out>/aom-runner-<version>.tgz
-#   <out>/manifest.json   {version, file, sha256, minRunner, floor, allowDowngrade: false, nodeRuntime}
+#   <out>/manifest.json   {version, file, sha256, minRunner, floor, allowDowngrade: false, nodeRuntime, dockerRootless}
 # Contents of the tgz: aom-runner/{aom-runner, aom-runner.cmd, guildwise-runner.cmd, dist/ (with dist/grammars), node_modules/,
 # package.json, README.md, THIRD_PARTY_NOTICES}
 #
@@ -86,7 +86,7 @@ cp -r apps/runner/dist "$PKG/dist"
 cp apps/runner/README.md "$PKG/README.md"
 # Licences of the tree-sitter parser and grammars in dist/grammars (docs/design/project-graphs.md owner decision 7).
 cp apps/runner/THIRD_PARTY_NOTICES "$PKG/THIRD_PARTY_NOTICES"
-# The root-owned admin tools (R20: guildwise-admin, deploy-compose): the installer copies them out of the verified package.
+# The root-owned admin tool (R20: guildwise-admin): the installer copies it out of the verified package.
 if [ -d apps/runner/admin ]; then cp -r apps/runner/admin "$PKG/admin"; fi
 
 # package.json with only the real runtime dependencies (@aom/shared is bundled into dist/).
@@ -155,6 +155,9 @@ tar -C "$STAGE" -czf "$OUT/aom-runner-$VERSION.tgz" aom-runner
 # left from an earlier build belongs to another manifest: it goes.
 # manifest-<v>.json is the same bytes, kept per version so the server can serve a pin to a retained release (R18-U).
 rm -f "$OUT/manifest.json.minisig" "$OUT/manifest-$VERSION.json.minisig"
-node "$ROOT/scripts/runner-manifest.mjs" "$OUT/aom-runner-$VERSION.tgz" "$VERSION" "$FLOOR" "$NODE_RUNTIME" >"$OUT/manifest.json"
+# The pinned rootless Docker binaries (deps-without-sudo §3), next to nodeRuntime in the signed manifest.
+DOCKER_ROOTLESS="${AOM_RUNNER_DOCKER_ROOTLESS:-$ROOT/scripts/docker-rootless.json}"
+[ -f "$DOCKER_ROOTLESS" ] || DOCKER_ROOTLESS=""
+node "$ROOT/scripts/runner-manifest.mjs" "$OUT/aom-runner-$VERSION.tgz" "$VERSION" "$FLOOR" "$NODE_RUNTIME" ${DOCKER_ROOTLESS:+"$DOCKER_ROOTLESS"} >"$OUT/manifest.json"
 cp "$OUT/manifest.json" "$OUT/manifest-$VERSION.json"
 echo "wrote $OUT/aom-runner-$VERSION.tgz and $OUT/manifest.json (unsigned: sign it with scripts/sign-runner-release.sh on the key holder's machine)"

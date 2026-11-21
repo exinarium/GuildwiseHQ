@@ -183,6 +183,13 @@ export const RunnerReleaseManifestSchema = z.object({
   nodeRuntime: z
     .record(z.string().max(40), z.object({ url: z.url(), sha256: z.string().regex(/^[0-9a-f]{64}$/) }))
     .default({}),
+  /** The pinned rootless Docker binaries (docker, rootless extras, compose) per Linux platform (deps-without-sudo §3). */
+  dockerRootless: z
+    .record(
+      z.string().max(40),
+      z.record(z.string().max(20), z.object({ url: z.url(), sha256: z.string().regex(/^[0-9a-f]{64}$/) })),
+    )
+    .optional(),
 });
 export type RunnerReleaseManifest = z.infer<typeof RunnerReleaseManifestSchema>;
 

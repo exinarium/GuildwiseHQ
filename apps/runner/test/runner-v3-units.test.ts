@@ -441,10 +441,9 @@ describe('role smoke test', () => {
   }, 120_000);
 });
 
-describe('DevOps chat: aom devops-approval, aom sudo and the audit rpc', () => {
+describe('DevOps chat: aom devops-approval, no aom sudo, and the audit rpc', () => {
   async function chatWith(devops: boolean) {
     const posted: Array<Record<string, unknown>> = [];
-    const sudoCalls: string[][] = [];
     const sent: Array<[string, unknown]> = [];
     const root = tmp();
     const paths = runnerPaths(root);
@@ -459,16 +458,12 @@ describe('DevOps chat: aom devops-approval, aom sudo and the audit rpc', () => {
         if (method === 'thread.post') posted.push(params);
         return { ok: true, result: {} };
       },
-      sudoRun: async (cmd, args) => {
-        sudoCalls.push([cmd, ...args]);
-        return { exitCode: 0, stdout: 'done', stderr: '' };
-      },
     });
     const chat = { msg: { chatId: 'c1', agent: { isDevops: devops, roleKey: devops ? 'devops' : 'ba' } } };
     const handler = (
       manager as unknown as { handlerFor(c: unknown): import('../src/ipc/server.ts').ShiftIpcHandler }
     ).handlerFor(chat);
-    return { handler, posted, sudoCalls, sent, paths, close: () => ipc.stop() };
+    return { handler, posted, sent, paths, close: () => ipc.stop() };
   }
 
   it('devops-approval is posted to the conversation for the owner, and tells the agent to wait', async () => {
@@ -500,15 +495,13 @@ describe('DevOps chat: aom devops-approval, aom sudo and the audit rpc', () => {
     expect((rep as { accepted: boolean }).accepted).toBe(false);
     const sudo = await t.handler.rpc({ method: 'sudo.run', params: { argv: ['ls'] } });
     expect(sudo.ok).toBe(false);
-    expect(t.sudoCalls).toEqual([]);
     await t.close();
   });
 
-  it('aom sudo works in the DevOps chat and the guard hook can report its audit entries', async () => {
+  it('aom sudo is gone in the DevOps chat too (1.10.0); the guard hook can report its audit entries', async () => {
     const t = await chatWith(true);
     const sudo = await t.handler.rpc({ method: 'sudo.run', params: { argv: ['apt-get', 'install', 'jq'] } });
-    expect(sudo).toMatchObject({ ok: true, result: { exitCode: 0, stdout: 'done' } });
-    expect(t.sudoCalls).toEqual([['apt-get', 'install', 'jq']]);
+    expect(sudo).toMatchObject({ ok: false });
     const audit = await t.handler.rpc({
       method: 'devops.audit',
       params: {

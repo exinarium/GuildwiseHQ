@@ -63,10 +63,43 @@ install_extras() {
   elif ask_yn "Install yt-dlp? It lets agents read transcripts of YouTube and other videos. Optional." y GUILDWISE_WITH_YTDLP; then
     if brew install yt-dlp >/dev/null 2>&1; then good "yt-dlp installed"; else step_warn "Could not install yt-dlp."; fi
   else note "Skipped yt-dlp. You can add it later."; fi
-  if have docker; then good "Docker is already installed"
-  elif ask_yn "Install Docker Desktop? Only needed if your testers run containers. Optional." n GUILDWISE_WITH_DOCKER; then
-    if brew install --cask docker >/dev/null 2>&1; then good "Docker Desktop installed (open it once to finish setup)"; else step_warn "Could not install Docker Desktop."; fi
-  else note "Skipped Docker. You can add it later."; fi
+}
+
+# macOS baseline (DESIGN deps-without-sudo §1): the Xcode Command Line Tools (compilers, git, make), with the same
+# wait-and-recheck as Docker Desktop below. Not yet tested on hardware.
+install_xcode_clt() {
+  if xcode-select -p >/dev/null 2>&1; then step_ok "The Xcode Command Line Tools are installed"; return; fi
+  [ "${OPT_SKIP_BASELINE}" = 1 ] && die "The Xcode Command Line Tools are missing (--skip-baseline installs nothing)." "Run \`xcode-select --install\`, then run the command again."
+  xcode-select --install >/dev/null 2>&1 || true
+  interactive || die "The Xcode Command Line Tools are needed; their installer window has opened." "Finish it, then run the command again."
+  while ! xcode-select -p >/dev/null 2>&1; do
+    say "    Finish the Command Line Tools installer window, then press Enter to check again."
+    wait_enter || die "No keyboard to wait on." "Finish the Command Line Tools install, then run the command again."
+  done
+  step_ok "The Xcode Command Line Tools are installed"
+}
+
+# Docker on a Mac (owner 2026-11-21): Docker Desktop is used when it is there; without it the installer stops, shows the
+# download link, waits and checks again. --docker none skips the wait. Without a keyboard: --docker host stops with the
+# link; otherwise the wait is skipped and the runner gets no Docker (an unattended re-run cannot loop). Not yet tested on
+# hardware.
+# Waits for Enter at the keyboard.
+wait_enter() { read -r _ </dev/tty; }
+
+DOCKER_DESKTOP_URL="https://www.docker.com/products/docker-desktop/"
+wait_for_docker_desktop() {
+  [ "${OPT_DOCKER}" = none ] && { note "Docker skipped (--docker none)."; return 0; }
+  desktop_docker_answers && { good "Docker Desktop is running"; return 0; }
+  if ! interactive; then
+    [ "${OPT_DOCKER}" = host ] && die "Docker Desktop is needed: install it from ${DOCKER_DESKTOP_URL}, start it, then run the command again." "Or run the installer with --docker none."
+    step_warn "No Docker Desktop: the runner gets no Docker (install it from ${DOCKER_DESKTOP_URL} and run the installer again)."
+    return 0
+  fi
+  while ! desktop_docker_answers; do
+    say "    Docker Desktop is needed: install it from ${DOCKER_DESKTOP_URL}, start it, then press Enter to check again."
+    wait_enter || die "No keyboard to wait on." "Install Docker Desktop, then run the command again."
+  done
+  good "Docker Desktop is running"
 }
 
 # The browser that makes the PDF copy of a form's answers. Never fatal: the copies stay off until it works.
@@ -153,16 +186,19 @@ PLIST
 main() {
   parse_flags "$@"
   if [ "${OPT_LEGACY_ONLY}" = 1 ]; then legacy_only; return 0; fi
-  STEP_TOTAL=15
+  STEP_TOTAL=18
   say "${C_BOLD}${APP_NAME}: set up this Mac as a workstation${C_RESET}"
   say "${C_DIM}Safe to run again at any time: it upgrades or repairs what is already here.${C_RESET}"
   report "installer" start "macos"
 
   step "Checking this Mac"; detect_system
   step "Looking for an older runner"; handle_legacy; choose_runner_user
+  step "Administrator rights (once)"; authorize_once
+  step "Xcode Command Line Tools"; install_xcode_clt
   step "Homebrew"; install_homebrew
   step "Installing Node 22 and git"; install_tools
   step "Optional extras"; install_extras
+  step "Checking Docker"; wait_for_docker_desktop
   step "Downloading the runner"; stage_runner_release
   step "Runner user"; setup_runner_user
   step "Installing the runner"; place_runner_release

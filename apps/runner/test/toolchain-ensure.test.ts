@@ -2,10 +2,16 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { DevOpsAccess, EnvEnsurePayload } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
-import { type EnsureDeps, ensureEnvironment, type RootRunner } from '../src/toolchain/ensure.ts';
+import { type EnsureDeps, ensureEnvironment, SYSTEM_DEPENDENCY } from '../src/toolchain/ensure.ts';
 import type { ExecResult, Executor } from '../src/toolchain/exec.ts';
-import { androidHome, cmdlineToolsScript } from '../src/toolchain/stacks.ts';
+import { androidHome } from '../src/toolchain/stacks.ts';
 import type { Platform } from '../src/toolchain/types.ts';
+import {
+  toolchainsRoot,
+  type UserInstaller,
+  type UserInstallResolver,
+  type UserInstallResult,
+} from '../src/toolchain/user-install.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
 
 cleanupTmp();
@@ -58,6 +64,26 @@ class Machine implements Executor {
   }
 }
 
+/**
+ * A pretend user-space installer (the real one is tested in user-install.test.ts): records which tool it was asked
+ * for and makes the tool appear on the pretend machine.
+ */
+class FakeInstaller implements UserInstaller {
+  calls: string[] = [];
+  resolvers = new Map<string, UserInstallResolver>();
+  effects = new Map<string, { answers: Record<string, ExecResult>; result?: UserInstallResult }>();
+  constructor(private readonly m: Machine) {}
+  async install(toolId: string, resolver: UserInstallResolver): Promise<UserInstallResult | null> {
+    this.calls.push(toolId);
+    this.resolvers.set(toolId, resolver);
+    const e = this.effects.get(toolId);
+    if (!e) return { ok: false, detail: `no fixture for ${toolId}` };
+    if (e.result && !e.result.ok) return e.result;
+    for (const [k, v] of Object.entries(e.answers)) this.m.answers.set(k, v);
+    return e.result ?? { ok: true, detail: 'installed' };
+  }
+}
+
 const access = (over: Partial<DevOpsAccess> = {}): DevOpsAccess => ({
   allowInstall: true,
   allowDocker: false,
@@ -70,26 +96,17 @@ function setup(
   files: Record<string, string>,
   opts: {
     platform?: Platform;
-    root?: Awaited<ReturnType<RootRunner['mode']>>['mode'];
     /** D6: run the dependency installs too (off in most tests: the pretend machine knows nothing of them). */
     dependencies?: boolean;
   } = {},
 ) {
   const m = new Machine();
-  const rootCalls: string[] = [];
-  const rootMode = opts.root ?? 'passwordless';
-  const root: RootRunner = {
-    mode: async () => ({ mode: rootMode, detail: rootMode }),
-    run: async (cmd, args) => {
-      rootCalls.push([cmd, ...args].join(' '));
-      return m.run(cmd, args);
-    },
-  };
+  const installer = new FakeInstaller(m);
   const repoDir = fixture(files);
   const deps: EnsureDeps = {
     exec: m,
     platform: opts.platform ?? 'linux',
-    root,
+    userInstaller: installer,
     findRepo: async () => ({ localPath: repoDir }),
     installDependencies: opts.dependencies ?? false,
     // the repository's owner allowed its install scripts locally (R18-S): the installs run as written
@@ -101,20 +118,18 @@ function setup(
     repos: [{ repoId: REPO_A, name: 'app', remoteUrlNormalized: 'github.com/acme/app' }],
     access: a,
   });
-  return { m, rootCalls, deps, payload, repoDir };
+  return { m, installer, deps, payload, repoDir };
 }
 
-/** The pretend Android SDK: the command-line tools appear after the script, then each package after its install. */
-function androidSdkInstalls(m: Machine, api = '34', buildTools = '34.0.0') {
+/** The pretend Android SDK: the command-line tools appear after the user install, then each package after its install. */
+function androidSdkInstalls(m: Machine, installer: FakeInstaller, api = '34', buildTools = '34.0.0') {
   const home = androidHome('linux');
   const sdkmanager = `${home}/cmdline-tools/latest/bin/sdkmanager`;
   const listed = (...names: string[]) =>
     ok(
       `Installed packages:\n  Path | Version\n  ---- | ----\n${names.map((n) => `  ${n} | 1 | x`).join('\n')}\n`,
     );
-  m.installs.set(`bash -c ${cmdlineToolsScript('linux')}`, {
-    effect: { [`${sdkmanager} --version`]: ok('12.0') },
-  });
+  installer.effects.set('android-cmdline-tools', { answers: { [`${sdkmanager} --version`]: ok('12.0') } });
   const list = `${sdkmanager} --sdk_root=${home} --list_installed`;
   m.installs.set(`${sdkmanager} --sdk_root=${home} platform-tools`, {
     effect: { [list]: listed('platform-tools') },
@@ -142,17 +157,15 @@ describe('env.ensure', () => {
     expect(m.calls.some((c) => c.includes('install'))).toBe(false);
   });
 
-  it('MAUI on a clean Linux box: SDK from apt as root, the maui-android workload and the JDK, then ready', async () => {
-    const { m, rootCalls, deps, payload } = setup({ 'App.csproj': MAUI }, { root: 'passwordless' });
+  it('MAUI on a clean Linux box: SDK and JDK in user space, the maui-android workload, then ready; nothing as root', async () => {
+    const { m, installer, deps, payload } = setup({ 'App.csproj': MAUI });
     m.managers = ['apt-get'];
-    m.installs.set('apt-get install -y dotnet-sdk-8.0', { effect: { 'dotnet --version': ok('8.0.404') } });
+    installer.effects.set('dotnet-sdk', { answers: { 'dotnet --version': ok('8.0.404') } });
     m.installs.set('dotnet workload install maui-android', {
       effect: { 'dotnet workload list': ok('Installed Workload Id\n------\nmaui-android   8.0.100\n') },
     });
-    m.installs.set('apt-get install -y openjdk-17-jdk', {
-      effect: { 'javac -version': ok('javac 17.0.12') },
-    });
-    androidSdkInstalls(m);
+    installer.effects.set('jdk', { answers: { 'javac -version': ok('javac 17.0.12') } });
+    androidSdkInstalls(m, installer);
     const r = await ensureEnvironment(payload(access()), deps);
     expect(r.state).toBe('ready');
     expect(r.stacks).toEqual([{ id: 'dotnet-maui', name: '.NET MAUI', repo: 'app' }]);
@@ -165,15 +178,13 @@ describe('env.ensure', () => {
       ['Android SDK platform', 'installed'],
       ['Android build-tools', 'installed'],
     ]);
-    // the apt installs ran as root, the workload did not
-    expect(rootCalls).toEqual(['apt-get install -y dotnet-sdk-8.0', 'apt-get install -y openjdk-17-jdk']);
+    expect(installer.calls).toEqual(['dotnet-sdk', 'jdk', 'android-cmdline-tools']);
+    expect(r.tools[0]?.detail).toContain('checksum-verified');
+    // the package manager was only asked for its version: no install, no sudo, ever
+    expect(m.calls.filter((c) => c.startsWith('apt-get') && c !== 'apt-get --version')).toEqual([]);
+    expect(m.calls.some((c) => c.startsWith('sudo'))).toBe(false);
+    expect(r.logTail.join('\n')).not.toContain('sudo');
     expect(m.calls).toContain('dotnet workload install maui-android');
-    expect(rootCalls).not.toContain('dotnet workload install maui-android');
-    // order: SDK before the workload (the workload waits for it)
-    expect(m.calls.indexOf('apt-get install -y dotnet-sdk-8.0')).toBeLessThan(
-      m.calls.indexOf('dotnet workload install maui-android'),
-    );
-    expect(r.logTail.join('\n')).toContain('$ sudo apt-get install -y dotnet-sdk-8.0');
   });
 
   it('a workload is recognized by its whole id: maui-android does not satisfy maui', async () => {
@@ -199,78 +210,78 @@ describe('env.ensure', () => {
     expect(r.summary).toMatch(/^Needs access: Go/);
   });
 
-  it('without sudo, a root-only installer is not tried; the user-level script is used when there is one', async () => {
-    const { m, rootCalls, deps, payload } = setup(
-      { 'global.json': '{"sdk":{"version":"8.0.100"}}' },
-      { root: 'none' },
-    );
+  it("Ruby is a system dependency: failed with the owner's command, which is never run; Bundler waits", async () => {
+    const { m, installer, deps, payload } = setup({ Gemfile: '' });
     m.managers = ['apt-get'];
-    const script = [
-      'bash',
-      '-c',
-      'curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh && bash /tmp/dotnet-install.sh --channel 8.0',
-    ].join(' ');
-    m.installs.set(script, { effect: { 'dotnet --version': ok('8.0.404') } });
-    const r = await ensureEnvironment(payload(access({ sudo: false })), deps);
-    expect(r.state).toBe('ready');
-    expect(rootCalls).toEqual([]);
-    expect(r.tools[0]?.detail).toContain('official installer');
-  });
-
-  it('a root-only tool without sudo needs access, and says sudo', async () => {
-    const { m, rootCalls, deps, payload } = setup({ Gemfile: '' }, { root: 'none' });
-    m.managers = ['apt-get'];
-    const r = await ensureEnvironment(payload(access({ sudo: false })), deps);
-    expect(r.state).toBe('needs_access');
-    expect(r.tools[0]?.fix).toContain('Administrator (sudo)');
-    expect(rootCalls).toEqual([]);
-    // Bundler waits for Ruby
+    const r = await ensureEnvironment(payload(access()), deps);
+    expect(r.state).toBe('failed');
+    expect(r.tools[0]).toMatchObject({ tool: 'Ruby', status: 'failed', detail: SYSTEM_DEPENDENCY });
+    expect(r.tools[0]?.fix).toContain('Ask the machine owner to run: sudo apt-get install -y ruby-full');
+    expect(m.calls.some((c) => c.includes('install'))).toBe(false);
+    expect(installer.calls).toEqual([]);
     expect(r.tools[1]).toMatchObject({ tool: 'Bundler', status: 'skipped', detail: 'waiting for Ruby' });
   });
 
-  it('sudo ticked but not working says to enter the password', async () => {
-    const { m, deps, payload } = setup({ Gemfile: '' }, { root: 'none' });
+  it('a system dependency on a machine without a known package manager says what to install', async () => {
+    const { deps, payload } = setup({ 'composer.json': '{}' });
+    const r = await ensureEnvironment(payload(access()), deps);
+    expect(r.tools[0]).toMatchObject({ tool: 'PHP', status: 'failed', detail: SYSTEM_DEPENDENCY });
+    expect(r.tools[0]?.fix).toContain('php.net');
+    expect(r.tools[0]?.fix).toContain('Guildwise does not install system packages');
+  });
+
+  it('no step runs as root: user-space installs and `any` steps only (pnpm into the toolchains folder)', async () => {
+    const { m, installer, deps, payload } = setup({ 'package.json': '{}', 'pnpm-lock.yaml': '' });
     m.managers = ['apt-get'];
-    const r = await ensureEnvironment(payload(access({ sudo: true })), deps);
-    expect(r.tools[0]?.fix).toContain('password');
+    m.answers.set('node --version', ok('v22.1.0'));
+    m.installs.set(`npm install -g --prefix ${toolchainsRoot()} pnpm`, {
+      effect: { 'pnpm --version': ok('9.12.0') },
+    });
+    const r = await ensureEnvironment(payload(access()), deps);
+    expect(r.state).toBe('ready');
+    expect(installer.calls).toEqual([]);
+    // package managers are only probed (`--version`) to name an owner's command; none runs
+    const managerRuns = m.calls.filter(
+      (c) => /^(sudo|apt-get|dnf|yum|pacman|zypper|apk|choco)\b/.test(c) && !c.endsWith(' --version'),
+    );
+    expect(managerRuns).toEqual([]);
   });
 
   it('an old version is upgraded: node 18 where .nvmrc says 22', async () => {
-    const { m, rootCalls, deps, payload } = setup(
-      { 'package.json': '{}', '.nvmrc': '22\n' },
-      { root: 'root' },
-    );
+    const { m, installer, deps, payload } = setup({ 'package.json': '{}', '.nvmrc': '22\n' });
     m.managers = ['apt-get'];
     m.answers.set('node --version', ok('v18.19.0'));
-    m.installs.set('apt-get install -y nodejs npm', { effect: { 'node --version': ok('v22.4.0') } });
+    installer.effects.set('node', { answers: { 'node --version': ok('v22.4.0') } });
     const r = await ensureEnvironment(payload(access()), deps);
     expect(r.state).toBe('ready');
     expect(r.tools[0]).toMatchObject({ status: 'installed', version: '22.4.0' });
-    // the machine is root: the install ran directly, not through sudo
-    expect(rootCalls).toEqual([]);
+    expect(installer.calls).toEqual(['node']);
+    expect(m.calls.some((c) => c.startsWith('apt-get install'))).toBe(false);
   });
 
   it('a failed install is reported with the last error and the manual fix; dependants are skipped', async () => {
-    const { m, deps, payload } = setup({ 'package.json': '{}', 'yarn.lock': '' }, { root: 'passwordless' });
-    m.managers = ['apt-get'];
-    m.installs.set('apt-get install -y nodejs npm', {
-      effect: {},
-      result: fail('E: Unable to locate package nodejs\nE: network is down', 100),
+    const { installer, deps, payload } = setup({ 'package.json': '{}', 'yarn.lock': '' });
+    installer.effects.set('node', {
+      answers: {},
+      result: { ok: false, detail: 'checksum mismatch: refused (https://nodejs.org/dist/v22.4.0/x.tar.xz)' },
     });
     const r = await ensureEnvironment(payload(access()), deps);
     expect(r.state).toBe('failed');
     expect(r.tools[0]).toMatchObject({ tool: 'Node.js', status: 'failed' });
-    expect(r.tools[0]?.detail).toContain('network is down');
+    expect(r.tools[0]?.detail).toContain('checksum mismatch: refused');
     expect(r.tools[0]?.fix).toContain('nodejs.org');
     expect(r.tools[1]).toMatchObject({ tool: 'Yarn', status: 'skipped' });
   });
 
-  it('Docker needs the Docker right as well as install; a daemon that refuses the user is a rights problem', async () => {
+  it("Docker is the installer's job: a missing Docker or a daemon that refuses the user says re-run the installer", async () => {
     const { m, deps, payload } = setup({ Dockerfile: '' });
     m.managers = ['apt-get'];
-    const a = await ensureEnvironment(payload(access({ allowDocker: false })), deps);
-    expect(a.state).toBe('needs_access');
-    expect(a.tools[0]?.fix).toContain('"Docker"');
+    const a = await ensureEnvironment(payload(access({ allowDocker: true })), deps);
+    expect(a.state).toBe('failed');
+    expect(a.tools[0]).toMatchObject({ tool: 'Docker', status: 'failed', detail: SYSTEM_DEPENDENCY });
+    expect(a.tools[0]?.fix).toContain('set up by the installer: re-run it');
+    expect(a.tools[0]?.fix).not.toContain('usermod');
+    expect(m.calls.some((c) => c.includes('install'))).toBe(false);
 
     const b = setup({ Dockerfile: '' });
     b.m.answers.set('docker --version', ok('Docker version 27.1.1'));
@@ -281,7 +292,8 @@ describe('env.ensure', () => {
     const r = await ensureEnvironment(b.payload(access({ allowDocker: true })), b.deps);
     expect(r.state).toBe('failed');
     expect(r.tools[1]).toMatchObject({ tool: 'Docker daemon', status: 'failed' });
-    expect(r.tools[1]?.fix).toContain('usermod -aG docker');
+    expect(r.tools[1]?.fix).toContain('set up by the installer: re-run it');
+    expect(r.tools[1]?.fix).not.toContain('usermod');
   });
 
   it('two repositories asking for different node majors: the higher one wins', async () => {
@@ -323,18 +335,16 @@ describe('env.ensure', () => {
     expect(readFileSync(logFile, 'utf8')).toContain('Go: ok 1.23.1');
   });
 
-  it('works for every supported platform without throwing (windows uses winget)', async () => {
-    const { m, deps, payload } = setup(
-      { 'go.mod': 'go 1.22\n' },
-      { platform: 'win32', root: 'unsupported' as never },
-    );
+  it('Windows (not yet tested on hardware): no user-space install, the winget command is advice only', async () => {
+    const { m, deps, payload } = setup({ 'go.mod': 'go 1.22\n' }, { platform: 'win32' });
     m.managers = ['winget'];
-    m.installs.set(
-      'winget install --id GoLang.Go -e --silent --accept-package-agreements --accept-source-agreements',
-      { effect: { 'go version': ok('go version go1.23.1 windows/amd64') } },
-    );
-    const r = await ensureEnvironment(payload(access({ sudo: false })), deps);
-    expect(r.state).toBe('ready');
+    // the fake installer answers like the real one does on win32: no plan
+    deps.userInstaller = { install: async () => null };
+    const r = await ensureEnvironment(payload(access()), deps);
+    expect(r.tools[0]).toMatchObject({ tool: 'Go', status: 'failed', detail: SYSTEM_DEPENDENCY });
+    expect(r.tools[0]?.fix).toContain('winget install --id GoLang.Go');
+    expect(r.tools[0]?.fix).not.toContain('sudo');
+    expect(m.calls.some((c) => c.startsWith('winget install'))).toBe(false);
   });
 
   it('D6: a native Android project gets the SDK pieces it targets (compileSdk 35), within the install access', async () => {
@@ -349,10 +359,10 @@ describe('env.ensure', () => {
     expect(r0.state).toBe('needs_access');
     expect(r0.tools.find((t) => t.tool === 'Android SDK command-line tools')?.status).toBe('needs_access');
 
-    const { m, deps, payload } = setup(files);
+    const { m, installer, deps, payload } = setup(files);
     m.managers = ['apt-get'];
     m.answers.set('javac -version', ok('javac 17.0.12'));
-    androidSdkInstalls(m, '35', '35.0.0');
+    androidSdkInstalls(m, installer, '35', '35.0.0');
     const r = await ensureEnvironment(payload(access()), deps);
     expect(r.state).toBe('ready');
     expect(r.stacks.map((s) => s.id)).toContain('android');

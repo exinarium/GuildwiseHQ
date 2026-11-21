@@ -1,5 +1,19 @@
-import { homedir } from 'node:os';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  androidCmdlineUserInstall,
+  bunUserInstall,
+  dotnetUserInstall,
+  goUserInstall,
+  gradleUserInstall,
+  jdkUserInstall,
+  mavenUserInstall,
+  nodeUserInstall,
+  pythonUserInstall,
+  rustUserInstall,
+  uvToolUserInstall,
+  uvUserInstall,
+} from './sources.ts';
 import type {
   Check,
   DepStep,
@@ -12,11 +26,11 @@ import type {
   Step,
   ToolSpec,
 } from './types.ts';
+import { accountHome, toolchainsRoot } from './user-install.ts';
 
 // ------------------------------------------------------------------------------------------------ helpers
 
 const findFiles = (repo: RepoView, re: RegExp): string[] => repo.files.filter((f) => re.test(f));
-const basename = (f: string): string => f.slice(f.lastIndexOf('/') + 1);
 const rootFile = (repo: RepoView, name: string): boolean => repo.files.includes(name);
 const readAll = (repo: RepoView, files: string[]): string =>
   files
@@ -443,6 +457,10 @@ export const STACKS: StackSpec[] = [
 
 // ------------------------------------------------------------------------------------------------- tools
 
+/** What a Docker gap says: the runner's Docker comes from the installer (DESIGN §3), never from DevOps. */
+export const DOCKER_BY_INSTALLER =
+  'Docker for the runner is set up by the installer: re-run it (it sets up a rootless Docker for this user, or uses the installed Docker after your typed acceptance)';
+
 const one = (cmd: string, args: string[], version?: RegExp, contains?: string): Check => ({
   cmd,
   args,
@@ -453,19 +471,19 @@ const VER = /(\d+(?:\.\d+){0,3})/;
 const pkg = (m: Manager, ...names: string[]): Partial<Record<Manager, Step[]>> => {
   switch (m) {
     case 'apt':
-      return { apt: [{ cmd: 'apt-get', args: ['install', '-y', ...names], root: true }] };
+      return { apt: [{ cmd: 'apt-get', args: ['install', '-y', ...names] }] };
     case 'dnf':
       // yum (older RHEL/CentOS) takes the same package names
       return {
-        dnf: [{ cmd: 'dnf', args: ['install', '-y', ...names], root: true }],
-        yum: [{ cmd: 'yum', args: ['install', '-y', ...names], root: true }],
+        dnf: [{ cmd: 'dnf', args: ['install', '-y', ...names] }],
+        yum: [{ cmd: 'yum', args: ['install', '-y', ...names] }],
       };
     case 'pacman':
-      return { pacman: [{ cmd: 'pacman', args: ['-S', '--noconfirm', '--needed', ...names], root: true }] };
+      return { pacman: [{ cmd: 'pacman', args: ['-S', '--noconfirm', '--needed', ...names] }] };
     case 'zypper':
-      return { zypper: [{ cmd: 'zypper', args: ['--non-interactive', 'install', ...names], root: true }] };
+      return { zypper: [{ cmd: 'zypper', args: ['--non-interactive', 'install', ...names] }] };
     case 'apk':
-      return { apk: [{ cmd: 'apk', args: ['add', ...names], root: true }] };
+      return { apk: [{ cmd: 'apk', args: ['add', ...names] }] };
     case 'brew':
       return { brew: [{ cmd: 'brew', args: ['install', ...names] }] };
     case 'winget':
@@ -484,7 +502,7 @@ const pkg = (m: Manager, ...names: string[]): Partial<Record<Manager, Step[]>> =
         })),
       };
     case 'choco':
-      return { choco: [{ cmd: 'choco', args: ['install', '-y', ...names], root: true }] };
+      return { choco: [{ cmd: 'choco', args: ['install', '-y', ...names] }] };
     default:
       return {};
   }
@@ -503,31 +521,26 @@ const workload = (id: string, extra?: Partial<ToolSpec>): ToolSpec => ({
   ...extra,
 });
 
-const DOTNET_INSTALL_SH = (channel: string) =>
-  `curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh && bash /tmp/dotnet-install.sh --channel ${channel}`;
-
-/** dotnet-install into a given root (user level): one run per SDK channel, then runtime-only channels. */
-export const dotnetInstallInto = (root: string, sdkChannels: string[], runtimeChannels: string[]): string => {
-  const q = `'${root.replace(/'/g, `'\\''`)}'`;
-  const runs = [
-    ...sdkChannels.map((c) => `bash /tmp/dotnet-install.sh --install-dir ${q} --channel ${c}`),
-    ...runtimeChannels.map(
-      (c) => `bash /tmp/dotnet-install.sh --install-dir ${q} --runtime dotnet --channel ${c}`,
-    ),
-  ];
-  return ['curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh', ...runs].join(' && ');
-};
-
 // ---------------------------------------------------------------------------------------------- Android SDK
 
-/** Where the Android SDK lives: the user's own setting, else the default folder every Android tool looks in. */
-export function androidHome(platform: Platform, env: NodeJS.ProcessEnv = process.env): string {
+/**
+ * Where the Android SDK lives: the user's own setting, else an existing default folder every Android tool looks in,
+ * else `<toolchains>/android-sdk` (where DevOps installs it, DESIGN §5).
+ */
+export function androidHome(
+  platform: Platform,
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = accountHome(),
+): string {
   const set = env.ANDROID_HOME || env.ANDROID_SDK_ROOT;
   if (set) return set;
-  if (platform === 'darwin') return join(homedir(), 'Library', 'Android', 'sdk');
-  if (platform === 'win32')
-    return join(env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'Android', 'Sdk');
-  return join(homedir(), 'Android', 'Sdk');
+  const usual =
+    platform === 'darwin'
+      ? join(home, 'Library', 'Android', 'sdk')
+      : platform === 'win32'
+        ? join(env.LOCALAPPDATA ?? join(home, 'AppData', 'Local'), 'Android', 'Sdk')
+        : join(home, 'Android', 'Sdk');
+  return existsSync(usual) ? usual : join(toolchainsRoot(home), 'android-sdk');
 }
 
 const sdkmanagerPath = (platform: Platform): string =>
@@ -538,25 +551,6 @@ const sdkmanagerPath = (platform: Platform): string =>
     'bin',
     platform === 'win32' ? 'sdkmanager.bat' : 'sdkmanager',
   );
-
-/** Google's command-line tools bundle (the build number changes rarely; sdkmanager updates itself afterwards). */
-const CMDLINE_TOOLS_BUILD = '11076708';
-
-/** Installs the command-line tools into `<sdk>/cmdline-tools/latest` and accepts the licences. User level, no root. */
-export const cmdlineToolsScript = (platform: Platform): string => {
-  const sdk = androidHome(platform);
-  const os = platform === 'darwin' ? 'mac' : 'linux';
-  return [
-    'set -e',
-    `mkdir -p "${sdk}/cmdline-tools"`,
-    `curl -fsSL -o "${sdk}/clt.zip" https://dl.google.com/android/repository/commandlinetools-${os}-${CMDLINE_TOOLS_BUILD}_latest.zip`,
-    `rm -rf "${sdk}/cmdline-tools/tmp" "${sdk}/cmdline-tools/latest"`,
-    `unzip -q -o "${sdk}/clt.zip" -d "${sdk}/cmdline-tools/tmp"`,
-    `mv "${sdk}/cmdline-tools/tmp/cmdline-tools" "${sdk}/cmdline-tools/latest"`,
-    `rm -rf "${sdk}/cmdline-tools/tmp" "${sdk}/clt.zip"`,
-    `yes | "${sdk}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${sdk}" --licenses > /dev/null || true`,
-  ].join('\n');
-};
 
 /** `sdkmanager --install <package>` for the SDK folder of this machine. */
 const sdkInstall = (platform: Platform, pkgName: string): Step[] => [
@@ -583,8 +577,8 @@ const ANDROID_TOOLS: ToolSpec[] = [
     name: 'Android SDK command-line tools',
     after: ['jdk'],
     checks: (_p, platform) => [one(sdkmanagerPath(platform), ['--version'], VER)],
-    recipes: (_p, platform) =>
-      platform === 'win32' ? {} : { any: [{ cmd: 'bash', args: ['-c', cmdlineToolsScript(platform)] }] },
+    recipes: () => ({}),
+    userInstall: (ctx) => androidCmdlineUserInstall(androidHome(ctx.platform))(ctx),
     manual: (_p, platform) =>
       `Install the Android command-line tools into ${join(androidHome(platform), 'cmdline-tools', 'latest')} (https://developer.android.com/studio#command-line-tools-only; curl and unzip are needed)`,
   },
@@ -622,7 +616,7 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
         name: '.NET SDK',
         checks: () => [one('dotnet', ['--version'], VER)],
         minVersion: (p) => p.sdkMajor,
-        recipes: (p, platform) => {
+        recipes: (p) => {
           const v = p.sdkMajor ?? '8';
           return merge(
             pkg('apt', `dotnet-sdk-${v}.0`),
@@ -632,10 +626,10 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
             pkg('apk', `dotnet${v}-sdk`),
             pkg('brew', `dotnet@${v}`),
             pkg('winget', `Microsoft.DotNet.SDK.${v}`),
-            // The official installer script: user level, no administrator rights (Linux and macOS).
-            platform === 'win32' ? {} : { any: [{ cmd: 'bash', args: ['-c', DOTNET_INSTALL_SH(`${v}.0`)] }] },
           );
         },
+        // env.ensure picks the root and channels from the .NET selection (`dotnetUserInstall` there)
+        userInstall: (ctx) => dotnetUserInstall(undefined, [`${ctx.params.sdkMajor ?? '8'}.0`], [])(ctx),
         manual: (p) =>
           `Install the .NET SDK ${p.sdkMajor ?? ''} from https://dot.net/download`.replace('  ', ' '),
       },
@@ -661,6 +655,7 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
             pkg('winget', `Microsoft.OpenJDK.${v}`),
           );
         },
+        userInstall: jdkUserInstall,
         manual: (p) => `Install a JDK ${p.javaMajor ?? '17'} (https://adoptium.net)`,
       },
       {
@@ -678,6 +673,7 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
             pkg('brew', p.nodeMajor ? `node@${p.nodeMajor}` : 'node'),
             pkg('winget', p.nodeMajor ? `OpenJS.NodeJS.${p.nodeMajor}` : 'OpenJS.NodeJS.LTS'),
           ),
+        userInstall: nodeUserInstall,
         manual: (p) => `Install Node.js ${p.nodeMajor ?? 'LTS'} (https://nodejs.org or nvm)`,
       },
       {
@@ -687,7 +683,18 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
         checks: () => [one('pnpm', ['--version'], VER)],
         minVersion: (p) => p.pmVersion,
         recipes: (p) => ({
-          any: [{ cmd: 'npm', args: ['install', '-g', p.pmVersion ? `pnpm@${p.pmVersion}` : 'pnpm'] }],
+          any: [
+            {
+              cmd: 'npm',
+              args: [
+                'install',
+                '-g',
+                '--prefix',
+                toolchainsRoot(),
+                p.pmVersion ? `pnpm@${p.pmVersion}` : 'pnpm',
+              ],
+            },
+          ],
         }),
         manual: () => 'npm install -g pnpm (or corepack enable)',
       },
@@ -696,20 +703,17 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
         name: 'Yarn',
         after: ['node'],
         checks: () => [one('yarn', ['--version'], VER)],
-        recipes: () => ({ any: [{ cmd: 'npm', args: ['install', '-g', 'yarn'] }] }),
+        recipes: () => ({
+          any: [{ cmd: 'npm', args: ['install', '-g', '--prefix', toolchainsRoot(), 'yarn'] }],
+        }),
         manual: () => 'npm install -g yarn (or corepack enable)',
       },
       {
         id: 'node-bun',
         name: 'Bun',
         checks: () => [one('bun', ['--version'], VER)],
-        recipes: (_p, platform) =>
-          merge(
-            pkg('brew', 'oven-sh/bun/bun'),
-            platform === 'win32'
-              ? {}
-              : { any: [{ cmd: 'bash', args: ['-c', 'curl -fsSL https://bun.sh/install | bash'] }] },
-          ),
+        recipes: () => pkg('brew', 'oven-sh/bun/bun'),
+        userInstall: bunUserInstall,
         manual: () => 'Install Bun from https://bun.sh',
       },
       {
@@ -733,6 +737,7 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
               p.pythonVersion ? `Python.Python.${p.pythonVersion.replace('.', '.')}` : 'Python.Python.3.12',
             ),
           ),
+        userInstall: pythonUserInstall,
         manual: (p) => `Install Python ${p.pythonVersion ?? '3'} (https://python.org)`,
       },
       {
@@ -748,15 +753,9 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
       {
         id: 'python-uv',
         name: 'uv',
-        after: ['python'],
         checks: () => [one('uv', ['--version'], VER)],
-        recipes: (_p, platform) =>
-          merge(
-            pkg('brew', 'uv'),
-            platform === 'win32'
-              ? {}
-              : { any: [{ cmd: 'bash', args: ['-c', 'curl -LsSf https://astral.sh/uv/install.sh | sh'] }] },
-          ),
+        recipes: () => pkg('brew', 'uv'),
+        userInstall: uvUserInstall,
         manual: () => 'Install uv (https://docs.astral.sh/uv/)',
       },
       {
@@ -764,47 +763,27 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
         name: 'Poetry',
         after: ['python'],
         checks: () => [one('poetry', ['--version'], VER)],
-        recipes: (_p, platform) => ({
-          any: [
-            {
-              cmd: platform === 'win32' ? 'python' : 'python3',
-              args: ['-m', 'pip', 'install', '--user', 'poetry'],
-            },
-          ],
-        }),
-        manual: () => 'pip install --user poetry',
+        recipes: () => ({}),
+        userInstall: uvToolUserInstall('poetry'),
+        manual: () => 'uv tool install poetry',
       },
       {
         id: 'python-pipenv',
         name: 'Pipenv',
         after: ['python'],
         checks: () => [one('pipenv', ['--version'], VER)],
-        recipes: (_p, platform) => ({
-          any: [
-            {
-              cmd: platform === 'win32' ? 'python' : 'python3',
-              args: ['-m', 'pip', 'install', '--user', 'pipenv'],
-            },
-          ],
-        }),
-        manual: () => 'pip install --user pipenv',
+        recipes: () => ({}),
+        userInstall: uvToolUserInstall('pipenv'),
+        manual: () => 'uv tool install pipenv',
       },
       {
         id: 'docker',
         name: 'Docker',
         docker: true,
         checks: () => [one('docker', ['--version'], VER)],
-        recipes: () =>
-          merge(
-            pkg('apt', 'docker.io', 'docker-compose-v2'),
-            pkg('dnf', 'docker', 'docker-compose'),
-            pkg('pacman', 'docker', 'docker-compose'),
-            pkg('zypper', 'docker', 'docker-compose'),
-            pkg('apk', 'docker', 'docker-cli-compose'),
-            pkg('brew', 'docker', 'docker-compose'),
-            pkg('winget', 'Docker.DockerDesktop'),
-          ),
-        manual: () => 'Install Docker (https://docs.docker.com/engine/install/)',
+        // Docker for the runner (rootless, or the accepted host daemon) is the installer's job, never a DevOps install
+        recipes: () => ({}),
+        manual: () => DOCKER_BY_INSTALLER,
       },
       {
         id: 'docker-daemon',
@@ -812,14 +791,11 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
         docker: true,
         after: ['docker'],
         checks: () => [one('docker', ['info', '--format', '{{.ServerVersion}}'], VER)],
-        recipes: (_p, platform) =>
-          platform === 'linux'
-            ? { any: [{ cmd: 'systemctl', args: ['enable', '--now', 'docker'], root: true }] }
-            : {},
+        recipes: () => ({}),
         manual: (_p, platform) =>
-          platform === 'linux'
-            ? 'sudo systemctl enable --now docker; add the runner user to the docker group: sudo usermod -aG docker $USER (then log in again)'
-            : 'Start Docker Desktop',
+          platform === 'darwin'
+            ? `Start Docker Desktop. ${DOCKER_BY_INSTALLER}`
+            : `${DOCKER_BY_INSTALLER}; for a rootless Docker that is set up but stopped: systemctl --user start docker (as the runner user)`,
       },
       {
         id: 'go',
@@ -836,27 +812,15 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
             pkg('brew', 'go'),
             pkg('winget', 'GoLang.Go'),
           ),
+        userInstall: goUserInstall,
         manual: () => 'Install Go (https://go.dev/dl/)',
       },
       {
         id: 'rust',
         name: 'Rust (cargo)',
         checks: () => [one('cargo', ['--version'], VER)],
-        recipes: (_p, platform) =>
-          merge(
-            pkg('brew', 'rustup'),
-            pkg('winget', 'Rustlang.Rustup'),
-            platform === 'win32'
-              ? {}
-              : {
-                  any: [
-                    {
-                      cmd: 'bash',
-                      args: ['-c', "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"],
-                    },
-                  ],
-                },
-          ),
+        recipes: () => merge(pkg('brew', 'rustup'), pkg('winget', 'Rustlang.Rustup')),
+        userInstall: rustUserInstall,
         manual: () => 'Install Rust with rustup (https://rustup.rs)',
       },
       {
@@ -874,6 +838,7 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
             pkg('brew', 'maven'),
             pkg('winget', 'Apache.Maven'),
           ),
+        userInstall: mavenUserInstall,
         manual: () => 'Install Maven (https://maven.apache.org)',
       },
       {
@@ -891,6 +856,7 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
             pkg('brew', 'gradle'),
             pkg('winget', 'Gradle.Gradle'),
           ),
+        userInstall: gradleUserInstall,
         manual: () => 'Install Gradle (https://gradle.org) or add a wrapper to the repository',
       },
       {

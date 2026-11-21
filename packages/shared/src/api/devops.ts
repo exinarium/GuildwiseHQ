@@ -82,6 +82,7 @@ export const PatchDevOpsAccessRequestSchema = z.object({
   allowInstall: z.boolean().optional(),
   allowDocker: z.boolean().optional(),
   allowedPaths: z.array(z.string()).optional(),
+  /** Removed in 1.10.0: `true` answers 400 `sudo_removed`. */
   sudo: z.boolean().optional(),
 });
 export type PatchDevOpsAccessRequest = z.infer<typeof PatchDevOpsAccessRequestSchema>;

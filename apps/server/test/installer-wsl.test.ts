@@ -35,7 +35,7 @@ function pwsh(
     `$ErrorActionPreference = 'Stop'
 $AppName = 'Guildwise HQ'
 $DedicatedDistro = 'guildwise-runner'
-$ForwardedVars = @('GUILDWISE_YES', 'GUILDWISE_DEVOPS_ORGS', 'GUILDWISE_SUDO')
+$ForwardedVars = @('GUILDWISE_YES', 'GUILDWISE_DEVOPS_ORGS', 'GUILDWISE_SKIP_BASELINE')
 $t = $null; $e = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile('${scriptFile}', [ref]$t, [ref]$e)
 foreach ($f in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
@@ -121,7 +121,9 @@ describe('the Windows installer script', () => {
     expect(fn.indexOf('Get-DedicatedWslConfScript -WithUser')).toBeGreaterThan(
       fn.indexOf('exec bash /root/guildwise-install.sh'),
     );
-    expect(fn).toContain('root inside $DedicatedDistro could switch Windows interop back on (/etc/wsl.conf)');
+    expect(fn).toContain(
+      'The runner has no sudo inside $DedicatedDistro; its Docker is its own rootless engine there',
+    );
   });
 
   it('checks Docker Desktop before the Linux installer runs and again after (the distribution may have become the default)', () => {
@@ -220,7 +222,7 @@ describe.skipIf(!hasPwsh)('passing installer choices into the distribution (Powe
       GUILDWISE_YES: '1',
     });
     expect(r.status, r.err).toBe(0);
-    expect(r.out).not.toContain('GUILDWISE_SUDO');
+    expect(r.out).not.toContain('GUILDWISE_SKIP_BASELINE');
     const b = spawnSync('bash', ['-c', `${r.out} printf '%s|%s' "$GUILDWISE_DEVOPS_ORGS" "$GUILDWISE_YES"`], {
       encoding: 'utf8',
     });
@@ -245,10 +247,14 @@ describe('the default-distribution path (your own Ubuntu)', () => {
       'GUILDWISE_YES',
       'GUILDWISE_LEGACY',
       'GUILDWISE_DEVOPS_ORGS',
-      'GUILDWISE_SUDO',
       'GUILDWISE_DOCKER',
+      'GUILDWISE_DOCKER_SOCKET',
+      'GUILDWISE_ACCEPT_SHARED_DAEMON',
+      'GUILDWISE_SKIP_BASELINE',
     ])
       expect(ps).toMatch(new RegExp(`\\$ForwardedVars = @\\([^)]*'${v}'`));
+    for (const gone of ['GUILDWISE_SUDO', 'GUILDWISE_APPROVE_APPS', 'GUILDWISE_WITH_DOCKER'])
+      expect(ps).not.toMatch(new RegExp(`\\$ForwardedVars = @\\([^)]*'${gone}'`));
   });
 });
 

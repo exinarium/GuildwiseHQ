@@ -130,7 +130,6 @@ import {
   applyEnvEnsureResult,
   applyRepoCloneResult,
   applyRightsResult,
-  applySudoSetResult,
   deliver,
   environmentRequestEvents,
 } from '../commands/workstation-setup.ts';
@@ -898,7 +897,7 @@ export class RunnerHandlers {
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyDeployResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
     } else if (cmd?.type === 'deploy.secret.set') {
-      // Like the sudo password: the ciphertext is forgotten whatever the answer was.
+      // The ciphertext is forgotten whatever the answer was.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyDeploySecretResult(
         this.ctx,
@@ -907,17 +906,6 @@ export class RunnerHandlers {
         cmd.payload,
         msg.ok,
         msg.result,
-      );
-    } else if (cmd?.type === 'sudo.set') {
-      // The ciphertext is forgotten here (applySudoSetResult empties the payload) whatever the answer was.
-      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
-      await applySudoSetResult(
-        this.ctx,
-        conn.workstationId,
-        msg.commandId,
-        msg.ok,
-        msg.result,
-        String(cmd.payload.keyId ?? ''),
       );
     } else if (cmd?.type === 'app.access_check') {
       // Which project repositories the app reaches: states and value-free reasons only.
@@ -1025,7 +1013,7 @@ export class RunnerHandlers {
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyResealResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result);
     } else if (cmd?.type === 'env.secret.set') {
-      // Like the sudo password: the ciphertext is forgotten whatever the answer was.
+      // The ciphertext is forgotten whatever the answer was.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyTargetSecretResult(
         this.ctx,
@@ -1150,7 +1138,7 @@ export class RunnerHandlers {
         msg.startupRefused ?? null,
       ],
     );
-    // The public key the sudo password is encrypted with (the private half stays on the runner).
+    // The workstation sealing key (still named sudoKey): secrets are encrypted with it; the private half stays on the runner.
     conn.setupCapable = !!msg.sudoKey;
     if (msg.sudoKey)
       await exec(

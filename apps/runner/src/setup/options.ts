@@ -22,10 +22,10 @@ export interface RawSetupFlags {
   legacy?: string;
   acceptRootEquivalent?: boolean;
   devopsOrgs?: string;
-  sudo?: string;
-  sudoPasswordStdin?: boolean;
   docker?: string;
-  approveApp?: string[];
+  dockerFound?: string;
+  dockerSocket?: string;
+  acceptSharedDaemon?: boolean;
   deploy?: string;
   deployPinCommit?: boolean;
   allowUnsignedFrom?: string[];
@@ -33,10 +33,12 @@ export interface RawSetupFlags {
   instance?: string;
 }
 
-export interface ApproveApp {
-  app: string;
-  folder: string;
-}
+export type DockerMode = 'rootless' | 'host' | 'shared' | 'none';
+/** `rootful`: a root daemon; `desktop`: Docker Desktop (macOS); `own`: the runner's own rootless daemon; `shared`: another user's rootless daemon. */
+export type DockerFound = 'rootful' | 'desktop' | 'own' | 'shared' | 'none';
+
+export const DESKTOP_SOCKET_RE = /^\/Users\/[^/]+\/\.docker\/run\/docker\.sock$/;
+export const SHARED_SOCKET_RE = /^\/(?:var\/)?run\/[A-Za-z0-9_-][A-Za-z0-9._-]*\/docker\.sock$/;
 
 export interface SetupOptions {
   yes: boolean;
@@ -48,10 +50,13 @@ export interface SetupOptions {
   acceptRootEquivalent: boolean;
   /** `none`, or the organization ids to grant (each must be offered by the server; no `owned` shortcut [rv6-6]). */
   devopsOrgs?: 'none' | string[];
-  sudo?: 'on' | 'off';
-  sudoPasswordStdin: boolean;
-  docker?: 'none' | 'narrow' | 'group';
-  approveApps: ApproveApp[];
+  docker?: DockerMode;
+  /** What the installer's `detect_docker` saw (a suggestion for the question, never a grant). */
+  dockerFound?: DockerFound;
+  /** `host` on macOS: the Docker Desktop socket; `shared`: the other daemon's socket. */
+  dockerSocket?: string;
+  /** Typed acceptance of a shared rootless daemon (owner 2026-11-21). */
+  acceptSharedDaemon: boolean;
   deploy?: 'ask' | 'off';
   deployPinCommit?: boolean;
   allowUnsignedFrom?: string[];
@@ -60,7 +65,6 @@ export interface SetupOptions {
   instance?: string;
 }
 
-const APP_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function oneOf<T extends string>(
@@ -107,20 +111,9 @@ export function parseInstance(v: string | undefined): string | undefined {
   if (v === undefined || v === '') return undefined;
   if (!isInstanceName(v))
     throw new SetupError(
-      `--instance takes lowercase letters, digits and inner dashes, at most 15, not node, guildwise-admin or deploy-compose (got ${JSON.stringify(v)})`,
+      `--instance takes lowercase letters, digits and inner dashes, at most 15, not node, guildwise-admin, deploy-compose or docker (got ${JSON.stringify(v)})`,
     );
   return v;
-}
-
-export function parseApproveApp(spec: string): ApproveApp {
-  const i = spec.indexOf('=');
-  const app = i > 0 ? spec.slice(0, i) : '';
-  const folder = i > 0 ? spec.slice(i + 1) : '';
-  if (!APP_RE.test(app) || !folder.startsWith('/'))
-    throw new SetupError(
-      `--approve-app takes <app>=<absolute folder> (app: a-z, 0-9, -), got ${JSON.stringify(spec)}`,
-    );
-  return { app, folder };
 }
 
 export function parseSetupOptions(raw: RawSetupFlags, env: NodeJS.ProcessEnv = process.env): SetupOptions {
@@ -150,23 +143,35 @@ export function parseSetupOptions(raw: RawSetupFlags, env: NodeJS.ProcessEnv = p
     legacy: oneOf('legacy', raw.legacy ?? e('LEGACY'), ['quarantine', 'remove'] as const),
     acceptRootEquivalent: raw.acceptRootEquivalent === true || truthy(e('ACCEPT_ROOT_EQUIVALENT')),
     devopsOrgs,
-    sudo: oneOf('sudo', raw.sudo ?? e('SUDO'), ['on', 'off'] as const),
-    sudoPasswordStdin: raw.sudoPasswordStdin === true || truthy(e('SUDO_PASSWORD_STDIN')),
-    docker: oneOf('docker', raw.docker ?? e('DOCKER'), ['none', 'narrow', 'group'] as const),
-    approveApps: (raw.approveApp?.length ? raw.approveApp : list(e('APPROVE_APP'))).map(parseApproveApp),
+    docker: oneOf('docker', raw.docker ?? e('DOCKER'), ['rootless', 'host', 'shared', 'none'] as const),
+    dockerFound: oneOf('docker-found', raw.dockerFound ?? e('DOCKER_FOUND'), [
+      'rootful',
+      'desktop',
+      'own',
+      'shared',
+      'none',
+    ] as const),
+    dockerSocket: raw.dockerSocket ?? e('DOCKER_SOCKET'),
+    acceptSharedDaemon: raw.acceptSharedDaemon === true || truthy(e('ACCEPT_SHARED_DAEMON')),
     deploy: oneOf('deploy', raw.deploy ?? e('DEPLOY'), ['ask', 'off'] as const),
     deployPinCommit: raw.deployPinCommit === true || truthy(e('DEPLOY_PIN_COMMIT')) ? true : undefined,
     allowUnsignedFrom: unsignedRaw.length > 0 ? [...new Set(unsignedRaw.map(exactOrigin))] : undefined,
     dataDir: raw.dataDir,
     instance: parseInstance(raw.instance ?? e('INSTANCE')),
   };
-  if (opts.docker === 'group' && !opts.acceptRootEquivalent)
+  if (opts.docker === 'host' && !opts.acceptRootEquivalent)
+    throw new SetupError('--docker host makes the runner root-equivalent: it needs --accept-root-equivalent');
+  if (opts.docker === 'shared' && !opts.acceptSharedDaemon)
     throw new SetupError(
-      '--docker group makes the runner root-equivalent: it needs --accept-root-equivalent',
+      '--docker shared lets the runner control every container on that daemon: it needs --accept-shared-daemon',
     );
-  if (opts.approveApps.length > 0 && opts.docker !== undefined && opts.docker !== 'narrow')
-    throw new SetupError('--approve-app needs --docker narrow');
-  if (opts.sudoPasswordStdin && opts.sudo !== 'on')
-    throw new SetupError('--sudo-password-stdin goes with --sudo on');
+  if (
+    opts.dockerSocket !== undefined &&
+    !DESKTOP_SOCKET_RE.test(opts.dockerSocket) &&
+    !SHARED_SOCKET_RE.test(opts.dockerSocket)
+  )
+    throw new SetupError(
+      `--docker-socket takes /Users/<you>/.docker/run/docker.sock (macOS) or /run/<name>/docker.sock (got ${JSON.stringify(opts.dockerSocket)})`,
+    );
   return opts;
 }

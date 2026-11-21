@@ -178,11 +178,6 @@ export function devopsRevoke(d: PolicyCliDeps, orgId: string): Policy {
 
 export function devopsRequests(d: PolicyCliDeps, mode: string): Policy {
   if (mode !== 'ask' && mode !== 'auto') throw new Error('use: devops requests ask|auto');
-  const cur = d.store.get();
-  if (mode === 'auto' && cur.devops.sudo)
-    throw new Error(
-      '"auto" is refused while sudo is granted: with sudo, every DevOps task asks (sudo disable first)',
-    );
   const p = d.store.update((p) => {
     p.devopsRequests = mode;
     return p;
@@ -201,21 +196,6 @@ export function devopsAgentRequests(d: PolicyCliDeps, mode: string): Policy {
     p.devopsAgentRequests = mode;
     return p;
   });
-}
-
-export async function sudoSet(d: PolicyCliDeps, on: boolean): Promise<Policy> {
-  if (
-    on &&
-    !(await confirm(d, 'Allow the DevOps engineer to run approved commands with sudo on this machine?'))
-  )
-    throw new Error('not changed');
-  const p = d.store.update((p) => {
-    p.devops.sudo = on;
-    if (on) p.devopsRequests = 'ask'; // with sudo, asking is always on
-    return p;
-  });
-  d.out(on ? 'sudo granted locally; every DevOps task asks first.' : 'sudo is off on this workstation.');
-  return p;
 }
 
 export function repoScripts(d: PolicyCliDeps, url: string, allow: boolean): Policy {
@@ -300,7 +280,7 @@ export function passkeyList(d: PolicyCliDeps): void {
 
 /**
  * `passkey trust [credential-id prefix]`: trusts one offered passkey after a local yes. It can then approve only a
- * commit-only redeploy and a recipe write; never grants, DevOps, sudo, install scripts or owner turns.
+ * commit-only redeploy and a recipe write; never grants, DevOps, install scripts or owner turns.
  */
 export async function passkeyTrust(d: PolicyCliDeps, prefix?: string): Promise<Policy> {
   const offers = d.passkeys.offers().filter((o) => !prefix || o.credentialId.startsWith(prefix));
@@ -444,11 +424,6 @@ export function registerPolicyCommands(
   devops.command('pending').action(run(() => pendingList(make())));
   devops.command('approve <id>').action(run((id: string) => approve(make(), id)));
   devops.command('deny <id>').action(run((id: string) => deny(make(), id)));
-
-  program
-    .command('sudo <enable|disable>')
-    .description('local sudo grant for the DevOps engineer')
-    .action(run((v: string) => sudoSet(make(), v === 'enable')));
 
   const repo = program.command('repo').description('per-repository install scripts (R18-S)');
   repo.command('allow-scripts <url>').action(run((u: string) => repoScripts(make(), u, true)));

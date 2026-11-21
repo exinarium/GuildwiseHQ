@@ -160,13 +160,14 @@ describe('other held commands', () => {
     expect(gateCommand(set({}), 'deploy.exec', { runId: 'x' })).toMatchObject({ action: 'refuse' });
   });
 
-  it('env.ensure: sudo and Docker are narrowed to the local grants; installs or extra paths wait', () => {
+  it('env.ensure: Docker is narrowed to the local grant, sudo is always off; installs or extra paths wait', () => {
     const access = { allowInstall: false, allowDocker: true, allowedPaths: [], sudo: true };
     expect(narrowAccess(set({}), access)).toMatchObject({ sudo: false, allowDocker: false });
+    // an old policy.json with devops.sudo still parses, and grants no sudo (removed in 1.10.0)
     expect(
-      narrowAccess(set({ devops: { agents: {}, sudo: true }, allowDocker: true }), access),
+      narrowAccess(PolicySchema.parse({ devops: { agents: {}, sudo: true }, allowDocker: true }), access),
     ).toMatchObject({
-      sudo: true,
+      sudo: false,
       allowDocker: true,
     });
     const payload = (a: object) => ({
@@ -178,17 +179,13 @@ describe('other held commands', () => {
     expect(gateEnvEnsure(set({}), payload({}))).toEqual({ action: 'run' });
     expect(gateEnvEnsure(set({}), payload({ allowInstall: true }))).toMatchObject({ action: 'hold' });
     expect(gateEnvEnsure(set({}), payload({ allowedPaths: ['/etc'] }))).toMatchObject({ action: 'hold' });
-    // what runs: the server's sudo is dropped unless sudo is granted locally, and the prompt says so
+    // what runs: the server's sudo is always dropped, and the prompt no longer mentions it
     expect(localEnvEnsure(set({}), payload({ allowInstall: true })).access).toMatchObject({
       sudo: false,
       allowDocker: false,
     });
-    expect(
-      localEnvEnsure(set({ devops: { agents: {}, sudo: true } }), payload({ allowInstall: true })).access
-        .sudo,
-    ).toBe(true);
     const held = gateEnvEnsure(set({}), payload({ allowInstall: true }));
-    expect(held.action === 'hold' && held.detail).toMatch(/sudo\s+no/);
+    expect(held.action === 'hold' && held.detail).not.toMatch(/sudo/);
   });
 });
 
@@ -225,12 +222,10 @@ describe('DevOps shifts [rv4-2]', () => {
   it('an isDevops shift without a local grant is refused', () => {
     expect(gateDevopsShift(set({}), s)).toMatchObject({ action: 'refuse' });
     // a grant for another agent of the org is not a grant for this one
-    expect(gateDevopsShift(set({ devops: { agents: { [ORG]: ORG }, sudo: false } }), s).action).toBe(
-      'refuse',
-    );
+    expect(gateDevopsShift(set({ devops: { agents: { [ORG]: ORG } } }), s).action).toBe('refuse');
   });
-  it('a granted agent is held until a local yes (ask, the default); auto runs; sudo makes it ask again', () => {
-    const granted = { agents: { [ORG]: AGENT }, sudo: false };
+  it('a granted agent is held until a local yes (ask, the default); auto runs, also for an old file with sudo', () => {
+    const granted = { agents: { [ORG]: AGENT } };
     expect(gateDevopsShift(set({ devops: granted }), s)).toMatchObject({
       action: 'hold',
       kind: 'devops.task',
@@ -238,15 +233,10 @@ describe('DevOps shifts [rv4-2]', () => {
     expect(gateDevopsShift(set({ devops: granted, devopsRequests: 'auto' }), s)).toEqual({ action: 'run' });
     expect(
       gateDevopsShift(
-        { ...set({ devops: granted }), devopsRequests: 'auto', devops: { ...granted, sudo: true } },
+        PolicySchema.parse({ setupDone: true, devopsRequests: 'auto', devops: { ...granted, sudo: true } }),
         s,
       ).action,
-    ).toBe('hold');
-  });
-  it('the schema refuses devopsRequests auto while sudo is granted', () => {
-    expect(
-      PolicySchema.safeParse({ devopsRequests: 'auto', devops: { agents: {}, sudo: true } }).success,
-    ).toBe(false);
+    ).toBe('run');
   });
 });
 
@@ -306,7 +296,7 @@ describe('release.prepare prompt (R30, review round 2)', () => {
 
 describe('DevOps task prompt shows the grant (round-1 should-fix 4)', () => {
   it('lists the shift kind and the access as it applies here', () => {
-    const d = gateDevopsShift(set({ devops: { agents: { [ORG]: AGENT }, sudo: false } }), {
+    const d = gateDevopsShift(set({ devops: { agents: { [ORG]: AGENT } } }), {
       orgId: ORG,
       agentId: AGENT,
       shiftId: 's1',
@@ -314,7 +304,7 @@ describe('DevOps task prompt shows the grant (round-1 should-fix 4)', () => {
       access: { allowInstall: true, allowDocker: true, allowedPaths: ['/srv/app'], sudo: true },
     });
     expect(d.action === 'hold' && d.detail).toMatch(/kind\s+devops/);
-    expect(d.action === 'hold' && d.detail).toMatch(/sudo\s+asked, NOT granted here/);
+    expect(d.action === 'hold' && d.detail).not.toMatch(/sudo/);
     expect(d.action === 'hold' && d.detail).toMatch(/docker\s+asked, NOT allowed here/);
     expect(d.action === 'hold' && d.detail).toMatch(/installs\s+yes/);
     expect(d.action === 'hold' && d.detail).toMatch(/paths\s+\/srv\/app/);

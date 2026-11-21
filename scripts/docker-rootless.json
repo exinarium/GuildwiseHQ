@@ -1,0 +1,30 @@
+{
+  "linux-x64": {
+    "docker": {
+      "url": "https://download.docker.com/linux/static/stable/x86_64/docker-29.9.3.tgz",
+      "sha256": "3fb5d1f13014c18cc54945bc177c58a9056a482dada031e17d12cf2e6922c973"
+    },
+    "extras": {
+      "url": "https://download.docker.com/linux/static/stable/x86_64/docker-rootless-extras-29.9.3.tgz",
+      "sha256": "c41b7194dca722fe929bc0225fc87f3166c97e67d50a521533b0b23f3c79a466"
+    },
+    "compose": {
+      "url": "https://github.com/docker/compose/releases/download/v5.7.0/docker-compose-linux-x86_64",
+      "sha256": "7758048ad38e580f22559603312874fec8bb638d021a9e64182385fc17cc12a2"
+    }
+  },
+  "linux-arm64": {
+    "docker": {
+      "url": "https://download.docker.com/linux/static/stable/aarch64/docker-29.9.3.tgz",
+      "sha256": "1b27fd739378ef938401e81ce5afb73b7ad7432d4f598814a9ff5f826bb464d2"
+    },
+    "extras": {
+      "url": "https://download.docker.com/linux/static/stable/aarch64/docker-rootless-extras-29.9.3.tgz",
+      "sha256": "867bbb01a3df1566681ccf53da8255434d4ca2cc84a304111604b6ee6130c349"
+    },
+    "compose": {
+      "url": "https://github.com/docker/compose/releases/download/v5.7.0/docker-compose-linux-aarch64",
+      "sha256": "15861535d14e26555736b49376c95e14bfd94285366c8446bfac7156a972e76f"
+    }
+  }
+}

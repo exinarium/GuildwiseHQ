@@ -1,5 +1,4 @@
-import { appendFileSync, mkdirSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
   type DevOpsAccess,
@@ -18,10 +17,17 @@ import {
   dotnetRootWritable,
   shortPath,
 } from './dotnet.ts';
-import type { ExecResult, Executor } from './exec.ts';
-import { type DetectedManager, detectManagers, managerCommands, noManagerAdvice } from './managers.ts';
-import { dotnetInstallInto, STACKS, TOOLS } from './stacks.ts';
-import type { Check, DepStep, Detection, Manager, Params, Platform, Step, ToolSpec } from './types.ts';
+import type { Executor } from './exec.ts';
+import { type DetectedManager, detectManagers, noManagerAdvice } from './managers.ts';
+import { dotnetUserInstall, rustEnv } from './sources.ts';
+import { DOCKER_BY_INSTALLER, STACKS, TOOLS } from './stacks.ts';
+import type { Check, DepStep, Detection, Params, Platform, Step, ToolSpec } from './types.ts';
+import {
+  createUserInstaller,
+  toolchainsRoot,
+  type UserInstaller,
+  type UserInstallResolver,
+} from './user-install.ts';
 
 /** `have >= want`, comparing dotted numbers segment by segment (`8` is satisfied by `8.0.100` and `9.0`). */
 export function versionAtLeast(have: string, want: string): boolean {
@@ -35,16 +41,20 @@ export function versionAtLeast(have: string, want: string): boolean {
   return true;
 }
 
-/** How a command that needs administrator rights runs here (the sudo vault, or the process itself when root). */
-export interface RootRunner {
-  mode(): Promise<{ mode: 'root' | 'passwordless' | 'password' | 'none' | 'unsupported'; detail: string }>;
-  run(cmd: string, args: string[], opts?: { cwd?: string; timeoutMs?: number }): Promise<ExecResult>;
-}
+/** What a tool that only a system package provides says (1.10.0: Guildwise never runs a package manager). */
+export const SYSTEM_DEPENDENCY = 'system dependency: Guildwise does not install system packages';
 
 export interface EnsureDeps {
+  /** Runs every check and install step, as the runner user (never with root). */
   exec: Executor;
   platform: Platform;
-  root: RootRunner;
+  /**
+   * The user-space installs into `<passwd home>/.local/share/guildwise/toolchains` (default: the real downloader).
+   * Tests inject a stub.
+   */
+  userInstaller?: UserInstaller;
+  /** The toolchains root (default: from the password database). */
+  toolchainsRoot?: string;
   /** Local clone of a repository by normalized remote URL. */
   findRepo(normalized: string): Promise<{ localPath: string } | undefined>;
   /** Full install log (appended, redacted). */
@@ -66,14 +76,25 @@ export interface EnsureDeps {
   installScriptsAllowed?: (remoteUrlNormalized: string) => boolean;
 }
 
-/** Env for a command: `dotnet` and its installers run with the chosen root first on PATH and as DOTNET_ROOT. */
+/**
+ * Env for a command: `dotnet` and its installers run with the chosen root first on PATH and as DOTNET_ROOT; the rustup
+ * proxies installed under the toolchains root need its RUSTUP_HOME. (`<root>/bin` is first on every command's PATH,
+ * `userBinDirs`.)
+ */
 function dotnetRunEnv(
   cmd: string,
   deps: EnsureDeps,
 ): { env: Record<string, string> } | Record<string, never> {
   const chosen = cmd === 'dotnet' ? deps.dotnet?.().chosen : undefined;
-  return chosen ? { env: dotnetProcessEnv(chosen, process.env.PATH) } : {};
+  const env: Record<string, string> = chosen ? dotnetProcessEnv(chosen, process.env.PATH) : {};
+  if (cmd === 'cargo' || cmd === 'rustc' || cmd === 'rustup') {
+    const rustup = rustEnv(rootOf(deps)).RUSTUP_HOME as string;
+    if (!process.env.RUSTUP_HOME && existsSync(rustup)) env.RUSTUP_HOME = rustup;
+  }
+  return Object.keys(env).length ? { env } : {};
 }
+
+const rootOf = (deps: EnsureDeps): string => deps.toolchainsRoot ?? toolchainsRoot();
 
 /** What the project asks of the SDK and what the chosen root lacks; used by the check and the installer. */
 function dotnetPlan(params: Params, deps: EnsureDeps) {
@@ -102,7 +123,8 @@ const tail = (s: string, n = 3): string =>
 /**
  * `env.ensure`: for each repository of the project find the stacks, verify each tool, install what is missing (only
  * what the manager allowed) and say whether the workstation is ready to build. Plain code driven by the tables in
- * `stacks.ts`; every command goes through `deps.exec` (or `deps.root` for administrator rights) and is logged.
+ * `stacks.ts`; every command goes through `deps.exec` or the user-space installer, as the runner user, and is logged. Nothing runs
+ * as root and no package manager runs: a system package is reported with the owner's command.
  */
 export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): Promise<EnvironmentReport> {
   const tables = deps.tables ?? { stacks: STACKS, tools: TOOLS };
@@ -186,11 +208,11 @@ export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): 
   }
 
   // 2. Verify, then install what is missing.
+  // package managers are only probed to name the owner's command for a system package
   const manager = await detectManagers(deps.exec, deps.platform);
-  const rootInfo = await deps.root.mode();
   const done = new Map<string, ToolReport>();
   for (const [toolId, t] of need) {
-    const report = await ensureTool(toolId, t, p.access, manager, rootInfo.mode, deps, log, done);
+    const report = await ensureTool(toolId, t, p.access, manager, deps, log, done);
     done.set(toolId, report);
     reports.push(report);
   }
@@ -368,7 +390,6 @@ async function ensureTool(
   t: { spec: ToolSpec; params: Params; stack: string },
   access: DevOpsAccess,
   detected: DetectedManager[],
-  rootMode: string,
   deps: EnsureDeps,
   log: (l: string) => void,
   done: Map<string, ToolReport>,
@@ -388,12 +409,13 @@ async function ensureTool(
   log(`${spec.name}: missing (${before.output})`);
   const manualBase = spec.manual?.(params, deps.platform);
   // Whatever DevOps installs for the agents has to be registered, or the sandbox cannot see it.
-  const manual = manualBase
-    ? `${manualBase}. Then register it for the agents: aom toolchain add <name> --bin <its bin folder> (a user-space install is best; .NET under ~/.dotnet is found automatically).`.slice(
-        0,
-        900,
-      )
-    : manualBase;
+  const manual =
+    manualBase && !spec.docker
+      ? `${manualBase}. Then register it for the agents: aom toolchain add <name> --bin <its bin folder> (a user-space install is best; .NET under ~/.dotnet is found automatically).`.slice(
+          0,
+          900,
+        )
+      : manualBase;
   const needsAccess = (why: string, fix: string): ToolReport => ({
     ...base,
     status: 'needs_access',
@@ -401,14 +423,38 @@ async function ensureTool(
     fix: manual && !fix.includes(manual) ? `${fix} Or do it yourself: ${manual}` : fix,
   });
 
-  // Docker's daemon refusing the runner user is a rights problem, not something to install.
+  // Docker's daemon refusing the runner user is the installer's business, not something DevOps installs.
   if (spec.id === 'docker-daemon' && /permission denied/i.test(before.output))
     return {
       ...base,
       status: 'failed',
       detail: 'the runner user may not use Docker (permission denied)',
-      fix: 'Add the runner user to the docker group: sudo usermod -aG docker $USER, then restart the runner.',
+      fix: DOCKER_BY_INSTALLER,
     };
+
+  // What may run: the user-space install (checksum verified) and steps the runner user runs itself.
+  const recipes = spec.recipes(params, deps.platform);
+  let resolver: UserInstallResolver | undefined = spec.userInstall;
+  if (spec.id === 'dotnet-sdk' && deps.dotnet && deps.platform !== 'win32') {
+    // Into the root the agents use (or a root of our own under the toolchains folder when there is none).
+    const { sel, gap } = dotnetPlan(params, deps);
+    const chosenRoot = sel.chosen?.root;
+    if (chosenRoot && !dotnetRootWritable(chosenRoot))
+      return {
+        ...base,
+        status: 'failed',
+        detail: `the .NET root ${shortPath(chosenRoot)} is not writable by the runner user (${before.output})`,
+        fix: `Install the SDK into ${chosenRoot} yourself${ownerCommand(recipes, detected) ? ` (${ownerCommand(recipes, detected)})` : ''}, or set dotnetRoot in the runner's config.json to ${join(rootOf(deps), 'dotnet')} so DevOps installs it there, then check again.`,
+      };
+    const sdk = gap.channels.length
+      ? gap.channels
+      : gap.runtimeChannels.length
+        ? []
+        : [`${params.sdkMajor ?? '8'}.0`];
+    resolver = dotnetUserInstall(chosenRoot, sdk, gap.runtimeChannels);
+  }
+  const steps = recipes.any;
+  if (!resolver && !steps?.length) return systemDependency(base, recipes, detected, deps.platform, manual);
 
   if (!access.allowInstall)
     return needsAccess(
@@ -421,73 +467,30 @@ async function ensureTool(
       'Allow "Docker" for this workstation\'s DevOps engineer, then check again.',
     );
 
-  // Pick the first installer whose steps can run with the rights there are.
-  const managers = detected.map((m) => m.id);
-  let recipes = spec.recipes(params, deps.platform);
-  if (spec.id === 'dotnet-sdk' && deps.dotnet && deps.platform !== 'win32') {
-    // Install into the root the agents use. A user-level root (~/.dotnet) is filled by the official script without
-    // administrator rights; a system root (/usr/share/dotnet) keeps the package manager recipes.
-    const { sel, gap } = dotnetPlan(params, deps);
-    const root = sel.chosen?.root ?? join(homedir(), '.dotnet');
-    if (!sel.chosen || dotnetRootWritable(root)) {
-      const sdk = gap.channels.length
-        ? gap.channels
-        : gap.runtimeChannels.length
-          ? []
-          : [`${params.sdkMajor ?? '8'}.0`];
-      recipes = { any: [{ cmd: 'bash', args: ['-c', dotnetInstallInto(root, sdk, gap.runtimeChannels)] }] };
-    } else delete recipes.any;
-  }
-  const candidates: Manager[] = [
-    ...managers.filter((m) => recipes[m]),
-    ...(recipes.any ? (['any'] as Manager[]) : []),
-  ];
-  if (!candidates.length)
-    return {
-      ...base,
-      status: 'failed',
-      detail: managers.length
-        ? `no installer for ${spec.name} with the package managers found here (${managers.join(', ')})`
-        : `no installer for ${spec.name}: no package manager found on this ${deps.platform} workstation (looked for ${managerCommands(deps.platform).join(', ')})`,
-      ...(managers.length
-        ? manual
-          ? { fix: manual }
-          : {}
-        : { fix: [noManagerAdvice(deps.platform), manual].filter(Boolean).join(' Or: ') }),
-    };
-  const rootAllowed =
-    rootMode === 'root' || (access.sudo && (rootMode === 'passwordless' || rootMode === 'password'));
-  const runnable = candidates.find((m) => (recipes[m] as Step[]).every((s) => !s.root || rootAllowed));
-  if (!runnable) {
-    return needsAccess(
-      'installing it needs administrator rights',
-      access.sudo
-        ? 'sudo does not work for the runner user: enter its password in the DevOps access settings.'
-        : 'Allow "Administrator (sudo)" for the DevOps engineer, or run the installer yourself.',
-    );
-  }
-
-  // Homebrew found by its absolute path (not on the service's PATH) is run by that path.
-  const chosen = detected.find((m) => m.id === runnable);
+  let how = 'its official installer';
   let lastErr = '';
-  for (const raw of recipes[runnable] as Step[]) {
-    const step: Step = chosen && raw.cmd === chosen.cmd ? { ...raw, cmd: chosen.path } : raw;
-    log(`$ ${step.root ? 'sudo ' : ''}${step.cmd} ${step.args.join(' ')}`);
-    const r =
-      step.root && rootMode !== 'root'
-        ? await deps.root.run(step.cmd, step.args, { timeoutMs: 30 * 60_000 })
-        : await deps.exec.run(step.cmd, step.args, {
-            timeoutMs: 30 * 60_000,
-            ...dotnetRunEnv(step.cmd, deps),
-          });
-    for (const line of `${r.stdout}\n${r.stderr}`.split('\n').slice(-12))
-      if (line.trim()) log(`  ${line.trim()}`);
-    if (r.exitCode !== 0) {
-      lastErr = tail(r.stderr || r.stdout) || `exit code ${r.exitCode}`;
-      log(`  exit ${r.exitCode}`);
-      break;
+  const installer = deps.userInstaller ?? createUserInstaller();
+  const result = resolver ? await installer.install(spec.id, resolver, params, log) : null;
+  if (result) {
+    if (!result.ok)
+      return { ...base, status: 'failed', detail: result.detail, ...(manual ? { fix: manual } : {}) };
+    how = "a checksum-verified download into the runner's toolchains folder";
+  } else if (steps?.length) {
+    for (const step of steps) {
+      log(`$ ${step.cmd} ${step.args.join(' ')}`);
+      const r = await deps.exec.run(step.cmd, step.args, {
+        timeoutMs: 30 * 60_000,
+        ...dotnetRunEnv(step.cmd, deps),
+      });
+      for (const line of `${r.stdout}\n${r.stderr}`.split('\n').slice(-12))
+        if (line.trim()) log(`  ${line.trim()}`);
+      if (r.exitCode !== 0) {
+        lastErr = tail(r.stderr || r.stdout) || `exit code ${r.exitCode}`;
+        log(`  exit ${r.exitCode}`);
+        break;
+      }
     }
-  }
+  } else return systemDependency(base, recipes, detected, deps.platform, manual);
   const after = await probe(spec, params, deps);
   if (after.ok) {
     log(`${spec.name}: installed${after.version ? ` ${after.version}` : ''}`);
@@ -495,7 +498,7 @@ async function ensureTool(
       ...base,
       status: 'installed',
       ...(after.version ? { version: after.version } : {}),
-      detail: `installed with ${runnable === 'any' ? 'its official installer' : runnable}`,
+      detail: `installed with ${how}`,
     };
   }
   return {
@@ -504,6 +507,44 @@ async function ensureTool(
     detail: lastErr || after.output || 'still not found after installing',
     ...(manual ? { fix: manual } : {}),
   };
+}
+
+/**
+ * The owner's command for the system packages of a tool, for the first package manager found here (`sudo` where that
+ * manager needs root). Shown only; never run.
+ */
+export function ownerCommand(
+  recipes: Partial<Record<string, Step[]>>,
+  detected: DetectedManager[],
+): string | undefined {
+  for (const m of detected) {
+    const steps = recipes[m.id];
+    if (!steps?.length) continue;
+    return steps
+      .map((s) => `${m.needsRoot ? 'sudo ' : ''}${s.cmd === m.cmd ? m.path : s.cmd} ${s.args.join(' ')}`)
+      .join(' && ');
+  }
+  return undefined;
+}
+
+/** A tool only a system package provides: `failed`, with the command the machine owner can run. */
+function systemDependency(
+  base: { stack: string; tool: string },
+  recipes: Partial<Record<string, Step[]>>,
+  detected: DetectedManager[],
+  platform: Platform,
+  manual: string | undefined,
+): ToolReport {
+  const cmd = ownerCommand(recipes, detected);
+  const hasPackages = Object.keys(recipes).some((k) => k !== 'any');
+  const fix = cmd
+    ? `Ask the machine owner to run: ${cmd}${manual ? ` (or: ${manual})` : ''}`
+    : manual
+      ? detected.length || !hasPackages
+        ? manual
+        : [manual, noManagerAdvice(platform)].join(' Or: ')
+      : noManagerAdvice(platform);
+  return { ...base, status: 'failed', detail: SYSTEM_DEPENDENCY, fix: fix.slice(0, 1200) };
 }
 
 export type { Check };

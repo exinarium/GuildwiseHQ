@@ -3,7 +3,10 @@ import { join } from 'node:path';
 import type { Executor } from './exec.ts';
 import type { Manager, Platform } from './types.ts';
 
-/** One package manager the runner knows: how to find it and whether installing with it needs administrator rights. */
+/**
+ * One package manager the runner knows: how to find it and whether installing with it needs administrator rights.
+ * 1.10.0: managers are never run to install; they only name the owner's command for a system package.
+ */
 export interface ManagerDef {
   id: Manager;
   /** The command on PATH (also the first word of the install steps in `stacks.ts`). */
@@ -15,10 +18,7 @@ export interface ManagerDef {
 
 const BREW_MAC = ['/opt/homebrew/bin/brew', '/usr/local/bin/brew'];
 
-/**
- * In detection order: the first working manager that can install a tool is used. Homebrew on Linux comes last and is
- * a fallback (needs no root).
- */
+/** In detection order: the first manager found names the owner's command. Homebrew on Linux comes last. */
 export const MANAGER_DEFS: Record<Platform, ManagerDef[]> = {
   linux: [
     { id: 'apt', cmd: 'apt-get', needsRoot: true },
@@ -73,8 +73,8 @@ export const managerCommands = (platform: Platform): string[] => MANAGER_DEFS[pl
 /** The message for a workstation where no package manager is found, with how to get one. */
 export function noManagerAdvice(platform: Platform): string {
   if (platform === 'darwin')
-    return 'Install Homebrew (https://brew.sh); the official installers of .NET, Rust and Bun also work without it.';
+    return 'Install it yourself (for example with Homebrew, https://brew.sh); Guildwise does not install system packages.';
   if (platform === 'win32')
-    return 'Install winget (App Installer from the Microsoft Store) or Chocolatey; tool installers without one (dotnet-install, rustup) still work for those stacks.';
-  return 'Install one of apt, dnf/yum (Fedora, RHEL), pacman (Arch, Manjaro), zypper (openSUSE), apk (Alpine) or Homebrew (https://brew.sh, no root needed); tool installers without one (dotnet-install, rustup) still work for those stacks.';
+    return 'Install it yourself (for example with winget); Guildwise does not install system packages.';
+  return 'Install it yourself with the package manager of this machine; Guildwise does not install system packages.';
 }

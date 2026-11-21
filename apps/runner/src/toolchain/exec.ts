@@ -12,7 +12,7 @@ export interface ExecResult {
 export interface ExecOptions {
   cwd?: string;
   timeoutMs?: number;
-  /** Written to stdin (the sudo password). Never logged. */
+  /** Written to stdin. Never logged. */
   input?: string;
   env?: Record<string, string>;
 }
@@ -22,9 +22,11 @@ export interface Executor {
   run(cmd: string, args: string[], opts?: ExecOptions): Promise<ExecResult>;
 }
 
-/** User-level install locations the installers use: not on a service's PATH, but where the tools end up. */
+/** User-level install locations: not on a service's PATH, but where the tools end up. */
 export function userBinDirs(home = homedir()): string[] {
   return [
+    // the user-space stack installs (DESIGN §5) come first
+    join(home, '.local', 'share', 'guildwise', 'toolchains', 'bin'),
     join(home, '.dotnet'),
     join(home, '.dotnet', 'tools'),
     join(home, '.cargo', 'bin'),

@@ -60,7 +60,6 @@ import {
   RepoClonePayloadSchema,
   RightsVerifyPayloadSchema,
   SudoKeySchema,
-  SudoSetPayloadSchema,
 } from '../devops/environment.ts';
 import { DevopsShiftSchema } from '../devops/index.ts';
 import { Usage } from '../events/define.ts';
@@ -133,7 +132,7 @@ import {
   PrReviewRunPayloadSchema,
 } from '../review/pr-review.ts';
 import { ReviewerTokenFactSchema } from '../review/reviewer-run.ts';
-import { AgentPermissionsSchema, Seniority } from '../roles/schema.ts';
+import { Seniority } from '../roles/schema.ts';
 import {
   CHECKS_MAX,
   EnvSecretClearPayloadSchema,
@@ -1453,8 +1452,6 @@ export const RunnerCommandNameSchema = z.enum([
   'repo.clone',
   'env.ensure',
   'rights.verify',
-  'sudo.set',
-  'sudo.clear',
   'env.secret.set',
   'env.secret.clear',
   'git.status',
@@ -1587,8 +1584,6 @@ export const CommandPayloadSchemas = {
   'repo.clone': RepoClonePayloadSchema,
   'env.ensure': EnvEnsurePayloadSchema,
   'rights.verify': RightsVerifyPayloadSchema,
-  'sudo.set': SudoSetPayloadSchema,
-  'sudo.clear': z.object({}),
   'env.secret.set': EnvSecretSetPayloadSchema,
   'env.secret.clear': EnvSecretClearPayloadSchema,
   'git.status': z.object({}),

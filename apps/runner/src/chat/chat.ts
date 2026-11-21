@@ -22,7 +22,6 @@ import {
   renderChatInstructions,
   renderDirectSystemPrompt,
   renderSessionTurnInstructions,
-  SESSION_PURPOSE_VERBS,
   type ServerToRunnerOf,
   sessionToolsFor,
   splitBackendModel,
@@ -107,8 +106,6 @@ export interface ChatDeps {
   guardClones?: () => GuardClone[];
   /** `aom runner restart` in an owner turn: the restart that waits for the reply to be acknowledged. */
   restart?: RestartAfterReply;
-  /** `aom sudo` in the DevOps engineer's chat: runs a command with administrator rights (the stored password stays here). */
-  sudoRun?: (cmd: string, args: string[]) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
   /** M7: the ticket systems of this workstation (`aom source read`); credentials never leave it. */
   external?: ExternalAdapters;
   /** Text for the agent's instructions about granted MCP servers that need a sign-in here (empty: none). */
@@ -563,9 +560,6 @@ export class ChatManager {
             send: (entries) => this.deps.send('devops.audit', { entries }),
             redact: redactCommand,
           });
-        // `aom sudo -- <command>` in the DevOps engineer's chat: the runner runs it with the stored password (the
-        // always-refused rules of the guard still apply to the command: the hook judged it before `aom` ran).
-        if (req.method === 'sudo.run') return this.sudoRun(chat, req.params);
         if (req.method === 'git.status' || req.method === 'git.connect')
           return chat.msg.agent.isDevops && this.deps.git
             ? this.deps.git.handle(req.method, req.params)
@@ -616,23 +610,6 @@ export class ChatManager {
     this.deps.restart.request(chat.msg.chatId, reason);
     await this.deps.rpc(chat.msg.chatId, 'ceo', { op: 'restart', ...(reason ? { reason } : {}) });
     return { ok: true, result: { message: 'Restart scheduled after this reply. Finish your reply now.' } };
-  }
-
-  /**
-   * `aom sudo -- <command>` in the DevOps engineer's chat. The owner is in the conversation, so there is no separate grant
-   * to check; the stored password exists only when the owner set it on this workstation (the runner refuses without it).
-   */
-  private async sudoRun(chat: ActiveChat, params: Record<string, unknown>): Promise<IpcRpcResponse> {
-    if (!chat.msg.agent.isDevops) return { ok: false, error: 'only the DevOps engineer may use sudo' };
-    const argv = Array.isArray(params.argv) ? params.argv.map(String) : [];
-    if (argv.length === 0 || !this.deps.sudoRun)
-      return { ok: false, error: 'usage: aom sudo -- <command> [args...]' };
-    const [cmd, ...args] = argv as [string, ...string[]];
-    const r = await this.deps.sudoRun(cmd, args);
-    return {
-      ok: true,
-      result: { exitCode: r.exitCode, stdout: r.stdout.slice(-20000), stderr: r.stderr.slice(-8000) },
-    };
   }
 
   /**

@@ -120,9 +120,13 @@ const BOOLEAN_FLAGS = new Set([
 const takesInlineJson = (verb: string | undefined, argv: string[]): boolean =>
   (verb === 'card' && (argv[0] === 'create' || argv[0] === 'update')) || verb === 'org';
 
+/** What `aom sudo` answers since 1.10.0. */
+export const SUDO_REMOVED =
+  "aom sudo was removed in 1.10.0: nothing on the runner runs as root. Install stack tools in your own home (~/.local/share/guildwise/toolchains); a system package is the machine owner's job, so tell them the exact package and command.";
+
 export function parseArgs(argv: string[], verb?: string): Parsed {
-  // `aom sudo -- <command> [args...]`: everything after the verb is the command, flags included.
-  if (verb === 'sudo') return { flags: new Map(), positionals: argv[0] === '--' ? argv.slice(1) : argv };
+  // `aom sudo` was removed in 1.10.0: take everything as positionals so the verb can say so instead of a flag error.
+  if (verb === 'sudo') return { flags: new Map(), positionals: argv };
   // `aom run step|service ... -- <command> [args...]`: the command after `--` is taken as it is, flags included.
   if (verb === 'run' && argv.includes('--')) {
     const at = argv.indexOf('--');
@@ -2364,17 +2368,10 @@ const VERBS: Record<string, Verb> = {
     throw new UsageError(PREP_USAGE);
   },
   report: async (ctx, p) => reportVerb(ctx, p),
-  /** `aom sudo -- <command> [args...]` (DevOps engineer): the runner runs it with administrator rights. */
-  sudo: async (ctx, p) => {
-    if (p.positionals.length === 0) throw new UsageError('usage: aom sudo -- <command> [args...]');
-    const r = (await rpc(ctx, 'sudo.run', { argv: p.positionals })) as {
-      exitCode: number;
-      stdout: string;
-      stderr: string;
-    };
-    if (r.stdout) ctx.io.out(r.stdout.endsWith('\n') ? r.stdout : `${r.stdout}\n`);
-    if (r.stderr) ctx.io.err(r.stderr.endsWith('\n') ? r.stderr : `${r.stderr}\n`);
-    return r.exitCode === 0 ? 0 : 1;
+  /** `aom sudo` was removed in 1.10.0 (no standing root path): say what to do instead. */
+  sudo: async (ctx) => {
+    ctx.io.err(`${SUDO_REMOVED}\n`);
+    return 1;
   },
   /** `aom run info|status|logs|step|service|ready|fail` (DevOps engineer of a "run this branch" request): the runner starts and supervises the services. */
   run: async (ctx, p) => {
@@ -2911,7 +2908,6 @@ export const USAGE = `usage: aom <verb> [options]
   devops-approval --action "<a>" --reason "<r>" [--command "<c>"]...   DevOps engineer: ask the manager
   devops-question --text "<q>" --reason "<r>"   DevOps engineer: ask a question (goes through the normal chain; you resume with the answer)
   devops-done --summary "<text>" [--command "<c>"]...                  DevOps engineer: request completed
-  sudo -- <command> [args...]                 DevOps engineer: run a command as administrator (only when the manager granted sudo; the password stays on the runner)
   toolchain list | add <name> --bin <dir>... [--read <dir>]... [--env KEY=VALUE]... | remove <name>   tools sandboxed agents may use; DevOps engineer: register what you installed so agents get it on PATH
   hygiene run [--note "<text>"]               DevOps engineer: repository hygiene request (commit to the working branch, pull, push, tidy), ends the request
   backlog suggest --title "<title>" [--description "<what and why>"] [--priority critical|high|normal|low] [--tag <t>]... [--project KEY]   a follow-up you found that is outside this card goes on the project backlog as a suggestion (never on the board); the owner decides

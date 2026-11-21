@@ -1,7 +1,7 @@
 ---
 title: DevOps and repository hygiene
 summary: The DevOps engineer and Ask DevOps, approvals, conflicts, repository hygiene and saved work, the toolchain, the working branch and new repositories.
-keywords: [DevOps, ask devops, chat, approval, two people, conflict, hygiene, saved work, repository, toolchain, packages, android sdk, sudo, working branch, git]
+keywords: [DevOps, ask devops, chat, approval, two people, conflict, hygiene, saved work, repository, toolchain, packages, android sdk, system packages, working branch, git]
 order: 7
 ---
 
@@ -22,7 +22,7 @@ The DevOps engineer handles:
 
 You can ask it directly from anywhere: click **Ask DevOps** in the top bar, choose **Ask DevOps...** in the command palette (Ctrl K), or use the **Ask DevOps** button on a card, on a desk item or on the workstation. The page, project, card or error you were looking at is attached (remove any chip you do not want to share), and the right workstation's engineer is chosen for you when it is obvious. Requests go through your CEO: the dialog says DevOps works through the CEO now, and its button is **Ask** followed by the CEO's name. The CEO delegates to DevOps and tells you the result; you can follow it on the Workstations page. See also [Chat with agents](/help/chat-with-agents).
 
-The DevOps engineer works **as you, on your machine**, outside the safety box that other agents work in. In a chat with it, a command, a Docker build or a deploy you ask for runs right away. The tick boxes in the workstation's panel (install packages and tools, use Docker, use elevated privileges (sudo), write to extra paths) are instructions to it and decide what the automatic tool setup may do, but they do not physically stop it: only give this agent to a machine you are happy to hand it. Anything it decides is outside its instructions waits for approval on the desk. A plain question from it (which branch, which option) is not an approval: it goes through the normal chain of agents first and reaches your desk only if nobody can answer. On a project that does not require your approval for merges, it resolves merge conflicts in the card's own worktree without asking.
+The DevOps engineer works **as you, on your machine**, outside the safety box that other agents work in. In a chat with it, a command, a Docker build or a deploy you ask for runs right away. The tick boxes in the workstation's panel (install packages and tools, use Docker, write to extra paths) are instructions to it and decide what the automatic tool setup may do, but they do not physically stop it: only give this agent to a machine you are happy to hand it. Anything it decides is outside its instructions waits for approval on the desk. A plain question from it (which branch, which option) is not an approval: it goes through the normal chain of agents first and reaches your desk only if nobody can answer. On a project that does not require your approval for merges, it resolves merge conflicts in the card's own worktree without asking.
 
 **Requests about a card.** When a request is filed for a card (the **Ask DevOps** button on the card, or the agent working on it asks), the DevOps engineer gets that card in its brief: title, type, fields, project, repository and the latest comments. It can read the card, comment on it and set the card fields it needs, for example how to start the stack. It cannot change the card's title, stage or status, and it cannot read or change any other card.
 
@@ -84,13 +84,13 @@ The status appears next to the item:
 - **Done**: the check runs again by itself (the environment check, the rights check or the clone). **Check again** runs it by hand.
 - **DevOps could not fix it**: read its answer on the Workstations page, then use **Fix again** or fix it yourself with the "How to fix" text.
 
-Only the project owner sees Fix on the project settings. A fix that needs a password or token (for example a sudo password) is never typed by the engineer: it tells you what to do.
+Only the project owner sees Fix on the project settings. A fix that needs a password, a token or a system package is never done by the engineer: it tells you what to do.
 
-## Rights and the sudo password {#rights}
+## Rights {#rights}
 
-A ticked right is checked on the machine itself. On the Workstations page each ticked right shows **verified** or **failed** with the reason and how to fix it (for Docker: add the runner user to the docker group, start the daemon; for sudo: enter the password or allow passwordless sudo). **Verify now** checks again.
+A ticked right is checked on the machine itself. On the Workstations page each ticked right shows **verified** or **failed** with the reason and how to fix it (for Docker: run the installer again so the runner gets its own rootless Docker; for installs: the runner's toolchains folder must be writable). **Verify now** checks again.
 
-Sudo is local. Turn it on or off on the machine with `guildwise-runner sudo enable` or `disable`; the setup step **Setting local permissions** asks too. The password is sealed on that machine, used only for the DevOps engineer's commands and never written to a log. Showing the sudo key id or changing the sudo setting in the web page asks **Confirm it's you**. To check that nobody swapped the key, compare the key id on the page with `guildwise-runner doctor` on the machine.
+The DevOps engineer has no sudo (removed in Guildwise 1.10.0). It installs stack tools only in the runner's own home (`~/.local/share/guildwise/toolchains`), each checked against the vendor's checksum. A system package (Ruby, PHP, a library) is your job: the tool check shows the exact command to run. The sealing key id on the page (provider keys and test accounts are sealed with it) matches `guildwise-runner doctor` on the machine.
 
 ## The working branch {#working-branch}
 

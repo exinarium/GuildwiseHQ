@@ -112,7 +112,6 @@ describe('Fix on a failed right', () => {
             checkedAt: '2026-10-05T10:00:00.000Z',
             stale: false,
             platform: 'linux',
-            sudoPasswordStored: false,
             checks: {
               install: { status: 'verified', reason: 'ok' },
               docker: {

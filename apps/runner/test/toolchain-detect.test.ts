@@ -5,6 +5,7 @@ import { detectStacks, scanRepoFiles, viewOf } from '../src/toolchain/detect.ts'
 import { versionAtLeast } from '../src/toolchain/ensure.ts';
 import { STACKS, TOOLS } from '../src/toolchain/stacks.ts';
 import type { Platform } from '../src/toolchain/types.ts';
+import { toolchainsRoot } from '../src/toolchain/user-install.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
 
 cleanupTmp();
@@ -258,18 +259,13 @@ describe('toolchain: install recipes', () => {
   const recipes = (tool: string, p: Record<string, string>, platform: Platform) =>
     TOOLS[tool]?.recipes(p, platform) ?? {};
 
-  it('.NET SDK: the version is part of every installer, the script needs no administrator rights', () => {
+  it('.NET SDK: the version is in every owner command; the install is user space, never a script', () => {
     const r = recipes('dotnet-sdk', { sdkMajor: '9' }, 'linux');
-    expect(r.apt?.[0]).toMatchObject({
-      cmd: 'apt-get',
-      args: ['install', '-y', 'dotnet-sdk-9.0'],
-      root: true,
-    });
+    expect(r.apt?.[0]).toEqual({ cmd: 'apt-get', args: ['install', '-y', 'dotnet-sdk-9.0'] });
     expect(r.brew?.[0]?.args).toEqual(['install', 'dotnet@9']);
     expect(r.winget?.[0]?.args).toContain('Microsoft.DotNet.SDK.9');
-    expect(r.any?.[0]?.args.join(' ')).toContain('dotnet-install.sh --channel 9.0');
-    expect(r.any?.[0]?.root).toBeUndefined();
-    expect(recipes('dotnet-sdk', {}, 'win32').any).toBeUndefined();
+    expect(r.any).toBeUndefined();
+    expect(TOOLS['dotnet-sdk']?.userInstall).toBeTypeOf('function');
   });
 
   it('MAUI workloads install with `dotnet workload install <id>`', () => {
@@ -287,13 +283,43 @@ describe('toolchain: install recipes', () => {
     expect(recipes('node-pnpm', { pmVersion: '9.12.0' }, 'linux').any?.[0]?.args).toEqual([
       'install',
       '-g',
+      '--prefix',
+      toolchainsRoot(),
       'pnpm@9.12.0',
     ]);
   });
 
-  it('only system-wide package managers need root', () => {
-    expect(recipes('go', {}, 'linux').apt?.[0]?.root).toBe(true);
-    expect(recipes('go', {}, 'darwin').brew?.[0]?.root).toBeUndefined();
+  it('no recipe step runs a package manager: every `any` step is a user-level command', () => {
+    for (const [id, spec] of Object.entries(TOOLS))
+      for (const platform of ['linux', 'darwin', 'win32'] as const) {
+        const any = spec.recipes({}, platform).any ?? [];
+        for (const step of any)
+          expect(
+            ['apt-get', 'dnf', 'yum', 'pacman', 'zypper', 'apk', 'choco', 'sudo', 'systemctl'],
+            `${id} on ${platform}`,
+          ).not.toContain(step.cmd);
+      }
+  });
+
+  it("the user-space stacks of the owner's list each have a user install", () => {
+    for (const id of [
+      'node',
+      'python-uv',
+      'python',
+      'python-poetry',
+      'python-pipenv',
+      'node-bun',
+      'dotnet-sdk',
+      'jdk',
+      'maven',
+      'gradle',
+      'go',
+      'rust',
+      'android-cmdline-tools',
+    ])
+      expect(TOOLS[id]?.userInstall, id).toBeTypeOf('function');
+    for (const id of ['ruby', 'php', 'composer', 'python-venv', 'docker', 'docker-daemon'])
+      expect(TOOLS[id]?.userInstall, id).toBeUndefined();
   });
 });
 

@@ -1,7 +1,7 @@
 import { webcrypto } from 'node:crypto';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { RightsReportSchema, uuidv7 } from '@aom/shared';
+import { makeEnvelope, RightsReportSchema, ServerToRunnerSchema, uuidv7 } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { unregisterSecret } from '../src/secrets/redact.ts';
 import type { ExecResult, Executor } from '../src/toolchain/exec.ts';
@@ -33,7 +33,7 @@ async function encrypt(publicKeyB64: string, text: string): Promise<string> {
   ).toString('base64');
 }
 
-/** Everything except git and sudo answers "not found"; sudo accepts PASSWORD on stdin. */
+/** Everything except git answers "not found" (sudo would accept PASSWORD on stdin: nothing may ask). */
 const machine = (calls: string[]): Executor => ({
   async run(cmd, args, o): Promise<ExecResult> {
     calls.push([cmd, ...args].join(' '));
@@ -60,7 +60,7 @@ const send = (command: string, payload: Record<string, unknown>) => {
 };
 
 describe('DevOps workstation setup commands', () => {
-  it('hello announces the key the sudo password is encrypted with', async () => {
+  it('hello announces the workstation sealing key (kept as sudoKey for compatibility)', async () => {
     h = await startHarness();
     const hello = h.server.received.find((m) => m.type === 'hello') as {
       sudoKey?: { keyId: string; publicKey: string };
@@ -69,40 +69,31 @@ describe('DevOps workstation setup commands', () => {
     expect(hello.sudoKey?.publicKey).toBe(h.runner.keys.publicKey.publicKey);
   });
 
-  it('sudo.set stores the password, verifies it, and the answer, the log and the frames never contain it', async () => {
+  it('sudo.set and sudo.clear are gone (1.10.0): refused, nothing stored; rights.verify never checks sudo', async () => {
     const calls: string[] = [];
     h = await startHarness({}, { executor: machine(calls), platform: 'linux' });
     const ciphertext = await encrypt(h.runner.keys.publicKey.publicKey, PASSWORD);
-    const res = await send('sudo.set', { ciphertext, keyId: h.runner.keys.publicKey.keyId });
-    expect(res).toMatchObject({ ok: true, result: { stored: true, works: true } });
-    expect(existsSync(join(h.dataDir, 'secrets', 'sudo.enc'))).toBe(true);
-    expect(JSON.stringify(h.server.received)).not.toContain(PASSWORD);
-    expect(calls.join('\n')).not.toContain(PASSWORD);
+    // the protocol no longer has the commands: such a frame is dropped before it reaches the runner
+    for (const command of ['sudo.set', 'sudo.clear'])
+      expect(
+        ServerToRunnerSchema.safeParse(
+          makeEnvelope('command', { commandId: uuidv7(), command, payload: { ciphertext, keyId: 'x' } }),
+        ).success,
+      ).toBe(false);
+    expect(existsSync(join(h.dataDir, 'secrets', 'sudo.enc'))).toBe(false);
 
-    // rights.verify sees the stored password
     const rights = await send('rights.verify', {
       access: { allowInstall: false, allowDocker: true, allowedPaths: [], sudo: true },
     });
-    const report = (
-      rights as {
-        result: {
-          checks: Record<string, { status: string; reason: string; fix?: string }>;
-          sudoPasswordStored: boolean;
-        };
-      }
-    ).result;
-    expect(report.sudoPasswordStored).toBe(true);
-    expect(report.checks.sudo).toMatchObject({
-      status: 'verified',
-      reason: 'sudo works with the stored password',
-    });
+    const report = (rights as { result: { checks: Record<string, { status: string; fix?: string }> } })
+      .result;
+    expect(report.checks.sudo).toBeUndefined();
+    expect(report).not.toHaveProperty('sudoPasswordStored');
     expect(report.checks.docker?.status).toBe('failed');
-    expect(report.checks.docker?.fix).toContain('usermod -aG docker');
+    expect(report.checks.docker?.fix).toContain('own rootless Docker');
     expect(report.checks.install).toBeUndefined(); // a right that is off is not checked
     expect(JSON.stringify(h.server.received)).not.toContain(PASSWORD);
-
-    expect(await send('sudo.clear', {})).toMatchObject({ ok: true, result: { cleared: true } });
-    expect(existsSync(join(h.dataDir, 'secrets', 'sudo.enc'))).toBe(false);
+    expect(calls.some((c) => c.startsWith('sudo'))).toBe(false);
   });
 
   it('rights.verify answers a report the server accepts, and an error (never silence) for a bad payload', async () => {
@@ -116,12 +107,6 @@ describe('DevOps workstation setup commands', () => {
     const bad = await send('rights.verify', { access: 'nope' });
     expect(bad).toMatchObject({ ok: false });
     expect((bad as { error?: string }).error).toBeTruthy();
-  });
-
-  it('sudo.set with ciphertext for another key is refused', async () => {
-    h = await startHarness({}, { executor: machine([]) });
-    const res = await send('sudo.set', { ciphertext: 'AAAA', keyId: 'ffffffffffffffff' });
-    expect(res).toMatchObject({ ok: true, result: { stored: false } });
   });
 
   it('repo.clone clones a remote into the repository folder and the runner knows the clone at once', async () => {

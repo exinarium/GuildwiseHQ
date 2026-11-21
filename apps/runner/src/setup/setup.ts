@@ -1,14 +1,15 @@
-import { constants, createPublicKey, publicEncrypt } from 'node:crypto';
-import { rmSync } from 'node:fs';
-import { isAbsolute, join, relative } from 'node:path';
 import { entryDir, loadIndex } from '../pairings.ts';
 import type { Policy } from '../policy/schema.ts';
-import { RunnerKeys } from '../secrets/keys.ts';
-import { SudoVault } from '../secrets/sudo.ts';
 import type { Executor } from '../toolchain/exec.ts';
 import { adminCommand, dedicatedUserOf, instanceOfUser, isDedicatedUser } from './admin-command.ts';
 import { readOffers } from './offers.ts';
-import { type ApproveApp, parseApproveApp, SetupError, type SetupOptions } from './options.ts';
+import {
+  DESKTOP_SOCKET_RE,
+  type DockerMode,
+  SetupError,
+  type SetupOptions,
+  SHARED_SOCKET_RE,
+} from './options.ts';
 import { policyPath, readPolicy, writePolicy } from './policy-file.ts';
 import type { Prompter } from './prompt.ts';
 import { clonesDir, ensureClonesDir, gitVersionAtLeast, MIN_FETCH_GIT } from './workspace.ts';
@@ -32,7 +33,6 @@ export interface SetupDeps {
   /** null: no questions (non-interactive); every unanswered step takes the safe value. */
   prompter: Prompter | null;
   out: (line: string) => void;
-  readStdin: () => Promise<string>;
   exec: Executor;
 }
 
@@ -44,15 +44,30 @@ export interface SetupResult {
   wrote: boolean;
 }
 
-export const SUDO_WARNING =
-  'With sudo on, the runner can become root whenever your local policy allows a DevOps step; every such step still needs your local yes.';
+/** The owner's words (OWNER-TODO 2026-11-21) for Docker that is not rootless. */
+/** Owner 2026-11-21: "UAT will not use github and it should be able to setup through the UI". Never required. */
+export const GITHUB_OPTIONAL =
+  '  (optional) gh auth login, only for GitHub repositories; repositories and set-up can come through the Guildwise UI';
+export const ROOTFUL_WARNING = 'Docker detected, not running in rootless mode';
+export const MAC_DOCKER_WARNING =
+  'Docker Desktop: containers can read and write the folders Docker Desktop shares, by default all of /Users, your files included; narrow them in Settings > Resources > File sharing.';
+export const SHARED_WARNING =
+  "The runner joins that daemon's group: it can then control every container on that daemon. Runners that share a daemon can each control the other's containers; your typed acceptance records that you chose it.";
+const SHARED_DAEMON_PHRASE = 'shared-daemon';
 
-const DOCKER_EXPLAINED = [
-  'How deploys reach Docker:',
-  '  none    no Docker for deploys (the default)',
-  '  narrow  a small root-owned helper runs only compose apps you approved, frozen; every compose change asks you again (recommended when deploys use Docker)',
-  '  group   the docker group: no prompts, but the runner user becomes root-equivalent',
-].join('\n');
+/**
+ * The groups of the user that own a Docker socket (or `docker`): any of them reaches a daemon that is not the runner's
+ * own. Read with `id -nG`, `stat -c %g` on the sockets and `getent group`, so it works as the unprivileged user.
+ */
+async function dockerGroupsOf(deps: SetupDeps): Promise<string[]> {
+  const mine = (await deps.exec.run('id', ['-nG'])).stdout.trim().split(/\s+/).filter(Boolean);
+  const r = await deps.exec.run('sh', [
+    '-c',
+    'for s in /var/run/docker.sock /run/docker.sock /run/*/docker.sock; do [ -S "$s" ] && stat -L -c %g "$s"; done 2>/dev/null | sort -u | while read g; do getent group "$g" | cut -d: -f1; done',
+  ]);
+  const owning = new Set(['docker', ...r.stdout.trim().split(/\s+/).filter(Boolean)]);
+  return mine.filter((g) => owning.has(g));
+}
 
 const ROOT_EQUIVALENT_PHRASE = 'root-equivalent';
 const USER_RE = /^[a-z_][a-z0-9_-]{0,31}$/;
@@ -63,24 +78,6 @@ function pairingDirsOf(dataRoot: string): string[] {
   } catch {
     return [];
   }
-}
-
-function inside(base: string, p: string): boolean {
-  const rel = relative(base, p);
-  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
-}
-
-/** RSA-OAEP (SHA-256) with the runner's own public key: the same ciphertext the browser would send for `sudo.set`. */
-function sealFor(keys: RunnerKeys, password: string): string {
-  const pub = createPublicKey({
-    key: Buffer.from(keys.publicKey.publicKey, 'base64'),
-    format: 'der',
-    type: 'spki',
-  });
-  return publicEncrypt(
-    { key: pub, padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
-    Buffer.from(password),
-  ).toString('base64');
 }
 
 export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<SetupResult> {
@@ -140,7 +137,7 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
       );
     mode = 'current';
     say(
-      `The runner keeps running as ${deps.username}. It refuses to start while ${deps.username} is root-equivalent (passwordless sudo, the docker group, a writable Docker socket) unless you accept that below.`,
+      `The runner keeps running as ${deps.username}. It refuses to start while ${deps.username} is root-equivalent (passwordless sudo, the docker group, a writable socket of another Docker daemon) unless you accept that below.`,
     );
   }
   next.runnerUser = { mode, name: deps.username };
@@ -203,112 +200,141 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
   }
   next.devops = { ...next.devops, agents };
 
-  // ---- 4. sudo [R20 step 3, rv6-7]
-  let sudo = opts.sudo;
-  if (!sudo) {
-    if (p) {
-      say(SUDO_WARNING);
-      sudo = (await p.confirm('Turn sudo on for the runner?', false)) ? 'on' : 'off';
-    } else sudo = 'off';
-  } else if (sudo === 'on') say(SUDO_WARNING);
-  if (sudo === 'on') {
-    if (!posix) throw new SetupError('sudo does not exist on Windows; use the dedicated WSL distro');
-    if (dirs.length === 0)
-      throw new SetupError(
-        'pair this machine first (`guildwise-runner pair`), then run setup again: sudo is sealed with the pairing key',
-      );
-    const keys = dirs.map((d) => ({ dir: d, keys: new RunnerKeys(join(d, 'secrets', 'runner-key.pem')) }));
-    if (mode === 'dedicated') admin.push(adminCmd(['sudo', 'on']));
-    else {
-      let password: string;
-      if (opts.sudoPasswordStdin) password = (await deps.readStdin()).replace(/\r?\n$/, '');
-      else if (p)
-        password = await p.secret('Your sudo password (sealed on this machine, never sent anywhere):');
-      else
-        throw new SetupError(
-          'with the current user, --sudo on needs your own sudo password: add --sudo-password-stdin',
-        );
-      if (!password) throw new SetupError('empty sudo password: sudo stays off');
-      for (const k of keys) {
-        const vault = new SudoVault({
-          file: join(k.dir, 'secrets', 'sudo.enc'),
-          keys: k.keys,
-          exec: deps.exec,
-          platform: deps.platform,
-        });
-        const r = await vault.set({ keyId: k.keys.publicKey.keyId, ciphertext: sealFor(k.keys, password) });
-        if (!r.stored || !r.works) {
-          vault.clear();
-          throw new SetupError(
-            `sudo did not accept that password (${r.error ?? 'not stored'}); sudo stays off`,
-          );
-        }
-      }
-      say(`Sealed your sudo password for ${keys.length} pairing(s) on this machine.`);
-    }
-    next.devops = { ...next.devops, sudo: true };
-    // with sudo, asking is always on
-    next.devopsRequests = 'ask';
-  } else {
-    if (current.devops.sudo && mode === 'dedicated') admin.push(adminCmd(['sudo', 'off']));
-    if (mode === 'current') for (const d of dirs) rmSync(join(d, 'secrets', 'sudo.enc'), { force: true });
-    next.devops = { ...next.devops, sudo: false };
-  }
-
-  // ---- 5. Docker for deploys [R20 step 4]
+  // ---- 4. Docker for the runner [R20 step 4, DESIGN deps-without-sudo §3]
   const userArg = mode === 'current' ? ['--user', deps.username] : [];
-  let docker = opts.docker;
-  if (!docker) {
-    if (p) {
-      say(DOCKER_EXPLAINED);
-      docker = await p.choose('Docker access for deploys', ['none', 'narrow', 'group'] as const, 'none');
-    } else docker = 'none';
-  }
+  const mac = deps.platform === 'darwin';
+  const found = opts.dockerFound ?? (current.docker === 'rootless' ? 'own' : 'none');
   let accept = opts.acceptRootEquivalent;
-  const typedAccept = async (why: string): Promise<boolean> =>
+  const typed = async (why: string, phrase: string): Promise<boolean> =>
     p
-      ? (
-          await p.text(`${why} Type "${ROOT_EQUIVALENT_PHRASE}" to accept (anything else declines):`)
-        ).trim() === ROOT_EQUIVALENT_PHRASE
+      ? (await p.text(`${why} Type "${phrase}" to accept (anything else declines):`)).trim() === phrase
       : false;
-  if (docker === 'group' && !accept) {
-    accept = await typedAccept('The docker group makes the runner user root-equivalent.');
+  let docker: DockerMode | undefined = opts.docker;
+  const socket = opts.dockerSocket;
+  let acceptShared = opts.acceptSharedDaemon;
+  if (!docker) {
+    if (!posix) docker = 'none';
+    else if (mac) {
+      if (found === 'desktop' && p) {
+        say(MAC_DOCKER_WARNING);
+        docker = 'host';
+      } else docker = 'none';
+    } else if (found === 'rootful' && p) {
+      say(ROOTFUL_WARNING);
+      docker =
+        (await p.choose(
+          '1) a separate rootless Docker for the runner (recommended), 2) the installed Docker (root-equivalent)',
+          ['1', '2'] as const,
+          '1',
+        )) === '2'
+          ? 'host'
+          : 'rootless';
+    } else if (found === 'shared' && p && socket) {
+      say(`A rootless Docker daemon of another user is running (${socket}).`);
+      docker =
+        (await p.choose(
+          '1) a separate rootless Docker for the runner (recommended), 2) that shared daemon',
+          ['1', '2'] as const,
+          '1',
+        )) === '2'
+          ? 'shared'
+          : 'rootless';
+    } else docker = 'rootless';
+  }
+  if (docker === 'rootless' && (mac || !posix))
+    throw new SetupError(
+      'rootless Docker is a Linux set-up: on a Mac use Docker Desktop (--docker host), or none',
+    );
+  if (docker === 'host' && mac) {
+    if (!socket || !DESKTOP_SOCKET_RE.test(socket))
+      throw new SetupError(
+        '--docker host on a Mac needs --docker-socket /Users/<you>/.docker/run/docker.sock',
+      );
+  }
+  if (docker === 'host' && !accept) {
+    accept = await typed(
+      mac
+        ? 'Docker Desktop makes the runner user root-equivalent inside Docker.'
+        : 'The installed Docker daemon makes the runner user root-equivalent.',
+      ROOT_EQUIVALENT_PHRASE,
+    );
     if (!accept) {
-      say('Not accepted: Docker access stays none.');
+      say('Not accepted: the runner gets no Docker.');
       docker = 'none';
     }
   }
+  if (docker === 'shared') {
+    if (!socket || !SHARED_SOCKET_RE.test(socket))
+      throw new SetupError('--docker shared needs --docker-socket /run/<name>/docker.sock');
+    if (!acceptShared) {
+      say(SHARED_WARNING);
+      acceptShared = await typed('', SHARED_DAEMON_PHRASE);
+      if (!acceptShared) {
+        say('Not accepted: the runner gets its own rootless Docker instead.');
+        docker = 'rootless';
+      }
+    }
+  }
+  // F1: in current-user mode the person's own groups stay as they are; a group that reaches a Docker daemon is refused
+  // at start-up, so say so now instead of writing a policy that refuses
+  if (mode === 'current' && posix && !mac && (docker === 'rootless' || docker === 'none') && !accept) {
+    const reach = await dockerGroupsOf(deps);
+    if (reach.length > 0) {
+      const why = `${deps.username} is in ${reach.join(', ')}, which reaches a Docker daemon: the runner would refuse to start (the start-up check), and setup does not change your groups.`;
+      if (!p)
+        throw new SetupError(
+          `${why} Use a dedicated runner user (--runner-user dedicated, recommended) or the installed Docker (--docker host --accept-root-equivalent).`,
+        );
+      say(why);
+      const pick = await p.choose(
+        '1) a dedicated runner user (recommended), 2) the installed Docker (root-equivalent)',
+        ['1', '2'] as const,
+        '1',
+      );
+      if (pick === '1') {
+        const cmds = [adminCmd(['user', 'create']), adminCmd(['service', 'install'])];
+        say('As an administrator, run:');
+        for (const c of cmds) say(`  ${c}`);
+        say(`Then run setup as that user:  sudo -u ${DEDICATED_USER} -H guildwise-runner setup`);
+        return { policy: null, adminCommands: cmds, exitCode: 3, wrote: false };
+      }
+      accept = await typed(
+        'The installed Docker daemon makes the runner user root-equivalent.',
+        ROOT_EQUIVALENT_PHRASE,
+      );
+      if (!accept) throw new SetupError('not accepted: nothing was written');
+      docker = 'host';
+    }
+  }
   if (!accept && p && mode === 'current' && posix)
-    accept = await typedAccept(
+    accept = await typed(
       `If ${deps.username} is root-equivalent, the runner refuses to start. Accept starting anyway, with a warning?`,
+      ROOT_EQUIVALENT_PHRASE,
     ).catch(() => false);
   next.docker = docker;
   next.acceptRootEquivalent = accept;
-  if (docker === 'narrow') admin.push(adminCmd(['docker', 'narrow', ...userArg]));
-  else if (docker === 'group')
-    admin.push(adminCmd(['docker', 'group', '--accept-root-equivalent', ...userArg]));
-  else if (current.docker !== 'none') admin.push(adminCmd(['docker', 'none', ...userArg]));
-  const apps: ApproveApp[] = [...opts.approveApps];
-  if (p && docker === 'narrow' && apps.length === 0) {
-    const t = (
-      await p.text('Compose apps to approve now, as app=folder separated by commas (empty for none):')
-    ).trim();
-    for (const spec of t
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean))
-      apps.push(parseApproveApp(spec));
-  }
-  if (apps.length > 0 && docker !== 'narrow') throw new SetupError('--approve-app needs --docker narrow');
-  for (const a of apps) {
-    if (!inside(deps.home, a.folder))
-      throw new SetupError(
-        `${a.folder} is not one of the runner's own clones (inside ${deps.home}): clone the app there first`,
-      );
-    admin.push(adminCmd(['approve-app', a.app, '--source', a.folder]));
-  }
+  delete next.dockerHost;
+  if (docker !== 'shared') delete next.sharedDocker;
+  if (docker === 'rootless') admin.push(adminCmd(['docker', 'rootless', ...userArg]));
+  else if (docker === 'host') {
+    if (mac && socket) next.dockerHost = `unix://${socket}`;
+    admin.push(
+      adminCmd([
+        'docker',
+        'host',
+        '--accept-root-equivalent',
+        ...(mac && socket ? ['--desktop-socket', socket] : []),
+        ...userArg,
+      ]),
+    );
+  } else if (docker === 'shared' && socket) {
+    next.dockerHost = `unix://${socket}`;
+    admin.push(
+      adminCmd(['docker', 'shared', '--docker-socket', socket, '--accept-shared-daemon', ...userArg]),
+    );
+  } else if (current.docker !== 'none') admin.push(adminCmd(['docker', 'none', ...userArg]));
 
-  // ---- 6. deploy defaults [R20 step 5]
+  // ---- 5. deploy defaults [R20 step 5]
   next.deploy =
     opts.deploy ?? (p ? await p.choose('Deploys', ['ask', 'off'] as const, current.deploy) : 'ask');
   next.deployPinCommit =
@@ -353,7 +379,7 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
     if (!keep) delete next.legacyUpdateOrigin;
   }
 
-  // ---- 7. summary [R20 step 6]
+  // ---- 6. summary [R20 step 6]
   next.startupRefusal = true;
   next.setupDone = true;
   const written = writePolicy(policyFile, next);
@@ -367,7 +393,6 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
   say(
     `  DevOps for       ${Object.keys(written.devops.agents).map(orgName).join(', ') || 'no organization'}`,
   );
-  say(`  sudo             ${written.devops.sudo ? 'on (each DevOps step still asks here)' : 'off'}`);
   say(
     `  Docker           ${written.docker}${written.acceptRootEquivalent ? ' (root-equivalence accepted)' : ''}`,
   );
@@ -389,10 +414,10 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
     say(
       '  claude setup-token   then: guildwise-runner auth oauth-token   (a daemon user has no login keychain)',
     );
-    say('  gh auth login --insecure-storage');
+    say(GITHUB_OPTIONAL);
   } else {
     say('  claude               (sign in, then /exit)');
-    say('  gh auth login        (or git credentials for your remotes)');
+    say(GITHUB_OPTIONAL);
   }
   return { policy: written, adminCommands: admin, exitCode: 0, wrote: true };
 }

@@ -11,7 +11,6 @@ import {
   type PolicyCliDeps,
   passkeyTrust,
   signingAddKey,
-  sudoSet,
 } from '../src/policy/cli.ts';
 import { gateCommand } from '../src/policy/gate.ts';
 import { capDetail, HeldStore } from '../src/policy/held.ts';
@@ -199,22 +198,21 @@ describe('passkey approvals during setup pending (round-1 should-fix 3)', () => 
 });
 
 describe('local grants are written only by the CLI (R18-S)', () => {
-  it('devops grant, requests auto refused with sudo, sudo forces ask', async () => {
+  it('devops grant and requests auto (no sudo grant exists since 1.10.0)', async () => {
     const t = env();
     devopsGrant(t.cli, ORG, AGENT);
     expect(t.store.get().devops.agents).toEqual({ [ORG]: AGENT });
     devopsRequests(t.cli, 'auto');
-    await sudoSet(t.cli, true);
-    expect(t.store.get()).toMatchObject({ devops: { sudo: true }, devopsRequests: 'ask' });
-    expect(() => devopsRequests(t.cli, 'auto')).toThrow(/refused while sudo/);
+    expect(t.store.get()).toMatchObject({ devops: { agents: { [ORG]: AGENT } }, devopsRequests: 'auto' });
+    expect(t.store.get().devops).not.toHaveProperty('sudo');
     expect(statSync(t.store.file).mode & 0o777).toBe(0o600);
   });
 
   it('an invalid policy.json grants nothing and is never silently replaced', () => {
     const t = env();
-    writeFileSync(t.store.file, '{"devops": {"agents": {"x": "y"}, "sudo": "yes"}}');
+    writeFileSync(t.store.file, '{"devops": {"agents": {"x": "y"}}}');
     expect(t.store.read().error).toBeTruthy();
-    expect(t.store.get().devops.sudo).toBe(false);
+    expect(t.store.get().devops.agents).toEqual({});
     expect(() => devopsGrant(t.cli, ORG, AGENT)).toThrow(/not a valid policy/);
   });
 

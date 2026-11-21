@@ -151,18 +151,19 @@ export function gateReleaseSign(policy: Policy, payload: unknown): GateDecision 
 }
 
 /**
- * `env.ensure` (R18-S, R18-L): sudo and Docker are narrowed to what policy.json grants (never widened); a request for
+ * `env.ensure` (R18-S, R18-L): Docker is narrowed to what policy.json grants (never widened) and sudo is always off (removed
+ * in 1.10.0: nothing on the runner runs as root); a request for
  * installs or extra paths is a widening of access and waits for a local yes.
  */
 export function narrowAccess(policy: Policy, access: DevOpsAccess): DevOpsAccess {
   return {
     ...access,
-    sudo: access.sudo && policy.devops.sudo,
+    sudo: false,
     allowDocker: access.allowDocker && policy.allowDocker,
   };
 }
 
-/** The `env.ensure` payload as the runner runs it: access narrowed to the local grants (never the server's sudo). */
+/** The `env.ensure` payload as the runner runs it: access narrowed to the local grants (never sudo). */
 export function localEnvEnsure(policy: Policy, p: EnvEnsurePayload): EnvEnsurePayload {
   return { ...p, access: narrowAccess(policy, p.access) };
 }
@@ -183,8 +184,7 @@ export function gateEnvEnsure(policy: Policy, payload: unknown): GateDecision {
       line('repositories', p.repos.map((r) => r.remoteUrlNormalized).join(', ')),
       line('installs', p.access.allowInstall ? 'yes' : 'no'),
       line('paths', p.access.allowedPaths.join(', ')),
-      // what actually applies: sudo and Docker only where granted on this workstation
-      line('sudo', narrowAccess(policy, p.access).sudo ? 'yes (granted locally)' : 'no'),
+      // what actually applies: Docker only where granted on this workstation
       line('docker', narrowAccess(policy, p.access).allowDocker ? 'yes (allowed locally)' : 'no'),
     ].join('\n'),
     commandHash: commandHashOf('env.ensure', { ...p, requestId: undefined }),
@@ -321,7 +321,7 @@ export interface DevopsShiftInput {
 
 /**
  * A DevOps shift from the server: the agent must hold a local grant for that organization (`devops grant`), and unless
- * policy.json says `devopsRequests: auto` (refused while sudo is granted) every task not started on this machine waits
+ * policy.json says `devopsRequests: auto` every task not started on this machine waits
  * for a local yes. Setup pending holds it too.
  */
 export function gateDevopsShift(
@@ -335,7 +335,7 @@ export function gateDevopsShift(
       reason: `DevOps is not granted to this agent on this workstation: run \`guildwise-runner devops grant ${s.orgId}\` on the workstation`,
     };
   const pending = setupPending(policy);
-  if (policy.devopsRequests === 'auto' && !policy.devops.sudo && !pending) return { action: 'run' };
+  if (policy.devopsRequests === 'auto' && !pending) return { action: 'run' };
   return {
     action: 'hold',
     kind: 'devops.task',
@@ -356,10 +356,6 @@ export function gateDevopsShift(
             const a = narrowAccess(policy, s.access);
             return [
               line(
-                'sudo',
-                a.sudo ? 'yes (granted locally)' : s.access.sudo ? 'asked, NOT granted here' : 'no',
-              ),
-              line(
                 'docker',
                 a.allowDocker
                   ? 'yes (allowed locally)'
@@ -375,7 +371,7 @@ export function gateDevopsShift(
       ...(s.request ? ['', 'request (as received, untrusted):', s.request] : []),
       '',
       policy.devopsRequests === 'ask'
-        ? 'DevOps tasks wait for a local yes (policy.json devopsRequests: "ask"). `guildwise-runner devops requests auto` opts out; it is refused while sudo is granted.'
+        ? 'DevOps tasks wait for a local yes (policy.json devopsRequests: "ask"). `guildwise-runner devops requests auto` opts out.'
         : '',
     ]
       .filter((l) => l !== '')

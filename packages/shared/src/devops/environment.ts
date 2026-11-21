@@ -134,16 +134,17 @@ export const RightsReportSchema = z.object({
   checkedAt: z.iso.datetime(),
   platform: z.string(),
   checks: z.record(z.string(), RightCheckSchema),
-  /** A stored sudo password exists on the runner (never the password itself). */
-  sudoPasswordStored: z.boolean().default(false),
 });
 export type RightsReport = z.infer<typeof RightsReportSchema>;
 
 export const RightsVerifyPayloadSchema = z.object({ access: DevOpsAccessSchema });
 
-// -------------------------------------------------------------------------------------------- sudo password
+// -------------------------------------------------------------------------------------------- sealing key
 
-/** The runner's public key for the sudo password (RSA-OAEP, SHA-256), announced in `hello`. */
+/**
+ * The runner's public key (RSA-OAEP, SHA-256), announced in `hello` as `sudoKey`: the workstation sealing key for
+ * provider and target secrets. The sudo password it once sealed was removed in 1.10.0; the name stays.
+ */
 export const SudoKeySchema = z.object({
   /** First 16 hex digits of the SHA-256 of the SPKI key: shown in the UI and by `aom-runner doctor` to compare. */
   keyId: z.string(),
@@ -151,19 +152,3 @@ export const SudoKeySchema = z.object({
   publicKey: z.string(),
 });
 export type SudoKey = z.infer<typeof SudoKeySchema>;
-
-export const SudoSetPayloadSchema = z.object({
-  /** Base64 RSA-OAEP ciphertext of the password, encrypted in the browser with the runner's public key. */
-  ciphertext: z.string().min(1).max(2000),
-  keyId: z.string(),
-});
-export type SudoSetPayload = z.infer<typeof SudoSetPayloadSchema>;
-
-export const SudoSetResultSchema = z.object({
-  /** The password was decrypted and stored. */
-  stored: z.boolean(),
-  /** `sudo -S -v` accepted it. */
-  works: z.boolean().optional(),
-  error: z.string().max(500).optional(),
-});
-export type SudoSetResult = z.infer<typeof SudoSetResultSchema>;

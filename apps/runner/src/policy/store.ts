@@ -30,7 +30,7 @@ export function writeFileAtomic(file: string, text: string, mode: number): void 
 }
 
 /**
- * The local authority on this machine. The CLI writes it (`approve --pin`, `devops grant`, `sudo enable`, `passkey trust`,
+ * The local authority on this machine. The CLI writes it (`approve --pin`, `devops grant`, `passkey trust`,
  * `signing add-key`, `repo allow-scripts`, ... and W9's `setup`); the running runner only reads it, re-reading whenever
  * the file changes. An unreadable or invalid file never grants anything: the default policy (everything off, deploys
  * ask, nothing trusted) applies until it is fixed on the machine.

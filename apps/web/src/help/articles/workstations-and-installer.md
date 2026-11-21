@@ -144,7 +144,7 @@ To let it work for another organization, switch that organization on under **Wor
 
 Reinstalling means running the **Add a workstation** command from your own server again.
 
-The installer starts with **Looking for an older runner**: it finds an old install, stops it and quarantines it (a single archive under `~/.guildwise-quarantine/<time>/`, with a `MANIFEST.txt`; use `--legacy remove` to delete instead). Nothing of the old install is read or reused: no token, key, sudo password, policy or clone. Delete the quarantine after you have looked at it. If sudo was ever granted to the old runner, change that user's password, because the old sealed password may be known.
+The installer starts with **Looking for an older runner**: it finds an old install, stops it and quarantines it (a single archive under `~/.guildwise-quarantine/<time>/`, with a `MANIFEST.txt`; use `--legacy remove` to delete instead). Nothing of the old install is read or reused: no token, key, sudo password, policy or clone. Delete the quarantine after you have looked at it. If sudo was ever granted to the old runner, change that user's password, because the old sealed password may be known. A sealed sudo password of a 1.10.0 test install is deleted without being read.
 
 When it is required:
 
@@ -159,8 +159,9 @@ The installer has a step **Setting local permissions**; it runs `guildwise-runne
 - **Runner user**: a dedicated `guildwise-runner` user (Linux, macOS) or a dedicated WSL distribution (Windows), or your own user.
 - **Own clones**: the runner works only in its own clones under its home folder, never in your folders. You get its work through git.
 - **DevOps organizations**: which organizations the DevOps engineer may serve. Each starts as No; the server's list is only a suggestion.
-- **Sudo**: on or off. The password is sealed on the machine, never through the browser.
-- **Docker**: none, a narrow helper, or the docker group. The narrow helper (`deploy-compose`) runs only a compose setup you approved with `guildwise-admin approve-app`, from a frozen copy, and refuses privileged containers, host network, devices, host folders outside the project and remote includes. A changed file waits until you approve it again. The docker group gives the runner root-equivalent power, so setup asks you to type `root-equivalent` (or pass `--accept-root-equivalent`).
+- **Docker**: by default the runner gets its own rootless Docker (one per runner, never shared). If Docker is already installed and not rootless, the installer says "Docker detected, not running in rootless mode" and lets you choose: a separate rootless Docker for the runner (recommended), or the installed Docker, which gives the runner root-equivalent power, so you type `root-equivalent` (or pass `--docker host --accept-root-equivalent`). A rootless Docker of another user that is already running can be shared after you type `shared-daemon` (or pass `--docker shared --docker-socket <path> --accept-shared-daemon`); runners that share a daemon can each control the other's containers. On a Mac the installer uses Docker Desktop, after a warning that containers can read and write the folders Docker Desktop shares (by default all of /Users), and waits for you to install it from https://www.docker.com/products/docker-desktop/ if it is missing. On Windows the runner has its own engine inside its WSL distribution.
+- **No sudo**: the runner never gets sudo. The installer asks for your password once and does all root work in that one go: it installs a baseline (build tools, git, curl, unzip, the libraries headless Chromium and Playwright need, fonts, the rootless Docker prerequisites), creates the runner user and sets up Docker. Use `--skip-baseline` if you manage packages yourself. The DevOps engineer installs stack tools (Node, Python, .NET, Java, Go, Rust, Android SDK, ...) only in the runner's own home, each checked against the vendor's checksum. Other system packages are your job: the runner tells you the exact command.
+- **GitHub is optional**: nothing in the installer or setup asks for GitHub. Repositories and setup can come through Guildwise; `gh auth login` is only for GitHub repositories.
 - **Deploy approvals**: the default for new deploy scripts.
 
 Steps that need root are printed as `sudo /usr/local/lib/guildwise/guildwise-admin ...`. `guildwise-admin` is owned by root, installed from the verified package, and the runner can never change it. For an offline install, download the package, verify it yourself and run the installer with `--from-file`. Otherwise the installer script comes from your server and you trust it the first time. The macOS dedicated user and the Windows distribution are not yet tested on hardware.
@@ -180,7 +181,7 @@ The workstation page shows what is waiting: setup pending, a start-up refusal wi
 
 ## Passkey approvals {#passkeys}
 
-The **Approvals** button on a workstation card opens the approvals page. **Waiting for your yes** lists held items. **Approve with passkey** appears for only two kinds: a redeploy at a new commit and a recipe change. Everything else shows the `guildwise-runner approve <id>` command. Grants, DevOps, sudo, install scripts and CEO turns always need the machine.
+The **Approvals** button on a workstation card opens the approvals page. **Waiting for your yes** lists held items. **Approve with passkey** appears for only two kinds: a redeploy at a new commit and a recipe change. Everything else shows the `guildwise-runner approve <id>` command. Grants, DevOps, install scripts and CEO turns always need the machine.
 
 1. Under **Passkeys**, type a name and click **Add a passkey** (**Confirm it's you** is asked).
 2. On the machine run `guildwise-runner passkey trust`. The page names the start of the credential id.
@@ -195,7 +196,7 @@ A signed runner release carries a signature (minisign) over its manifest, and th
 - **Official key**: Guildwise Cloud and the official image use the key published by the project.
 - **Your own key**: a self-hosted server can sign its own runner release and trust only that key (`AOM_RUNNER_RELEASE_PUBKEY`). This is optional. See [Open source and self-hosting](/help/open-source-and-self-hosting#security-settings).
 - **Setting**: **Platform > Security > Security settings > Only signed runners**. Off by default on self-hosted servers; locked on in Guildwise Cloud. Turning it on unlinks unsigned workstations, which then show **Reinstall required**.
-- **Start-up refusal**: when the server says signed runners are required, or when setup asks for it, the runner refuses to start (exit code 78, shown on the workstation page) if its user is root-equivalent (root, passwordless sudo, the docker group, a writable Docker socket) or its files are writable by others. Fix it and start again; see [Troubleshooting](/help/troubleshooting#exit-78). With the setting off, a self-updated runner only warns.
+- **Start-up refusal**: when the server says signed runners are required, or when setup asks for it, the runner refuses to start (exit code 78, shown on the workstation page) if its user is root-equivalent (root, passwordless sudo, the docker group, the socket of another Docker daemon it can write) or its files are writable by others. Its own rootless Docker never counts, and a shared rootless daemon you accepted at install only shows a warning. Fix it and start again; see [Troubleshooting](/help/troubleshooting#exit-78). With the setting off, a self-updated runner only warns.
 - To sign a release for one deploy environment, see [Signing the runner per environment](/help/phases#runner-signing).
 
 ## Unpairing {#unpairing}

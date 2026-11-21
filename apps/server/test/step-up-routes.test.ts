@@ -49,10 +49,8 @@ const ws = () => w.workstationId;
 const sealed = () => ({ workstationId: w.workstationId, keyId: WS_KEY, ciphertext: 'Zm9v' });
 
 const OWNER_ROUTES: Route[] = [
-  // sudo key and password (devops.ts)
+  // the sealing key (devops.ts)
   ['GET', () => `/api/workstations/${ws()}/sudo-key`],
-  ['PUT', () => `/api/workstations/${ws()}/sudo-password`, () => ({ ciphertext: 'Zm9v', keyId: WS_KEY })],
-  ['DELETE', () => `/api/workstations/${ws()}/sudo-password`],
   // test accounts of a deploy target (runs.ts)
   [
     'PUT',

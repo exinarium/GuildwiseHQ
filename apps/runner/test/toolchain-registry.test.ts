@@ -12,7 +12,7 @@ import type { DevOpsAccess, EnvEnsurePayload } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { sandboxEnv } from '../src/sandbox/sandbox.ts';
 import { dotnetGaps, pathWithDotnet, sdkSatisfies, selectDotnet } from '../src/toolchain/dotnet.ts';
-import { type EnsureDeps, ensureEnvironment, type RootRunner } from '../src/toolchain/ensure.ts';
+import { type EnsureDeps, ensureEnvironment } from '../src/toolchain/ensure.ts';
 import type { ExecResult, Executor } from '../src/toolchain/exec.ts';
 import {
   agentPath,
@@ -22,6 +22,7 @@ import {
   toolchainNote,
   toolchainRpc,
 } from '../src/toolchain/registry.ts';
+import type { UserInstallResolver } from '../src/toolchain/user-install.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
 
 cleanupTmp();
@@ -175,14 +176,16 @@ describe('env.ensure for .NET against the chosen root', () => {
         return ok();
       },
     };
-    const rootRunner: RootRunner = {
-      mode: async () => ({ mode: 'none', detail: '' }),
-      run: async () => ok(),
-    };
+    const resolvers = new Map<string, UserInstallResolver>();
     const deps: EnsureDeps = {
       exec,
       platform: 'linux',
-      root: rootRunner,
+      userInstaller: {
+        install: async (toolId, resolver) => {
+          resolvers.set(toolId, resolver);
+          return { ok: false, detail: 'not in this test' };
+        },
+      },
       findRepo: async () => ({ localPath: repo }),
       installDependencies: true,
       // the repository's owner allowed its install scripts locally (R18-S): dotnet restore runs
@@ -195,7 +198,7 @@ describe('env.ensure for .NET against the chosen root', () => {
       repos: [{ repoId: '0190aaaa-0000-7000-8000-0000000000a1', name: 'app', remoteUrlNormalized: 'x/y' }],
       access: { ...access, allowInstall },
     } as EnvEnsurePayload;
-    return { report: await ensureEnvironment(payload, deps), calls };
+    return { report: await ensureEnvironment(payload, deps), calls, resolvers };
   };
   const proj = (tfm: string) =>
     `<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>${tfm}</TargetFramework></PropertyGroup></Project>`;
@@ -231,9 +234,45 @@ describe('env.ensure for .NET against the chosen root', () => {
       { 'global.json': '{"sdk":{"version":"10.0.100"}}', 'a.csproj': proj('net10.0') },
       root,
     );
-    const install = on.calls.find((c) => c.line.startsWith('bash -c curl'));
-    expect(install?.line).toContain(`--install-dir '${root}'`);
-    expect(install?.line).toContain('--channel 10.0');
+    // the user-space plan: the 10.0 SDK from the release metadata (sha512), merged into the chosen root
+    const fetched: string[] = [];
+    const plan = await on.resolvers.get('dotnet-sdk')?.({
+      params: {},
+      platform: 'linux',
+      arch: 'x64',
+      root: '/home/r/.local/share/guildwise/toolchains',
+      fetchText: async (url) => {
+        fetched.push(url);
+        return JSON.stringify({
+          'latest-sdk': '10.0.401',
+          'latest-runtime': '10.0.12',
+          releases: [
+            {
+              sdk: {
+                version: '10.0.401',
+                files: [
+                  {
+                    name: 'dotnet-sdk-linux-x64.tar.gz',
+                    rid: 'linux-x64',
+                    url: 'https://b/sdk.tar.gz',
+                    hash: 'ab'.repeat(64),
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      },
+    });
+    expect(fetched).toEqual([
+      'https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json',
+    ]);
+    expect(plan?.archives[0]).toMatchObject({
+      url: 'https://b/sdk.tar.gz',
+      checksum: { algo: 'sha512', hex: 'ab'.repeat(64) },
+      into: { dir: root, mode: 'merge' },
+    });
+    expect(on.calls.some((c) => c.line.includes('dotnet-install'))).toBe(false);
   });
 
   it('missing runtime 8 for a net8.0 test project on a net10-only root', async () => {

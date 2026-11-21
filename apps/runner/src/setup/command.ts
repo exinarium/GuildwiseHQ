@@ -8,18 +8,12 @@ import { runSetup } from './setup.ts';
 
 const collect = (v: string, prev: string[] = []) => [...prev, v];
 
-async function readStdin(): Promise<string> {
-  let s = '';
-  for await (const chunk of process.stdin) s += String(chunk);
-  return s;
-}
-
 /** Registers `guildwise-runner setup` (R20) on the runner CLI. */
 export function registerSetupCommand(program: Command): void {
   program
     .command('setup')
     .description(
-      'set the local permissions of this workstation (DevOps organizations, sudo, Docker for deploys, deploy approvals); writes only policy.json and prints the root steps for guildwise-admin',
+      'set the local permissions of this workstation (DevOps organizations, Docker, deploy approvals); writes only policy.json and prints the root steps for guildwise-admin',
     )
     .option('--yes', 'no questions: every step not given by a flag takes the safest value')
     .option('--runner-user <mode>', 'dedicated|current (Linux and macOS)')
@@ -27,19 +21,22 @@ export function registerSetupCommand(program: Command): void {
     .option('--legacy <mode>', 'quarantine|remove (installer only)')
     .option(
       '--accept-root-equivalent',
-      'let a root-equivalent runner user start, with a warning (needed by --docker group)',
+      'let a root-equivalent runner user start, with a warning (needed by --docker host)',
     )
     .option(
       '--devops-orgs <ids>',
       'none, or organization ids separated by commas (each must be offered by the server)',
     )
-    .option('--sudo <mode>', 'on|off')
     .option(
-      '--sudo-password-stdin',
-      'with the current user and --sudo on: read your sudo password from stdin',
+      '--docker <mode>',
+      "rootless|host|shared|none (default: the runner's own rootless Docker; host needs --accept-root-equivalent, shared needs --accept-shared-daemon)",
     )
-    .option('--docker <mode>', 'none|narrow|group (group needs --accept-root-equivalent)')
-    .option('--approve-app <app=folder>', 'a compose app for the narrow Docker helper (repeatable)', collect)
+    .option('--docker-found <what>', 'rootful|desktop|own|shared|none (installer only: what it detected)')
+    .option('--docker-socket <path>', "macOS: your Docker Desktop socket; shared: the other daemon's socket")
+    .option(
+      '--accept-shared-daemon',
+      'let the runner use a rootless Docker daemon of another user (it can control every container on it)',
+    )
     .option('--deploy <mode>', 'ask|off')
     .option('--deploy-pin-commit', 'bind approved redeploys to the commit')
     .option(
@@ -62,9 +59,8 @@ export function registerSetupCommand(program: Command): void {
             username: userInfo().username,
             platform: process.platform,
             dataRoot: resolveDataDir(opts.dataDir),
-            prompter: process.stdin.isTTY && !opts.yes && !opts.sudoPasswordStdin ? terminalPrompter : null,
+            prompter: process.stdin.isTTY && !opts.yes ? terminalPrompter : null,
             out: (line) => console.log(line),
-            readStdin,
             exec: realExecutor,
           },
           opts,

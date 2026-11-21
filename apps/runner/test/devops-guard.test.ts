@@ -58,8 +58,6 @@ const rows: Row[] = [
   ['curl -s https://example.com/health', 'curl is not remote-admin', 'allowed'],
   ['echo "do not drop database users"', 'text about dropping a database', 'allowed'],
   ['git commit -m "drop schema migration"', 'commit message', 'allowed'],
-  ['aom sudo -- apt-get install -y jq', 'privileged work through aom sudo', 'allowed', 'aom_sudo'],
-  ['aom sudo -- useradd builder', 'user admin through aom sudo', 'allowed'],
   ['cat /etc/passwd', 'reading accounts', 'allowed'],
 
   // ---- refused: deleting outside worktrees and data folders
@@ -84,7 +82,8 @@ const rows: Row[] = [
   ['echo $(rm -rf /home/u/x)', 'inside command substitution', 'refused', 'delete_outside'],
   ['rmdir /home/u/Documents', 'rmdir', 'refused', 'delete_outside'],
   ['git -C /home/u/src/repo clean -fdx', 'git clean outside', 'refused', 'delete_outside'],
-  ['aom sudo -- rm -rf /var/lib/postgresql', 'delete outside through aom sudo', 'refused', 'delete_outside'],
+  ['aom sudo -- apt-get install -y jq', 'aom sudo was removed in 1.10.0', 'refused', 'user_admin'],
+  ['aom sudo -- useradd builder', 'aom sudo was removed in 1.10.0', 'refused', 'user_admin'],
 
   // ---- refused: disk tools
   ['fdisk /dev/sda', 'fdisk', 'refused', 'disk_tools'],
@@ -93,7 +92,12 @@ const rows: Row[] = [
   ['dd if=/dev/zero of=/dev/sda bs=1M', 'dd to a disk', 'refused', 'disk_tools'],
   ['echo x > /dev/sda', 'redirect to a disk', 'refused', 'disk_tools'],
   ['wipefs -a /dev/sdb', 'wipefs', 'refused', 'disk_tools'],
-  ['aom sudo -- mkfs.ext4 /dev/sdb1', 'disk tool through aom sudo', 'refused', 'disk_tools'],
+  [
+    'aom sudo -- mkfs.ext4 /dev/sdb1',
+    'aom sudo is gone, whatever the inner command',
+    'refused',
+    'user_admin',
+  ],
   ['dd if=/dev/zero of=/tmp/file bs=1M count=10', 'dd to a file', 'allowed'],
 
   // ---- refused: users, sudo, passwords
@@ -265,7 +269,7 @@ describe('DevOps guard: hook', () => {
     });
     const out = JSON.parse(r.stdout);
     expect(out.hookSpecificOutput.permissionDecision).toBe('deny');
-    expect(out.hookSpecificOutput.permissionDecisionReason).toMatch(/aom sudo/);
+    expect(out.hookSpecificOutput.permissionDecisionReason).toMatch(/machine owner/);
     expect(sent[0]).toMatchObject({ decision: 'refused', rule: 'user_admin' });
   });
 

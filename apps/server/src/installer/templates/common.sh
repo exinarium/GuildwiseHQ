@@ -30,14 +30,12 @@ RUNNER_NAME="$(id -un)"
 RUNNER_HOME="${HOME}"
 DEDICATED_USER="guildwise-runner"
 # --instance <name>: a named runner (two runners on one machine, say one paired with UAT and one with production). It gets
-# its own user guildwise-runner-<name>, service, CA copy, sudoers rules and approved apps; every guildwise-admin call
+# its own user guildwise-runner-<name>, service, CA copy and rootless Docker; every guildwise-admin call
 # below carries --instance <name> (run_admin). Without it: the single guildwise-runner, as before.
 # shellcheck disable=SC2034 # used by linux.sh (macOS names its LaunchDaemon from the instance instead)
 DEDICATED_SERVICE="guildwise-runner"
-SUDOERS_SUDO_FILE="/etc/sudoers.d/guildwise-runner"
-SUDOERS_DOCKER_FILE="/etc/sudoers.d/guildwise-runner-docker"
 INSTANCE_ARGS=()
-# Root-owned, read-only tools (guildwise-admin, deploy-compose) and the pinned Node they run on. The runner can never
+# Root-owned, read-only tools (guildwise-admin, the rootless Docker binaries) and the pinned Node they run on. The runner can never
 # change them; they change only when you run this installer again.
 ADMIN_DIR="/usr/local/lib/guildwise"
 ADMIN="${ADMIN_DIR}/guildwise-admin"
@@ -45,6 +43,14 @@ ADMIN="${ADMIN_DIR}/guildwise-admin"
 ADMIN_HINT="${ADMIN}"
 BUNDLED_NODE_BIN="${ADMIN_DIR}/node/bin"
 ADMIN_TOOLS_READY=0
+# One authorization (DESIGN deps-without-sudo §2): `sudo -v` once, a keepalive, then only `sudo -n`.
+AUTHORIZED=0
+SUDO_KEEPALIVE_PID=""
+# What detect_docker saw (rootful|desktop|own|shared|none) and the socket it names.
+DOCKER_FOUND=none
+DOCKER_SOCKET=""
+# Where a root daemon's socket lives (tests point these into their own folder).
+DOCKER_SOCKET_PATHS=(/var/run/docker.sock /run/docker.sock)
 # The first signed runner release: an install below it, or one this installer did not verify, is an "older runner".
 SIGNED_RUNNER_FLOOR="1.10.0"
 LEGACY_RESULT=none
@@ -146,11 +152,11 @@ OPT_LEGACY="${GUILDWISE_LEGACY:-}"
 OPT_LEGACY_ONLY=0
 OPT_ACCEPT_ROOT_EQ="${GUILDWISE_ACCEPT_ROOT_EQUIVALENT:-0}"
 OPT_DEVOPS_ORGS="${GUILDWISE_DEVOPS_ORGS:-}"
-OPT_SUDO="${GUILDWISE_SUDO:-}"
-OPT_SUDO_PW_STDIN=0
 OPT_DOCKER="${GUILDWISE_DOCKER:-}"
-OPT_APPROVE_APPS=()
-read -r -a OPT_APPROVE_APPS <<<"${GUILDWISE_APPROVE_APPS:-}"
+OPT_DOCKER_SOCKET="${GUILDWISE_DOCKER_SOCKET:-}"
+OPT_ACCEPT_SHARED="${GUILDWISE_ACCEPT_SHARED_DAEMON:-0}"
+# --skip-baseline: this host manages its packages itself; missing core tools stop the install, the rest are warnings.
+OPT_SKIP_BASELINE="${GUILDWISE_SKIP_BASELINE:-0}"
 OPT_DEPLOY="${GUILDWISE_DEPLOY:-}"
 OPT_DEPLOY_PIN_COMMIT="${GUILDWISE_DEPLOY_PIN_COMMIT:-0}"
 OPT_ALLOW_UNSIGNED_FROM="${GUILDWISE_ALLOW_UNSIGNED_FROM:-}"
@@ -160,10 +166,9 @@ OPT_FROM_FILE="${GUILDWISE_FROM_FILE:-}"
 OPT_CA_FILE="${GUILDWISE_CA_FILE:-}"
 RUNNER_CA=""
 OPT_INSTANCE="${GUILDWISE_INSTANCE:-}"
-SUDO_PASSWORD=""
 
 bad_flag() {
-  die "$1" "Options: --yes, --runner-user dedicated|current, --legacy quarantine|remove, --accept-root-equivalent, --devops-orgs none|<id,...>, --sudo off|on, --sudo-password-stdin, --docker none|narrow|group, --approve-app <app>=<folder>, --deploy ask|off, --deploy-pin-commit, --allow-unsigned-from <origin>, --from-file <folder>, --ca-file <pem file>, --instance <name>, --choose-folders."
+  die "$1" "Options: --yes, --runner-user dedicated|current, --legacy quarantine|remove, --accept-root-equivalent, --devops-orgs none|<id,...>, --docker rootless|host|shared|none, --accept-shared-daemon, --docker-socket <path>, --skip-baseline, --deploy ask|off, --deploy-pin-commit, --allow-unsigned-from <origin>, --from-file <folder>, --ca-file <pem file>, --instance <name>, --choose-folders."
 }
 
 set_flag() {
@@ -171,9 +176,8 @@ set_flag() {
     --runner-user) OPT_RUNNER_USER="$2" ;;
     --legacy) OPT_LEGACY="$2" ;;
     --devops-orgs) OPT_DEVOPS_ORGS="$2" ;;
-    --sudo) OPT_SUDO="$2" ;;
     --docker) OPT_DOCKER="$2" ;;
-    --approve-app) OPT_APPROVE_APPS+=("$2") ;;
+    --docker-socket) OPT_DOCKER_SOCKET="$2" ;;
     --deploy) OPT_DEPLOY="$2" ;;
     --allow-unsigned-from) OPT_ALLOW_UNSIGNED_FROM="$2" ;;
     --from-file) OPT_FROM_FILE="$2" ;;
@@ -195,8 +199,9 @@ parse_flags() {
       --legacy-only) OPT_LEGACY_ONLY=1 ;;
       --accept-root-equivalent) OPT_ACCEPT_ROOT_EQ=1 ;;
       --deploy-pin-commit) OPT_DEPLOY_PIN_COMMIT=1 ;;
-      --sudo-password-stdin) OPT_SUDO_PW_STDIN=1 ;;
-      --runner-user|--legacy|--devops-orgs|--sudo|--docker|--approve-app|--deploy|--allow-unsigned-from|--from-file|--ca-file|--instance)
+      --accept-shared-daemon) OPT_ACCEPT_SHARED=1 ;;
+      --skip-baseline) OPT_SKIP_BASELINE=1 ;;
+      --runner-user|--legacy|--devops-orgs|--docker|--docker-socket|--deploy|--allow-unsigned-from|--from-file|--ca-file|--instance)
         [ "$#" -gt 0 ] || bad_flag "${a} needs a value."
         set_flag "${a}" "$1"; shift ;;
       --*=*) set_flag "${a%%=*}" "${a#*=}" ;;
@@ -212,14 +217,16 @@ validate_flags() {
   case "${OPT_DEPLOY_PIN_COMMIT}" in 1|y|yes|true) OPT_DEPLOY_PIN_COMMIT=1 ;; *) OPT_DEPLOY_PIN_COMMIT=0 ;; esac
   case "${OPT_RUNNER_USER}" in ''|dedicated|current) ;; *) bad_flag "--runner-user is dedicated or current (got ${OPT_RUNNER_USER})." ;; esac
   case "${OPT_LEGACY}" in ''|quarantine|remove) ;; *) bad_flag "--legacy is quarantine or remove (got ${OPT_LEGACY})." ;; esac
-  case "${OPT_SUDO}" in ''|on|off) ;; *) bad_flag "--sudo is on or off (got ${OPT_SUDO})." ;; esac
-  case "${OPT_DOCKER}" in ''|none|narrow|group) ;; *) bad_flag "--docker is none, narrow or group (got ${OPT_DOCKER})." ;; esac
+  case "${OPT_ACCEPT_SHARED}" in 1|y|yes|true) OPT_ACCEPT_SHARED=1 ;; *) OPT_ACCEPT_SHARED=0 ;; esac
+  case "${OPT_SKIP_BASELINE}" in 1|y|yes|true) OPT_SKIP_BASELINE=1; export GUILDWISE_SKIP_BASELINE=1 ;; *) OPT_SKIP_BASELINE=0 ;; esac
+  case "${OPT_DOCKER}" in ''|rootless|host|shared|none) ;; *) bad_flag "--docker is rootless, host, shared or none (got ${OPT_DOCKER})." ;; esac
   case "${OPT_DEPLOY}" in ''|ask|off) ;; *) bad_flag "--deploy is ask or off (got ${OPT_DEPLOY})." ;; esac
-  if [ "${OPT_DOCKER}" = group ] && [ "${OPT_ACCEPT_ROOT_EQ}" != 1 ]; then
-    bad_flag "--docker group makes the runner root-equivalent: it needs --accept-root-equivalent as well."
+  if [ "${OPT_DOCKER}" = host ] && [ "${OPT_ACCEPT_ROOT_EQ}" != 1 ]; then
+    bad_flag "--docker host makes the runner root-equivalent: it needs --accept-root-equivalent as well."
   fi
-  if [ "${#OPT_APPROVE_APPS[@]}" -gt 0 ] && [ -n "${OPT_DOCKER}" ] && [ "${OPT_DOCKER}" != narrow ]; then
-    bad_flag "--approve-app needs --docker narrow."
+  if [ "${OPT_DOCKER}" = shared ]; then
+    [ "${OPT_ACCEPT_SHARED}" = 1 ] || bad_flag "--docker shared lets the runner control every container on that daemon: it needs --accept-shared-daemon as well."
+    [[ "${OPT_DOCKER_SOCKET}" =~ ^/(var/)?run/[A-Za-z0-9_-][A-Za-z0-9._-]*/docker\.sock$ ]] || bad_flag "--docker shared needs --docker-socket /run/<name>/docker.sock (got ${OPT_DOCKER_SOCKET:-nothing})."
   fi
   if [ -n "${OPT_DEVOPS_ORGS}" ] && [ "${OPT_DEVOPS_ORGS}" != none ]; then
     local id ids
@@ -228,10 +235,6 @@ validate_flags() {
       is_uuid "${id}" || bad_flag "--devops-orgs is none or organization ids separated by commas (got ${id})."
     done
   fi
-  local app
-  for app in "${OPT_APPROVE_APPS[@]+"${OPT_APPROVE_APPS[@]}"}"; do
-    [[ "${app}" =~ ^[a-z0-9][a-z0-9-]{0,47}=/.+$ ]] || bad_flag "--approve-app is <app>=<absolute folder>, the app name in lowercase letters, digits and - (got ${app})."
-  done
   if [ -n "${OPT_ALLOW_UNSIGNED_FROM}" ] && ! [[ "${OPT_ALLOW_UNSIGNED_FROM}" =~ ^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]]; then
     bad_flag "--allow-unsigned-from is an exact origin such as https://hq.example.com (got ${OPT_ALLOW_UNSIGNED_FROM})."
   fi
@@ -245,14 +248,12 @@ validate_flags() {
   if [ -n "${OPT_INSTANCE}" ]; then
     [[ "${OPT_INSTANCE}" =~ ^[a-z0-9]([a-z0-9-]{0,13}[a-z0-9])?$ ]] ||
       bad_flag "--instance is a short name of lowercase letters, digits and inner dashes, at most 15 (got ${OPT_INSTANCE})."
-    case "${OPT_INSTANCE}" in node|guildwise-admin|deploy-compose) bad_flag "--instance ${OPT_INSTANCE} is a reserved name; pick another." ;; esac
+    case "${OPT_INSTANCE}" in node|guildwise-admin|deploy-compose|docker) bad_flag "--instance ${OPT_INSTANCE} is a reserved name; pick another." ;; esac
     [ "${OPT_RUNNER_USER}" = current ] && bad_flag "--instance gives the runner its own dedicated user: it cannot go with --runner-user current."
     OPT_RUNNER_USER=dedicated
     DEDICATED_USER="guildwise-runner-${OPT_INSTANCE}"
     # shellcheck disable=SC2034 # used by linux.sh
     DEDICATED_SERVICE="${DEDICATED_USER}"
-    SUDOERS_SUDO_FILE="/etc/sudoers.d/${DEDICATED_USER}_sudo"
-    SUDOERS_DOCKER_FILE="/etc/sudoers.d/${DEDICATED_USER}_docker"
     INSTANCE_ARGS=(--instance "${OPT_INSTANCE}")
     # Its own root-owned tools, from this server's verified release: another instance's install never replaces them,
     # and this one never replaces theirs (or the single runner's in the top-level folder).
@@ -261,18 +262,50 @@ validate_flags() {
     BUNDLED_NODE_BIN="${ADMIN_DIR}/node/bin"
     ADMIN_HINT="${ADMIN} --instance ${OPT_INSTANCE}"
   fi
-  if [ "${OPT_SUDO_PW_STDIN}" = 1 ]; then
-    IFS= read -r SUDO_PASSWORD || true
-    [ -n "${SUDO_PASSWORD}" ] || bad_flag "--sudo-password-stdin was given, but no password came on standard input."
-  fi
 }
 
 # ---- running things as root (guildwise-admin only) and as the runner's account -------------------------------------------
 as_root() {
-  if [ "$(id -u)" -eq 0 ]; then "$@"
-  elif have sudo; then sudo "$@"
-  else return 127; fi
+  if [ "$(id -u)" -eq 0 ]; then "$@"; return; fi
+  if [ "${AUTHORIZED}" = 1 ]; then
+    local rc=0
+    sudo -n "$@" || rc=$?
+    # a lapsed authorization is not a failed command: stop with a clear message instead
+    if [ "${rc}" != 0 ] && ! sudo -n true 2>/dev/null; then
+      die "The administrator authorization of this install ran out." "Run the command again."
+    fi
+    return "${rc}"
+  fi
+  if have sudo; then sudo "$@"; else return 127; fi
 }
+
+# The root actions of an install, listed before the one authorization.
+ROOT_ACTIONS=(
+  "install the baseline packages (build tools, git, curl, unzip, the Playwright/Chromium libraries, fonts, rootless Docker prerequisites)"
+  "install the root-owned tools and the rootless Docker binaries in ${ADMIN_DIR}"
+  "create the runner user and its service; remove what 1.10.0 dropped (sudoers rules, a sealed sudo password)"
+  "set up the runner's Docker (a subordinate id range, an AppArmor profile where needed, lingering)"
+)
+
+# "Administrator rights (once)": one `sudo -v`, kept alive in the background until the installer exits; every later root
+# step uses `sudo -n` and never asks again (owner 2026-11-21: "the user is busy authorizing everything once").
+authorize_once() {
+  if [ "$(id -u)" -eq 0 ]; then AUTHORIZED=1; step_ok "Running as root: no separate authorization"; return; fi
+  have sudo || die "Administrator rights are needed once, and sudo is not installed." "Install sudo, or run the installer as root, then run the command again."
+  say "    These steps need administrator rights, asked for once now:"
+  local a; for a in "${ROOT_ACTIONS[@]}"; do say "      - ${a}"; done
+  sudo -v || die "Administrator rights were not given." "Run the command again and enter your password when asked."
+  # F3: a host that keeps no sudo timestamp (timestamp_timeout=0) would ask at every step
+  sudo -n true 2>/dev/null ||
+    die "sudo keeps no authorization on this computer: run the installer as root (sudo bash <installer>)." "Run it as root this once; nothing else changes."
+  AUTHORIZED=1
+  ( while kill -0 "$$" 2>/dev/null; do sleep 50; sudo -n -v >/dev/null 2>&1 || exit 0; done ) >/dev/null 2>&1 &
+  SUDO_KEEPALIVE_PID=$!
+  trap 'stop_keepalive' EXIT
+  step_ok "Administrator rights given once for this install"
+}
+
+stop_keepalive() { [ -n "${SUDO_KEEPALIVE_PID}" ] && kill "${SUDO_KEEPALIVE_PID}" 2>/dev/null; SUDO_KEEPALIVE_PID=""; return 0; }
 
 # run_admin <args...>: guildwise-admin as root, for this install's runner (with --instance <name> for a named one).
 run_admin() { as_root "${ADMIN}" ${INSTANCE_ARGS[@]+"${INSTANCE_ARGS[@]}"} "$@"; }
@@ -288,6 +321,8 @@ as_runner() {
   fi
   if [ "$(id -u)" -eq 0 ] && have runuser; then
     runuser -u "${RUNNER_AS}" -- env HOME="${RUNNER_HOME}" PATH="$(runner_path)" ${RUNNER_CA:+NODE_EXTRA_CA_CERTS="${RUNNER_CA}"} sh -c 'cd "${HOME}" 2>/dev/null || cd /; exec "$@"' guildwise "$@"
+  elif [ "${AUTHORIZED}" = 1 ]; then
+    sudo -n -u "${RUNNER_AS}" -H env HOME="${RUNNER_HOME}" PATH="$(runner_path)" ${RUNNER_CA:+NODE_EXTRA_CA_CERTS="${RUNNER_CA}"} sh -c 'cd "${HOME}" 2>/dev/null || cd /; exec "$@"' guildwise "$@"
   else
     sudo -u "${RUNNER_AS}" -H env HOME="${RUNNER_HOME}" PATH="$(runner_path)" ${RUNNER_CA:+NODE_EXTRA_CA_CERTS="${RUNNER_CA}"} sh -c 'cd "${HOME}" 2>/dev/null || cd /; exec "$@"' guildwise "$@"
   fi
@@ -330,7 +365,8 @@ if (global.length !== 64 || !crypto.verify(null, Buffer.concat([sig.subarray(10)
 process.stdout.write(comment + "\n");'
 }
 
-# manifest_get <manifest.json> <version|floor|sha256|file|node:<platform>>: one checked value (fails on anything else).
+# manifest_get <manifest.json> <version|floor|sha256|file|node:<platform>|docker:<linux-x64|linux-arm64>:<docker|extras|compose>>:
+# one checked value (fails on anything else).
 manifest_get() {
   have node || return 2
   GW_FILE="$1" GW_FIELD="$2" node -e '
@@ -345,6 +381,10 @@ else if (f === "sha256") out = ok(m.sha256, sha) ? m.sha256 : null;
 else if (f === "file") out = ok(m.file, /^aom-runner-[0-9A-Za-z.+-]+\.tgz$/) ? m.file : null;
 else if (f.startsWith("node:")) {
   const r = (m.nodeRuntime || {})[f.slice(5)];
+  out = r && ok(r.url, /^https:\/\/[^\s"]+$/) && ok(r.sha256, sha) ? r.url + " " + r.sha256 : null;
+} else if (/^docker:linux-(x64|arm64):(docker|extras|compose)$/.test(f)) {
+  const [, plat, part] = f.split(":");
+  const r = ((m.dockerRootless || {})[plat] || {})[part];
   out = r && ok(r.url, /^https:\/\/[^\s"]+$/) && ok(r.sha256, sha) ? r.url + " " + r.sha256 : null;
 }
 if (!out) process.exit(1);
@@ -590,8 +630,8 @@ node_platform() {
   esac
 }
 
-# Copies the root-owned tools from the verified release into /usr/local/lib/guildwise (root:root, 0755): guildwise-admin,
-# deploy-compose and the pinned Node build they run on (URL and sha256 from the signed manifest) [rv7-12]. Only from a
+# Copies the root-owned tools from the verified release into /usr/local/lib/guildwise (root:root, 0755): guildwise-admin
+# and the pinned Node build it runs on (URL and sha256 from the signed manifest) [rv7-12]. Only from a
 # signed release, or from an unsigned one when this server was allowed with --allow-unsigned-from (test machines).
 install_admin_tools() {
   [ "${ADMIN_TOOLS_READY}" = 1 ] && return 0
@@ -621,17 +661,14 @@ install_admin_tools() {
       as_root mv "${ADMIN_DIR}/node.new" "${ADMIN_DIR}/node" && as_root rm -rf "${ADMIN_DIR}/node.old"; } ||
       die "Could not install the Node runtime into ${ADMIN_DIR}/node." "Run the command again."
   fi
-  for t in guildwise-admin deploy-compose; do
+  t=guildwise-admin
+  {
     src=""
     for ext in mjs cjs js sh; do
       if [ -f "${STAGE_PKG}/aom-runner/admin/${t}.${ext}" ]; then src="${STAGE_PKG}/aom-runner/admin/${t}.${ext}"; break; fi
     done
-    if [ -z "${src}" ]; then
-      [ "${t}" = guildwise-admin ] && die "The runner release has no ${t}." "Ask your administrator to publish a complete ${SIGNED_RUNNER_FLOOR} (or newer) release."
-      # Only the narrow Docker access for deploys needs it; guildwise-admin refuses that choice while it is missing.
-      warn "The runner release has no ${t}: the narrow Docker access for deploys is not available with this release."
-      continue
-    fi
+    [ -n "${src}" ] || die "The runner release has no ${t}." "Ask your administrator to publish a complete ${SIGNED_RUNNER_FLOOR} (or newer) release."
+
     if [ -n "${OPT_INSTANCE}" ]; then
       # An instance's copy runs under its own Node: only the interpreter line changes (from the top-level Node).
       [ "$(head -n 1 "${src}")" = "#!/usr/local/lib/guildwise/node/bin/node" ] ||
@@ -641,9 +678,9 @@ install_admin_tools() {
       src="${STAGE_DIR}/${t}.instance"
     fi
     as_root install -o 0 -g 0 -m 0755 "${src}" "${ADMIN_DIR}/${t}" || die "Could not install ${ADMIN_DIR}/${t}." "Run the command again."
-  done
+  }
   ADMIN_TOOLS_READY=1
-  good "Root-owned tools installed in ${ADMIN_DIR} (guildwise-admin, its helpers and their Node), from the verified release"
+  good "Root-owned tools installed in ${ADMIN_DIR} (guildwise-admin and its Node), from the verified release"
 }
 
 # The "Runner user" step: in dedicated mode guildwise-admin creates the user with its home and workspace (its service is
@@ -983,63 +1020,167 @@ sign_in_to_claude() {
 }
 
 # ---- setting local permissions (R20) -------------------------------------------------------------------------------------
-# One value of the policy.json that guildwise-runner setup just wrote (docker: none|narrow|group; sudo: true|false).
+# One value of the policy.json that guildwise-runner setup just wrote (docker: rootless|host|shared|none; dockerHost).
 policy_value() {
   as_runner cat "${RUNNER_HOME}/.config/aom-runner/policy.json" 2>/dev/null | GW_FIELD="$1" node -e '
 let t = "";
 process.stdin.on("data", (d) => { t += d; }).on("end", () => {
   let p;
   try { p = JSON.parse(t); } catch (e) { process.exit(1); }
-  const v = process.env.GW_FIELD === "sudo" ? String(!!(p.devops && p.devops.sudo === true)) : (p.docker === undefined ? "none" : p.docker);
-  if (!["none", "narrow", "group", "true", "false"].includes(v)) process.exit(1);
+  if (process.env.GW_FIELD === "dockerHost") {
+    const h = typeof p.dockerHost === "string" ? p.dockerHost : "";
+    if (!/^unix:\/\/(\/Users\/[^\/]+\/\.docker\/run\/docker\.sock|\/(var\/)?run\/[A-Za-z0-9_-][A-Za-z0-9._-]*\/docker\.sock)$/.test(h)) process.exit(1);
+    process.stdout.write(h.slice("unix://".length));
+    return;
+  }
+  const v = p.docker === undefined ? "none" : p.docker;
+  if (!["rootless", "host", "shared", "none"].includes(v)) process.exit(1);
   process.stdout.write(v);
 });'
+}
+
+# ---- Docker for the runner (DESIGN deps-without-sudo §3) -----------------------------------------------------------------
+# docker_platform: linux-x64 | linux-arm64 (the keys of dockerRootless in the signed manifest).
+docker_platform() {
+  case "$(uname -m)" in x86_64|amd64) echo linux-x64 ;; aarch64|arm64) echo linux-arm64 ;; *) return 1 ;; esac
+}
+
+# detect_docker (as you, before setup; a suggestion for setup's question, never policy): DOCKER_FOUND is
+#   rootful  a root daemon (/var/run/docker.sock, /run/docker.sock, or docker.service/docker.socket active)
+#   shared   that socket's daemon runs rootless as another user (the DevBox docker-svc case), DOCKER_SOCKET its real path
+#   desktop  Docker Desktop on a Mac, answering on ~/.docker/run/docker.sock
+#   own      the runner's own rootless daemon (a re-run)
+#   none     nothing (your own rootless daemon counts as none)
+detect_docker() {
+  DOCKER_FOUND=none; DOCKER_SOCKET=""
+  if [ "$(uname -s)" = Darwin ]; then
+    if [ -d /Applications/Docker.app ] && desktop_docker_answers; then
+      DOCKER_FOUND=desktop; DOCKER_SOCKET="${HOME}/.docker/run/docker.sock"
+    fi
+    return 0
+  fi
+  if [ -n "${RUNNER_UID:-}" ] && [ -S "/run/user/${RUNNER_UID}/docker.sock" ]; then DOCKER_FOUND=own; return 0; fi
+  local s real
+  for s in "${DOCKER_SOCKET_PATHS[@]}"; do
+    [ -S "${s}" ] || continue
+    real="$(readlink -f "${s}" 2>/dev/null || printf '%s' "${s}")"
+    DOCKER_FOUND=rootful
+    # through the one authorization: ask that daemon itself whether it runs rootless
+    if [ "${AUTHORIZED}" = 1 ] && [ "${real}" != "${DOCKER_SOCKET_PATHS[0]}" ] && [ "${real}" != "${DOCKER_SOCKET_PATHS[1]}" ] &&
+      as_root env DOCKER_HOST="unix://${real}" docker info --format '{{json .SecurityOptions}}' 2>/dev/null | grep -q 'name=rootless'; then
+      DOCKER_FOUND=shared; DOCKER_SOCKET="${real}"
+    fi
+    return 0
+  done
+  if [ "${DOCKER_SOCKET_PATHS[0]}" = /var/run/docker.sock ] && have systemctl && { systemctl is-active --quiet docker.service 2>/dev/null || systemctl is-active --quiet docker.socket 2>/dev/null; }; then
+    DOCKER_FOUND=rootful
+  fi
+  return 0
+}
+
+desktop_docker_answers() {
+  [ -S "${HOME}/.docker/run/docker.sock" ] &&
+    curl -fsS --max-time 3 --unix-socket "${HOME}/.docker/run/docker.sock" http://d/_ping 2>/dev/null | grep -q OK
+}
+
+# install_docker_binaries: Docker's static binaries (docker, rootless extras, compose), pinned in the signed manifest,
+# unpacked root-owned 0755 into ${ADMIN_DIR}/docker (per instance, as ADMIN_DIR is). The runner cannot change them, and
+# the AppArmor userns grant names only this root-owned rootlesskit.
+install_docker_binaries() {
+  local plat part entry url sha f dir="${ADMIN_DIR}/docker"
+  plat="$(docker_platform)" || die "There are no Docker binaries for $(uname -m)." "Use --docker none, or a 64-bit Intel/AMD or ARM computer."
+  install_admin_tools
+  local want=""
+  for part in docker extras compose; do
+    entry="$(manifest_get "${STAGE_MANIFEST}" "docker:${plat}:${part}")" ||
+      die "The runner release lists no rootless Docker (${part}) for ${plat}." "Ask your administrator to publish a release with one, or use --docker none."
+    want="${want}${entry##* }"
+  done
+  if [ "$(cat "${dir}/.sha256" 2>/dev/null)" = "${want}" ]; then good "Rootless Docker binaries are up to date in ${dir}"; return 0; fi
+  { as_root rm -rf "${dir}.new" && as_root mkdir -p "${dir}.new/cli-plugins"; } || die "Could not prepare ${dir}." "Run the command again."
+  for part in docker extras compose; do
+    entry="$(manifest_get "${STAGE_MANIFEST}" "docker:${plat}:${part}")"
+    url="${entry% *}"; sha="${entry##* }"
+    f="${STAGE_DIR}/docker-${part}"
+    note "Downloading Docker (${part}) ..."
+    curl -fsSL --retry 3 -o "${f}" "${url}" || die "Could not download ${url}." "Check this computer can reach it, then run the command again."
+    [ "$(sha256_of "${f}")" = "${sha}" ] || die "Docker (${part}) did not match its checksum in the signed release manifest." "Try again; if it repeats, contact us."
+    if [ "${part}" = compose ]; then as_root install -o 0 -g 0 -m 0755 "${f}" "${dir}.new/cli-plugins/docker-compose"
+    else as_root tar -xzf "${f}" -C "${dir}.new" --strip-components=1 --no-same-owner; fi ||
+      die "Could not unpack Docker (${part})." "Run the command again."
+  done
+  { as_root chown -R 0:0 "${dir}.new" && as_root chmod -R go-w,a+rX "${dir}.new" &&
+    printf '%s\n' "${want}" | as_root tee "${dir}.new/.sha256" >/dev/null &&
+    as_root rm -rf "${dir}.old" && { ! as_root test -d "${dir}" || as_root mv "${dir}" "${dir}.old"; } &&
+    as_root mv "${dir}.new" "${dir}" && as_root rm -rf "${dir}.old"; } || die "Could not install the Docker binaries into ${dir}." "Run the command again."
+  good "Rootless Docker binaries installed in ${dir} (root-owned, from the signed release)"
+}
+
+# setup_runner_docker (as the runner): Docker's own rootless set-up tool, as a systemd user service with lingering.
+setup_runner_docker() {
+  local uid sock dir="${ADMIN_DIR}/docker" i
+  uid="$(as_runner id -u)" || die "Could not read the runner's user id." "Run the command again."
+  sock="/run/user/${uid}/docker.sock"
+  local envs=(env XDG_RUNTIME_DIR="/run/user/${uid}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" PATH="${dir}:/usr/local/bin:/usr/bin:/bin" DOCKER_CLI_PLUGIN_EXTRA_DIRS="${dir}/cli-plugins")
+  if as_runner "${envs[@]}" docker -H "unix://${sock}" info --format '{{json .SecurityOptions}}' 2>/dev/null | grep -q rootless; then
+    good "The runner's own rootless Docker is running (${sock})"; return 0
+  fi
+  for i in $(seq 1 10); do as_runner test -S "/run/user/${uid}/bus" && break; sleep 1; done
+  # ports order: published ports bind to 127.0.0.1 by default (the default bridge only)
+  # shellcheck disable=SC2016 # the runner's own shell expands $HOME
+  as_runner sh -c 'mkdir -p "$HOME/.config/docker" && { [ -f "$HOME/.config/docker/daemon.json" ] || printf "%s\n" "{\"ip\":\"127.0.0.1\"}" >"$HOME/.config/docker/daemon.json"; }' ||
+    die "Could not write the runner's ~/.config/docker/daemon.json." "Run the command again."
+  local force=()
+  [ "${DOCKER_FOUND}" = rootful ] || [ "${DOCKER_FOUND}" = shared ] && force=(--force)
+  as_runner "${envs[@]}" "${dir}/dockerd-rootless-setuptool.sh" install ${force[@]+"${force[@]}"} ||
+    die "Docker's rootless set-up did not finish for ${RUNNER_NAME}." "Run the command again; \`journalctl --user -u docker\` as ${RUNNER_NAME} shows why."
+  as_runner "${envs[@]}" docker -H "unix://${sock}" info --format '{{json .SecurityOptions}}' 2>/dev/null | grep -q rootless ||
+    die "The runner's Docker does not report rootless mode." "Run the command again."
+  good "The runner has its own rootless Docker (${sock})"
 }
 
 # The root parts of the answers, done by guildwise-admin (root-owned, from the verified release). Setup has written them
 # to policy.json on this machine; the values are checked against a fixed list before anything runs.
 apply_root_choices() {
-  local docker sudo_on app name folder
+  local docker sock
   docker="$(policy_value docker)" || docker=none
-  sudo_on="$(policy_value sudo)" || sudo_on=false
-  case "${docker}" in
-    narrow|group)
-      local acc=()
-      if [ "${docker}" = group ]; then
-        # Only a yes given here (the flag, or typed in setup at this keyboard) counts: policy.json alone cannot buy it.
-        [ "${OPT_ACCEPT_ROOT_EQ}" = 1 ] || interactive ||
-          die "policy.json asks for the docker group, but root-equivalence was not accepted here." "Run the installer with --docker group --accept-root-equivalent, or run guildwise-runner setup on this computer."
-        acc=(--accept-root-equivalent)
-      fi
-      install_admin_tools
-      run_admin docker "${docker}" --user "${RUNNER_NAME}" ${acc[@]+"${acc[@]}"} ||
-        die "guildwise-admin could not set up Docker access for deploys (${docker})." "Run: sudo ${ADMIN_HINT} docker ${docker} --user ${RUNNER_NAME}   to see why."
-      good "Docker access for deploys: ${docker}" ;;
-    *)
-      if [ "${RUNNER_MODE}" = dedicated ] && as_root test -e "${SUDOERS_DOCKER_FILE}"; then
-        run_admin docker none --user "${RUNNER_NAME}" || die "guildwise-admin could not remove the Docker rule." "Run: sudo ${ADMIN_HINT} docker none --user ${RUNNER_NAME}"
-        good "Docker access for deploys: none (the earlier rule was removed)"
-      fi ;;
-  esac
-  if [ "${RUNNER_MODE}" = dedicated ]; then
-    if [ "${sudo_on}" = true ]; then
-      [ "${OPT_SUDO}" = on ] || interactive ||
-        die "policy.json asks for sudo, but it was not turned on here." "Run the installer with --sudo on, or run guildwise-runner setup on this computer."
-      run_admin sudo on --user "${RUNNER_NAME}" || die "guildwise-admin could not turn sudo on for ${RUNNER_NAME}." "Run: sudo ${ADMIN_HINT} sudo on --user ${RUNNER_NAME}"
-      good "Sudo is on for ${RUNNER_NAME} (password required; every privileged step still needs your local yes)"
-    elif as_root test -e "${SUDOERS_SUDO_FILE}"; then
-      run_admin sudo off --user "${RUNNER_NAME}" || die "guildwise-admin could not turn sudo off for ${RUNNER_NAME}." "Run: sudo ${ADMIN_HINT} sudo off --user ${RUNNER_NAME}"
-      good "Sudo is off for ${RUNNER_NAME}"
-    fi
-  fi
-  for app in "${OPT_APPROVE_APPS[@]+"${OPT_APPROVE_APPS[@]}"}"; do
-    name="${app%%=*}"
-    folder="${app#*=}"
+  sock="$(policy_value dockerHost)" || sock=""
+  # what 1.10.0 removed (sudoers, a sealed sudo password, narrow mode), on every install; idempotent
+  if [ "${RUNNER_MODE}" = dedicated ] || [ "${ADMIN_TOOLS_READY}" = 1 ]; then
     install_admin_tools
-    run_admin approve-app "${name}" --source "${folder}" --user "${RUNNER_NAME}" --yes ||
-      die "The app ${name} did not pass the Docker helper's checks (the reason is above; its folder must be inside ${RUNNER_HOME})." "Fix its compose setup, or leave out --approve-app ${name}, then run the command again."
-    good "App ${name} approved for deploys (${folder})"
-  done
+    run_admin cleanup-legacy --user "${RUNNER_NAME}" || die "guildwise-admin could not clean up the sudo and narrow-mode files of before 1.10.0." "Run: sudo ${ADMIN_HINT} cleanup-legacy --user ${RUNNER_NAME}   to see why."
+  fi
+  case "${docker}" in
+    rootless)
+      install_docker_binaries
+      run_admin docker rootless --user "${RUNNER_NAME}" ||
+        die "guildwise-admin could not prepare rootless Docker for ${RUNNER_NAME}." "Run: sudo ${ADMIN_HINT} docker rootless --user ${RUNNER_NAME}   to see why."
+      setup_runner_docker ;;
+    host)
+      # Only a yes given here (the flag, or typed in setup at this keyboard) counts: policy.json alone cannot buy it.
+      [ "${OPT_ACCEPT_ROOT_EQ}" = 1 ] || interactive ||
+        die "policy.json asks for the installed Docker, but root-equivalence was not accepted here." "Run the installer with --docker host --accept-root-equivalent, or run guildwise-runner setup on this computer."
+      install_admin_tools
+      local mac=()
+      [ "$(uname -s)" = Darwin ] && [ -n "${sock}" ] && mac=(--desktop-socket "${sock}")
+      run_admin docker host --accept-root-equivalent ${mac[@]+"${mac[@]}"} --user "${RUNNER_NAME}" ||
+        die "guildwise-admin could not give ${RUNNER_NAME} the installed Docker." "Run: sudo ${ADMIN_HINT} docker host --accept-root-equivalent --user ${RUNNER_NAME}   to see why."
+      good "Docker for the runner: the installed daemon (root-equivalent, accepted)" ;;
+    shared)
+      [ "${OPT_ACCEPT_SHARED}" = 1 ] || interactive ||
+        die "policy.json asks for a shared Docker daemon, but it was not accepted here." "Run the installer with --docker shared --docker-socket <path> --accept-shared-daemon, or run guildwise-runner setup on this computer."
+      [ -n "${sock}" ] || die "policy.json names no socket for the shared Docker daemon." "Run guildwise-runner setup again."
+      # the root-owned docker CLI guildwise-admin asks the daemon with (never one found on PATH)
+      install_docker_binaries
+      run_admin docker shared --docker-socket "${sock}" --accept-shared-daemon --user "${RUNNER_NAME}" ||
+        die "guildwise-admin could not give ${RUNNER_NAME} the shared Docker daemon." "Run: sudo ${ADMIN_HINT} docker shared --docker-socket ${sock} --accept-shared-daemon --user ${RUNNER_NAME}   to see why."
+      good "Docker for the runner: the shared rootless daemon at ${sock} (accepted; runners that share it can each control the other's containers)" ;;
+    *)
+      if [ "${RUNNER_MODE}" = dedicated ]; then
+        run_admin docker none --user "${RUNNER_NAME}" || die "guildwise-admin could not remove the runner's Docker access." "Run: sudo ${ADMIN_HINT} docker none --user ${RUNNER_NAME}"
+      fi
+      good "Docker for the runner: none" ;;
+  esac
 }
 
 setup_supported() { runner setup --help >/dev/null 2>&1; }
@@ -1052,8 +1193,8 @@ set_local_permissions() {
     return
   fi
   local explicit=0 args rc=0
-  if [ -n "${OPT_DEVOPS_ORGS}${OPT_SUDO}${OPT_DOCKER}${OPT_DEPLOY}${OPT_ALLOW_UNSIGNED_FROM}" ] || [ "${OPT_ACCEPT_ROOT_EQ}" = 1 ] ||
-    [ "${OPT_DEPLOY_PIN_COMMIT}" = 1 ] || [ "${#OPT_APPROVE_APPS[@]}" -gt 0 ] || [ -n "${SUDO_PASSWORD}" ]; then explicit=1; fi
+  if [ -n "${OPT_DEVOPS_ORGS}${OPT_DOCKER}${OPT_DEPLOY}${OPT_ALLOW_UNSIGNED_FROM}" ] || [ "${OPT_ACCEPT_ROOT_EQ}" = 1 ] ||
+    [ "${OPT_DEPLOY_PIN_COMMIT}" = 1 ]; then explicit=1; fi
   # An upgrade of a runner kept for your user, with no keyboard and no flags: nothing is decided for you. The runner keeps
   # working (sandboxed work runs; steps outside the sandbox wait for setup).
   if [ "${RUNNER_MODE}" = current ] && [ "${LEGACY_RESULT}" = kept ] && [ "${OPT_YES}" != 1 ] && [ "${explicit}" = 0 ] && ! interactive; then
@@ -1063,20 +1204,22 @@ set_local_permissions() {
   # The dedicated runner from an earlier install must not run while setup writes policy.json and the root choices are
   # read from it (install_service starts it again).
   [ -n "${RUNNER_AS}" ] && stop_dedicated_service
+  RUNNER_UID="$(as_runner id -u 2>/dev/null || true)"
+  detect_docker
   args=(setup --runner-user "${RUNNER_MODE}")
   if [ "${OPT_YES}" = 1 ] || ! interactive; then args+=(--yes); fi
   [ -n "${OPT_DEVOPS_ORGS}" ] && args+=(--devops-orgs "${OPT_DEVOPS_ORGS}")
-  [ -n "${OPT_SUDO}" ] && args+=(--sudo "${OPT_SUDO}")
   [ -n "${OPT_DOCKER}" ] && args+=(--docker "${OPT_DOCKER}")
+  args+=(--docker-found "${DOCKER_FOUND}")
+  if [ -n "${OPT_DOCKER_SOCKET}" ]; then args+=(--docker-socket "${OPT_DOCKER_SOCKET}")
+  elif [ -n "${DOCKER_SOCKET}" ]; then args+=(--docker-socket "${DOCKER_SOCKET}"); fi
   [ "${OPT_ACCEPT_ROOT_EQ}" = 1 ] && args+=(--accept-root-equivalent)
+  [ "${OPT_ACCEPT_SHARED}" = 1 ] && args+=(--accept-shared-daemon)
   [ -n "${OPT_DEPLOY}" ] && args+=(--deploy "${OPT_DEPLOY}")
   [ "${OPT_DEPLOY_PIN_COMMIT}" = 1 ] && args+=(--deploy-pin-commit)
   [ -n "${OPT_ALLOW_UNSIGNED_FROM}" ] && args+=(--allow-unsigned-from "${OPT_ALLOW_UNSIGNED_FROM}")
-  note "guildwise-runner setup asks you here, on this computer: which organizations DevOps may serve (each defaults to no), sudo, Docker access for deploys and the deploy approvals."
-  if [ -n "${SUDO_PASSWORD}" ]; then
-    printf '%s\n' "${SUDO_PASSWORD}" | runner "${args[@]}" --sudo-password-stdin || rc=$?
-    SUDO_PASSWORD=""
-  elif interactive; then
+  note "guildwise-runner setup asks you here, on this computer: which organizations DevOps may serve (each defaults to no), Docker for the runner and the deploy approvals."
+  if interactive; then
     runner "${args[@]}" </dev/tty || rc=$?
   else
     runner "${args[@]}" </dev/null || rc=$?

@@ -24,10 +24,10 @@ The link works for 30 minutes. The script embeds the server URL, a fresh **singl
 **What the Linux installer does** (also run inside Ubuntu by the Windows script), each step shown and reported to the wizard page:
 
 1. checks the system (64-bit, not root, apt, dnf or pacman);
-2. installs git, curl, tar, `bubblewrap` and `socat` with the package manager (sudo); git older than 2.40 (Ubuntu 22.04, Debian 12) is replaced by the git-core PPA build or, on Debian, a pinned and checksummed git compiled into `~/.local`;
+2. asks for administrator rights once ("Administrator rights (once)") and installs the baseline with the package manager (see "Installer flags" under Local permissions); git older than 2.40 (Ubuntu 22.04, Debian 12) is replaced by the git-core PPA build or, on Debian, a pinned and checksummed git compiled into `~/.local`;
 3. uses Node 22 if present, otherwise installs it with nvm;
 4. installs Claude Code (`npm install -g @anthropic-ai/claude-code`);
-5. optionally installs yt-dlp (asks, default yes) and Docker (asks, default no);
+5. optionally installs yt-dlp (asks, default yes); Docker for the runner is set up later, rootless by default ("Docker for the runner");
 6. downloads `aom-runner-<version>.tgz` from the app, verifies its sha256 against the value embedded in the script and unpacks it to `~/.local/share/guildwise/runner/<version>` (`current` points at the active version; `~/.local/bin/aom-runner` and `aom` link to it);
 7. pairs (`guildwise-runner pair`) with the workstation the one-time code belongs to. A machine that already has a runner (any server or organization) keeps it: the installer upgrades it only if the server offers a newer version, and the new code pairs it with the new workstation instead of failing or installing a second copy; a code that was already used (the same command run again) is reported and the existing pairing stays;
 8. asks which folders hold your code (suggests `~/src`) and runs `guildwise-runner repos add` for each;
@@ -36,8 +36,8 @@ The link works for 30 minutes. The script embeds the server URL, a fresh **singl
 
 **1.10.0 changes to the install** (the numbering above is the older flow; the installer now adds these steps).
 
-- **First: "Looking for an older runner".** The installer detects a runner from before Guildwise 1.10.0: `~/.local/share/guildwise/runner`, `~/.aom-runner` (or `AOM_RUNNER_HOME`), `~/.config/aom-runner`, `~/.local/bin/guildwise-runner` and `aom-runner`, the systemd user unit `aom-runner`, the macOS LaunchAgent `com.guildwisehq.runner`, Windows scheduled tasks, the same inside the default WSL distribution, and running processes. It stops them and **quarantines** them (the default) into one tar under `~/.guildwise-quarantine/<UTC timestamp>/` (folder mode 700, files 600, execute bits stripped, with a `MANIFEST.txt` of paths, sizes and sha256), or deletes them with `--legacy remove`. Nothing is read, copied or reused: no token, key, sealed sudo password, policy or clone. It prints where the quarantine is and that it may be deleted after review. If sudo was granted to the old runner, change that user's password: the old runner's sealed sudo password may be known.
-- **Then: "Setting local permissions".** After the package is installed and verified, the installer runs `guildwise-runner setup` (below), then pairs. Scripted installs pass flags through: `--runner-user dedicated|current`, `--devops-orgs`, `--sudo on|off`, `--docker none|narrow|group`, `--yes`, `--accept-root-equivalent`, `--legacy quarantine|remove`, `--instance <name>` (a named runner; see "Two runners on one machine"). Answers never come from the server.
+- **First: "Looking for an older runner".** The installer detects a runner from before Guildwise 1.10.0: `~/.local/share/guildwise/runner`, `~/.aom-runner` (or `AOM_RUNNER_HOME`), `~/.config/aom-runner`, `~/.local/bin/guildwise-runner` and `aom-runner`, the systemd user unit `aom-runner`, the macOS LaunchAgent `com.guildwisehq.runner`, Windows scheduled tasks, the same inside the default WSL distribution, and running processes. It stops them and **quarantines** them (the default) into one tar under `~/.guildwise-quarantine/<UTC timestamp>/` (folder mode 700, files 600, execute bits stripped, with a `MANIFEST.txt` of paths, sizes and sha256), or deletes them with `--legacy remove`. Nothing is read, copied or reused: no token, key, sealed sudo password, policy or clone. It prints where the quarantine is and that it may be deleted after review. If sudo was granted to an old runner, change that user's password: the old runner's sealed sudo password may be known (1.10.0 has no sudo for the runner at all).
+- **Then: "Setting local permissions".** After the package is installed and verified, the installer runs `guildwise-runner setup` (below), then pairs. Scripted installs pass flags through: `--runner-user dedicated|current`, `--devops-orgs`, `--docker rootless|host|shared|none`, `--skip-baseline`, `--yes`, `--accept-root-equivalent`, `--legacy quarantine|remove`, `--instance <name>` (a named runner; see "Two runners on one machine"). Answers never come from the server.
 - **Offline: `--from-file`.** Install from a package you downloaded and verified yourself. The installer script is otherwise served by the server (trust on first use).
 - The installer keeps `manifest.json` and `manifest.json.minisig` beside the runner; the runner sends that proof at pairing and hello.
 - The macOS dedicated user and the Windows dedicated WSL distribution are not yet tested on hardware.
@@ -818,10 +818,49 @@ Run by the installer, re-runnable, refuses to run as root.
 ```sh
 guildwise-runner setup [--yes] [--accept-root-equivalent]
                        [--runner-user dedicated|current] [--devops-orgs <list>]
-                       [--sudo on|off] [--docker none|narrow|group]
+                       [--docker rootless|host|shared|none] [--docker-socket <path>] [--accept-shared-daemon]
 ```
 
-Steps: the runner user (a dedicated `guildwise-runner` user on Linux and macOS, a dedicated WSL distribution on Windows, or the current user); the runner's own clones folder (under its HOME; it works only in its own clones, never in your folders, and work reaches you through git); which organizations the DevOps engineer may serve (each defaults to No; organizations the server reports are suggestions only); sudo on or off (sealed locally, never through the browser); Docker access (none, the narrow helper, or the docker group); deploy approval defaults; a summary. `--yes` takes the safest values. The docker group is root-equivalent: it needs `--accept-root-equivalent` or typing `root-equivalent`. Steps that need root are printed as `sudo /usr/local/lib/guildwise/guildwise-admin ...`.
+Steps: the runner user (a dedicated `guildwise-runner` user on Linux and macOS, a dedicated WSL distribution on Windows, or the current user); the runner's own clones folder (under its HOME; it works only in its own clones, never in your folders, and work reaches you through git); which organizations the DevOps engineer may serve (each defaults to No; organizations the server reports are suggestions only); Docker for the runner (below); deploy approval defaults; a summary. `--yes` takes the safest values (the runner's own rootless Docker on Linux, no Docker on a Mac). Steps that need root are printed as `sudo /usr/local/lib/guildwise/guildwise-admin ...`. Nothing in setup asks for GitHub: `gh auth login` is optional, only for GitHub repositories; repositories and set-up can come through the Guildwise UI.
+
+There is no sudo for the runner in 1.10.0: the installer does every root step once, in one authorization, and nothing on the runner asks for root afterwards. `aom sudo`, `guildwise-runner sudo enable|disable`, the sealed sudo password (`secrets/sudo.enc`) and narrow mode (`deploy-compose`, `approve-app`) are gone. The runner deletes an old `secrets/sudo.enc` at start without opening it, and `guildwise-admin cleanup-legacy` (run by every install) removes the old sudoers files, locks the dedicated user's password and removes the narrow-mode helper and its approvals. Apps narrow mode started keep running; stop them yourself with `docker compose -p <project> down` as root. A `policy.json` from before keeps working: `docker: "narrow"` reads as `none` (the runner logs "narrow mode was removed: run guildwise-runner setup"), `"group"` as `host`, and `devops.sudo` is dropped.
+
+### Docker for the runner
+
+| Value | What it is | How you choose it |
+|---|---|---|
+| `rootless` (default on Linux) | the runner's own rootless Docker daemon: one per runner user, so one per instance, never shared | nothing to accept |
+| `host` | the installed Docker daemon (Docker Desktop on a Mac): the runner user becomes root-equivalent | typed `root-equivalent` in setup, or `--docker host --accept-root-equivalent` |
+| `shared` | a rootless daemon of another user that is already running (for example `docker-svc` on a dev box): the runner joins its socket's group and can control every container on that daemon | typed `shared-daemon` in setup, or `--docker shared --docker-socket <path> --accept-shared-daemon` |
+| `none` | no Docker | |
+
+The installer looks first (`--docker-found`, a suggestion only): no Docker, or the runner's own, gives `rootless` with no question. A root daemon prints **Docker detected, not running in rootless mode** and offers 1) a separate rootless Docker for the runner (the default) or 2) the installed one. On a Mac with Docker Desktop, setup warns that containers can read and write the folders Docker Desktop shares (by default all of `/Users`, your files included; narrow them in Settings > Resources > File sharing) and asks for the typed acceptance; the hidden runner user then gets ACLs on your Docker Desktop socket (`~/.docker/run/docker.sock`). To run the runner as yourself instead, install with `--runner-user current`. Without Docker on a Mac the installer stops, shows https://www.docker.com/products/docker-desktop/, and checks again when you press Enter (`--docker none` skips this). On Windows the runner's own engine runs inside its WSL distribution.
+
+Before root adds a runner to a shared daemon's group, `guildwise-admin docker shared` resolves the socket path (a link to the default root socket, a dot segment or a `docker`-group socket is refused) and asks the daemon itself, through a root-owned docker CLI (the pinned one in the admin folder, else `/usr/bin/docker`, never one found on `PATH`), whether it runs rootless; a refusal joins no group. The start-up check asks the same way. Runners that share a daemon (`shared`, or two instances on `host`) can each control the other's containers. UAT and production may share one rootless daemon: each runner joins with the same typed acceptance at install, and root records that acceptance in that runner's `policy.json` (`sharedDocker`).
+
+How `rootless` is set up: Docker's static binaries (docker, the rootless extras and compose), pinned with their sha256 in the signed release manifest (`dockerRootless`, from `scripts/docker-rootless.json`), are unpacked root-owned into `/usr/local/lib/guildwise/docker/` (`/usr/local/lib/guildwise/<name>/docker/` for an instance). `guildwise-admin docker rootless` removes the runner user from every group that owns a Docker socket, gives it a subordinate id range of 65536 (`/etc/subuid`, `/etc/subgid`; two instances never overlap), writes an AppArmor profile that lets only that root-owned `rootlesskit` create user namespaces (only where `apparmor_restrict_unprivileged_userns` is 1, Ubuntu 24.04 and later), and turns on lingering. The installer then runs Docker's `dockerd-rootless-setuptool.sh install` as the runner, which starts the daemon as a systemd user service, with `~/.config/docker/daemon.json` `{"ip":"127.0.0.1"}` so published ports bind to localhost. The privileged pieces left are the ones rootless Docker always needs: the setuid `newuidmap`/`newgidmap` (package `uidmap`) and the subordinate id range. Rootless Docker cannot publish ports below 1024.
+
+The runner sets `DOCKER_HOST` at start from the policy (`unix:///run/user/<uid>/docker.sock` for `rootless`, `dockerHost` for `shared` and a Mac's `host`) and puts the root-owned binaries first on `PATH`; `none` drops an inherited `DOCKER_HOST`. `guildwise-runner doctor` shows a `docker` line.
+
+### Stack tools
+
+The DevOps engineer installs stack tools as the runner user, in the runner's own home only (its passwd home, never `$HOME` and never your home): `~/.local/share/guildwise/toolchains/` (binaries linked in `bin/`). Every download is checked before it is unpacked: Node against `SHASUMS256.txt`, uv and Bun against their release sums, .NET against the sha512 in Microsoft's release metadata, the JDK against the Adoptium API checksum, Maven `.sha512`, Gradle `.sha256`, Go against `go.dev/dl` JSON, rustup-init against its `.sha256`, the Android command-line tools against a pinned sha256. Python comes through `uv python install`, poetry and pipenv through `uv tool install`, pnpm and Yarn through `npm install -g --prefix` the toolchains folder. A checksum mismatch deletes the download and nothing is unpacked. No package manager runs: a tool that needs a system package (Ruby, PHP, Composer, `python3-venv` and similar) is reported as failed with the command for the machine owner to run.
+
+### Installer flags
+
+| Flag | Meaning |
+|---|---|
+| `--yes` | no questions: the safest values |
+| `--runner-user dedicated\|current` | the runner's own user (default) or yours |
+| `--docker rootless\|host\|shared\|none` | Docker for the runner (above) |
+| `--accept-root-equivalent` | with `--docker host` |
+| `--docker-socket <path>`, `--accept-shared-daemon` | with `--docker shared` |
+| `--skip-baseline` | install no packages (hosts that manage their own); missing core tools stop the install, the rest warn |
+| `--devops-orgs`, `--deploy`, `--deploy-pin-commit`, `--allow-unsigned-from`, `--from-file`, `--ca-file`, `--instance`, `--legacy`, `--choose-folders` | as before |
+
+Each also reads a `GUILDWISE_*` variable (`GUILDWISE_DOCKER`, `GUILDWISE_SKIP_BASELINE`, ...). Removed in 1.10.0, and refused: `--sudo`, `--sudo-password-stdin`, `--approve-app`, `--docker narrow|group`.
+
+The installer asks for administrator rights once ("Administrator rights (once)": one `sudo -v`, kept alive until it exits, then only `sudo -n`; on a host whose sudo keeps no timestamp it asks you to run it as root) and installs a baseline in that authorization: build tools (build-essential or gcc/make), git, curl, unzip, zip, xz, bzip2, jq, socat, bubblewrap, python3, openssh client, the Chromium libraries Playwright needs, fonts, and the rootless Docker prerequisites (`uidmap`, `dbus-user-session`, `iptables`, `slirp4netns`) for apt, dnf or pacman; on a Mac the Xcode Command Line Tools. Headless Chromium is downloaded by the runner itself (`guildwise-runner pdf-renderer install`). Only missing packages are installed, so a re-run is quick. The macOS and WSL paths are unit-tested but not yet tested on hardware.
 
 ### Held items
 
@@ -840,7 +879,6 @@ A redeploy at a new commit and a recipe change can also be approved with a passk
 | Command | Effect |
 |---|---|
 | `devops grant` / `devops revoke` | which organizations' DevOps engineers may work here |
-| `sudo enable` / `sudo disable` | sudo for DevOps shifts (sealed locally) |
 | `repo allow-scripts` / `repo deny-scripts` | let a repository's installs run its scripts (needed for Bundler, `dotnet restore`, Gradle, Maven, pip and similar; npm, pnpm, Yarn, Composer with scripts and plugins off, `go mod download` and `cargo fetch` run without it) |
 | `formatter pin` / `formatter unpin` | a release formatter runs only while its config is unchanged since pinned |
 | `deploy mode`, `deploy pin-commit`, `deploy unpin` | deploy approval mode; `pin-commit` binds an unattended redeploy to a commit (`deployPinCommit`), otherwise it builds whatever is on the deployed branch |
@@ -853,11 +891,11 @@ Arguments differ by command; run each with `--help`.
 
 ### Start-up refusal
 
-The runner refuses to start, with **exit code 78** (the workstation page shows it with the fix), when its user is root-equivalent (root, passwordless sudo, the docker group, a writable Docker socket) or its files are writable by others. It applies when setup set `startupRefusal`, or the server has **Only signed runners** on. `acceptRootEquivalent` (a typed confirmation in setup) lets it start with a warning, never for files writable by others. A self-updated runner on a server with the setting off only warns.
+The runner refuses to start, with **exit code 78** (the workstation page shows it with the fix), when its user is root-equivalent (root, passwordless sudo, the docker group, a writable socket of another Docker daemon, an inherited `tcp://` `DOCKER_HOST`) or its files are writable by others. The runner's own rootless socket (`/run/user/<uid>/docker.sock`, owned by it, in a 0700 folder) never counts. An accepted shared rootless daemon only shows a warning line, for exactly the recorded socket and only while `docker info` through it reports rootless. It applies when setup set `startupRefusal`, or the server has **Only signed runners** on. `acceptRootEquivalent` (a typed confirmation in setup) lets it start with a warning, never for files writable by others. A self-updated runner on a server with the setting off only warns.
 
 ### `guildwise-admin`
 
-A root-owned program the installer copies from the verified package to `/usr/local/lib/guildwise/`; it runs only under the bundled Node at `/usr/local/lib/guildwise/node`. The runner can never change it. Commands: `user create`, `service install|remove`, `sudo on|off`, `docker none|narrow|group`, `approve-app`, `readers add|remove`, `migrate-user [--finish]`, `apply`, `verify`. Every command takes `--dry-run` and `--instance <name>` (below).
+A root-owned program the installer copies from the verified package to `/usr/local/lib/guildwise/`; it runs only under the bundled Node at `/usr/local/lib/guildwise/node`. The runner can never change it. Commands: `user create`, `service install|remove`, `docker rootless|host|shared|none`, `cleanup-legacy`, `readers add|remove`, `migrate-user [--finish]`, `apply`, `verify` (which also reports any sudoers file left for the runner). Every command takes `--dry-run` and `--instance <name>` (below).
 
 ### Two runners on one machine (named instances)
 
@@ -869,14 +907,13 @@ One machine can run several fully separate runners, for example one paired with 
 | runner root, data, `policy.json`, clones | in that HOME | in that HOME (mode 0700: the other runner cannot read or write them) |
 | service | systemd `guildwise-runner`, LaunchDaemon `com.guildwisehq.runner` | systemd `guildwise-runner-uat`, LaunchDaemon `com.guildwisehq.runner.uat` |
 | CA copy (`--ca-file`) | `/etc/guildwise-runner/ca.pem` | `/etc/guildwise-runner-uat/ca.pem` |
-| sudoers rules | `/etc/sudoers.d/guildwise-runner`, `guildwise-runner-docker` | `/etc/sudoers.d/guildwise-runner-uat_sudo`, `guildwise-runner-uat_docker` |
-| approved compose apps | `/etc/guildwise-runner/apps`, project `guildwise-<app>` | `/etc/guildwise-runner-uat/apps`, project `guildwise_uat_<app>` (volumes and networks `guildwise_uat_<app>_<name>`) |
+| rootless Docker | its own daemon, `/run/user/<uid>/docker.sock`; AppArmor `/etc/apparmor.d/guildwise-runner-rootlesskit` | its own daemon; `/etc/apparmor.d/guildwise-runner-uat-rootlesskit`; its own subordinate id range |
 | readers group, migration marker | `guildwise-readers`, `/var/lib/guildwise/migrate-user.json` | `guildwise-readers-uat`, `/var/lib/guildwise/migrate-user-uat.json` |
-| root-owned tools (guildwise-admin, deploy-compose, their Node) | `/usr/local/lib/guildwise/` | `/usr/local/lib/guildwise/uat/` |
+| root-owned tools (guildwise-admin, its Node, the rootless Docker binaries) | `/usr/local/lib/guildwise/` | `/usr/local/lib/guildwise/uat/` |
 
-Each instance pairs with the server whose installer you run, and runs that server's runner package, so it trusts only that server's release key (a UAT build key on UAT, the official key on production). `deploy-compose` knows the calling instance from the `SUDO_USER` and `SUDO_UID` that sudo sets, so one instance can never resolve, deploy or stop the other's approved apps. The start-up check treats a `policy.json` written for another runner user as foreign (refused when the refusal is on, a warning otherwise), and checks that the instance's `/etc/guildwise-runner-<name>` is root-owned.
+Each instance pairs with the server whose installer you run, and runs that server's runner package, so it trusts only that server's release key (a UAT build key on UAT, the official key on production). The start-up check treats a `policy.json` written for another runner user as foreign (refused when the refusal is on, a warning otherwise), and checks that the instance's `/etc/guildwise-runner-<name>` is root-owned.
 
-**What the isolation does not cover.** The two runners are isolated from each other as unprivileged users. Root on the machine is a different matter. Whoever holds an instance's release signing key is effectively root on this machine, because that instance's install (its guildwise-admin) and its deploy tools (its deploy-compose, through the NOPASSWD rule) run as root. That holds for the UAT key on a machine that also runs production, so treat the UAT signing key as production-grade. Turning on sudo (`--sudo on`) or the docker group (`--docker group`) for either runner makes that runner root-equivalent, which reaches the other runner and breaks the isolation. Keep both runners on `--sudo off`, and on `--docker none` or `--docker narrow`.
+**What the isolation does not cover.** The two runners are isolated from each other as unprivileged users. Root on the machine is a different matter. Whoever holds an instance's release signing key is effectively root on this machine, because that instance's install (its guildwise-admin and Docker binaries) runs as root. That holds for the UAT key on a machine that also runs production, so treat the UAT signing key as production-grade. `--docker host` for either runner makes it root-equivalent, which reaches the other runner and breaks the isolation; `rootless` keeps one daemon per runner. Runners that share a daemon (`--docker shared` with the same socket, which the owner allows for UAT and production) can each control the other's containers; the typed acceptance at install records that choice.
 
 Install both with the command each server's **Add a workstation** page gives you, adding the instance name (and, for a server with a private CA, its certificate):
 
@@ -887,22 +924,9 @@ curl -fsSL 'https://uat.example.com/install/<token>/install.sh' | bash -s -- --i
 curl -fsSL 'https://hq.example.com/install/<token>/install.sh' | bash -s -- --instance prod
 ```
 
-Manage each one with its own copy of the tools: `sudo /usr/local/lib/guildwise/uat/guildwise-admin --instance uat <command>` (every command takes it, including `service install|remove`, `sudo on|off`, `docker`, `approve-app`, `readers`, `migrate-user`, `apply` and `verify`), and `sudo -u guildwise-runner-uat -H guildwise-runner setup` for its local permissions (setup prints the root steps with `--instance uat`). Without `--instance` everything is the single `guildwise-runner` as before; an existing single runner can stay next to named ones.
+Manage each one with its own copy of the tools: `sudo /usr/local/lib/guildwise/uat/guildwise-admin --instance uat <command>` (every command takes it, including `service install|remove`, `docker`, `cleanup-legacy`, `readers`, `migrate-user`, `apply` and `verify`), and `sudo -u guildwise-runner-uat -H guildwise-runner setup` for its local permissions (setup prints the root steps with `--instance uat`). Without `--instance` everything is the single `guildwise-runner` as before; an existing single runner can stay next to named ones.
 
-Each instance has its own root-owned tools in `/usr/local/lib/guildwise/<name>/`, installed from its own server's verified release (only the interpreter line of guildwise-admin and deploy-compose is changed, to that folder's Node), so a release signed with the UAT key never supplies the tools production's runner uses. An install for one instance never writes another's folder or the top-level one. The tools enforce it: the top-level `guildwise-admin` refuses `--instance`, an instance's copy refuses any other instance (and manages its own without the flag), and an instance's `deploy-compose` serves only that instance's runner user. Both servers must be on a release that knows `--instance`.
-
-### `deploy-compose` (the narrow Docker helper)
-
-`/usr/local/lib/guildwise/deploy-compose <app> up|pull|down|resolve` is the only passwordless sudo rule. It runs only a Compose setup approved with `guildwise-admin approve-app`, from a frozen copy, and applies an allowlist: no privileged containers, no host binds outside the app folder, no host network, no devices or added capabilities, no remote `include`, and similar. A changed configuration is held until approved again (a Docker Compose upgrade can need one re-approval).
-
-| Exit code | Meaning |
-|---|---|
-| 0 | ok |
-| 1 | docker failed |
-| 2 | usage |
-| 3 | held, approve it again |
-| 4 | refused by the allowlist |
-| 5 | environment problem |
+Each instance has its own root-owned tools in `/usr/local/lib/guildwise/<name>/`, installed from its own server's verified release (only the interpreter line of guildwise-admin is changed, to that folder's Node), so a release signed with the UAT key never supplies the tools production's runner uses. An install for one instance never writes another's folder or the top-level one. The tools enforce it: the top-level `guildwise-admin` refuses `--instance`, and an instance's copy refuses any other instance (and manages its own without the flag). Both servers must be on a release that knows `--instance`.
 
 ### Untrusted text
 
@@ -1218,7 +1242,7 @@ label, never a prompt, card text or client code. The server keeps one row per si
 
 The `direct-model` runtime calls a model provider's API from this workstation with the Vercel AI SDK: Anthropic's API, OpenAI, Google Gemini, and one OpenAI-compatible endpoint (OpenRouter, Ollama, LiteLLM, LM Studio). It is for conversation: Discovery and Boardroom turns (facilitator, CEO proposals, personas, the Chair, the minutes) and plain chats. It has no shell, no edit tool and no files, so it never runs a card or a shift. It announces the `direct-model:1` capability and always reports the runtime (`available: false` until a key is stored).
 
-**Setting a key.** On the Workstations page, under the workstation, **Model providers**: the owner of the workstation pastes the key (and, for an OpenAI-compatible endpoint, the base URL such as `http://localhost:11434/v1`; the key is optional for a local Ollama or LM Studio; extra model ids can be added for any provider). The browser encrypts the key with this runner's public key (RSA-OAEP, the same one the sudo password uses, so a key longer than 190 bytes is refused) and the server only relays the ciphertext in the `provider.key.set` command and empties it once the runner has answered. **Remove** sends `provider.key.clear`. There is no command-line form on purpose: the key never needs to be typed into a shell.
+**Setting a key.** On the Workstations page, under the workstation, **Model providers**: the owner of the workstation pastes the key (and, for an OpenAI-compatible endpoint, the base URL such as `http://localhost:11434/v1`; the key is optional for a local Ollama or LM Studio; extra model ids can be added for any provider). The browser encrypts the key with this runner's public key (RSA-OAEP, the workstation sealing key that target secrets use too, so a key longer than 190 bytes is refused) and the server only relays the ciphertext in the `provider.key.set` command and empties it once the runner has answered. **Remove** sends `provider.key.clear`. There is no command-line form on purpose: the key never needs to be typed into a shell.
 
 **Where it lives.** `secrets/providers.json` (mode 0600, in the 0700 `secrets/` folder, never readable by agents): per provider the ciphertext, the base URL and the extra model ids. The plain key is decrypted in memory when a turn needs it and registered with the redaction registry (also after a restart), so it does not appear in `logs/`, in a tool summary or in an error text. The server learns only provider names, model ids, the endpoint's host and a short problem text: `RuntimeInfo.providers` in `hello` and `runtimes.report`. Models offered: the built-in list per provider, the extra ids, and for the compatible endpoint the list from its `/models` (cached ten minutes).
 
@@ -1461,7 +1485,7 @@ On top of that, Claude Code sessions run inside Claude Code's own sandbox and pe
 
 **Exception: the DevOps engineer.** The workstation's DevOps engineer (the agent with `isDevops`, built-in role `devops`)
 runs its shifts **and its chats** outside this sandbox by design, so that it can deploy to the local Docker stack
-(`docker compose -p myapp ... up -d --build`), to remote hosts (ssh, scp, docker contexts), install tools and use sudo.
+(`docker compose -p myapp ... up -d --build`), to remote hosts (ssh, scp, docker contexts) and install stack tools in the runner's own home (it has no sudo).
 See [DevOps shifts are unsandboxed](#devops-shifts-are-unsandboxed).
 
 ### Reviewer runs (PR-only repositories)
@@ -1693,8 +1717,8 @@ when there is one; a tie goes to the highest SDK), `dotnetRoot` in `config.json`
 `global.json` (with its `rollForward`, default `latestPatch`) and the `TargetFramework(s)` of the projects against the
 chosen root and reports `missing SDK 10.0.100 (global.json)`, `missing SDK 10.0 (target framework net10.0)` or
 `missing runtime 8.0`, plus a line **.NET SDKs 8.0.425, 10.0.401 (~/.dotnet)**. With "Install packages and tools"
-allowed it installs into the chosen root with `dotnet-install.sh --install-dir <root> --channel <x.y>` (no sudo when the
-root is in the user's home); a root that is not writable (`/usr/share/dotnet`) keeps the package manager recipes.
+allowed it installs into the chosen root from Microsoft's release metadata, checking each file's sha512 (the default root
+is `~/.local/share/guildwise/toolchains/dotnet`); a root that is not writable (`/usr/share/dotnet`) is reported with what to do.
 
 **`aom toolchain`** (outside the sandbox, over the IPC like `aom git`):
 
@@ -3022,8 +3046,8 @@ PreToolUse hook (`aom devops-guard`, configured in the agent's own `settings.jso
 `$( )`, backticks, `bash -c`, `eval`, `env`/`nohup`/`timeout`/`xargs`, and `cd` are looked through) and:
 
 - **always refuses**: deleting outside the worktrees and the runner's data folders (and the OS temp folder); disk and partition
-  tools (`fdisk`, `parted`, `mkfs`, `dd of=/dev/...`, ...); user, group, password and sudo changes and raw `sudo`/`su` (privileged
-  work goes through `aom sudo -- <command>`, which still refuses the other rules for the inner command); force-pushing or
+  tools (`fdisk`, `parted`, `mkfs`, `dd of=/dev/...`, ...); user, group, password and sudo changes, raw `sudo`/`su` and `aom sudo`
+  (removed in 1.10.0: the agent tells the machine owner the exact command instead); force-pushing or
   deleting `main`, `master`, `develop`, `trunk` or the project's working branch; dropping a database or schema;
 - **refuses unless the manager approved that exact command**: anything that leaves this workstation (`ssh`, `scp`, `sftp`,
   `rsync` with a remote, `docker` with `-H`/`--context`/another `DOCKER_HOST`, `kubectl`, `helm`, cloud CLIs, `terraform`, ...).
@@ -3034,7 +3058,7 @@ PreToolUse hook (`aom devops-guard`, configured in the agent's own `settings.jso
   `<data dir>/logs/devops-audit.jsonl` and sent to the server (`devops.audit`, table `devops_audit`,
   `GET /api/platform/devops-audit`, super admin).
 
-In a DevOps chat `aom devops-approval` posts the request into the conversation for the owner and `aom sudo` works.
+In a DevOps chat `aom devops-approval` posts the request into the conversation for the owner.
 This is a guardrail for an agent that follows its instructions, not a security boundary against one that tries to get around it
 (`python -c`, a script it wrote itself): the threat model below still applies.
 

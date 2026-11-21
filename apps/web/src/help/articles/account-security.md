@@ -50,7 +50,7 @@ Before a sensitive action Guildwise asks **Confirm it's you**: "Enter the 6-digi
 
 - An answer counts for 10 minutes, so a few sensitive steps in a row ask once.
 - 5 wrong answers end the session.
-- Asked for: every platform administrator change; showing the sudo key, setting or removing the sudo password; workstation secrets and provider keys; project Claude and provider accounts; deploy targets and their signing key; organization provider keys; resetting a member's password or two-factor login and **Email a reset link**; adding a passkey; approving an ownership transfer; block list changes; and adding or revoking a render worker.
+- Asked for: every platform administrator change; showing the workstation sealing key; workstation secrets and provider keys; project Claude and provider accounts; deploy targets and their signing key; organization provider keys; resetting a member's password or two-factor login and **Email a reset link**; adding a passkey; approving an ownership transfer; block list changes; and adding or revoking a render worker.
 
 ## Require two-factor login {#enforcement}
 

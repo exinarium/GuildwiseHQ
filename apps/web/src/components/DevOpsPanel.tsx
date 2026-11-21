@@ -8,23 +8,19 @@ import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useCeoChat } from '../api/queries/ceo.ts';
 import {
-  useClearSudoPassword,
   useDevOpsRequest,
   useDevOpsRequests,
   usePatchDevOpsAccess,
   useResolveDevOpsApproval,
   useRunHygiene,
   useSetHygieneInterval,
-  useSetSudoPassword,
   useVerifyRights,
 } from '../api/queries/devops.ts';
 import { openCeoChat } from '../lib/openCeoChat.ts';
-import { canSealHere } from '../lib/secure.ts';
 import { formatDateTime } from '../lib/time.ts';
 import { useCeoName } from './ceo/useCeoName.ts';
 import { AskDevOpsButton } from './devops/AskDevOps.tsx';
 import { FixWithDevOps } from './devops/FixWithDevOps.tsx';
-import { SecureContextNotice } from './SecureContextNotice.tsx';
 import { Badge, Button, ErrorBox, Select, TextArea, TextInput } from './ui.tsx';
 
 const TONE = {
@@ -49,7 +45,7 @@ export function DevOpsPanel({ w }: { w: WorkstationDto }) {
   const patch = usePatchDevOpsAccess();
   const requests = useDevOpsRequests(w.id);
   const [paths, setPaths] = useState<string | null>(null);
-  const toggle = (key: 'allowInstall' | 'allowDocker' | 'sudo') =>
+  const toggle = (key: 'allowInstall' | 'allowDocker') =>
     patch.mutate({ workstationId: w.id, body: { [key]: !access[key] } });
   const pathsText = paths ?? access.allowedPaths.join('\n');
   const savePaths = () =>
@@ -77,7 +73,6 @@ export function DevOpsPanel({ w }: { w: WorkstationDto }) {
           [
             ['allowInstall', 'Install packages and tools'],
             ['allowDocker', 'Docker'],
-            ['sudo', 'Elevated privileges (sudo)'],
           ] as const
         ).map(([key, label]) => (
           <label key={key} className="flex items-center gap-3 [@media(pointer:coarse)]:min-h-11">
@@ -132,13 +127,12 @@ export function DevOpsPanel({ w }: { w: WorkstationDto }) {
 const RIGHT_LABEL = {
   install: 'Install packages and tools',
   docker: 'Docker',
-  sudo: 'Elevated privileges (sudo)',
   paths: 'Writable paths',
 } as const;
 
 /**
  * A ticked right is a promise until the runner proves it on the machine: one badge per ticked right (verified or failed,
- * with the reason and how to fix it), and the sudo password form when sudo needs one.
+ * with the reason and how to fix it).
  */
 function RightsStatus({
   w,
@@ -152,7 +146,6 @@ function RightsStatus({
     [
       ['install', access.allowInstall],
       ['docker', access.allowDocker],
-      ['sudo', access.sudo],
       ['paths', access.allowedPaths.length > 0],
     ] as const
   ).filter(([, on]) => on);
@@ -216,80 +209,8 @@ function RightsStatus({
           );
         })}
       </ul>
-      {access.sudo && <SudoPassword w={w} />}
       <ErrorBox error={verify.error} />
     </div>
-  );
-}
-
-/**
- * The sudo password. It is encrypted in this browser with the runner's own key; the server only relays ciphertext, the
- * runner keeps it in its data folder (readable by the runner user only), and it is never shown again.
- */
-function SudoPassword({ w }: { w: WorkstationDto }) {
-  const set = useSetSudoPassword();
-  const clear = useClearSudoPassword();
-  const [pw, setPw] = useState('');
-  const sudo = w.sudo;
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!pw) return;
-    set.mutate({ workstationId: w.id, password: pw }, { onSuccess: () => setPw('') });
-  };
-  return (
-    <form
-      onSubmit={submit}
-      aria-label={`Sudo password for ${w.name}`}
-      className="mt-3 border-t border-line pt-2"
-      autoComplete="off"
-    >
-      <p className="text-sm font-medium">
-        Sudo password{' '}
-        {sudo?.passwordSet ? (
-          <Badge tone={sudo.works === false ? 'red' : 'green'}>
-            {sudo.works === false ? 'stored, not accepted' : 'stored'}
-          </Badge>
-        ) : (
-          <Badge tone="neutral">not set</Badge>
-        )}
-      </p>
-      <p className="text-xs text-subtle">
-        Only needed when sudo asks for a password on this machine. It is encrypted here with a key only this
-        runner holds, stored on the runner alone and used for the DevOps engineer's commands only. It is never
-        shown again and never written to a log.
-        {sudo?.keyId ? ` Key ${sudo.keyId} (the same as \`guildwise-runner doctor\` shows).` : ''}
-      </p>
-      <SecureContextNotice className="mt-1" />
-      <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-end">
-        <div className="flex-1">
-          <TextInput
-            label={sudo?.passwordSet ? 'New sudo password' : 'Sudo password'}
-            type="password"
-            autoComplete="new-password"
-            value={pw}
-            onChange={(e) => setPw(e.target.value)}
-          />
-        </div>
-        <Button
-          type="submit"
-          variant="primary"
-          disabled={!pw || set.isPending || !w.connected || !canSealHere()}
-        >
-          Send to {w.name}
-        </Button>
-        {sudo?.passwordSet && (
-          <Button disabled={clear.isPending} onClick={() => clear.mutate(w.id)}>
-            Forget it
-          </Button>
-        )}
-      </div>
-      {set.isSuccess && (
-        <p role="status" className="text-sm text-success">
-          Sent. The runner checks it and the badge above updates.
-        </p>
-      )}
-      <ErrorBox error={set.error ?? clear.error} />
-    </form>
   );
 }
 

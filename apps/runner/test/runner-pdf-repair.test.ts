@@ -95,7 +95,7 @@ describe('chromiumPdfRenderer install cancellation', () => {
     );
     const pdf = chromiumPdfRenderer({ browsersPath: join(dir, 'b'), cli });
     const ac = new AbortController();
-    const run = pdf.install({ withDeps: false, log: () => undefined, signal: ac.signal });
+    const run = pdf.install({ log: () => undefined, signal: ac.signal });
     const { existsSync, readFileSync } = await import('node:fs');
     for (let i = 0; i < 200 && !existsSync(pidFile); i++) await new Promise((r) => setTimeout(r, 25));
     const pid = Number(readFileSync(pidFile, 'utf8'));

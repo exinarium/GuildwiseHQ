@@ -16,15 +16,15 @@ afterEach(() => setup?.cleanup());
 const STUB_ROOT =
   'as_root() { echo "as_root $*" >> "$STUB_LOG"; }; record_service_mode() { :; }; install_admin_tools() { :; }';
 const STATE =
-  'echo "user=$DEDICATED_USER service=$DEDICATED_SERVICE sudo=$SUDOERS_SUDO_FILE docker=$SUDOERS_DOCKER_FILE mode=$OPT_RUNNER_USER hint=$ADMIN_HINT dir=$ADMIN_DIR node=$BUNDLED_NODE_BIN"';
+  'echo "user=$DEDICATED_USER service=$DEDICATED_SERVICE mode=$OPT_RUNNER_USER hint=$ADMIN_HINT dir=$ADMIN_DIR node=$BUNDLED_NODE_BIN"';
 
 describe('--instance: flags', () => {
-  it('names the instance user, service and sudoers files and forces the dedicated user', () => {
+  it('names the instance user and service and forces the dedicated user', () => {
     setup = shHome();
     const r = runSh(setup, `parse_flags "$@"; ${STATE}`, { args: ['--instance', 'uat'] });
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout.trim()).toBe(
-      'user=guildwise-runner-uat service=guildwise-runner-uat sudo=/etc/sudoers.d/guildwise-runner-uat_sudo docker=/etc/sudoers.d/guildwise-runner-uat_docker mode=dedicated hint=/usr/local/lib/guildwise/uat/guildwise-admin --instance uat dir=/usr/local/lib/guildwise/uat node=/usr/local/lib/guildwise/uat/node/bin',
+      'user=guildwise-runner-uat service=guildwise-runner-uat mode=dedicated hint=/usr/local/lib/guildwise/uat/guildwise-admin --instance uat dir=/usr/local/lib/guildwise/uat node=/usr/local/lib/guildwise/uat/node/bin',
     );
     const env = runSh(setup, `parse_flags "$@"; ${STATE}`, { env: { GUILDWISE_INSTANCE: 'prod' } });
     expect(env.stdout).toContain('user=guildwise-runner-prod ');
@@ -37,7 +37,7 @@ describe('--instance: flags', () => {
     const r = runSh(setup, `parse_flags "$@"; ${STATE}`);
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout.trim()).toBe(
-      'user=guildwise-runner service=guildwise-runner sudo=/etc/sudoers.d/guildwise-runner docker=/etc/sudoers.d/guildwise-runner-docker mode= hint=/usr/local/lib/guildwise/guildwise-admin dir=/usr/local/lib/guildwise node=/usr/local/lib/guildwise/node/bin',
+      'user=guildwise-runner service=guildwise-runner mode= hint=/usr/local/lib/guildwise/guildwise-admin dir=/usr/local/lib/guildwise node=/usr/local/lib/guildwise/node/bin',
     );
   });
 
@@ -48,7 +48,7 @@ describe('--instance: flags', () => {
     expect(r.stderr).toContain('--instance is a short name of lowercase letters');
   });
 
-  it.each(['node', 'guildwise-admin', 'deploy-compose'])('refuses the reserved name %j', (name) => {
+  it.each(['node', 'guildwise-admin', 'deploy-compose', 'docker'])('refuses the reserved name %j', (name) => {
     setup = shHome();
     const r = runSh(setup, 'parse_flags "$@"', { args: ['--instance', name] });
     expect(r.status).toBe(1);
@@ -110,33 +110,57 @@ describe('--instance: Linux', () => {
     expect(r.log).toContain('as_root systemctl restart guildwise-runner.service\n');
   });
 
-  it("Docker, sudo and app approvals go to the instance's own rules", () => {
+  it("the legacy clean-up and the rootless Docker go to the instance's own tools", () => {
     setup = shHome();
     const r = runSh(
       setup,
       `parse_flags "$@"; ${STUB_ROOT}; RUNNER_MODE=dedicated; RUNNER_NAME=guildwise-runner-prod; RUNNER_HOME=/home/guildwise-runner-prod
-policy_value() { case "$1" in docker) echo narrow ;; sudo) echo false ;; esac; }
+policy_value() { case "$1" in docker) echo rootless ;; *) return 1 ;; esac; }
+install_docker_binaries() { echo "install_docker_binaries $ADMIN_DIR/docker" >> "$STUB_LOG"; }
+setup_runner_docker() { :; }
 apply_root_choices`,
-      {
-        args: [
-          '--instance',
-          'prod',
-          '--docker',
-          'narrow',
-          '--approve-app',
-          'shop=/home/guildwise-runner-prod/src/shop',
-        ],
-      },
+      { args: ['--instance', 'prod', '--docker', 'rootless'] },
     );
     expect(r.status, r.stderr).toBe(0);
     expect(r.log).toContain(
-      'as_root /usr/local/lib/guildwise/prod/guildwise-admin --instance prod docker narrow --user guildwise-runner-prod\n',
+      'as_root /usr/local/lib/guildwise/prod/guildwise-admin --instance prod cleanup-legacy --user guildwise-runner-prod\n',
     );
-    expect(r.log).toContain('as_root test -e /etc/sudoers.d/guildwise-runner-prod_sudo\n');
+    expect(r.log).toContain('install_docker_binaries /usr/local/lib/guildwise/prod/docker\n');
     expect(r.log).toContain(
-      'as_root /usr/local/lib/guildwise/prod/guildwise-admin --instance prod approve-app shop --source /home/guildwise-runner-prod/src/shop --user guildwise-runner-prod --yes\n',
+      'as_root /usr/local/lib/guildwise/prod/guildwise-admin --instance prod docker rootless --user guildwise-runner-prod\n',
     );
     expect(r.log).not.toMatch(/\/usr\/local\/lib\/guildwise\/guildwise-admin/);
+    expect(r.log).not.toMatch(/sudoers|approve-app|sudo on/);
+  });
+
+  it('UAT and prod may share one rootless daemon, each with the same typed acceptance (owner 2026-11-21)', () => {
+    for (const inst of ['uat', 'prod']) {
+      setup = shHome();
+      const r = runSh(
+        setup,
+        `parse_flags "$@"; ${STUB_ROOT}; RUNNER_MODE=dedicated; RUNNER_NAME=guildwise-runner-${inst}; RUNNER_HOME=/home/guildwise-runner-${inst}
+policy_value() { case "$1" in docker) echo shared ;; dockerHost) echo /run/docker-svc/docker.sock ;; esac; }
+install_docker_binaries() { echo "install_docker_binaries $ADMIN_DIR/docker" >> "$STUB_LOG"; }
+apply_root_choices`,
+        {
+          args: [
+            '--instance',
+            inst,
+            '--docker',
+            'shared',
+            '--docker-socket',
+            '/run/docker-svc/docker.sock',
+            '--accept-shared-daemon',
+          ],
+        },
+      );
+      expect(r.status, r.stderr).toBe(0);
+      // the root-owned docker CLI guildwise-admin asks the daemon with comes from the signed release first
+      expect(r.log).toContain(`install_docker_binaries /usr/local/lib/guildwise/${inst}/docker`);
+      expect(r.log).toContain(
+        `as_root /usr/local/lib/guildwise/${inst}/guildwise-admin --instance ${inst} docker shared --docker-socket /run/docker-svc/docker.sock --accept-shared-daemon --user guildwise-runner-${inst}\n`,
+      );
+    }
   });
 });
 
@@ -171,7 +195,6 @@ describe('--instance: macOS', () => {
 
 describe('--instance: its own root-owned tools folder', () => {
   const ADMIN_SRC = "#!/usr/local/lib/guildwise/node/bin/node\n'use strict';\n// guildwise-admin body\n";
-  const DC_SRC = "#!/usr/local/lib/guildwise/node/bin/node\n'use strict';\n// deploy-compose body\n";
 
   /** A staged release with the two tools and a Node runtime the stub curl serves; as_root only logs. */
   function tools(args: string[]) {
@@ -179,7 +202,6 @@ describe('--instance: its own root-owned tools folder', () => {
     const stage = join(setup.home, 'stage');
     mkdirSync(join(stage, 'pkg/aom-runner/admin'), { recursive: true });
     writeFileSync(join(stage, 'pkg/aom-runner/admin/guildwise-admin.cjs'), ADMIN_SRC);
-    writeFileSync(join(stage, 'pkg/aom-runner/admin/deploy-compose.cjs'), DC_SRC);
     const node = Buffer.from('fake node runtime');
     writeFileSync(join(setup.www, 'node.tar.xz'), node);
     const sha = createHash('sha256').update(node).digest('hex');
@@ -201,9 +223,7 @@ install_admin_tools`,
     expect(r.log).toContain(
       `as_root install -o 0 -g 0 -m 0755 ${stage}/guildwise-admin.instance /usr/local/lib/guildwise/uat/guildwise-admin\n`,
     );
-    expect(r.log).toContain(
-      `as_root install -o 0 -g 0 -m 0755 ${stage}/deploy-compose.instance /usr/local/lib/guildwise/uat/deploy-compose\n`,
-    );
+    expect(r.log).not.toContain('deploy-compose');
     expect(r.log).toContain(
       'as_root mv /usr/local/lib/guildwise/uat/node.new /usr/local/lib/guildwise/uat/node\n',
     );
@@ -214,9 +234,6 @@ install_admin_tools`,
     // only the interpreter line differs from the verified file
     expect(readFileSync(join(stage, 'guildwise-admin.instance'), 'utf8')).toBe(
       ADMIN_SRC.replace('/usr/local/lib/guildwise/node/', '/usr/local/lib/guildwise/uat/node/'),
-    );
-    expect(readFileSync(join(stage, 'deploy-compose.instance'), 'utf8')).toBe(
-      DC_SRC.replace('/usr/local/lib/guildwise/node/', '/usr/local/lib/guildwise/uat/node/'),
     );
   });
 

@@ -43,15 +43,6 @@ pkg_install() {
   esac
 }
 
-# Package names per tool (the program name is not always the package name).
-pkg_for() {
-  case "$1" in
-    bwrap) echo bubblewrap ;;
-    docker) if [ "${PKG}" = apt ]; then echo docker.io; else echo docker; fi ;;
-    *) echo "$1" ;;
-  esac
-}
-
 git_new_enough() {
   have git || return 1
   local v major minor
@@ -96,19 +87,83 @@ ensure_modern_git() {
   git_new_enough || die "git $(git --version | sed 's/git version //') is too old and a newer one could not be installed (the runner needs 2.40 or newer)." "Install a newer git from your distribution or from https://git-scm.com/downloads/linux, then run the command again."
 }
 
-install_system_packages() {
-  local missing=() tool
-  for tool in curl git tar gzip socat bwrap; do have "${tool}" || missing+=("$(pkg_for "${tool}")"); done
-  if [ "${#missing[@]}" -eq 0 ]; then
-    ensure_modern_git
-    step_ok "git $(git --version | sed 's/git version //'), curl and the sandbox tools (bubblewrap, socat) are ready"
-    return
-  fi
-  note "Installing: ${missing[*]} (this may ask for your password)"
-  pkg_install "${missing[@]}" || die "Installing ${missing[*]} failed." "Run the command again; if it repeats, install them by hand and run it once more."
-  for tool in curl git tar gzip socat bwrap; do have "${tool}" || die "${tool} is still missing after the install." "Install it by hand, then run the command again."; done
+# ---- the baseline (DESIGN deps-without-sudo §1): installed once, as root, in the one authorization ---------------------
+# One package-manager call per group, only for what is missing. The core group must succeed; the others warn and name
+# what is missing. With --skip-baseline nothing is installed: missing core tools stop the install, the rest warn.
+# Headless Chromium is not here: `runner pdf-renderer install` downloads it as the runner user.
+baseline_group() {
+  local group="$1"
+  case "${PKG}:${group}" in
+    apt:core) echo "ca-certificates curl git unzip zip tar gzip xz-utils bzip2 build-essential pkg-config python3 openssh-client jq socat bubblewrap" ;;
+    apt:playwright) echo "libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 libatspi2.0-0 libx11-6 libxcb1 libxext6 libglib2.0-0" ;;
+    apt:fonts) echo "fonts-liberation fonts-noto-core fonts-noto-color-emoji" ;;
+    apt:docker) echo "uidmap dbus-user-session iptables slirp4netns" ;;
+    dnf:core) echo "ca-certificates curl git unzip zip tar gzip xz bzip2 gcc gcc-c++ make pkgconf-pkg-config python3 openssh-clients jq socat bubblewrap" ;;
+    dnf:playwright) echo "nss nspr atk at-spi2-atk at-spi2-core cups-libs libdrm dbus-libs libxkbcommon libXcomposite libXdamage libXfixes libXrandr mesa-libgbm pango cairo alsa-lib libX11 libxcb libXext glib2" ;;
+    dnf:fonts) echo "liberation-fonts google-noto-sans-fonts google-noto-color-emoji-fonts" ;;
+    dnf:docker) echo "shadow-utils dbus-daemon iptables slirp4netns" ;;
+    pacman:core) echo "ca-certificates curl git unzip zip tar gzip xz bzip2 base-devel pkgconf python openssh jq socat bubblewrap" ;;
+    pacman:playwright) echo "nss nspr at-spi2-core libcups libdrm dbus libxkbcommon libxcomposite libxdamage libxfixes libxrandr mesa pango cairo alsa-lib libx11 libxcb libxext glib2" ;;
+    pacman:fonts) echo "ttf-liberation noto-fonts noto-fonts-emoji" ;;
+    pacman:docker) echo "shadow iptables slirp4netns" ;;
+  esac
+}
+
+# apt t64 rename (Ubuntu 24.04+, Debian 13): use <name>t64 where the archive has it.
+apt_name() {
+  case "$1" in
+    libasound2|libatk1.0-0|libatk-bridge2.0-0|libcups2|libglib2.0-0|libatspi2.0-0)
+      if apt-cache show "$1t64" >/dev/null 2>&1; then echo "$1t64"; else echo "$1"; fi ;;
+    *) echo "$1" ;;
+  esac
+}
+
+# pkg_present <package>: installed already (no root needed).
+pkg_present() {
+  case "${PKG}" in
+    apt) dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'install ok installed' ;;
+    dnf) rpm -q --whatprovides "$1" >/dev/null 2>&1 ;;
+    pacman) pacman -Qq "$1" >/dev/null 2>&1 || pacman -Qqg "$1" >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
+
+baseline_missing() {
+  local p name out=()
+  for p in $(baseline_group "$1"); do
+    name="${p}"
+    [ "${PKG}" = apt ] && name="$(apt_name "${p}")"
+    pkg_present "${name}" || out+=("${name}")
+  done
+  [ "${#out[@]}" -eq 0 ] || printf '%s\n' "${out[@]}"
+}
+
+install_baseline() {
+  [ -n "${PKG}" ] || {
+    [ "${OPT_SKIP_BASELINE}" = 1 ] || die "This Linux uses a package manager the installer does not know (apt, dnf and pacman are supported)." "Install the baseline yourself (see the install guide) and run the command again with --skip-baseline."
+  }
+  local group missing all=()
+  for group in core playwright fonts docker; do
+    [ -n "${PKG}" ] || break
+    mapfile -t missing < <(baseline_missing "${group}")
+    [ "${#missing[@]}" -eq 0 ] && continue
+    if [ "${OPT_SKIP_BASELINE}" = 1 ]; then
+      [ "${group}" = core ] && die "These baseline packages are missing: ${missing[*]} (--skip-baseline installs nothing)." "Install them yourself, then run the command again."
+      step_warn "Missing ${group} packages (--skip-baseline installs nothing): ${missing[*]}"
+      continue
+    fi
+    note "Installing the ${group} packages: ${missing[*]}"
+    if ! pkg_install "${missing[@]}"; then
+      [ "${group}" = core ] && die "Installing the core packages failed: ${missing[*]}." "Run the command again; if it repeats, install them by hand and run it with --skip-baseline."
+      step_warn "Could not install the ${group} packages: ${missing[*]}. Install them yourself later."
+      continue
+    fi
+    all+=("${missing[@]}")
+  done
+  local tool
+  for tool in curl git tar gzip socat bwrap; do have "${tool}" || die "${tool} is still missing." "Install it by hand, then run the command again."; done
   ensure_modern_git
-  step_ok "Installed ${missing[*]}"
+  if [ "${#all[@]}" -gt 0 ]; then step_ok "Baseline installed: ${all[*]}"; else step_ok "The baseline packages are already installed"; fi
 }
 
 node_major() { node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0; }
@@ -171,29 +226,11 @@ install_ytdlp() {
   fi
 }
 
-install_docker() {
-  if have docker; then good "Docker is already installed"; return; fi
-  if ! ask_yn "Install Docker? Only needed if your testers run containers. It needs administrator rights. Optional." n GUILDWISE_WITH_DOCKER; then
-    note "Skipped Docker. You can add it later."; report "Docker" info "skipped"; return
-  fi
-  pkg_install "$(pkg_for docker)" || { step_warn "Could not install Docker. Install it by hand if you need it."; return; }
-  if [ -n "${SUDO}" ]; then ${SUDO} usermod -aG docker "$(id -un)" 2>/dev/null || true; fi
-  good "Docker installed (log out and in again so your user may use it)"
-}
-
 # The browser that makes the PDF copy of a form's answers. Never fatal: the copies stay off until it works.
 install_pdf_renderer() {
   note "Installing the browser for PDF copies of form answers (a download of roughly 100 MB) ..."
-  if [ -n "${RUNNER_AS}" ]; then
-    # The dedicated user has no sudo: you install the system packages, it installs the browser for itself.
-    if [ "${PKG}" = apt ]; then pkg_install fonts-noto-core >/dev/null 2>&1 || true; fi
-    if runner pdf-renderer install >/dev/null 2>&1; then good "PDF renderer installed for ${RUNNER_NAME}"; return; fi
-  elif [ "${PKG}" = apt ] && { [ -n "${SUDO}" ] || [ "$(id -u)" -eq 0 ]; }; then
-    pkg_install fonts-noto-core >/dev/null 2>&1 || true
-    if runner pdf-renderer install --with-deps >/dev/null 2>&1; then good "PDF renderer installed"; return; fi
-  elif runner pdf-renderer install >/dev/null 2>&1; then
-    good "PDF renderer installed"; return
-  fi
+  # Its system libraries and fonts are in the baseline; the runner downloads the browser for itself, without root.
+  if runner pdf-renderer install >/dev/null 2>&1; then good "PDF renderer installed for ${RUNNER_NAME}"; return; fi
   step_warn "Could not install the PDF renderer. PDF copies of form answers stay off until \`guildwise-runner pdf-renderer install\` succeeds."
 }
 
@@ -325,16 +362,17 @@ install_service() {
 main() {
   parse_flags "$@"
   if [ "${OPT_LEGACY_ONLY}" = 1 ]; then legacy_only; return 0; fi
-  STEP_TOTAL=15
+  STEP_TOTAL=16
   say "${C_BOLD}${APP_NAME}: set up this computer as a workstation${C_RESET}"
   say "${C_DIM}Safe to run again at any time: it upgrades or repairs what is already here.${C_RESET}"
   report "installer" start "linux"
 
   step "Checking this computer"; detect_system
   step "Looking for an older runner"; handle_legacy; choose_runner_user
-  step "Installing git and the sandbox tools"; install_system_packages
+  step "Administrator rights (once)"; authorize_once; [ "$(id -u)" -eq 0 ] || SUDO="sudo -n"
+  step "Installing the baseline"; install_baseline
   step "Installing Node 22"; install_node
-  step "Optional extras"; install_ytdlp; install_docker
+  step "Optional extras"; install_ytdlp
   step "Downloading the runner"; stage_runner_release
   step "Runner user"; setup_runner_user
   step "Installing the runner"; place_runner_release

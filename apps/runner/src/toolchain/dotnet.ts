@@ -86,6 +86,8 @@ export function dotnetCandidates(o: DotnetDetectOptions = {}): string[] {
   if (env.DOTNET_ROOT) out.push(env.DOTNET_ROOT);
   out.push(
     join(home, '.dotnet'),
+    // where DevOps installs .NET when there is no root yet (DESIGN §5)
+    join(home, '.local', 'share', 'guildwise', 'toolchains', 'dotnet'),
     ...(o.systemRoots ?? [
       '/usr/share/dotnet',
       '/usr/lib/dotnet',

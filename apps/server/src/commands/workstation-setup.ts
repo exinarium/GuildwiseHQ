@@ -8,9 +8,6 @@ import {
   RepoCloneResultSchema,
   RightsReportSchema,
   SEAL_AAD_CAPABILITY,
-  type SetSudoPasswordRequest,
-  type SudoSetResult,
-  SudoSetResultSchema,
   streamId,
 } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
@@ -30,8 +27,8 @@ export const RUNNER_NOT_STARTED =
 /**
  * What the DevOps engineer does on a workstation when a project changes (docs/RUNNER.md "Repository setup, toolchain
  * and rights"): put a repository added to a project on the project's workstations, make the toolchain ready before
- * build work, check the rights the manager ticked and keep the sudo password. The work is done by the runner (plain
- * code, commands `repo.clone`, `env.ensure`, `rights.verify`, `sudo.set`); the server queues the commands durably,
+ * build work, check the rights the manager ticked. The work is done by the runner (plain
+ * code, commands `repo.clone`, `env.ensure`, `rights.verify`); the server queues the commands durably,
  * records the state as events and gates cards on the environment.
  */
 
@@ -526,9 +523,12 @@ export async function verifyRightsNow(
   deliver(ctx, [workstationId]);
 }
 
-// ------------------------------------------------------------------------------------------ sudo password
+// ------------------------------------------------------------------------------------------ sealing key
 
-/** The runner's public key for the sudo password (what the browser encrypts with). */
+/**
+ * The runner's public key (still named the sudo key): the browser seals provider and target secrets with it. The sudo
+ * password it once sealed was removed in 1.10.0.
+ */
 export async function sudoKeyOf(ctx: Ctx, user: AuthSession['user'], workstationId: string) {
   const ws = await one(
     ctx.pool,
@@ -554,127 +554,6 @@ export async function sudoKeyOf(ctx: Ctx, user: AuthSession['user'], workstation
     publicKey: k.public_key as string,
     ...((caps?.capabilities ?? []).includes(SEAL_AAD_CAPABILITY) ? { sealAad: true } : {}),
   };
-}
-
-/**
- * Relays the sudo password to the runner. The server only ever holds the ciphertext (encrypted in the browser with the
- * runner's own public key): it travels in the durable command queue until the runner confirms (the payload is then
- * emptied), it is never an event or a log line. Only the fact that a password was set is recorded.
- */
-export async function setSudoPassword(
-  ctx: Ctx,
-  user: AuthSession['user'],
-  workstationId: string,
-  body: SetSudoPasswordRequest,
-): Promise<void> {
-  await withAppendTx(ctx.pool, async (tx) => {
-    const ws = await one(
-      tx,
-      `SELECT id, devops_access, last_seen_at FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`,
-      [workstationId, user.id],
-    );
-    if (!ws) throw notFound('workstation not found');
-    const k = await one(tx, 'SELECT key_id FROM workstation_keys WHERE workstation_id=$1', [workstationId]);
-    if (!k || k.key_id !== body.keyId)
-      throw conflict(
-        'sudo_key_changed',
-        "the runner's key changed: reload the page and enter the password again",
-      );
-    // Only one password is ever pending: drop an earlier one that has not been delivered.
-    await exec(
-      tx,
-      `UPDATE runner_commands SET status='failed', payload='{}'::jsonb WHERE workstation_id=$1 AND type='sudo.set' AND status IN ('pending','sent')`,
-      [workstationId],
-    );
-    await enqueueRunnerCommand(tx, workstationId, 'sudo.set', {
-      ciphertext: body.ciphertext,
-      keyId: body.keyId,
-    });
-  });
-  deliver(ctx, [workstationId]);
-}
-
-export async function clearSudoPassword(
-  ctx: Ctx,
-  user: AuthSession['user'],
-  workstationId: string,
-): Promise<void> {
-  await withAppendTx(ctx.pool, async (tx) => {
-    const ws = await one(tx, `SELECT id FROM workstations WHERE id=$1 AND user_id=$2 AND status='active'`, [
-      workstationId,
-      user.id,
-    ]);
-    if (!ws) throw notFound('workstation not found');
-    await exec(
-      tx,
-      `UPDATE runner_commands SET status='failed', payload='{}'::jsonb WHERE workstation_id=$1 AND type='sudo.set' AND status IN ('pending','sent')`,
-      [workstationId],
-    );
-    await enqueueRunnerCommand(tx, workstationId, 'sudo.clear', {});
-    await ctx.store.append(
-      [
-        {
-          streamId: streamId.workstation(workstationId),
-          event: { type: 'DevOpsSudoPasswordCleared', payload: { workstationId, by: user.id } },
-          actor: userActor(user.id),
-          scope: userScope(user.id),
-        },
-      ],
-      { tx },
-    );
-  });
-  deliver(ctx, [workstationId]);
-}
-
-/** `command.result` of `sudo.set`: forget the ciphertext, record the fact, verify the rights again. */
-export async function applySudoSetResult(
-  ctx: Ctx,
-  workstationId: string,
-  commandId: string,
-  ok: boolean,
-  result: unknown,
-  keyId: string,
-): Promise<void> {
-  await exec(ctx.pool, `UPDATE runner_commands SET payload='{}'::jsonb WHERE id=$1`, [commandId]);
-  const parsed: SudoSetResult | null = ok ? (SudoSetResultSchema.safeParse(result).data ?? null) : null;
-  if (!parsed?.stored) return;
-  const ws = await one(ctx.pool, 'SELECT user_id, devops_access FROM workstations WHERE id=$1', [
-    workstationId,
-  ]);
-  if (!ws) return;
-  await withAppendTx(ctx.pool, async (tx) => {
-    await ctx.store.append(
-      [
-        {
-          streamId: streamId.workstation(workstationId),
-          event: {
-            type: 'DevOpsSudoPasswordSet',
-            payload: {
-              workstationId,
-              by: ws.user_id,
-              keyId,
-              ...(parsed.works !== undefined ? { works: parsed.works } : {}),
-            },
-          },
-          actor: { kind: 'runner', id: workstationId },
-          scope: userScope(ws.user_id),
-        },
-      ],
-      { tx },
-    );
-    await queueRightsVerify(tx, workstationId, ws.devops_access ?? {});
-    const waiting = await rows(
-      tx,
-      `SELECT project_id FROM project_environments WHERE workstation_id=$1 AND state IN ('needs_access','failed')`,
-      [workstationId],
-    );
-    const events: AppendInput[] = [];
-    for (const w of waiting)
-      events.push(
-        ...(await environmentRequestEvents(ctx, tx, w.project_id, workstationId, 'access_changed')),
-      );
-    if (events.length) await ctx.store.append(events, { tx });
-  });
 }
 
 /**

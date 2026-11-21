@@ -3,7 +3,6 @@ import { join } from 'node:path';
 import type { DevOpsAccess } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { checkDocker, checkInstall, checkPaths, verifyRights } from '../src/devops/rights.ts';
-import type { RootRunner } from '../src/toolchain/ensure.ts';
 import type { ExecResult, Executor } from '../src/toolchain/exec.ts';
 import type { Platform } from '../src/toolchain/types.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
@@ -18,19 +17,14 @@ const exec = (answers: Record<string, ExecResult>): Executor => ({
     return answers[[cmd, ...args].join(' ')] ?? fail('not found', 127);
   },
 });
-const root = (mode: Awaited<ReturnType<RootRunner['mode']>>['mode'], detail: string = mode): RootRunner => ({
-  mode: async () => ({ mode, detail }),
-  run: async () => ok(),
-});
 const deps = (
   answers: Record<string, ExecResult>,
   platform: Platform = 'linux',
-  mode: 'root' | 'none' = 'none',
+  toolchainsRoot?: string,
 ) => ({
   exec: exec(answers),
-  root: root(mode),
   platform,
-  sudoPasswordStored: false,
+  ...(toolchainsRoot ? { toolchainsRoot } : {}),
 });
 const access = (over: Partial<DevOpsAccess> = {}): DevOpsAccess => ({
   allowInstall: false,
@@ -49,18 +43,18 @@ describe('rights: docker', () => {
   });
 
   it.each([
-    [fail('', 127), 'not installed', 'Install Docker'],
+    [fail('', 127), 'not installed', 'run the installer again'],
     [
       fail('permission denied while trying to connect to the Docker daemon socket'),
       'may not use Docker',
-      'usermod -aG docker',
+      'own rootless Docker',
     ],
     [
       fail(
         'Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?',
       ),
       'not running',
-      'systemctl enable --now docker',
+      'systemctl --user start docker',
     ],
     [fail('something odd'), 'docker info failed', 'Run `docker info`'],
   ])('failed with a reason and a fix: %#', async (res, reason, fix) => {
@@ -78,29 +72,24 @@ describe('rights: docker', () => {
   });
 });
 
-describe('rights: install', () => {
-  it('apt needs administrator rights: failed without them, verified with root', async () => {
-    const answers = { 'apt-get --version': ok('apt 2.7') };
-    const a = await checkInstall(deps(answers), access({ allowInstall: true }));
-    expect(a.status).toBe('failed');
-    expect(a.fix).toContain('Administrator (sudo)');
-    const b = await checkInstall(deps(answers, 'linux', 'root'), access({ allowInstall: true }));
-    expect(b).toMatchObject({ status: 'verified' });
+describe('rights: install (user space only since 1.10.0)', () => {
+  it("verified when the runner's toolchains folder is writable; never asks for administrator rights", async () => {
+    const dir = join(tmp('aom-rights-'), 'toolchains');
+    const r = await checkInstall(deps({}, 'linux', dir));
+    expect(r.status).toBe('verified');
+    expect(r.reason).toContain(dir);
+    expect(`${r.reason} ${r.fix ?? ''}`).not.toMatch(/sudo|Administrator/);
   });
 
-  it('brew and winget need none', async () => {
-    expect(
-      (await checkInstall(deps({ 'brew --version': ok('Homebrew 4') }, 'darwin'), access())).status,
-    ).toBe('verified');
-    expect((await checkInstall(deps({ 'winget --version': ok('v1.7') }, 'win32'), access())).status).toBe(
-      'verified',
-    );
-  });
-
-  it('no package manager at all fails and says what still works', async () => {
-    const r = await checkInstall(deps({}, 'darwin'), access());
+  it('fails when the folder cannot be written', async () => {
+    const base = tmp('aom-rights-');
+    writeFileSync(join(base, 'file'), '');
+    const r = await checkInstall(deps({}, 'linux', join(base, 'file', 'toolchains')));
     expect(r.status).toBe('failed');
-    expect(r.fix).toContain('Homebrew');
+  });
+
+  it('on Windows the tools live in the WSL distro', async () => {
+    expect((await checkInstall(deps({}, 'win32'))).fix).toContain('WSL');
   });
 });
 
@@ -119,29 +108,14 @@ describe('rights: paths', () => {
 });
 
 describe('verifyRights', () => {
-  it('checks only the rights that are ticked, and says whether a sudo password is stored', async () => {
-    const report = await verifyRights(access({ allowDocker: true, sudo: true }), {
-      ...deps({ [DOCKER_INFO]: ok('27') }, 'linux', 'root'),
-      sudoPasswordStored: true,
-    });
-    expect(Object.keys(report.checks).sort()).toEqual(['docker', 'sudo']);
-    expect(report.checks.sudo?.status).toBe('verified');
-    expect(report.sudoPasswordStored).toBe(true);
+  it('checks only the rights that are ticked; a sudo tick from the server is never checked (removed)', async () => {
+    const report = await verifyRights(
+      access({ allowDocker: true, sudo: true }),
+      deps({ [DOCKER_INFO]: ok('27') }),
+    );
+    expect(Object.keys(report.checks).sort()).toEqual(['docker']);
+    expect(report).not.toHaveProperty('sudoPasswordStored');
     expect(report.platform).toBe('linux');
     expect(await verifyRights(access(), deps({}))).toMatchObject({ checks: {} });
-  });
-
-  it('sudo without a working way says to enter the password; on Windows to run elevated', async () => {
-    const lin = await verifyRights(access({ sudo: true }), {
-      ...deps({}),
-      root: root('none', 'sudo needs a password and none is stored'),
-    });
-    expect(lin.checks.sudo?.status).toBe('failed');
-    expect(lin.checks.sudo?.fix).toContain('Enter the sudo password');
-    const win = await verifyRights(access({ sudo: true }), {
-      ...deps({}, 'win32'),
-      root: root('unsupported', 'the runner is not elevated'),
-    });
-    expect(win.checks.sudo?.fix).toContain('Administrator');
   });
 });

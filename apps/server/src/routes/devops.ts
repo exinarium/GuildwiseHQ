@@ -4,7 +4,6 @@ import {
   IdParamsSchema,
   PatchDevOpsAccessRequestSchema,
   ResolveDevOpsApprovalRequestSchema,
-  SetSudoPasswordRequestSchema,
   UpdateHygieneRequestSchema,
 } from '@aom/shared';
 import type { FastifyInstance } from 'fastify';
@@ -19,12 +18,7 @@ import {
   resolveDevOpsApproval,
 } from '../commands/devops.ts';
 import { runHygieneNow, setHygieneInterval } from '../commands/hygiene.ts';
-import {
-  clearSudoPassword,
-  setSudoPassword,
-  sudoKeyOf,
-  verifyRightsNow,
-} from '../commands/workstation-setup.ts';
+import { sudoKeyOf, verifyRightsNow } from '../commands/workstation-setup.ts';
 import type { Ctx } from '../context.ts';
 import { notFound } from '../errors.ts';
 import { getAgentDto } from '../queries/agents.ts';
@@ -79,38 +73,14 @@ export function devopsRoutes(ctx: Ctx) {
       },
     );
 
-    /** The runner's public key for the sudo password (the browser encrypts with it; the server cannot read the result). */
+    /** The runner's public key, the workstation sealing key (the browser encrypts provider and target secrets with it). */
     app.get('/api/workstations/:id/sudo-key', { schema: { params: IdParamsSchema } }, async (req) => {
       const s = await requireUser(ctx, req);
       requireStepUp(ctx, s);
       return sudoKeyOf(ctx, s.user, req.params.id);
     });
 
-    app.put(
-      '/api/workstations/:id/sudo-password',
-      { schema: { params: IdParamsSchema, body: SetSudoPasswordRequestSchema } },
-      async (req, reply) => {
-        const s = await requireUser(ctx, req);
-        requireStepUp(ctx, s);
-        await setSudoPassword(ctx, s.user, req.params.id, req.body);
-        reply.code(202);
-        return { queued: true };
-      },
-    );
-
-    app.delete(
-      '/api/workstations/:id/sudo-password',
-      { schema: { params: IdParamsSchema } },
-      async (req, reply) => {
-        const s = await requireUser(ctx, req);
-        requireStepUp(ctx, s);
-        await clearSudoPassword(ctx, s.user, req.params.id);
-        reply.code(202);
-        return { queued: true };
-      },
-    );
-
-    /** Checks the rights ticked on the DevOps engineer on the machine itself (docker, sudo, install, paths). */
+    /** Checks the rights ticked on the DevOps engineer on the machine itself (docker, install, paths). */
     app.post(
       '/api/workstations/:id/verify-rights',
       { schema: { params: IdParamsSchema } },

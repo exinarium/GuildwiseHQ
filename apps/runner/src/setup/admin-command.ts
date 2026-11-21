@@ -17,7 +17,7 @@ export const DEDICATED_USER = 'guildwise-runner';
  */
 export const INSTANCE_RE = /^[a-z0-9](?:[a-z0-9-]{0,13}[a-z0-9])?$/;
 /** Names already taken inside the admin folder: never an instance (its tools live in `<ADMIN_DIR>/<name>/`). */
-export const RESERVED_INSTANCES: readonly string[] = ['node', 'guildwise-admin', 'deploy-compose'];
+export const RESERVED_INSTANCES: readonly string[] = ['node', 'guildwise-admin', 'deploy-compose', 'docker'];
 
 /** A valid instance name (INSTANCE_RE and not reserved). */
 export function isInstanceName(name: string): boolean {
@@ -64,7 +64,7 @@ export function instanceStartupPaths(username: string = currentUser()): string[]
   return inst ? [instanceEtcDir(inst), adminDirOf(inst)] : [];
 }
 
-function currentUser(): string {
+export function currentUser(): string {
   try {
     return userInfo().username;
   } catch {

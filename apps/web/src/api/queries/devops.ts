@@ -6,11 +6,10 @@ import {
   type PatchDevOpsAccessRequest,
   type ResolveDevOpsApprovalRequest,
   type RunHygieneResponse,
-  type SudoKeyResponse,
 } from '@aom/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { encryptForRunner } from '../../lib/runner-seal.ts';
-import { del, get, patch, post, put, qs } from '../client.ts';
+import { get, patch, post, put, qs } from '../client.ts';
 
 export { encryptForRunner };
 
@@ -86,30 +85,6 @@ export function useVerifyRights() {
     mutationFn: (workstationId: string) => post(`/workstations/${workstationId}/verify-rights`, {}),
     // The list now says "checking" (rightsCheck); it keeps polling until the runner's answer, an error or the timeout.
     onSuccess: () => qc.invalidateQueries({ queryKey: ['workstations'] }),
-  });
-}
-
-/**
- * Sends the sudo password: fetches the runner's public key, encrypts the password in the browser (RSA-OAEP, SHA-256)
- * and sends only the ciphertext. The password is never stored, logged or sent anywhere else.
- */
-export function useSetSudoPassword() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (v: { workstationId: string; password: string }) => {
-      const key = await get<SudoKeyResponse>(`/workstations/${v.workstationId}/sudo-key`);
-      const ciphertext = await encryptForRunner(key.publicKey, v.password);
-      return put(`/workstations/${v.workstationId}/sudo-password`, { ciphertext, keyId: key.keyId });
-    },
-    onSuccess: () => setTimeout(() => qc.invalidateQueries({ queryKey: ['workstations'] }), 2000),
-  });
-}
-
-export function useClearSudoPassword() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (workstationId: string) => del(`/workstations/${workstationId}/sudo-password`),
-    onSuccess: () => setTimeout(() => qc.invalidateQueries({ queryKey: ['workstations'] }), 1000),
   });
 }
 

@@ -362,13 +362,6 @@ export interface SupervisorDeps {
   envChecker?: EnvChecker;
   /** How `aom transcript` reaches yt-dlp and the web (default: the real ones; tests inject fakes). */
   transcript?: TranscriptDeps;
-  /** `aom sudo`: runs a command with administrator rights for the DevOps engineer (the stored sudo password stays here). */
-  sudoRun?: (
-    cmd: string,
-    args: string[],
-    /** The DevOps shift asking: the runner allows sudo only for a shift approved on the workstation (R18-S). */
-    shiftId: string,
-  ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
   /** `aom git status|connect` for the DevOps engineer (the runner drives the login on this workstation). */
   git?: { handle(method: string, params: Record<string, unknown>): Promise<IpcRpcResponse> };
   /** The ticket systems of this workstation: a batch intake shift reads its ticket (`aom source read`) like an intake chat. */
@@ -2455,7 +2448,6 @@ export class ShiftSupervisor {
             : ({ ok: false, error: 'only the DevOps engineer probes' } as IpcRpcResponse);
         if (req.method === 'card.attachments') return this.cardAttachments(s, req.params);
         if (req.method === 'transcript.fetch') return this.transcriptFetch(s, req.params);
-        if (req.method === 'sudo.run') return this.sudoRun(s, req.params);
         if (req.method === 'devops.audit')
           return recordDevopsAudit(req.params, {
             isDevops: s.msg.agent.isDevops === true,
@@ -3110,31 +3102,6 @@ export class ShiftSupervisor {
         ...architectFields(data),
       },
     };
-  }
-
-  /**
-   * `aom sudo -- <command> [args...]` from a DevOps shift: runs the command with administrator rights when the manager
-   * granted sudo to this workstation's DevOps engineer. The password never reaches the agent: the runner feeds it to
-   * `sudo -S` itself and the output is redacted.
-   */
-  private async sudoRun(s: ActiveShift, params: Record<string, unknown>): Promise<IpcRpcResponse> {
-    const argv = Array.isArray(params.argv) ? params.argv.map(String) : [];
-    if (s.msg.kind !== 'devops' || !s.msg.agent.isDevops)
-      return { ok: false, error: 'only the DevOps engineer may use sudo' } as IpcRpcResponse;
-    if (!s.msg.devops?.access.sudo)
-      return {
-        ok: false,
-        error: 'sudo is not granted to this DevOps engineer: ask the manager with `aom devops-approval`',
-      } as IpcRpcResponse;
-    if (argv.length === 0 || !this.deps.sudoRun)
-      return { ok: false, error: 'usage: aom sudo -- <command> [args...]' } as IpcRpcResponse;
-    const [cmd, ...args] = argv as [string, ...string[]];
-    this.addProgress(s, 'tool', `sudo ${cmd} ${args.join(' ')}`.slice(0, 200));
-    const r = await this.deps.sudoRun(cmd, args, s.msg.shiftId);
-    return {
-      ok: true,
-      result: { exitCode: r.exitCode, stdout: r.stdout.slice(-20000), stderr: r.stderr.slice(-8000) },
-    } as IpcRpcResponse;
   }
 
   /**

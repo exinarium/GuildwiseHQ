@@ -10,7 +10,7 @@ import { redactSecrets } from '../redact.ts';
  * Code PreToolUse hook on every Bash command (`aom devops-guard`, wired in claude-policy.ts):
  *
  * - always refused: deleting outside the worktrees and the runner's data folders, disk and partition tools, user, sudo
- *   and password changes (privileged work goes through `aom sudo`), force-pushing a protected branch, dropping a database;
+ *   and password changes (nothing on the runner runs as root since 1.10.0), force-pushing a protected branch, dropping a database;
  * - refused unless the manager approved that exact command: anything that leaves this workstation (ssh, scp, rsync to a
  *   remote, docker against another host, kubectl, cloud CLIs): the message says to ask with `aom devops-approval`;
  * - every command, allowed or refused, is appended to an audit log on the workstation and reported to the server.
@@ -377,11 +377,12 @@ const normWs = (s: string): string => s.trim().replace(/\s+/g, ' ');
 const baseName = (w: string): string => w.slice(w.lastIndexOf('/') + 1);
 const isAssign = (w: string): boolean => /^[A-Za-z_][A-Za-z0-9_]*=/.test(w);
 
+/** What a refused root step says since 1.10.0 (no `aom sudo`, no sudo grant). */
+const OWNER_TEXT = 'this runner has no root (1.10.0): tell the machine owner the exact command to run';
+
 interface Ctx {
   cfg: GuardConfig;
   cwd: string;
-  /** Inside `aom sudo -- <cmd>`: the user/sudo rule does not apply (that is how privileged work is done). */
-  viaAomSudo: boolean;
   usedApproval: boolean;
   deps: GuardDeps;
 }
@@ -727,11 +728,8 @@ function judgeSegment(seg: Segment, c: Ctx): GuardVerdict {
   for (const t of seg.redirects) {
     if (BLOCK_DEVICE.test(t))
       return refuse('disk_tools', `Writing to the block device ${t} is never allowed.`);
-    if (SYSTEM_FILES.test(t) && !c.viaAomSudo)
-      return refuse(
-        'user_admin',
-        `${t} holds accounts or sudo rules; change them through \`aom sudo -- <command>\`.`,
-      );
+    if (SYSTEM_FILES.test(t))
+      return refuse('user_admin', `${t} holds accounts or sudo rules; ${OWNER_TEXT}.`);
   }
   // variable assignments in front of the command (DOCKER_HOST=tcp://remote docker ps)
   while (words.length > 0 && isAssign(words[0] as string)) {
@@ -797,26 +795,18 @@ function judgeSegment(seg: Segment, c: Ctx): GuardVerdict {
     cmd = baseName(words[0] as string);
   }
 
-  // privileged work goes through `aom sudo -- <command>`: the inner command is judged, the user rule is lifted
+  // `aom sudo` was removed in 1.10.0 (no standing root path): refused like raw sudo
   if (cmd === 'aom') {
-    if (words[1] === 'sudo') {
-      const inner = words.slice(2)[0] === '--' ? words.slice(3) : words.slice(2);
-      if (inner.length === 0) return ok('aom');
-      const v = judgeLine(inner.map(shellQuote).join(' '), { ...c, viaAomSudo: true });
-      return v.decision === 'allowed' && v.rule === 'ok' ? ok('aom_sudo') : v;
-    }
+    if (words[1] === 'sudo') return refuse('user_admin', `aom sudo was removed in 1.10.0; ${OWNER_TEXT}.`);
     return ok('aom');
   }
   if (PRIVILEGE_WRAPPERS.has(cmd))
     return refuse(
       'user_admin',
-      'sudo/su is not available in your shell. Run privileged commands as `aom sudo -- <command> [args]` (the runner supplies the password; the manager must have granted sudo).',
+      `sudo/su is not available in your shell; install stack tools in your own home, and for a system package ${OWNER_TEXT}.`,
     );
-  if (USER_TOOLS.has(cmd) && !c.viaAomSudo)
-    return refuse(
-      'user_admin',
-      `${cmd} changes users, groups or passwords on this machine; if it is part of the request, run it as \`aom sudo -- ${cmd} ...\`.`,
-    );
+  if (USER_TOOLS.has(cmd))
+    return refuse('user_admin', `${cmd} changes users, groups or passwords on this machine; ${OWNER_TEXT}.`);
   if (DISK_TOOLS.has(cmd) || /^mkfs(\.|$)/.test(cmd) || /^(mke2fs|mkntfs|mkdosfs)$/.test(cmd))
     return refuse(
       'disk_tools',
@@ -831,13 +821,9 @@ function judgeSegment(seg: Segment, c: Ctx): GuardVerdict {
   }
   if (
     ['tee', 'sed', 'cp', 'mv', 'install', 'ln', 'truncate', 'rm'].includes(cmd) &&
-    !c.viaAomSudo &&
     words.slice(1).some((w) => SYSTEM_FILES.test(w))
   )
-    return refuse(
-      'user_admin',
-      'Accounts and sudo rules are not edited from this session; use `aom sudo -- <command>`.',
-    );
+    return refuse('user_admin', `Accounts and sudo rules are not edited from this session; ${OWNER_TEXT}.`);
 
   // dropping databases: any command that carries the statement or the tool
   if (
@@ -990,7 +976,7 @@ export function classifyCommand(
     if (scan) return scan;
   }
   // a whole-command approval matches however the line is built
-  const c: Ctx = { cfg, cwd, viaAomSudo: false, usedApproval: false, deps };
+  const c: Ctx = { cfg, cwd, usedApproval: false, deps };
   const whole = normWs(command);
   const v = judgeLine(command, c);
   if (

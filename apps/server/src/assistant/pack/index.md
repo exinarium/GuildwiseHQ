@@ -100,7 +100,7 @@ Say nothing else about cost. For anything else, point to the Terms (`/terms`) or
 - Sensitive actions ask "Confirm it's you" (an authenticator or recovery code, or the password without two-factor login); the answer counts for 10 minutes.
 - Lost authenticator and recovery codes: recovery by email with a 24 hour wait, which the user can stop (a normal sign-in or the cancel link); the Owners of the user's organizations are mailed. Platform administrators cannot reset other users' two-factor login.
 - Platform administrators cannot read an organization's projects, cards, workstations, secrets or vaults.
-- Runners: a runner decides locally. Deploy scripts, DevOps work not started on the machine, sudo and install scripts need a yes on the workstation. Passkeys can approve only two kinds of item: a redeploy at a new commit and a recipe change.
+- Runners: a runner decides locally. Deploy scripts, DevOps work not started on the machine and install scripts need a yes on the workstation; the runner never has sudo. Passkeys can approve only two kinds of item: a redeploy at a new commit and a recipe change.
 - With "Only signed runners" on, older or unsigned runners are unlinked and must be reinstalled from the server's own installer. Signing is optional for self-hosters, who sign with their own key.
 
 ## How to get access

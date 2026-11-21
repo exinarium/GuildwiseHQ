@@ -7,6 +7,7 @@ export const DevOpsAccessSchema = z.object({
   allowInstall: z.boolean().default(false),
   allowDocker: z.boolean().default(false),
   allowedPaths: z.array(z.string()).default([]),
+  /** Removed in 1.10.0 (no root path for the runner); kept so older events replay. Always false from now on. */
   sudo: z.boolean().default(false),
 });
 export type DevOpsAccess = z.infer<typeof DevOpsAccessSchema>;

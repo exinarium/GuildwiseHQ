@@ -9,10 +9,8 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { createRequire } from 'node:module';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { RunnerKeys } from '../src/secrets/keys.ts';
 import { RUNNER_VERSION } from '../src/version.ts';
 import { ADMIN_FILE, ALICE, admin, fakeSystem, RUNNER } from './admin/fake-system.ts';
 
@@ -52,7 +50,7 @@ describe('guildwise-admin: a self-contained root tool [rv6-1, rv7-12]', () => {
     g.sys.uid = () => 1000;
     expect(await admin.main(['docker', 'none'], g.sys)).toBe(2);
     expect(g.err.join('\n')).toContain('needs root');
-    expect(await admin.main(['docker', 'narrow', '--dry-run'], g.sys)).toBe(0);
+    expect(await admin.main(['docker', 'none', '--dry-run'], g.sys)).toBe(0);
   });
 
   it('keeps its compiled-in floor equal to MIN_TRUSTED_RUNNER (raised by hand, never with RUNNER_VERSION)', () => {
@@ -73,37 +71,6 @@ describe('guildwise-admin: a self-contained root tool [rv6-1, rv7-12]', () => {
       .filter((f) => readFileSync(f, 'utf8').includes('/usr/local/lib/guildwise'))
       .map((f) => relative(RUNNER_SRC, f));
     expect(hits).toEqual(['setup/admin-command.ts']);
-  });
-});
-
-describe('sudoers files pass visudo -cf', () => {
-  it.each([
-    ['sudo', admin.sudoersForSudo('guildwise-runner')],
-    ['docker', admin.sudoersForDocker('guildwise-runner')],
-  ])('%s rule', (_k, text: string) => {
-    const f = fakeSystem();
-    const file = join(f.root, 'rule');
-    writeFileSync(file, text, { mode: 0o440 });
-    const r = spawnSync('visudo', ['-cf', file], { encoding: 'utf8' });
-    expect(r.status, r.stderr).toBe(0);
-  });
-
-  it('sudo needs a password; the docker rule is the only NOPASSWD and names deploy-compose without wildcards', () => {
-    expect(admin.sudoersForSudo('guildwise-runner')).toContain('guildwise-runner ALL=(ALL) ALL\n');
-    expect(admin.sudoersForSudo('guildwise-runner')).not.toContain('NOPASSWD');
-    const d = admin.sudoersForDocker('guildwise-runner');
-    expect(d).toContain('guildwise-runner ALL=(root) NOPASSWD: /usr/local/lib/guildwise/deploy-compose\n');
-    expect(d).not.toContain('*');
-  });
-
-  it('pins the environment of the NOPASSWD rule whatever the local sudo defaults (Node reads NODE_OPTIONS first)', () => {
-    expect(admin.sudoersForDocker('guildwise-runner')).toContain(
-      'Defaults!/usr/local/lib/guildwise/deploy-compose env_reset, !env_keep, !setenv\n',
-    );
-  });
-
-  it('refuses a user name that could inject into the rule', () => {
-    expect(() => admin.sudoersForSudo('x ALL=(ALL) NOPASSWD: ALL\nevil')).toThrow(/not a valid user name/);
   });
 });
 
@@ -257,259 +224,338 @@ describe('service install [R18-P]', () => {
   });
 });
 
-describe('sudo on|off [R20 step 3]', () => {
-  function withRunnerKey() {
-    const f = fakeSystem({ users: [RUNNER] });
-    const keyFile = join(f.root, RUNNER.home, '.aom-runner/secrets/runner-key.pem');
-    const keys = new RunnerKeys(keyFile);
-    return { ...f, keys };
+describe('docker rootless|host|shared|none (deps-without-sudo §3)', () => {
+  /** A machine with Docker sockets: `stat` answers for the fixture paths (a fixture cannot be owned by another group). */
+  function withSockets(
+    sockets: Record<string, { uid: number; gid: number; link?: string }>,
+    opts: Parameters<typeof fakeSystem>[0] = {},
+  ) {
+    const groupNames: Record<number, string> = { 0: 'root', 962: 'docker-svc', 998: 'docker' };
+    const f = fakeSystem({
+      users: [RUNNER],
+      ...opts,
+      handle: (c, sys) =>
+        c.cmd === 'getent' && c.args[0] === 'group' && /^\d+$/.test(c.args[1] as string)
+          ? { code: 0, stdout: `${groupNames[Number(c.args[1])] ?? 'g'}:x:${c.args[1]}:\n`, stderr: '' }
+          : opts.handle?.(c, sys),
+    });
+    const stats = new Map<string, { uid: number; gid: number }>();
+    for (const [p, s] of Object.entries(sockets)) {
+      mkdirSync(join(f.root, p, '..'), { recursive: true });
+      // an absolute link inside the fixture root (never the real machine's sockets)
+      if (s.link) symlinkSync(join(f.root, s.link), join(f.root, p));
+      else {
+        writeFileSync(join(f.root, p), '');
+        stats.set(join(f.root, p), { uid: s.uid, gid: s.gid });
+      }
+    }
+    (f.sys as unknown as { stat: (p: string) => unknown }).stat = (p: string) => {
+      const st = stats.get(p);
+      if (!st) throw new Error('ENOENT');
+      return st;
+    };
+    return f;
   }
 
-  it('sets a random password on stdin, writes the password-required rule (visudo-checked, 0440) and seals the password for the runner', async () => {
-    const f = withRunnerKey();
-    expect(await admin.main(['sudo', 'on'], f.sys)).toBe(0);
-    const chpasswd = f.calls.find((c) => c.cmd === 'chpasswd');
-    expect(chpasswd?.args).toEqual([]);
-    const m = /^guildwise-runner:(\S+)\n$/.exec(chpasswd?.input ?? '');
-    expect(m).not.toBeNull();
-    const password = m?.[1] as string;
-    expect(password.length).toBeGreaterThanOrEqual(32);
-    const rule = join(f.root, admin.SUDOERS_SUDO);
-    expect(readFileSync(rule, 'utf8')).toContain('guildwise-runner ALL=(ALL) ALL');
-    expect(statSync(rule).mode & 0o777).toBe(0o440);
-    expect(f.calls.some((c) => c.cmd === 'visudo')).toBe(true);
-    const sealed = join(f.root, RUNNER.home, '.aom-runner/secrets/sudo.enc');
-    expect(statSync(sealed).mode & 0o777).toBe(0o600);
-    expect(f.keys.decrypt(readFileSync(sealed, 'utf8').trim())).toBe(password);
-    // the password is never printed, logged or an argument
-    expect([...f.out, ...f.err].join('\n')).not.toContain(password);
-    expect(f.calls.some((c) => c.args.join(' ').includes(password))).toBe(false);
-    expect(f.out.join('\n')).toContain('every such step still needs your local yes');
+  it('rootless: leaves the groups of every Docker socket (docker, docker-svc), gets a subuid range and linger', async () => {
+    const f = withSockets(
+      {
+        '/run/docker-svc/docker.sock': { uid: 0, gid: 962 },
+        '/run/docker.sock': { uid: 0, gid: 0, link: '/run/docker-svc/docker.sock' },
+      },
+      { users: [{ ...RUNNER, groups: ['docker', 'docker-svc'] }] },
+    );
+    expect(await admin.main(['docker', 'rootless'], f.sys)).toBe(0);
+    expect(f.calls).toContainEqual({ cmd: 'gpasswd', args: ['-d', 'guildwise-runner', 'docker'] });
+    expect(f.calls).toContainEqual({ cmd: 'gpasswd', args: ['-d', 'guildwise-runner', 'docker-svc'] });
+    expect(f.calls).toContainEqual({
+      cmd: 'usermod',
+      args: ['--add-subuids', '131072-196607', '--add-subgids', '131072-196607', 'guildwise-runner'],
+    });
+    expect(f.calls).toContainEqual({ cmd: 'loginctl', args: ['enable-linger', 'guildwise-runner'] });
   });
 
-  it('seals for every pairing of the runner', async () => {
+  it('subuid ranges: aligned, from 100000 up, after every entry of both files; skipped when the user has one', () => {
+    expect(admin.nextSubidStart([])).toBe(131072);
+    expect(admin.nextSubidStart(admin.parseSubids('a:100000:65536\nb:165536:65536\n'))).toBe(262144);
+    expect(admin.parseSubids('# c\nx:1:2\nbad line\n')).toEqual([{ name: 'x', start: 1, count: 2 }]);
+  });
+
+  it('F2: the AppArmor profile only where unprivileged user namespaces are restricted (AppArmor 4)', async () => {
+    const restricted = fakeSystem({ users: [RUNNER] });
+    mkdirSync(join(restricted.root, '/proc/sys/kernel'), { recursive: true });
+    writeFileSync(join(restricted.root, '/proc/sys/kernel/apparmor_restrict_unprivileged_userns'), '1\n');
+    expect(await admin.main(['docker', 'rootless'], restricted.sys)).toBe(0);
+    const profile = readFileSync(
+      join(restricted.root, '/etc/apparmor.d/guildwise-runner-rootlesskit'),
+      'utf8',
+    );
+    expect(profile).toContain('abi <abi/4.0>,');
+    expect(profile).toContain('"/usr/local/lib/guildwise/docker/rootlesskit" flags=(unconfined)');
+    expect(profile).toContain('  userns,');
+    expect(restricted.calls).toContainEqual({
+      cmd: 'apparmor_parser',
+      args: ['-r', '/etc/apparmor.d/guildwise-runner-rootlesskit'],
+    });
+    // Debian 12 (AppArmor 3): the sysctl is absent; no profile, no apparmor_parser
+    const debian = fakeSystem({ users: [RUNNER] });
+    mkdirSync(join(debian.root, '/sys/kernel/security/apparmor'), { recursive: true });
+    expect(await admin.main(['docker', 'rootless'], debian.sys)).toBe(0);
+    expect(existsSync(join(debian.root, '/etc/apparmor.d/guildwise-runner-rootlesskit'))).toBe(false);
+    expect(debian.calls.some((c) => c.cmd === 'apparmor_parser')).toBe(false);
+    expect(debian.out.join('\n')).toContain('no AppArmor profile needed');
+  });
+
+  it('F1: current-user mode never changes the groups of the person installing', async () => {
+    const f = withSockets(
+      { '/var/run/docker.sock': { uid: 0, gid: 998 } },
+      { users: [{ ...ALICE, groups: ['docker'] }] },
+    );
+    expect(await admin.main(['docker', 'rootless', '--user', 'alice'], f.sys)).toBe(0);
+    expect(await admin.main(['docker', 'none', '--user', 'alice'], f.sys)).toBe(0);
+    expect(f.calls.some((c) => c.cmd === 'gpasswd')).toBe(false);
+    expect(f.calls.some((c) => c.cmd === 'loginctl' && c.args[0] === 'disable-linger')).toBe(false);
+  });
+
+  it("host: needs --accept-root-equivalent, uses the socket's own group, refuses gid 0", async () => {
+    const f = withSockets({ '/var/run/docker.sock': { uid: 0, gid: 998 } });
+    expect(await admin.main(['docker', 'host'], f.sys)).toBe(1);
+    expect(f.err.join('\n')).toContain('root-equivalent');
+    expect(await admin.main(['docker', 'host', '--accept-root-equivalent'], f.sys)).toBe(0);
+    expect(f.calls).toContainEqual({ cmd: 'usermod', args: ['-aG', 'docker', 'guildwise-runner'] });
+    const g = withSockets({ '/var/run/docker.sock': { uid: 0, gid: 0 } });
+    expect(await admin.main(['docker', 'host', '--accept-root-equivalent'], g.sys)).toBe(1);
+    expect(g.err.join('\n')).toContain('group root');
+    expect(g.calls.some((c) => c.args[0] === '-aG')).toBe(false);
+  });
+
+  it('host on macOS: ACLs for the hidden user on the Docker Desktop socket and its folders (not yet tested on hardware)', async () => {
+    const f = fakeSystem({
+      platform: 'darwin',
+      users: [{ ...RUNNER, home: '/var/guildwise-runner' }],
+      handle: (c) =>
+        c.cmd === 'dscl' && c.args[1] === '-read'
+          ? {
+              code: 0,
+              stdout: 'UniqueID: 498\nPrimaryGroupID: 20\nNFSHomeDirectory: /var/guildwise-runner\n',
+              stderr: '',
+            }
+          : undefined,
+    });
+    const sock = '/Users/alice/.docker/run/docker.sock';
+    expect(
+      await admin.main(
+        ['docker', 'host', '--accept-root-equivalent', '--desktop-socket', '/tmp/x.sock'],
+        f.sys,
+      ),
+    ).toBe(1);
+    expect(
+      await admin.main(['docker', 'host', '--accept-root-equivalent', '--desktop-socket', sock], f.sys),
+    ).toBe(0);
+    expect(f.calls.filter((c) => c.cmd === 'chmod')).toEqual([
+      { cmd: 'chmod', args: ['+a', 'guildwise-runner allow search', '/Users/alice'] },
+      { cmd: 'chmod', args: ['+a', 'guildwise-runner allow search', '/Users/alice/.docker'] },
+      {
+        cmd: 'chmod',
+        args: [
+          '+a',
+          'guildwise-runner allow list,search,add_file,read,write,append,file_inherit',
+          '/Users/alice/.docker/run',
+        ],
+      },
+      { cmd: 'chmod', args: ['+a', 'guildwise-runner allow read,write,append', sock] },
+    ]);
+    expect(await admin.main(['docker', 'none', '--desktop-socket', sock], f.sys)).toBe(0);
+    expect(f.calls.filter((c) => c.cmd === 'chmod' && c.args[0] === '-a')).toHaveLength(4);
+    expect(await admin.main(['docker', 'rootless'], f.sys)).toBe(1);
+  });
+
+  /** A root-owned docker CLI at /usr/bin/docker in the fixture root; `info` answers with `opts` (S1). */
+  function sharedMachine(
+    info: { rootless: boolean; code?: number },
+    sockets?: Parameters<typeof withSockets>[0],
+  ) {
+    const f = withSockets(
+      sockets ?? {
+        '/run/docker-svc/docker.sock': { uid: 0, gid: 962 },
+        '/run/docker.sock': { uid: 0, gid: 0, link: '/run/docker-svc/docker.sock' },
+      },
+      {
+        handle: (c) =>
+          c.cmd === '/usr/bin/docker'
+            ? {
+                code: info.code ?? 0,
+                stdout: info.rootless ? '["name=seccomp","name=rootless"]\n' : '["name=seccomp"]\n',
+                stderr: '',
+              }
+            : undefined,
+      },
+    );
+    mkdirSync(join(f.root, 'usr/bin'), { recursive: true });
+    writeFileSync(join(f.root, 'usr/bin/docker'), '#!/bin/sh\n');
+    chmodSync(join(f.root, 'usr/bin/docker'), 0o755);
+    mkdirSync(join(f.root, RUNNER.home), { recursive: true });
+    return f;
+  }
+  const SHARED = [
+    'docker',
+    'shared',
+    '--docker-socket',
+    '/run/docker-svc/docker.sock',
+    '--accept-shared-daemon',
+  ];
+  const joined = (f: { calls: { cmd: string; args: string[] }[] }) =>
+    f.calls.some((c) => (c.cmd === 'usermod' && c.args[0] === '-aG') || c.cmd === 'gpasswd');
+
+  it("shared (owner 2026-11-21): the socket group of another user's rootless daemon, the acceptance recorded in policy.json", async () => {
+    const f = sharedMachine({ rootless: true });
+    expect(await admin.main(SHARED.slice(0, 4), f.sys)).toBe(1);
+    expect(f.err.join('\n')).toContain('--accept-shared-daemon');
+    expect(await admin.main(SHARED, f.sys)).toBe(0);
+    // S1: root asked the daemon itself, through the root-owned CLI, before the group change
+    const ask = f.calls.findIndex((c) => c.cmd === '/usr/bin/docker');
+    const join_ = f.calls.findIndex((c) => c.cmd === 'usermod' && c.args[0] === '-aG');
+    expect(f.calls[ask]?.args).toEqual([
+      '-H',
+      'unix:///run/docker-svc/docker.sock',
+      'info',
+      '--format',
+      '{{json .SecurityOptions}}',
+    ]);
+    expect(ask).toBeLessThan(join_);
+    expect(f.calls[join_]).toEqual({ cmd: 'usermod', args: ['-aG', 'docker-svc', 'guildwise-runner'] });
+    const policy = JSON.parse(
+      readFileSync(join(f.root, RUNNER.home, '.config/aom-runner/policy.json'), 'utf8'),
+    );
+    expect(policy).toMatchObject({
+      docker: 'shared',
+      dockerHost: 'unix:///run/docker-svc/docker.sock',
+      sharedDocker: { socket: '/run/docker-svc/docker.sock', group: 'docker-svc' },
+    });
+    expect(f.out.join('\n')).toContain("Runners that share a daemon can each control the other's containers");
+  });
+
+  it('S1: a daemon that is not rootless (or does not answer) is refused and no group is joined', async () => {
+    for (const info of [{ rootless: false }, { rootless: true, code: 1 }]) {
+      const f = sharedMachine(info);
+      expect(await admin.main(SHARED, f.sys)).toBe(1);
+      expect(f.err.join('\n')).toContain('does not run rootless');
+      expect(joined(f)).toBe(false);
+      expect(existsSync(join(f.root, RUNNER.home, '.config/aom-runner/policy.json'))).toBe(false);
+    }
+  });
+
+  it('S1: a link to the default root socket, a dot segment, the docker group and no trusted CLI are refused', async () => {
+    // /run/x/docker.sock links to the root daemon's /run/docker.sock
+    const link = sharedMachine(
+      { rootless: true },
+      {
+        '/run/docker.sock': { uid: 0, gid: 998 },
+        '/run/x/docker.sock': { uid: 0, gid: 0, link: '/run/docker.sock' },
+      },
+    );
+    expect(
+      await admin.main([...SHARED.slice(0, 3), '/run/x/docker.sock', '--accept-shared-daemon'], link.sys),
+    ).toBe(1);
+    expect(link.err.join('\n')).toContain('resolves to /run/docker.sock');
+    expect(joined(link)).toBe(false);
+    // /run/./docker.sock never passes the pattern
+    expect(
+      await admin.main([...SHARED.slice(0, 3), '/run/./docker.sock', '--accept-shared-daemon'], link.sys),
+    ).toBe(1);
+    expect(link.err.join('\n')).toContain('--docker-socket /run/<name>/docker.sock');
+    // a socket of the docker group is root-equivalent: host, never shared
+    const grp = sharedMachine({ rootless: true }, { '/run/svc/docker.sock': { uid: 0, gid: 998 } });
+    expect(
+      await admin.main([...SHARED.slice(0, 3), '/run/svc/docker.sock', '--accept-shared-daemon'], grp.sys),
+    ).toBe(1);
+    expect(grp.err.join('\n')).toContain('docker group');
+    expect(joined(grp)).toBe(false);
+    // no root-owned CLI: nothing is asked through PATH, refused
+    const nocli = sharedMachine({ rootless: true });
+    chmodSync(join(nocli.root, 'usr/bin/docker'), 0o777);
+    expect(await admin.main(SHARED, nocli.sys)).toBe(1);
+    expect(nocli.err.join('\n')).toContain('no root-owned docker CLI');
+    expect(nocli.calls.some((c) => c.cmd === 'docker' || c.cmd === '/usr/bin/docker')).toBe(false);
+    expect(joined(nocli)).toBe(false);
+  });
+
+  it('none: leaves the socket groups and removes the AppArmor profile', async () => {
+    const f = withSockets(
+      { '/var/run/docker.sock': { uid: 0, gid: 998 } },
+      { users: [{ ...RUNNER, groups: ['docker'] }] },
+    );
+    mkdirSync(join(f.root, '/etc/apparmor.d'), { recursive: true });
+    writeFileSync(join(f.root, '/etc/apparmor.d/guildwise-runner-rootlesskit'), 'x');
+    expect(await admin.main(['docker', 'none'], f.sys)).toBe(0);
+    expect(f.calls).toContainEqual({ cmd: 'gpasswd', args: ['-d', 'guildwise-runner', 'docker'] });
+    expect(existsSync(join(f.root, '/etc/apparmor.d/guildwise-runner-rootlesskit'))).toBe(false);
+  });
+
+  it('the removed modes are refused', async () => {
     const f = fakeSystem({ users: [RUNNER] });
+    expect(await admin.main(['docker', 'narrow'], f.sys)).toBe(1);
+    expect(await admin.main(['docker', 'group', '--accept-root-equivalent'], f.sys)).toBe(1);
+  });
+});
+
+describe('cleanup-legacy: what 1.10.0 removed (sudo, sealed sudo, narrow mode)', () => {
+  it('removes the sudoers files, deploy-compose and its approvals, locks the password, deletes sudo.enc unread', async () => {
+    const f = fakeSystem({ users: [RUNNER] });
+    mkdirSync(join(f.root, 'etc/sudoers.d'), { recursive: true });
+    writeFileSync(join(f.root, admin.SUDOERS_SUDO), 'x\n');
+    writeFileSync(join(f.root, admin.SUDOERS_DOCKER), 'x\n');
+    mkdirSync(join(f.root, '/etc/guildwise-runner/apps'), { recursive: true });
+    writeFileSync(join(f.root, '/etc/guildwise-runner/apps/shop.conf'), 'hash=x\n');
+    mkdirSync(join(f.root, '/usr/local/lib/guildwise'), { recursive: true });
+    writeFileSync(join(f.root, '/usr/local/lib/guildwise/deploy-compose'), 'x');
     const data = join(f.root, RUNNER.home, '.aom-runner');
-    const k1 = new RunnerKeys(join(data, 'secrets/runner-key.pem'));
-    const k2 = new RunnerKeys(join(data, 'pairings/uat-1/secrets/runner-key.pem'));
+    mkdirSync(join(data, 'secrets'), { recursive: true });
+    mkdirSync(join(data, 'pairings/uat-1/secrets'), { recursive: true });
     writeFileSync(
       join(data, 'pairings.json'),
-      JSON.stringify({
-        version: 1,
-        pairings: [{ dir: '.' }, { dir: 'pairings/uat-1' }, { dir: '../../etc' }],
-      }),
+      JSON.stringify({ pairings: [{ dir: '.' }, { dir: 'pairings/uat-1' }] }),
     );
-    expect(await admin.main(['sudo', 'on'], f.sys)).toBe(0);
-    const pw = /:(\S+)\n/.exec(f.calls.find((c) => c.cmd === 'chpasswd')?.input ?? '')?.[1];
-    expect(k1.decrypt(readFileSync(join(data, 'secrets/sudo.enc'), 'utf8').trim())).toBe(pw);
-    expect(k2.decrypt(readFileSync(join(data, 'pairings/uat-1/secrets/sudo.enc'), 'utf8').trim())).toBe(pw);
-    expect(existsSync(join(f.root, 'etc/secrets/sudo.enc'))).toBe(false);
-  });
-
-  it('refuses without a runner key (nothing changed), and refuses a user other than the dedicated one', async () => {
-    const f = fakeSystem({ users: [RUNNER, ALICE] });
-    expect(await admin.main(['sudo', 'on'], f.sys)).toBe(1);
-    expect(f.err.join('\n')).toContain('no runner key');
-    expect(f.calls.some((c) => c.cmd === 'chpasswd')).toBe(false);
-    expect(await admin.main(['sudo', 'on', '--user', 'alice'], f.sys)).toBe(1);
-    expect(f.err.join('\n')).toContain('seals your own sudo password');
-  });
-
-  it('refuses a symlinked key file (no root read through a link the runner planted)', async () => {
-    const f = fakeSystem({ users: [RUNNER] });
-    const secrets = join(f.root, RUNNER.home, '.aom-runner/secrets');
-    mkdirSync(secrets, { recursive: true });
-    const real = new RunnerKeys(join(f.root, 'elsewhere/runner-key.pem'));
-    expect(real.publicKey.keyId).toBeTruthy();
-    symlinkSync(join(f.root, 'elsewhere/runner-key.pem'), join(secrets, 'runner-key.pem'));
-    expect(await admin.main(['sudo', 'on'], f.sys)).toBe(1);
-    expect(f.err.join('\n')).toContain('not a regular file');
-  });
-
-  it('off removes the rule and the sealed password and locks the password', async () => {
-    const f = withRunnerKey();
-    await admin.main(['sudo', 'on'], f.sys);
-    expect(await admin.main(['sudo', 'off'], f.sys)).toBe(0);
+    // not readable at all: an unlink never needs to open it
+    for (const d of ['secrets', 'pairings/uat-1/secrets']) {
+      writeFileSync(join(data, d, 'sudo.enc'), 'CIPHERTEXT\n');
+      chmodSync(join(data, d, 'sudo.enc'), 0o000);
+    }
+    expect(await admin.main(['cleanup-legacy'], f.sys)).toBe(0);
     expect(existsSync(join(f.root, admin.SUDOERS_SUDO))).toBe(false);
-    expect(existsSync(join(f.root, RUNNER.home, '.aom-runner/secrets/sudo.enc'))).toBe(false);
+    expect(existsSync(join(f.root, admin.SUDOERS_DOCKER))).toBe(false);
+    expect(existsSync(join(f.root, '/etc/guildwise-runner/apps'))).toBe(false);
+    expect(existsSync(join(f.root, '/usr/local/lib/guildwise/deploy-compose'))).toBe(false);
+    expect(existsSync(join(data, 'secrets/sudo.enc'))).toBe(false);
+    expect(existsSync(join(data, 'pairings/uat-1/secrets/sudo.enc'))).toBe(false);
     expect(f.calls).toContainEqual({ cmd: 'usermod', args: ['-L', 'guildwise-runner'] });
-  });
-});
-
-describe('docker none|narrow|group [R20 step 4]', () => {
-  it('narrow: the helper rule only, and the user leaves the docker group', async () => {
-    const f = fakeSystem({ users: [{ ...RUNNER, groups: ['docker'] }] });
-    expect(await admin.main(['docker', 'narrow'], f.sys)).toBe(0);
-    expect(readFileSync(join(f.root, admin.SUDOERS_DOCKER), 'utf8')).toContain(
-      'NOPASSWD: /usr/local/lib/guildwise/deploy-compose',
-    );
-    expect(f.calls).toContainEqual({ cmd: 'gpasswd', args: ['-d', 'guildwise-runner', 'docker'] });
+    expect(f.out.join('\n')).not.toContain('CIPHERTEXT');
+    // idempotent
+    expect(await admin.main(['cleanup-legacy'], f.sys)).toBe(0);
   });
 
-  it('group needs --accept-root-equivalent, then removes the narrow rule', async () => {
+  it('refuses a symlinked secrets folder (never follows a link the runner planted)', async () => {
     const f = fakeSystem({ users: [RUNNER] });
-    await admin.main(['docker', 'narrow'], f.sys);
-    expect(await admin.main(['docker', 'group'], f.sys)).toBe(1);
-    expect(f.err.join('\n')).toContain('root-equivalent');
-    expect(await admin.main(['docker', 'group', '--accept-root-equivalent'], f.sys)).toBe(0);
-    expect(f.calls).toContainEqual({ cmd: 'usermod', args: ['-aG', 'docker', 'guildwise-runner'] });
-    expect(existsSync(join(f.root, admin.SUDOERS_DOCKER))).toBe(false);
+    const data = join(f.root, RUNNER.home, '.aom-runner');
+    mkdirSync(data, { recursive: true });
+    mkdirSync(join(f.root, 'elsewhere'), { recursive: true });
+    writeFileSync(join(f.root, 'elsewhere/sudo.enc'), 'x');
+    symlinkSync(join(f.root, 'elsewhere'), join(data, 'secrets'));
+    expect(await admin.main(['cleanup-legacy'], f.sys)).toBe(1);
+    expect(f.err.join('\n')).toContain('refusing to follow the symlink');
+    expect(existsSync(join(f.root, 'elsewhere/sudo.enc'))).toBe(true);
   });
 
-  it('none removes both', async () => {
+  it('leaves apps narrow mode started alone and says how to stop them', async () => {
     const f = fakeSystem({ users: [RUNNER] });
-    await admin.main(['docker', 'narrow'], f.sys);
-    expect(await admin.main(['docker', 'none'], f.sys)).toBe(0);
-    expect(existsSync(join(f.root, admin.SUDOERS_DOCKER))).toBe(false);
+    mkdirSync(join(f.root, '/var/lib/guildwise/apps/shop'), { recursive: true });
+    expect(await admin.main(['cleanup-legacy'], f.sys)).toBe(0);
+    expect(existsSync(join(f.root, '/var/lib/guildwise/apps/shop'))).toBe(true);
+    expect(f.out.join('\n')).toContain('docker compose -p <project> down');
   });
 });
 
-describe('approve-app: the installed deploy-compose prepare() computes the pin (W10)', () => {
-  const HASH = 'a'.repeat(64);
-  /** Installs a stand-in helper at /usr/local/lib/guildwise/deploy-compose that records its calls. */
-  function appSystem(behaviour: 'ok' | 'refuse' | 'old', answers?: string[]) {
-    const f = fakeSystem({ users: [RUNNER], answers });
-    const dir = join(f.root, 'usr/local/lib/guildwise');
-    mkdirSync(dir, { recursive: true });
-    chmodSync(dir, 0o755);
-    const log = join(f.root, 'helper-calls.json');
-    const body =
-      behaviour === 'old'
-        ? 'module.exports = {};\n'
-        : `const fs = require('node:fs');
-module.exports = {
-  async prepare(app, folder, opts) {
-    fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify({ app, folder, opts }));
-    ${behaviour === 'refuse' ? "throw new Error('the compose config is outside the allowlist: privileged');" : ''}
-    return { hash: ${JSON.stringify(HASH)}, pinned: { services: { web: {} } } };
-  },
-  formatAppConf: ({ source, hash, owner, group }) =>
-    '# written by guildwise-admin approve-app\\nsource=' + source + '\\nhash=' + hash + '\\nowner=' + owner + '\\ngroup=' + group + '\\n',
-};
-`;
-    writeFileSync(join(dir, 'deploy-compose'), body, { mode: 0o755 });
-    chmodSync(join(dir, 'deploy-compose'), 0o755);
-    mkdirSync(join(f.root, RUNNER.home, 'src/shop'), { recursive: true });
-    const calls = () => JSON.parse(readFileSync(log, 'utf8'));
-    return { ...f, calls, helperFile: join(dir, 'deploy-compose') };
-  }
-
-  it("calls prepare() on the clone, shows the pinned config and writes the conf in the helper's format after a yes", async () => {
-    const f = appSystem('ok', ['y']);
-    expect(
-      await admin.main(['approve-app', 'shop', '--source', '/home/guildwise-runner/src/shop'], f.sys),
-    ).toBe(0);
-    const c = f.calls();
-    expect(c.app).toBe('shop');
-    expect(c.folder).toBe(join(f.root, '/home/guildwise-runner/src/shop'));
-    expect(c.opts).toMatchObject({
-      dropPrivileges: true,
-      readerUid: RUNNER.uid,
-      readerGid: RUNNER.gid,
-      readerCommand: [admin.NODE_PATH, f.helperFile],
-    });
-    const confFile = join(f.root, admin.APPS_CONF_DIR, 'shop.conf');
-    expect(admin.parseAppConf(readFileSync(confFile, 'utf8'))).toEqual({
-      source: '/home/guildwise-runner/src/shop',
-      hash: HASH,
-      owner: String(RUNNER.uid),
-      group: String(RUNNER.gid),
-    });
-    expect(statSync(confFile).mode & 0o777).toBe(0o644);
-    for (const d of ['/etc/guildwise-runner', admin.APPS_CONF_DIR, '/var/lib/guildwise'])
-      expect(statSync(join(f.root, d)).mode & 0o777, d).toBe(0o755);
-    expect(f.out.join('\n')).toContain('"web"');
-  });
-
-  it('a no writes nothing; a refusal by the helper fails with its reason', async () => {
-    const f = appSystem('ok', ['n']);
-    expect(
-      await admin.main(['approve-app', 'shop', '--source', '/home/guildwise-runner/src/shop'], f.sys),
-    ).toBe(1);
-    expect(existsSync(join(f.root, admin.APPS_CONF_DIR, 'shop.conf'))).toBe(false);
-    const g = appSystem('refuse');
-    expect(
-      await admin.main(
-        ['approve-app', 'shop', '--source', '/home/guildwise-runner/src/shop', '--yes'],
-        g.sys,
-      ),
-    ).toBe(1);
-    expect(g.err.join('\n')).toContain('outside the allowlist: privileged');
-    expect(existsSync(join(g.root, admin.APPS_CONF_DIR, 'shop.conf'))).toBe(false);
-  });
-
-  it('refuses a helper the runner user could have changed (writable, symlink) and one without prepare()', async () => {
-    const f = appSystem('ok');
-    chmodSync(f.helperFile, 0o777);
-    expect(
-      await admin.main(
-        ['approve-app', 'shop', '--source', '/home/guildwise-runner/src/shop', '--yes'],
-        f.sys,
-      ),
-    ).toBe(1);
-    expect(f.err.join('\n')).toContain('must be owned by root, not a symlink and not writable');
-    expect(existsSync(join(f.root, 'helper-calls.json'))).toBe(false);
-    const g = appSystem('old');
-    expect(
-      await admin.main(
-        ['approve-app', 'shop', '--source', '/home/guildwise-runner/src/shop', '--yes'],
-        g.sys,
-      ),
-    ).toBe(1);
-    expect(g.err.join('\n')).toContain('no prepare()');
-  });
-
-  it("refuses a folder outside the runner's own clones, a symlink and an app name deploy-compose would refuse", async () => {
-    const f = appSystem('ok');
-    expect(await admin.main(['approve-app', 'shop', '--source', '/home/alice/shop', '--yes'], f.sys)).toBe(1);
-    expect(f.err.join('\n')).toContain('own clones');
-    symlinkSync('/etc', join(f.root, RUNNER.home, 'src/etc'));
-    expect(
-      await admin.main(['approve-app', 'x', '--source', '/home/guildwise-runner/src/etc', '--yes'], f.sys),
-    ).toBe(1);
-    expect(
-      await admin.main(
-        ['approve-app', '../x', '--source', '/home/guildwise-runner/src/shop', '--yes'],
-        f.sys,
-      ),
-    ).toBe(1);
-    // the same limit as deploy-compose's checkAppName: 48 characters
-    expect(
-      await admin.main(
-        ['approve-app', 'a'.repeat(49), '--source', '/home/guildwise-runner/src/shop', '--yes'],
-        f.sys,
-      ),
-    ).toBe(1);
-    expect(existsSync(join(f.root, 'helper-calls.json'))).toBe(false);
-    expect(
-      await admin.main(
-        ['approve-app', 'a'.repeat(48), '--source', '/home/guildwise-runner/src/shop', '--yes'],
-        f.sys,
-      ),
-    ).toBe(0);
-  });
-
-  const W10 = join(import.meta.dirname, '../admin/deploy-compose.cjs');
-  it.skipIf(!existsSync(W10))(
-    'contract with the real deploy-compose (after the W10 merge): exports, name limit, conf format',
-    () => {
-      const require = createRequire(import.meta.url);
-      const dc = require(W10);
-      expect(typeof dc.prepare).toBe('function');
-      expect(() => dc.checkAppName('a'.repeat(48))).not.toThrow();
-      expect(() => dc.checkAppName('a'.repeat(49))).toThrow();
-      const source = '/home/guildwise-runner/src/shop';
-      const text = dc.formatAppConf({ source, hash: HASH, owner: 1001, group: 1001 });
-      expect(dc.parseAppConf(text)).toEqual({ source, hash: HASH, owner: 1001, group: 1001 });
-      expect(admin.parseAppConf(text)).toEqual({ source, hash: HASH, owner: '1001', group: '1001' });
-      // the approval never names root as the reader
-      expect(() => dc.formatAppConf({ source, hash: HASH, owner: 0, group: 1001 })).toThrow(/non-root uid/);
-      expect(() => dc.formatAppConf({ source, hash: HASH, owner: 1001, group: 0 })).toThrow(/non-root gid/);
-    },
-  );
-});
-
-describe('verify: root-owned install, sudoers, root PATH [rv6-1]', () => {
+describe('verify: root-owned install, no sudoers rule, root PATH [rv6-1]', () => {
   function installed() {
     const f = fakeSystem({ users: [RUNNER] });
     const dirs = [
@@ -524,7 +570,7 @@ describe('verify: root-owned install, sudoers, root PATH [rv6-1]', () => {
       mkdirSync(join(f.root, d), { recursive: true });
       chmodSync(join(f.root, d), 0o755);
     }
-    for (const file of ['guildwise-admin', 'deploy-compose', 'node/bin/node']) {
+    for (const file of ['guildwise-admin', 'node/bin/node']) {
       writeFileSync(join(f.root, 'usr/local/lib/guildwise', file), '#!/bin/sh\n');
       chmodSync(join(f.root, 'usr/local/lib/guildwise', file), 0o755);
     }
@@ -540,11 +586,13 @@ describe('verify: root-owned install, sudoers, root PATH [rv6-1]', () => {
 
   it("flags a tool writable by others, a parent not owned by root, and a runner path on root's PATH", async () => {
     const f = installed();
-    chmodSync(join(f.root, 'usr/local/lib/guildwise/deploy-compose'), 0o777);
+    mkdirSync(join(f.root, 'usr/local/lib/guildwise/docker'), { mode: 0o755 });
+    writeFileSync(join(f.root, 'usr/local/lib/guildwise/docker/dockerd'), '');
+    chmodSync(join(f.root, 'usr/local/lib/guildwise/docker/dockerd'), 0o777);
     f.sys.env.PATH = '/home/guildwise-runner/.local/bin:/usr/bin';
     expect(await admin.main(['verify'], f.sys)).toBe(1);
     const e = f.err.join('\n');
-    expect(e).toContain('/usr/local/lib/guildwise/deploy-compose is writable by group or others');
+    expect(e).toContain('/usr/local/lib/guildwise/docker/dockerd is writable by group or others');
     expect(e).toContain("root's PATH includes the runner's HOME");
     const g = installed();
     g.sys.rootUid = 12345;
@@ -552,62 +600,68 @@ describe('verify: root-owned install, sudoers, root PATH [rv6-1]', () => {
     expect(g.err.join('\n')).toContain('/usr/local/lib/guildwise is not owned by root');
   });
 
-  it('flags a sudoers file that is not 0440 or does not pass visudo, and a secure_path into the runner HOME', async () => {
+  it('flags any sudoers drop-in left for the runner, and a secure_path into the runner HOME', async () => {
     const f = installed();
     mkdirSync(join(f.root, 'etc/sudoers.d'), { recursive: true });
-    writeFileSync(join(f.root, admin.SUDOERS_DOCKER), 'this is not sudoers\n', { mode: 0o644 });
+    writeFileSync(join(f.root, admin.SUDOERS_DOCKER), 'x\n', { mode: 0o440 });
+    writeFileSync(join(f.root, 'etc/sudoers.d/other-user'), 'x\n', { mode: 0o440 });
     writeFileSync(
       join(f.root, 'etc/sudoers'),
       'Defaults secure_path="/home/guildwise-runner/bin:/usr/bin"\n',
     );
     expect(await admin.main(['verify'], f.sys)).toBe(1);
     const e = f.err.join('\n');
-    expect(e).toContain('must be mode 0440');
-    expect(e).toContain('does not pass visudo -cf');
+    expect(e).toContain('/etc/sudoers.d/guildwise-runner-docker gives the runner sudo');
+    expect(e).not.toContain('other-user');
     expect(e).toContain('/home/guildwise-runner/bin');
   });
 });
 
 describe('apply: the installer flags [R20 non-interactive]', () => {
-  it('--sudo on on a fresh install (no runner key yet) prints the deferred command and still sets up Docker', async () => {
-    const f = fakeSystem();
-    expect(await admin.main(['apply', '--yes', '--sudo', 'on', '--docker', 'narrow'], f.sys)).toBe(0);
-    expect(f.calls.some((c) => c.cmd === 'chpasswd')).toBe(false);
-    expect(f.out.join('\n')).toContain('run `sudo /usr/local/lib/guildwise/guildwise-admin sudo on`');
-    expect(existsSync(join(f.root, admin.SUDOERS_DOCKER))).toBe(true);
+  it('rejects the removed flags --sudo and --approve-app, and the removed docker values', async () => {
+    const f = fakeSystem({ users: [RUNNER] });
+    expect(await admin.main(['apply', '--yes', '--sudo', 'on'], f.sys)).toBe(64);
+    expect(await admin.main(['apply', '--yes', '--approve-app', 'shop=/x'], f.sys)).toBe(64);
+    expect(await admin.main(['apply', '--yes', '--docker', 'narrow'], f.sys)).toBe(1);
+    expect(await admin.main(['apply', '--yes', '--docker', 'group'], f.sys)).toBe(1);
+    expect(await admin.main(['sudo', 'on'], f.sys)).toBe(64);
+    expect(await admin.main(['approve-app', 'shop'], f.sys)).toBe(64);
+    expect(f.calls.some((c) => c.cmd === 'useradd')).toBe(false);
   });
 
-  it('user create and sudo off refuse any account but the dedicated one', async () => {
+  it('user create refuses any account but the dedicated one', async () => {
     const f = fakeSystem({ users: [RUNNER, ALICE] });
     expect(await admin.main(['user', 'create', '--user', 'alice'], f.sys)).toBe(1);
-    expect(await admin.main(['sudo', 'off', '--user', 'alice'], f.sys)).toBe(1);
     expect(f.calls.some((c) => c.cmd === 'gpasswd' || c.cmd === 'usermod')).toBe(false);
   });
 
-  it('--yes alone: dedicated user and its service, sudo off, no Docker', async () => {
+  it('--yes alone: dedicated user and its service, the legacy clean-up, no Docker, no sudoers', async () => {
     const f = fakeSystem();
+    mkdirSync(join(f.root, 'etc/sudoers.d'), { recursive: true });
+    writeFileSync(join(f.root, admin.SUDOERS_SUDO), 'x\n');
     expect(await admin.main(['apply', '--yes'], f.sys)).toBe(0);
     expect(f.calls.some((c) => c.cmd === 'useradd')).toBe(true);
     expect(existsSync(join(f.root, admin.SYSTEMD_UNIT))).toBe(true);
     expect(existsSync(join(f.root, admin.SUDOERS_SUDO))).toBe(false);
-    expect(existsSync(join(f.root, admin.SUDOERS_DOCKER))).toBe(false);
-    expect(f.calls.some((c) => c.cmd === 'chpasswd')).toBe(false);
+    expect(f.calls.some((c) => c.cmd === 'chpasswd' || c.cmd === 'visudo')).toBe(false);
+    expect(readFileSync(join(f.root, admin.SYSTEMD_UNIT), 'utf8')).not.toContain('sudo');
   });
 
-  it('refuses docker group without the acceptance, and approve-app without narrow', async () => {
+  it('refuses docker host without the acceptance and shared without its own acceptance', async () => {
     const f = fakeSystem({ users: [RUNNER] });
-    expect(await admin.main(['apply', '--yes', '--docker', 'group'], f.sys)).toBe(1);
+    expect(await admin.main(['apply', '--yes', '--docker', 'host'], f.sys)).toBe(1);
     expect(
-      await admin.main(['apply', '--yes', '--approve-app', 'shop=/home/guildwise-runner/src/shop'], f.sys),
+      await admin.main(
+        ['apply', '--yes', '--docker', 'shared', '--docker-socket', '/run/x/docker.sock'],
+        f.sys,
+      ),
     ).toBe(1);
     expect(f.calls.some((c) => c.cmd === 'useradd')).toBe(false);
   });
 
-  it('current user with docker narrow names that user in the rule', async () => {
-    const f = fakeSystem({ users: [ALICE] });
-    expect(
-      await admin.main(['apply', '--runner-user', 'current', '--user', 'alice', '--docker', 'narrow'], f.sys),
-    ).toBe(0);
-    expect(readFileSync(join(f.root, admin.SUDOERS_DOCKER), 'utf8')).toContain('alice ALL=(root) NOPASSWD:');
+  it('--docker rootless: the dedicated user gets its subuid range and linger', async () => {
+    const f = fakeSystem();
+    expect(await admin.main(['apply', '--yes', '--docker', 'rootless'], f.sys)).toBe(0);
+    expect(f.calls).toContainEqual({ cmd: 'loginctl', args: ['enable-linger', 'guildwise-runner'] });
   });
 });

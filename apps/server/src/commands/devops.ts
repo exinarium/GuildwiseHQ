@@ -31,7 +31,7 @@ import { iso, one, type Queryable, type Row, rows } from '../db/sql.ts';
 import { APPEND_LOCK_ID, type Tx, withAppendTx } from '../db/tx.ts';
 import { COMPUTER_REMOVED, computerRemovedMessage } from '../delivery/computer-removed.ts';
 import { closeDeskItemIn, raiseDeskItem } from '../desk-port.ts';
-import { conflict, notFound } from '../errors.ts';
+import { badRequest, conflict, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
 import { DESK_VISIBLE } from '../queries/desk.ts';
 import { wsServesOrgSql } from '../simulation/fit.ts';
@@ -545,7 +545,13 @@ export async function patchDevOpsAccess(
       [workstationId],
     );
     if (!ws || ws.user_id !== user.id) throw notFound('workstation not found');
-    const access = DevOpsAccessSchema.parse({ ...(ws.devops_access ?? {}), ...patch });
+    // 1.10.0: the runner has no root path any more (no sudo grant, no stored sudo password).
+    if (patch.sudo === true)
+      throw badRequest(
+        'sudo_removed',
+        'sudo for the DevOps engineer was removed: the installer sets up the baseline once, DevOps installs stack tools in the runner home, and other system packages are installed by the machine owner',
+      );
+    const access = DevOpsAccessSchema.parse({ ...(ws.devops_access ?? {}), ...patch, sudo: false });
     await ctx.store.append(
       [
         {

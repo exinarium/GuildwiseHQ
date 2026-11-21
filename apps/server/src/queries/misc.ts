@@ -784,12 +784,6 @@ export async function workstationDtos(
     },
     rights: w.devops_rights ? { ...w.devops_rights, stale: !!w.devops_rights_stale } : null,
     rightsCheck: rightsCheck(w),
-    sudo: {
-      keyId: keys.get(w.id) ?? null,
-      passwordSet: !!w.devops_sudo_set_at,
-      setAt: iso(w.devops_sudo_set_at),
-      works: w.devops_sudo_works ?? null,
-    },
     shifts: shiftsDto(ctx, w, running.find((r) => r.workstation_id === w.id)?.n ?? 0, caps.get(w.id), {
       otherRunning: running.find((r) => r.workstation_id === w.id)?.other ?? 0,
       holders: holdersOf(w.id),

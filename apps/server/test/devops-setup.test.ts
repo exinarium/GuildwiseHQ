@@ -8,7 +8,7 @@ let w: World;
 let r: FakeRunner;
 beforeAll(async () => {
   w = await createWorld({ env: { AOM_FIRST_RUN_HIRE_CAP: 'false' } });
-  // A runner of this version announces the key for the sudo password in hello.
+  // A runner of this version announces its sealing key (still named sudoKey) in hello.
   r = await w.connectRunner({ hello: false });
   r.hello({
     repos: [{ remoteUrl: REPO_SSH, localPath: '/tmp/toy', headBranch: 'main' }],
@@ -164,34 +164,50 @@ describe('a repository added to a project is cloned', () => {
   });
 });
 
-describe('rights and the sudo password', () => {
+describe('rights; the sudo password and grant were removed (1.10.0)', () => {
   it('ticking a right queues a check; the result shows as verified or failed, stale after the next change', async () => {
     const from = r.received.length;
-    await ok(
-      owner('PATCH', `/api/workstations/${w.workstationId}/devops-access`, { allowDocker: true, sudo: true }),
-    );
+    await ok(owner('PATCH', `/api/workstations/${w.workstationId}/devops-access`, { allowDocker: true }));
     const cmd = await nextCommand('rights.verify', from);
-    expect(cmd.payload.access).toMatchObject({ allowDocker: true, sudo: true });
+    expect(cmd.payload.access).toMatchObject({ allowDocker: true, sudo: false });
     answer(cmd.commandId, {
       checkedAt: new Date().toISOString(),
       platform: 'linux',
       checks: {
         docker: { status: 'failed', reason: 'permission denied', fix: 'usermod -aG docker $USER' },
-        sudo: { status: 'verified', reason: 'sudo works without a password for this user' },
       },
-      sudoPasswordStored: false,
     });
     await settle();
     let ws = await workstation();
     expect(ws.rights.checks.docker).toMatchObject({ status: 'failed', fix: 'usermod -aG docker $USER' });
-    expect(ws.rights.checks.sudo.status).toBe('verified');
     expect(ws.rights.stale).toBe(false);
     await ok(owner('PATCH', `/api/workstations/${w.workstationId}/devops-access`, { allowDocker: false }));
     ws = await workstation();
     expect(ws.rights.stale).toBe(true);
   });
 
-  it('the sudo password travels as ciphertext only: relayed, forgotten, never an event', async () => {
+  it('PATCH devops-access refuses sudo: true with 400 sudo_removed; sudo: false is accepted', async () => {
+    const res = await owner('PATCH', `/api/workstations/${w.workstationId}/devops-access`, { sudo: true });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('sudo_removed');
+    const off = await ok<any>(
+      owner('PATCH', `/api/workstations/${w.workstationId}/devops-access`, {
+        sudo: false,
+        allowInstall: true,
+      }),
+    );
+    expect(off.devopsAccess).toMatchObject({ sudo: false, allowInstall: true });
+    // a legacy stored flag never survives a change
+    await q(`UPDATE workstations SET devops_access = devops_access || '{"sudo": true}'::jsonb WHERE id=$1`, [
+      w.workstationId,
+    ]);
+    const again = await ok<any>(
+      owner('PATCH', `/api/workstations/${w.workstationId}/devops-access`, { allowInstall: false }),
+    );
+    expect(again.devopsAccess.sudo).toBe(false);
+  });
+
+  it('the sudo-password routes are gone; the sealing key (sudo-key) stays', async () => {
     r.hello({ repos: [], runtimes: MOCK_RUNTIME, sudoKey: { keyId: 'abcd1234abcd1234', publicKey: 'AAAA' } });
     await settle();
     await until(async () => (await q('SELECT 1 FROM workstation_keys'))[0], 5000, 'key stored');
@@ -199,62 +215,22 @@ describe('rights and the sudo password', () => {
       keyId: 'abcd1234abcd1234',
       publicKey: 'AAAA',
     });
-
-    // a stale key is refused
-    const stale = await owner('PUT', `/api/workstations/${w.workstationId}/sudo-password`, {
-      ciphertext: 'Zm9v',
-      keyId: 'old',
-    });
-    expect(stale.status).toBe(409);
-
-    const from = r.received.length;
-    const res = await owner('PUT', `/api/workstations/${w.workstationId}/sudo-password`, {
+    const put = await owner('PUT', `/api/workstations/${w.workstationId}/sudo-password`, {
       ciphertext: 'U0VDUkVULUNJUEhFUlRFWFQ=',
       keyId: 'abcd1234abcd1234',
     });
-    expect(res.status).toBe(202);
-    const cmd = await nextCommand('sudo.set', from);
-    expect(cmd.payload).toEqual({ ciphertext: 'U0VDUkVULUNJUEhFUlRFWFQ=', keyId: 'abcd1234abcd1234' });
-
-    answer(cmd.commandId, { stored: true, works: true });
-    await settle();
-    // the ciphertext is gone from the queue and was never in an event
-    const queued = await q('SELECT payload FROM runner_commands WHERE id=$1', [cmd.commandId]);
-    expect(queued[0]?.payload).toEqual({});
-    const leaked = await q(`SELECT 1 FROM events WHERE payload::text LIKE '%U0VDUkVULUNJUEhFUlRFWFQ%'`);
-    expect(leaked).toEqual([]);
-    const ev = await q(
-      `SELECT payload FROM events WHERE type='DevOpsSudoPasswordSet' ORDER BY seq DESC LIMIT 1`,
-    );
-    expect(ev[0]?.payload).toMatchObject({
-      workstationId: w.workstationId,
-      keyId: 'abcd1234abcd1234',
-      works: true,
-    });
-    const ws = await workstation();
-    expect(ws.sudo).toMatchObject({ keyId: 'abcd1234abcd1234', passwordSet: true, works: true });
-    expect(JSON.stringify(ws)).not.toContain('U0VDUkVU');
-    // a check follows
-    await nextCommand('rights.verify', from);
-
-    const before = r.received.length;
-    expect((await owner('DELETE', `/api/workstations/${w.workstationId}/sudo-password`)).status).toBe(202);
-    await nextCommand('sudo.clear', before);
-    expect((await workstation()).sudo.passwordSet).toBe(false);
-    expect(commands('sudo.set').length).toBe(1);
+    expect(put.status).toBe(404);
+    expect((await owner('DELETE', `/api/workstations/${w.workstationId}/sudo-password`)).status).toBe(404);
+    expect(await q(`SELECT 1 FROM runner_commands WHERE type IN ('sudo.set','sudo.clear')`)).toEqual([]);
+    expect((await workstation()).sudo).toBeUndefined();
   });
 
-  it('only the workstation owner can use these routes', async () => {
+  it('only the workstation owner can read the sealing key', async () => {
     const other = await w.t.userSession(`other-${Date.now()}@example.test`);
     const res = await w.t.req('GET', `/api/workstations/${w.workstationId}/sudo-key`, {
       cookie: other.cookie,
     });
     expect(res.status).toBe(404);
-    const put = await w.t.req('PUT', `/api/workstations/${w.workstationId}/sudo-password`, {
-      cookie: other.cookie,
-      body: { ciphertext: 'Zm9v', keyId: 'abcd1234abcd1234' },
-    });
-    expect(put.status).toBe(404);
   });
 });
 
@@ -264,7 +240,6 @@ describe('Verify now (POST verify-rights) never fails silently', () => {
     checkedAt: new Date().toISOString(),
     platform: 'linux',
     checks: { docker: { status: 'verified', reason: 'docker info works' } },
-    sudoPasswordStored: false,
   });
 
   it('shows checking, then the result; a runner error and a missing answer are reported', async () => {

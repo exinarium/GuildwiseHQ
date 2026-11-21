@@ -73,7 +73,14 @@ import {
 import { resolveDataDir, runnerPaths } from './paths.ts';
 import { defaultAuthority } from './policy/authority.ts';
 import { ceoTurn, defaultCliDeps, registerPolicyCommands } from './policy/cli.ts';
-import { decideStartup, probeHost, STARTUP_REFUSED_EXIT } from './policy/startup.ts';
+import { applyDockerEnv } from './policy/docker-env.ts';
+import {
+  daemonIsRootless,
+  decideStartup,
+  probeHost,
+  STARTUP_REFUSED_EXIT,
+  trustedDockerCli,
+} from './policy/startup.ts';
 import { NarrowingStore, PolicyStore, policyDir } from './policy/store.ts';
 import { addRelayIntegration, removeRelayIntegration } from './relay/config.ts';
 import { WhatsAppSecretStore } from './relay/whatsapp/store.ts';
@@ -81,8 +88,15 @@ import { reviewerTokenStatusLines, setReviewerToken } from './review/reviewer-to
 import { FileReviewerTokenStore } from './review/reviewer-tokens.ts';
 import { probeLocalPort, type TestServicesSeen } from './sandbox/test-services.ts';
 import { fileKeyOf, RunnerKeys } from './secrets/keys.ts';
+import { legacyDockerNote, removeLegacySudoVault } from './secrets/legacy-sudo.ts';
 import { registerSecret } from './secrets/redact.ts';
-import { ADMIN_DIR, instanceStartupPaths } from './setup/admin-command.ts';
+import {
+  ADMIN_DIR,
+  adminDirOf,
+  currentUser,
+  instanceOfUser,
+  instanceStartupPaths,
+} from './setup/admin-command.ts';
 import { registerSetupCommand } from './setup/command.ts';
 import { chromiumPdfRenderer } from './storage/pdf.ts';
 import { clamdClient } from './storage/scan.ts';
@@ -246,21 +260,54 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
   // machine said "Only signed runners" is on (cached from its last welcome); otherwise it only warns.
   const policyStore = new PolicyStore();
   const narrowing = new NarrowingStore();
+  // 1.10.0 (deps-without-sudo): the sealed sudo password is deleted unread, before anything else reads secrets/
+  if (!mock) {
+    const dataRoot = resolveDataDir(opts.dataDir);
+    let dirs: string[] = [dataRoot];
+    try {
+      const listed = loadIndex(dataRoot).pairings.map((e) => entryDir(dataRoot, e));
+      if (listed.length > 0) dirs = [...new Set([dataRoot, ...listed])];
+    } catch {
+      // no index: the data root is the only pairing
+    }
+    removeLegacySudoVault(dirs, log);
+    const note = legacyDockerNote(policyStore.file);
+    if (note) log.warn(note);
+  }
   const startupPaths = [
     policyDir(),
     policyStore.file,
     ...(layout ? [layout.root, layout.packageDir] : []),
     ADMIN_DIR,
+    // the root-owned rootless Docker binaries of this runner (deps-without-sudo §4)
+    join(adminDirOf(instanceOfUser(currentUser())), 'docker'),
     // a named instance's root-owned CA copy and approvals (`/etc/guildwise-runner-<name>`): never another user's
     ...instanceStartupPaths(),
   ];
-  const startupCheck = async (serverRequiresSigned: boolean) =>
-    decideStartup({
-      facts: await probeHost({ paths: startupPaths }),
-      policy: policyStore.get(),
+  // Order (deps-without-sudo §4): the first check sees the DOCKER_HOST the runner inherited; then applyDockerEnv points
+  // DOCKER_HOST at the daemon policy.json names, and the later checks (after `welcome`) see that one.
+  const startupCheck = async (serverRequiresSigned: boolean) => {
+    const policy = policyStore.get();
+    return decideStartup({
+      facts: await probeHost({
+        paths: startupPaths,
+        ...(policy.docker === 'shared' && policy.sharedDocker
+          ? { sharedSocket: policy.sharedDocker.socket }
+          : {}),
+        // S2: the root-owned docker CLI only, never PATH
+        dockerCli: [join(adminDirOf(instanceOfUser(currentUser())), 'docker', 'docker'), '/usr/bin/docker'],
+      }),
+      policy,
       serverRequiresSigned,
     });
+  };
   const first = mock ? ({ action: 'ok' } as const) : await startupCheck(narrowing.requireSignedRunners());
+  if (!mock)
+    applyDockerEnv(
+      policyStore.get(),
+      typeof process.getuid === 'function' ? process.getuid() : null,
+      adminDirOf(instanceOfUser(currentUser())),
+    );
   if (first.action === 'warn')
     for (const r of first.reasons)
       log.warn(
@@ -558,16 +605,41 @@ async function doctor(opts: { dataDir?: string; pairing?: string }): Promise<voi
       ? String(y.stdout).trim()
       : 'not found (optional: `aom transcript` needs it for YouTube and other video sites; ask DevOps to install it)',
   );
-  // The key the sudo password is encrypted with: compare this id with the one shown on the Workstations page.
+  // The runner's Docker (deps-without-sudo §4): its own rootless daemon, the accepted installed or shared one, or none.
+  if (process.platform !== 'win32') {
+    const pol = new PolicyStore().get();
+    const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+    if (pol.docker === 'rootless' && uid !== null) {
+      const sockPath = `/run/user/${uid}/docker.sock`;
+      (await daemonIsRootless(
+        sockPath,
+        trustedDockerCli([
+          join(adminDirOf(instanceOfUser(currentUser())), 'docker', 'docker'),
+          '/usr/bin/docker',
+        ]),
+      ))
+        ? line(true, 'docker', `the runner's own rootless daemon (${sockPath})`)
+        : line(
+            'warn',
+            'docker',
+            `the runner's rootless daemon is not running: as this user run \`systemctl --user start docker\`, or run the installer again`,
+          );
+    } else if (pol.docker === 'shared')
+      line(
+        'warn',
+        'docker',
+        `the shared rootless daemon ${pol.sharedDocker?.socket ?? pol.dockerHost ?? '?'} (accepted at install: runners that share it can each control the other's containers)`,
+      );
+    else if (pol.docker === 'host')
+      line('warn', 'docker', 'the installed Docker daemon (root-equivalent, accepted)');
+    else line(true, 'docker', 'none for this runner');
+  }
+  // The workstation sealing key (provider keys, target secrets are sealed with it): the Workstations page shows its id.
   try {
     const keys = new RunnerKeys(join(paths.secrets, 'runner-key.pem'));
-    line(
-      true,
-      'sudo key',
-      `${keys.publicKey.keyId} (the Workstations page shows the same id next to the sudo password; password ${existsSync(join(paths.secrets, 'sudo.enc')) ? 'stored' : 'not stored'})`,
-    );
+    line(true, 'sealing key', `${keys.publicKey.keyId} (the Workstations page shows the same id)`);
   } catch (err) {
-    line('warn', 'sudo key', err instanceof Error ? err.message : String(err));
+    line('warn', 'sealing key', err instanceof Error ? err.message : String(err));
   }
   if (config) {
     const repos = await scanRepos(config.repoRoots);
@@ -630,10 +702,7 @@ function runnerAlive(statusFile: string): boolean {
 }
 /** Installs or reports the PDF renderer (Chrome Headless Shell) in the data dir browsers folder. */
 /** Replaces the runner token. The runner must be stopped: a second connection would supersede the running one. */
-async function pdfRendererCmd(
-  action: string,
-  opts: { dataDir?: string; pairing?: string; withDeps?: boolean },
-): Promise<void> {
+async function pdfRendererCmd(action: string, opts: { dataDir?: string; pairing?: string }): Promise<void> {
   const r = chromiumPdfRenderer({ browsersPath: join(pairingPaths(opts).root, 'browsers') });
   try {
     if (action === 'status') {
@@ -645,7 +714,7 @@ async function pdfRendererCmd(
       );
       if (!st.ready) process.exitCode = 1;
     } else if (action === 'install') {
-      await r.install({ withDeps: !!opts.withDeps, log: (l) => console.log(l) });
+      await r.install({ log: (l) => console.log(l) });
       console.log('PDF renderer: installed');
     } else {
       throw new Error('Use `pdf-renderer install` or `pdf-renderer status`.');
@@ -1610,7 +1679,6 @@ export function buildProgram(): Command {
     .description(
       'install or check the browser that makes PDF copies of form answers (action: install | status)',
     )
-    .option('--with-deps', 'also install the system libraries and fonts (Linux, needs sudo)')
     .option(...pairingOpt)
     .option(...dataDirOpt)
     .action(pdfRendererCmd);

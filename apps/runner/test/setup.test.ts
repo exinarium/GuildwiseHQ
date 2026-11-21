@@ -5,13 +5,19 @@ import { join } from 'node:path';
 import { Command } from 'commander';
 import { describe, expect, it } from 'vitest';
 import { type Policy, parsePolicy } from '../src/policy/schema.ts';
-import { RunnerKeys } from '../src/secrets/keys.ts';
 import { ADMIN_TOOL, adminCommand } from '../src/setup/admin-command.ts';
 import { registerSetupCommand } from '../src/setup/command.ts';
 import { parseSetupOptions, type RawSetupFlags, SetupError } from '../src/setup/options.ts';
 import { policyPath, writePolicy } from '../src/setup/policy-file.ts';
 import type { Prompter } from '../src/setup/prompt.ts';
-import { runSetup, type SetupDeps, SUDO_WARNING } from '../src/setup/setup.ts';
+import {
+  GITHUB_OPTIONAL,
+  MAC_DOCKER_WARNING,
+  ROOTFUL_WARNING,
+  runSetup,
+  type SetupDeps,
+  SHARED_WARNING,
+} from '../src/setup/setup.ts';
 import type { ExecOptions, Executor } from '../src/toolchain/exec.ts';
 
 const ORG_A = randomUUID();
@@ -31,9 +37,7 @@ interface Machine {
 }
 
 /** A home with one pairing and the server's offers: org A (Owner, has a DevOps engineer), B (Member, has one), C (none). */
-function machine(
-  opts: { username?: string; sudoPassword?: string; git?: string; paired?: boolean } = {},
-): Machine {
+function machine(opts: { username?: string; git?: string; paired?: boolean } = {}): Machine {
   const home = mkdtempSync(join(tmpdir(), 'gw-setup-'));
   const dataRoot = join(home, '.aom-runner');
   mkdirSync(dataRoot, { recursive: true });
@@ -71,8 +75,6 @@ function machine(
   const exec: Executor = {
     async run(cmd: string, args: string[], o: ExecOptions = {}) {
       execCalls.push({ cmd, args, ...(o.input !== undefined ? { input: o.input } : {}) });
-      if (cmd === 'sudo' && args.includes('-S'))
-        return { exitCode: o.input === `${opts.sudoPassword ?? 'right'}\n` ? 0 : 1, stdout: '', stderr: '' };
       if (cmd === 'git') return { exitCode: 0, stdout: `${opts.git ?? 'git version 2.53.0'}\n`, stderr: '' };
       return { exitCode: 0, stdout: '', stderr: '' };
     },
@@ -85,7 +87,6 @@ function machine(
     dataRoot,
     prompter: null,
     out: (l) => out.push(l),
-    readStdin: async () => '',
     exec,
     ...over,
   });
@@ -135,16 +136,16 @@ describe('guildwise-runner setup [R20]', () => {
     expect(existsSync(policyPath(m.home))).toBe(false);
   });
 
-  it('--yes gives the safest values: no DevOps orgs, sudo off, no Docker, deploy ask, start-up refusal on', async () => {
+  it('--yes gives the safest values: no DevOps orgs, own rootless Docker, deploy ask, start-up refusal on', async () => {
     const m = machine();
     const r = await runSetup(m.deps(), opts({ yes: true }));
     expect(r.exitCode).toBe(0);
-    expect(r.adminCommands).toEqual([]);
+    expect(r.adminCommands).toEqual([`sudo ${ADMIN_TOOL} docker rootless`]);
     const p = m.policy();
+    expect(p.devops).toEqual({ agents: {} });
     expect(p).toMatchObject({
       runnerUser: { mode: 'dedicated', name: 'guildwise-runner' },
-      devops: { agents: {}, sudo: false },
-      docker: 'none',
+      docker: 'rootless',
       deploy: 'ask',
       deployPinCommit: false,
       acceptRootEquivalent: false,
@@ -174,16 +175,13 @@ describe('guildwise-runner setup [R20]', () => {
 
   it('flags map one to one onto policy.json and the root commands', async () => {
     const m = machine();
-    const app = join(m.home, 'src', 'shop');
     const r = await runSetup(
       m.deps(),
       opts({
         yes: true,
         runnerUser: 'dedicated',
         devopsOrgs: `${ORG_A},${ORG_B}`,
-        sudo: 'on',
-        docker: 'narrow',
-        approveApp: [`shop=${app}`],
+        docker: 'none',
         deploy: 'off',
         deployPinCommit: true,
         allowUnsignedFrom: ['https://hq.example.com'],
@@ -191,28 +189,14 @@ describe('guildwise-runner setup [R20]', () => {
     );
     expect(r.exitCode).toBe(0);
     const p = m.policy();
-    expect(p.devops).toEqual({ agents: { [ORG_A]: AGENT_A, [ORG_B]: AGENT_B }, sudo: true });
-    expect(p.docker).toBe('narrow');
+    expect(p.devops).toEqual({ agents: { [ORG_A]: AGENT_A, [ORG_B]: AGENT_B } });
+    expect(p.docker).toBe('none');
     expect(p.deploy).toBe('off');
     expect(p.deployPinCommit).toBe(true);
     expect(p.allowUnsignedUpdatesFrom).toEqual(['https://hq.example.com']);
     expect(p.devopsRequests).toBe('ask');
-    expect(r.adminCommands).toEqual([
-      `sudo ${ADMIN_TOOL} sudo on`,
-      `sudo ${ADMIN_TOOL} docker narrow`,
-      `sudo ${ADMIN_TOOL} approve-app shop --source ${app}`,
-    ]);
-    // the key the root tool seals the sudo password with exists before the command is printed
-    expect(existsSync(join(m.dataRoot, 'secrets', 'runner-key.pem'))).toBe(true);
-    expect(m.out.join('\n')).toContain(SUDO_WARNING);
-  });
-
-  it('--docker group with --accept-root-equivalent sets the acceptance; without it the flags are refused', async () => {
-    expect(() => opts({ docker: 'group' })).toThrow(SetupError);
-    const m = machine();
-    const r = await runSetup(m.deps(), opts({ yes: true, docker: 'group', acceptRootEquivalent: true }));
-    expect(m.policy()).toMatchObject({ docker: 'group', acceptRootEquivalent: true });
-    expect(r.adminCommands).toEqual([`sudo ${ADMIN_TOOL} docker group --accept-root-equivalent`]);
+    expect(r.adminCommands).toEqual([]);
+    expect(m.out.join('\n')).not.toMatch(/sudo +on|sealed/);
   });
 
   it('server-offered organizations are only suggestions: each defaults to no', async () => {
@@ -247,95 +231,14 @@ describe('guildwise-runner setup [R20]', () => {
     expect(existsSync(policyPath(m.home))).toBe(false);
   });
 
-  it('interactive: sudo and Docker default to off/none; the sudo prompt says it plainly', async () => {
+  it('interactive: no sudo question exists any more; Docker defaults to rootless', async () => {
     const m = machine();
     await runSetup(m.deps({ prompter: scripted(m, []) }), opts());
     const p = m.policy();
-    expect(p.devops.sudo).toBe(false);
-    expect(p.docker).toBe('none');
+    expect(p.devops).toEqual({ agents: {} });
+    expect(p.docker).toBe('rootless');
     expect(p.deploy).toBe('ask');
-    expect(m.out.join('\n')).toContain(SUDO_WARNING);
-  });
-
-  it('interactive docker group needs the typed phrase; anything else keeps none', async () => {
-    const m = machine();
-    await runSetup(
-      m.deps({
-        prompter: scripted(m, [
-          [/Docker access/, 'group'],
-          [/Type "root-equivalent"/, 'yes'],
-        ]),
-      }),
-      opts(),
-    );
-    expect(m.policy()).toMatchObject({ docker: 'none', acceptRootEquivalent: false });
-    const m2 = machine();
-    const r = await runSetup(
-      m2.deps({
-        prompter: scripted(m2, [
-          [/Docker access/, 'group'],
-          [/Type "root-equivalent"/, 'root-equivalent'],
-        ]),
-      }),
-      opts(),
-    );
-    expect(m2.policy()).toMatchObject({ docker: 'group', acceptRootEquivalent: true });
-    expect(r.adminCommands).toContain(`sudo ${ADMIN_TOOL} docker group --accept-root-equivalent`);
-  });
-
-  it("current user: sudo on seals the user's own password locally (checked with sudo -S), never on a command line", async () => {
-    const m = machine({ username: 'alice', sudoPassword: 'hunter2' });
-    const r = await runSetup(
-      m.deps({ readStdin: async () => 'hunter2\n' }),
-      opts({ yes: true, runnerUser: 'current', sudo: 'on', sudoPasswordStdin: true }),
-    );
-    expect(r.adminCommands).toEqual([]);
-    const keys = new RunnerKeys(join(m.dataRoot, 'secrets', 'runner-key.pem'));
-    expect(keys.decrypt(readFileSync(join(m.dataRoot, 'secrets', 'sudo.enc'), 'utf8').trim())).toBe(
-      'hunter2',
-    );
-    expect(m.policy()).toMatchObject({
-      runnerUser: { mode: 'current', name: 'alice' },
-      devops: { sudo: true },
-    });
-    expect(m.execCalls.some((c) => c.args.join(' ').includes('hunter2'))).toBe(false);
-    expect(m.out.join('\n')).not.toContain('hunter2');
-    expect(statSync(join(m.home, 'guildwise-runner', 'src')).isDirectory()).toBe(true);
-  });
-
-  it('current user: a password sudo refuses is not kept and nothing is written', async () => {
-    const m = machine({ username: 'alice', sudoPassword: 'right' });
-    await expect(
-      runSetup(
-        m.deps({ readStdin: async () => 'wrong\n' }),
-        opts({ yes: true, runnerUser: 'current', sudo: 'on', sudoPasswordStdin: true }),
-      ),
-    ).rejects.toThrow(/did not accept/);
-    expect(existsSync(join(m.dataRoot, 'secrets', 'sudo.enc'))).toBe(false);
-    expect(existsSync(policyPath(m.home))).toBe(false);
-  });
-
-  it('sudo on needs a pairing (the key it is sealed with)', async () => {
-    const m = machine({ paired: false });
-    await expect(runSetup(m.deps(), opts({ yes: true, sudo: 'on' }))).rejects.toThrow(
-      /pair this machine first/,
-    );
-  });
-
-  it('turning sudo off after it was on prints guildwise-admin sudo off', async () => {
-    const m = machine();
-    await runSetup(m.deps(), opts({ yes: true, sudo: 'on' }));
-    const r = await runSetup(m.deps(), opts({ yes: true }));
-    expect(r.adminCommands).toEqual([`sudo ${ADMIN_TOOL} sudo off`]);
-    expect(m.policy().devops.sudo).toBe(false);
-  });
-
-  it("refuses an app folder outside the runner's own HOME", async () => {
-    const m = machine();
-    await expect(
-      runSetup(m.deps(), opts({ yes: true, docker: 'narrow', approveApp: ['shop=/home/alice/shop'] })),
-    ).rejects.toThrow(/own clones/);
-    expect(() => opts({ docker: 'none', approveApp: ['shop=/x'] })).toThrow(/needs --docker narrow/);
+    expect(m.questions.some((q) => /sudo/i.test(q))).toBe(false);
   });
 
   it('the fetch route prints guildwise-admin readers add, only with git >= 2.45.1', async () => {
@@ -360,7 +263,7 @@ describe('guildwise-runner setup [R20]', () => {
       }),
       opts(),
     );
-    expect(r2.adminCommands).toEqual([]);
+    expect(r2.adminCommands.some((c) => c.includes('readers add'))).toBe(false);
     expect(old.out.join('\n')).toContain('only the remote route is offered');
   });
 
@@ -369,7 +272,7 @@ describe('guildwise-runner setup [R20]', () => {
     const file = policyPath(m.home);
     writePolicy(file, {
       ...parsePolicy('{}'),
-      devops: { agents: { [ORG_A]: AGENT_A, [ORG_B]: AGENT_B }, sudo: false },
+      devops: { agents: { [ORG_A]: AGENT_A, [ORG_B]: AGENT_B } },
       legacyUpdateOrigin: 'https://hq.example.com',
     });
     await runSetup(
@@ -382,12 +285,11 @@ describe('guildwise-runner setup [R20]', () => {
     expect(m.policy().legacyUpdateOrigin).toBeUndefined();
   });
 
-  it('macOS dedicated user: logins use claude setup-token and gh --insecure-storage', async () => {
+  it('macOS dedicated user: logins use claude setup-token; --yes gives no Docker on a Mac', async () => {
     const m = machine();
     await runSetup(m.deps({ platform: 'darwin' }), opts({ yes: true }));
-    const out = m.out.join('\n');
-    expect(out).toContain('claude setup-token');
-    expect(out).toContain('gh auth login --insecure-storage');
+    expect(m.out.join('\n')).toContain('claude setup-token');
+    expect(m.policy().docker).toBe('none');
   });
 });
 
@@ -398,8 +300,8 @@ describe('setup flags and environment', () => {
       {
         GUILDWISE_YES: '1',
         GUILDWISE_RUNNER_USER: 'current',
-        GUILDWISE_DOCKER: 'narrow',
-        GUILDWISE_SUDO: 'off',
+        GUILDWISE_DOCKER: 'host',
+        GUILDWISE_DOCKER_FOUND: 'rootful',
         GUILDWISE_DEVOPS_ORGS: 'none',
         GUILDWISE_DEPLOY: 'off',
         GUILDWISE_DEPLOY_PIN_COMMIT: '1',
@@ -410,7 +312,7 @@ describe('setup flags and environment', () => {
       yes: true,
       runnerUser: 'current',
       docker: 'none',
-      sudo: 'off',
+      dockerFound: 'rootful',
       devopsOrgs: 'none',
       deploy: 'off',
       deployPinCommit: true,
@@ -421,14 +323,11 @@ describe('setup flags and environment', () => {
   it('refuses bad values', () => {
     expect(() => opts({ runnerUser: 'root' })).toThrow(SetupError);
     expect(() => opts({ allowUnsignedFrom: ['https://hq.example.com/path'] })).toThrow(/exact origin/);
-    expect(() => opts({ approveApp: ['Shop=relative'] })).toThrow(/approve-app/);
-    expect(() => opts({ sudoPasswordStdin: true })).toThrow(/goes with --sudo on/);
+    expect(() => opts({ dockerFound: 'maybe' })).toThrow(/docker-found/);
   });
 
   it('quotes printed root commands for a POSIX shell', () => {
-    expect(adminCommand(['approve-app', 'x', '--source', "/h/it's here"])).toBe(
-      `sudo ${ADMIN_TOOL} approve-app x --source '/h/it'\\''s here'`,
-    );
+    expect(adminCommand(['readers', 'add', "it's"])).toBe(`sudo ${ADMIN_TOOL} readers add 'it'\\''s'`);
   });
 
   it('is registered as `guildwise-runner setup` with every installer flag', () => {
@@ -443,10 +342,10 @@ describe('setup flags and environment', () => {
       '--legacy',
       '--accept-root-equivalent',
       '--devops-orgs',
-      '--sudo',
-      '--sudo-password-stdin',
       '--docker',
-      '--approve-app',
+      '--docker-found',
+      '--docker-socket',
+      '--accept-shared-daemon',
       '--deploy',
       '--deploy-pin-commit',
       '--allow-unsigned-from',
@@ -458,15 +357,11 @@ describe('setup flags and environment', () => {
 describe('guildwise-runner setup for a named runner instance', () => {
   it('as guildwise-runner-uat: dedicated mode, every root command carries --instance uat', async () => {
     const m = machine({ username: 'guildwise-runner-uat' });
-    const r = await runSetup(
-      m.deps(),
-      opts({ yes: true, docker: 'narrow', approveApp: [`shop=${join(m.home, 'src/shop')}`] }),
-    );
+    const r = await runSetup(m.deps(), opts({ yes: true }));
     expect(r.exitCode).toBe(0);
     expect(m.policy().runnerUser).toEqual({ mode: 'dedicated', name: 'guildwise-runner-uat' });
     expect(r.adminCommands).toEqual([
-      `sudo /usr/local/lib/guildwise/uat/guildwise-admin --instance uat docker narrow`,
-      `sudo /usr/local/lib/guildwise/uat/guildwise-admin --instance uat approve-app shop --source ${join(m.home, 'src/shop')}`,
+      `sudo /usr/local/lib/guildwise/uat/guildwise-admin --instance uat docker rootless`,
     ]);
     expect(m.out.join('\n')).toContain('guildwise-runner-uat (dedicated, instance uat)');
   });
@@ -494,5 +389,186 @@ describe('guildwise-runner setup for a named runner instance', () => {
     await expect(
       runSetup(m.deps(), opts({ yes: true, instance: 'prod', runnerUser: 'current' })),
     ).rejects.toThrow(/needs the dedicated runner user guildwise-runner-prod/);
+  });
+});
+
+describe('setup step 4: Docker for the runner (deps-without-sudo §3)', () => {
+  it('found none or own: rootless with no question', async () => {
+    for (const found of ['none', 'own'] as const) {
+      const m = machine();
+      const r = await runSetup(m.deps({ prompter: scripted(m, []) }), opts({ dockerFound: found }));
+      expect(m.policy().docker).toBe('rootless');
+      expect(r.adminCommands).toContain(`sudo ${ADMIN_TOOL} docker rootless`);
+      expect(m.questions.some((q) => /Docker/.test(q))).toBe(false);
+    }
+  });
+
+  it("found rootful: the owner's warning, then 1) separate rootless (default) or 2) the installed Docker with the typed phrase", async () => {
+    const m = machine();
+    await runSetup(m.deps({ prompter: scripted(m, []) }), opts({ dockerFound: 'rootful' }));
+    expect(m.out.join('\n')).toContain('Docker detected, not running in rootless mode');
+    expect(m.out.join('\n')).toBe(m.out.join('\n'));
+    expect(ROOTFUL_WARNING).toBe('Docker detected, not running in rootless mode');
+    expect(m.policy().docker).toBe('rootless');
+    const m2 = machine();
+    await runSetup(
+      m2.deps({
+        prompter: scripted(m2, [
+          [/separate rootless/, '2'],
+          [/Type "root-equivalent"/, 'yes'],
+        ]),
+      }),
+      opts({ dockerFound: 'rootful' }),
+    );
+    expect(m2.policy()).toMatchObject({ docker: 'none', acceptRootEquivalent: false });
+    const m3 = machine();
+    const r = await runSetup(
+      m3.deps({
+        prompter: scripted(m3, [
+          [/separate rootless/, '2'],
+          [/Type "root-equivalent"/, 'root-equivalent'],
+        ]),
+      }),
+      opts({ dockerFound: 'rootful' }),
+    );
+    expect(m3.policy()).toMatchObject({ docker: 'host', acceptRootEquivalent: true });
+    expect(r.adminCommands).toContain(`sudo ${ADMIN_TOOL} docker host --accept-root-equivalent`);
+  });
+
+  it('--docker host needs --accept-root-equivalent; --yes gives rootless on Linux', async () => {
+    expect(() => opts({ docker: 'host' })).toThrow(/accept-root-equivalent/);
+    const m = machine();
+    const r = await runSetup(m.deps(), opts({ yes: true, docker: 'host', acceptRootEquivalent: true }));
+    expect(m.policy()).toMatchObject({ docker: 'host', acceptRootEquivalent: true });
+    expect(r.adminCommands).toEqual([`sudo ${ADMIN_TOOL} docker host --accept-root-equivalent`]);
+    const y = machine();
+    await runSetup(y.deps(), opts({ yes: true, dockerFound: 'rootful' }));
+    expect(y.policy().docker).toBe('rootless');
+  });
+
+  it('macOS with Docker Desktop: the /Users warning and the typed phrase give host with the socket; declined gives none', async () => {
+    const sock = '/Users/alice/.docker/run/docker.sock';
+    const m = machine();
+    const r = await runSetup(
+      m.deps({
+        platform: 'darwin',
+        prompter: scripted(m, [[/Type "root-equivalent"/, 'root-equivalent']]),
+      }),
+      opts({ dockerFound: 'desktop', dockerSocket: sock }),
+    );
+    expect(m.out.join('\n')).toContain(MAC_DOCKER_WARNING);
+    expect(MAC_DOCKER_WARNING).toContain('by default all of /Users');
+    expect(m.policy()).toMatchObject({
+      docker: 'host',
+      dockerHost: `unix://${sock}`,
+      acceptRootEquivalent: true,
+    });
+    expect(r.adminCommands).toContain(
+      `sudo ${ADMIN_TOOL} docker host --accept-root-equivalent --desktop-socket ${sock}`,
+    );
+    const d = machine();
+    await runSetup(
+      d.deps({ platform: 'darwin', prompter: scripted(d, [[/Type "root-equivalent"/, 'no']]) }),
+      opts({ dockerFound: 'desktop', dockerSocket: sock }),
+    );
+    expect(d.policy().docker).toBe('none');
+    const y = machine();
+    await runSetup(
+      y.deps({ platform: 'darwin' }),
+      opts({ yes: true, dockerFound: 'desktop', dockerSocket: sock }),
+    );
+    expect(y.policy().docker).toBe('none');
+    expect(() => opts({ dockerSocket: '/tmp/docker.sock' })).toThrow(/--docker-socket/);
+  });
+
+  it('shared rootless daemon (owner 2026-11-21): typed acceptance, policy names the socket, root records the acceptance', async () => {
+    expect(() => opts({ docker: 'shared', dockerSocket: '/run/docker-svc/docker.sock' })).toThrow(
+      /accept-shared-daemon/,
+    );
+    const sock = '/run/docker-svc/docker.sock';
+    const m = machine({ username: 'guildwise-runner-uat' });
+    const r = await runSetup(
+      m.deps({
+        prompter: scripted(m, [
+          [/that shared daemon/, '2'],
+          [/Type "shared-daemon"/, 'shared-daemon'],
+        ]),
+      }),
+      opts({ dockerFound: 'shared', dockerSocket: sock }),
+    );
+    expect(m.out.join('\n')).toContain(SHARED_WARNING);
+    expect(SHARED_WARNING).toContain("can each control the other's containers");
+    expect(m.policy()).toMatchObject({ docker: 'shared', dockerHost: `unix://${sock}` });
+    expect(r.adminCommands).toContain(
+      `sudo /usr/local/lib/guildwise/uat/guildwise-admin --instance uat docker shared --docker-socket ${sock} --accept-shared-daemon`,
+    );
+    // prod may join the same daemon with the same acceptance ("Prod and UAT can use the same rootless docker")
+    const prod = machine({ username: 'guildwise-runner-prod' });
+    const rp = await runSetup(
+      prod.deps(),
+      opts({ yes: true, docker: 'shared', dockerSocket: sock, acceptSharedDaemon: true }),
+    );
+    expect(prod.policy().docker).toBe('shared');
+    expect(rp.adminCommands[0]).toContain('--instance prod docker shared');
+    // declined: its own rootless daemon
+    const d = machine();
+    await runSetup(
+      d.deps({ prompter: scripted(d, [[/that shared daemon/, '2']]) }),
+      opts({ dockerFound: 'shared', dockerSocket: sock }),
+    );
+    expect(d.policy().docker).toBe('rootless');
+  });
+
+  it('F1: current user in a group that reaches a Docker daemon: no group change, the refusal text, --yes writes nothing', async () => {
+    const groups = (m: Machine): SetupDeps['exec'] => ({
+      async run(cmd, args) {
+        m.execCalls.push({ cmd, args });
+        if (cmd === 'id') return { exitCode: 0, stdout: 'alice docker\n', stderr: '' };
+        return { exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+    const m = machine({ username: 'alice' });
+    await expect(
+      runSetup(m.deps({ exec: groups(m) }), opts({ yes: true, runnerUser: 'current' })),
+    ).rejects.toThrow(/would refuse to start.*dedicated runner user/s);
+    expect(existsSync(policyPath(m.home))).toBe(false);
+    const i = machine({ username: 'alice' });
+    const r = await runSetup(
+      i.deps({ exec: groups(i), prompter: scripted(i, []) }),
+      opts({ runnerUser: 'current' }),
+    );
+    expect(r.exitCode).toBe(3);
+    expect(r.adminCommands).toEqual([`sudo ${ADMIN_TOOL} user create`, `sudo ${ADMIN_TOOL} service install`]);
+    expect([...m.execCalls, ...i.execCalls].some((c) => ['gpasswd', 'usermod'].includes(c.cmd))).toBe(false);
+  });
+
+  it('the removed flags are rejected: --sudo, --sudo-password-stdin, --approve-app, --docker narrow|group', () => {
+    expect(() => opts({ docker: 'narrow' })).toThrow(SetupError);
+    expect(() => opts({ docker: 'group', acceptRootEquivalent: true })).toThrow(SetupError);
+    for (const argv of [['--sudo', 'on'], ['--sudo-password-stdin'], ['--approve-app', 'shop=/x']]) {
+      const program = new Command('aom-runner').exitOverride();
+      program.configureOutput({ writeErr: () => {}, writeOut: () => {} });
+      registerSetupCommand(program);
+      program.commands.forEach((c) => {
+        c.exitOverride();
+        c.configureOutput({ writeErr: () => {}, writeOut: () => {} });
+      });
+      expect(() => program.parse(['node', 'aom-runner', 'setup', ...argv])).toThrow(/unknown option/);
+    }
+  });
+});
+
+describe('GitHub is never required (owner 2026-11-21: "UAT will not use github and it should be able to setup through the UI")', () => {
+  it('setup asks nothing about GitHub, runs no gh, and only mentions gh as optional', async () => {
+    for (const platform of ['linux', 'darwin'] as const) {
+      const m = machine({ username: 'guildwise-runner-uat' });
+      const r = await runSetup(m.deps({ platform, prompter: scripted(m, []) }), opts());
+      expect(r.exitCode).toBe(0);
+      expect(m.questions.some((q) => /github|gh /i.test(q))).toBe(false);
+      expect(m.execCalls.some((c) => c.cmd === 'gh')).toBe(false);
+      const ghLines = m.out.filter((l) => /\bgh\b/.test(l));
+      expect(ghLines).toEqual([GITHUB_OPTIONAL]);
+      expect(GITHUB_OPTIONAL).toContain('(optional)');
+    }
   });
 });

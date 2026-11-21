@@ -128,15 +128,6 @@ export const WorkstationDtoSchema = z.object({
       requestedAt: IsoTime.nullable(),
     })
     .optional(),
-  /** The sudo password: whether one is stored on the runner and the key it is encrypted with (never the password). */
-  sudo: z
-    .object({
-      keyId: z.string().nullable(),
-      passwordSet: z.boolean(),
-      setAt: IsoTime.nullable(),
-      works: z.boolean().nullable(),
-    })
-    .optional(),
   /** Which git providers this workstation is connected to (facts reported by the runner; never a credential). */
   git: z.object({ connections: z.array(GitConnectionSchema), checkedAt: IsoTime.nullable() }).optional(),
   /** Jira on this workstation (facts only): connected, not connected or refused. */
@@ -242,13 +233,6 @@ export const SudoKeyResponseSchema = z.object({
   sealAad: z.boolean().optional(),
 });
 export type SudoKeyResponse = z.infer<typeof SudoKeyResponseSchema>;
-/** `PUT /api/workstations/:id/sudo-password`: the password encrypted in the browser; the server cannot read it. */
-export const SetSudoPasswordRequestSchema = z.object({
-  ciphertext: z.string().min(1).max(2000),
-  keyId: z.string().min(1).max(64),
-});
-export type SetSudoPasswordRequest = z.infer<typeof SetSudoPasswordRequestSchema>;
-
 /** `PUT /api/workstations/:id/org-folder`: set (`path`) or clear (`path: null`) the organisation source folder. */
 export const SetOrgFolderRequestSchema = z.object({
   orgId: z.uuid(),

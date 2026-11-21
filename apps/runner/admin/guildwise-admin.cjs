@@ -10,9 +10,8 @@
  *
  *   guildwise-admin user create                     the dedicated `guildwise-runner` user (Linux useradd, macOS dscl)
  *   guildwise-admin service install|remove          the system unit / LaunchDaemon that runs the runner as that user
- *   guildwise-admin sudo on|off                     sealed sudo for the dedicated user (password only the runner knows)
- *   guildwise-admin docker none|narrow|group        how deploys reach Docker (narrow = the deploy-compose helper only)
- *   guildwise-admin approve-app <app> --source <d>  approve a compose app for deploy-compose (frozen, validated, pinned)
+ *   guildwise-admin docker rootless|host|shared|none  the runner's Docker (own rootless daemon by default)
+ *   guildwise-admin cleanup-legacy                  remove what 1.10.0 dropped: sudoers, sealed sudo, deploy-compose
  *   guildwise-admin readers add|remove <user>       read-only `git fetch` access to the runner's own clones
  *   guildwise-admin migrate-user [--finish]         move a 1.10.0 current-user install to the dedicated user
  *   guildwise-admin apply <flags>                   the installer's non-interactive form of the above
@@ -21,16 +20,17 @@
  * Every command takes --dry-run (print what would change, change nothing; also allowed without root).
  * Every command takes --instance <name> for a named runner (two or more runners on one machine, for example one paired
  * with UAT and one with production): its own user `guildwise-runner-<name>`, service, CA copy, sudoers rules, readers
- * group, migration marker and approved apps (instanceLayout below). Without it, the single `guildwise-runner` of before.
- * A named instance also has its own copy of the root-owned tools, /usr/local/lib/guildwise/<name>/ (guildwise-admin,
- * deploy-compose, node), installed from that instance's server's verified release: an instance is managed only by its
- * own copy (the interpreter decides, see checkInterpreter), so one server's release never supplies another's root tools.
- * Secrets (the generated sudo password) are never printed, logged or put on a command line.
+ * group, migration marker, AppArmor profile and subuid range (instanceLayout below). Without it, the single
+ * `guildwise-runner` of before. A named instance also has its own copy of the root-owned tools,
+ * /usr/local/lib/guildwise/<name>/ (guildwise-admin, node, docker), installed from that instance's server's verified
+ * release: an instance is managed only by its own copy (the interpreter decides, see checkInterpreter), so one server's
+ * release never supplies another's root tools.
+ * 1.10.0 removed every standing root path of the runner: no sudo grant, no sealed sudo password, no narrow Docker helper.
+ * `cleanup-legacy` removes what an earlier install left; a sealed sudo password file is deleted and never opened.
  */
 
 const fs = require('node:fs');
 const path = require('node:path');
-const crypto = require('node:crypto');
 const childProcess = require('node:child_process');
 const readline = require('node:readline');
 const util = require('node:util');
@@ -39,6 +39,7 @@ const ADMIN_DIR = '/usr/local/lib/guildwise';
 const NODE_DIR = `${ADMIN_DIR}/node`;
 const NODE_PATH = `${NODE_DIR}/bin/node`;
 const SELF_PATH = `${ADMIN_DIR}/guildwise-admin`;
+/** The narrow-mode helper of before 1.10.0: only `cleanup-legacy` names it now (it removes it). */
 const DEPLOY_COMPOSE = `${ADMIN_DIR}/deploy-compose`;
 const RUNNER_USER = 'guildwise-runner';
 const READERS_GROUP = 'guildwise-readers';
@@ -47,6 +48,7 @@ const READERS_GROUP = 'guildwise-readers';
 const RUNNER_FLOOR = '1.10.0';
 const SUDOERS_SUDO = '/etc/sudoers.d/guildwise-runner';
 const SUDOERS_DOCKER = '/etc/sudoers.d/guildwise-runner-docker';
+/** Narrow-mode approvals of before 1.10.0 (removed by `cleanup-legacy`). */
 const APPS_CONF_DIR = '/etc/guildwise-runner/apps';
 /** `service install --ca-file`: the root-owned copy of a private CA the runner service trusts (NODE_EXTRA_CA_CERTS). */
 const RUNNER_CA_FILE = '/etc/guildwise-runner/ca.pem';
@@ -61,8 +63,6 @@ const MAC_STAFF_GID = 20;
 const SAFE_PATH = '/usr/sbin:/usr/bin:/sbin:/bin';
 /** Groups that make an account root-equivalent or an administrator; the dedicated user is never in one. */
 const PRIVILEGED_GROUPS = ['sudo', 'wheel', 'admin', 'docker', 'root', 'adm', 'lxd', 'libvirt'];
-/** The same limit as deploy-compose's checkAppName (W10): a-z, 0-9, -, at most 48. */
-const APP_RE = /^[a-z0-9][a-z0-9-]{0,47}$/;
 const USER_RE = /^[a-z_][a-z0-9_-]{0,31}$/;
 /** Paths that end up inside unit files, plists and sudoers lines: no quotes, spaces, newlines or `%`. */
 const SAFE_ABS_RE = /^\/[A-Za-z0-9._/-]{0,500}$/;
@@ -77,7 +77,18 @@ const PLATFORMS = ['linux', 'darwin'];
  */
 const INSTANCE_RE = /^[a-z0-9](?:[a-z0-9-]{0,13}[a-z0-9])?$/;
 /** Names already taken inside /usr/local/lib/guildwise (an instance's tools folder may never be one of them). */
-const RESERVED_INSTANCES = ['node', 'guildwise-admin', 'deploy-compose'];
+const RESERVED_INSTANCES = ['node', 'guildwise-admin', 'deploy-compose', 'docker'];
+/** Where Docker's sockets live: the default ones and one level below /run (a shared daemon such as /run/docker-svc). */
+const DOCKER_SOCKETS = ['/var/run/docker.sock', '/run/docker.sock'];
+/** A Mac's Docker Desktop socket of the logged-in user (`docker host` on macOS). */
+const DESKTOP_SOCKET_RE = /^\/Users\/([^/]+)\/\.docker\/run\/docker\.sock$/;
+/** Subordinate id ranges for rootless Docker: 65536 ids, aligned, from 100000 up (never overlapping another entry). */
+const SUBID_COUNT = 65536;
+/** A shared daemon's socket one level below /run (never a dot segment, never the default /run/docker.sock). */
+const SHARED_SOCKET_RE = /^\/(?:var\/)?run\/[A-Za-z0-9_-][A-Za-z0-9._-]*\/docker\.sock$/;
+const SUBID_FLOOR = 100000;
+/** The runner's policy.json inside its HOME (apps/runner/src/policy/store.ts policyDir). */
+const POLICY_REL = '.config/aom-runner/policy.json';
 
 /**
  * Every name and path that belongs to one runner. `null`: the single runner of before (the exact constants above); a
@@ -106,6 +117,8 @@ function instanceLayout(name) {
       toolsDir: ADMIN_DIR,
       adminPath: SELF_PATH,
       deployCompose: DEPLOY_COMPOSE,
+      dockerDir: `${ADMIN_DIR}/docker`,
+      apparmorProfile: `/etc/apparmor.d/${RUNNER_USER}-rootlesskit`,
       nodePath: NODE_PATH,
       flag: [],
     });
@@ -137,6 +150,8 @@ function instanceLayout(name) {
     toolsDir: `${ADMIN_DIR}/${name}`,
     adminPath: `${ADMIN_DIR}/${name}/guildwise-admin`,
     deployCompose: `${ADMIN_DIR}/${name}/deploy-compose`,
+    dockerDir: `${ADMIN_DIR}/${name}/docker`,
+    apparmorProfile: `/etc/apparmor.d/${user}-rootlesskit`,
     nodePath: `${ADMIN_DIR}/${name}/node/bin/node`,
     flag: ['--instance', name],
   });
@@ -523,57 +538,6 @@ function isTestOwner(sys, uid) {
   return Array.isArray(sys.ownerAliases) && sys.ownerAliases.includes(uid);
 }
 
-// ----------------------------------------------------------------------------------------------- sudoers
-
-/** Validates a sudoers text with `visudo -cf` before it is moved into /etc/sudoers.d (mode 0440). */
-function installSudoers(sys, abs, content) {
-  if (sys.dryRun) {
-    note(sys, `would write ${abs} (0440, checked with visudo -cf):\n${content.trimEnd()}`);
-    return;
-  }
-  const real = P(sys, abs);
-  fs.mkdirSync(path.dirname(real), { recursive: true, mode: 0o755 });
-  const tmp = path.join(path.dirname(real), `.${path.basename(real)}.${process.pid}.check`);
-  fs.rmSync(tmp, { force: true });
-  fs.writeFileSync(tmp, content, { mode: 0o440, flag: 'wx' });
-  const r = sys.run('visudo', ['-cf', tmp]);
-  if (r.code !== 0) {
-    fs.rmSync(tmp, { force: true });
-    throw new AdminError(
-      `visudo rejected ${abs}: ${String(r.stderr || r.stdout)
-        .trim()
-        .slice(0, 300)}`,
-    );
-  }
-  fs.chmodSync(tmp, 0o440);
-  sys.chown(tmp, 0, 0);
-  fs.renameSync(tmp, real);
-  note(sys, `Wrote ${abs} (checked with visudo).`);
-}
-
-function sudoersForSudo(user) {
-  checkUserName(user);
-  return [
-    '# Written by guildwise-admin (R20): the runner user may use sudo with its own password, which only the',
-    "# runner's sealed vault knows. Every privileged DevOps step still needs a local approval on this machine.",
-    `${user} ALL=(ALL) ALL`,
-    '',
-  ].join('\n');
-}
-
-function sudoersForDocker(user, helper = DEPLOY_COMPOSE) {
-  checkSafeAbs(helper, 'the deploy-compose path');
-  checkUserName(user);
-  return [
-    '# Written by guildwise-admin (R20): the only passwordless rule. deploy-compose runs approved, frozen compose',
-    '# apps and nothing else; no wildcards. Its environment is pinned whatever the local sudo defaults say: Node',
-    '# reads NODE_OPTIONS before any check in the script could run.',
-    `Defaults!${helper} env_reset, !env_keep, !setenv`,
-    `${user} ALL=(root) NOPASSWD: ${helper}`,
-    '',
-  ].join('\n');
-}
-
 // ----------------------------------------------------------------------------------------------- service
 
 function unitText(u, runnerRoot, caFile = null, L = DEFAULT_LAYOUT) {
@@ -600,7 +564,7 @@ function unitText(u, runnerRoot, caFile = null, L = DEFAULT_LAYOUT) {
     'RestartSec=10',
     // the start-up refusal exits 78: no restart loop
     'RestartPreventExitStatus=78',
-    // the sealed sudo flow must still work
+    // bubblewrap and rootless Docker's setuid newuidmap need it (DESIGN deps-without-sudo decision 12: a follow-up)
     'NoNewPrivileges=no',
     'ProtectSystem=full',
     'StandardOutput=journal',
@@ -747,253 +711,374 @@ function pairingDirs(sys, u, dataRoot) {
   return dirs.length > 0 ? [...new Set(dirs)] : [dataRoot];
 }
 
-// ----------------------------------------------------------------------------------------------- sudo
-
-/**
- * Seals `password` for every pairing of the runner: RSA-OAEP (SHA-256) with the public half of the pairing's
- * `secrets/runner-key.pem`, written to `secrets/sudo.enc` (0600, owned by the runner) -- the same format `SudoVault`
- * reads. Returns the number of pairings sealed.
- */
-function sealSudoPassword(sys, u, dataRoot, password) {
-  let sealed = 0;
-  for (const dir of pairingDirs(sys, u, dataRoot)) {
-    const keyFile = path.posix.join(dir, 'secrets/runner-key.pem');
-    const pem = readOwnedFile(sys, keyFile, u.uid, 64 * 1024);
-    if (!pem) continue;
-    const pub = crypto.createPublicKey(crypto.createPrivateKey(pem));
-    const ct = crypto
-      .publicEncrypt(
-        { key: pub, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
-        Buffer.from(password),
-      )
-      .toString('base64');
-    writeUserFile(sys, u, path.posix.join(dir, 'secrets/sudo.enc'), `${ct}\n`, 0o600);
-    sealed++;
-  }
-  return sealed;
-}
-
-function runnerKeysPresent(sys, u, dataRoot) {
-  return pairingDirs(sys, u, dataRoot).some((d) =>
-    fs.existsSync(P(sys, path.posix.join(d, 'secrets/runner-key.pem'))),
-  );
-}
-
-/**
- * R20 step 3 / R18-P: `sudo on` gives the dedicated user a random password (chpasswd, on stdin), writes
- * `<user> ALL=(ALL) ALL` (password required, checked with visudo) and seals the password into the runner's vault.
- * The password is never printed. With the current user, `guildwise-runner setup` seals the user's own password.
- */
-function sudoOn(sys, opts = {}) {
-  const L = opts.L || DEFAULT_LAYOUT;
-  const u = requireUser(sys, opts.user || L.user, `run \`${adminHint(L, ['user', 'create'])}\` first`);
-  if (u.name !== L.user && !opts.allowOtherUser)
-    throw new AdminError(
-      `sudo on is for the dedicated ${L.user} user; with the current user, \`guildwise-runner setup --sudo on\` seals your own sudo password`,
-    );
-  const dataRoot = runnerDataRoot(u, opts.dataDir);
-  if (!sys.dryRun && !runnerKeysPresent(sys, u, dataRoot))
-    throw new AdminError(
-      `no runner key under ${dataRoot}: pair the runner and run \`guildwise-runner setup\` as ${u.name} first (it creates the key the password is sealed with)`,
-    );
-  note(
-    sys,
-    'With sudo on, the runner can become root whenever your local policy allows a DevOps step; every such step still needs your local yes.',
-  );
-  const password = crypto.randomBytes(24).toString('base64url');
-  if (sys.platform === 'darwin') {
-    // dscl reads the command from stdin, so the password is never an argument (visible in ps)
-    mustRun(sys, 'dscl', ['.'], { input: `passwd /Users/${u.name} ${password}\n` });
-  } else {
-    mustRun(sys, 'chpasswd', [], { input: `${u.name}:${password}\n` });
-  }
-  installSudoers(sys, L.sudoersSudo, sudoersForSudo(u.name));
-  const n = sys.dryRun ? 0 : sealSudoPassword(sys, u, dataRoot, password);
-  if (!sys.dryRun)
-    note(sys, `Sealed the new sudo password for ${n} pairing(s) of ${u.name}; it is not shown anywhere.`);
-  return { sealed: n };
-}
-
-function sudoOff(sys, opts = {}) {
-  const L = opts.L || DEFAULT_LAYOUT;
-  // it locks the account's password: only ever the dedicated user
-  if ((opts.user || L.user) !== L.user)
-    throw new AdminError(`sudo off is only for the dedicated ${L.user} user`);
-  const u = requireUser(sys, L.user);
-  if (removeFile(sys, L.sudoersSudo)) note(sys, `Removed ${L.sudoersSudo}.`);
-  if (sys.platform === 'darwin') {
-    mustRun(sys, 'dscl', ['.', '-create', `/Users/${u.name}`, 'Password', '*']);
-  } else {
-    mustRun(sys, 'usermod', ['-L', u.name]);
-  }
-  const dataRoot = runnerDataRoot(u, opts.dataDir);
-  for (const dir of fs.existsSync(P(sys, dataRoot)) ? pairingDirs(sys, u, dataRoot) : []) {
-    const f = path.posix.join(dir, 'secrets/sudo.enc');
-    assertNoSymlinkBelow(sys, u.home, f);
-    if (removeFile(sys, f)) note(sys, `Removed the sealed sudo password ${f}.`);
-  }
-  note(sys, `Sudo is off for ${u.name} (password locked).`);
-}
-
 // ----------------------------------------------------------------------------------------------- docker
 
-/**
- * R20 step 4. `narrow`: only `<user> ALL=(root) NOPASSWD: deploy-compose`, and the user leaves the docker group.
- * `group`: the docker group (root-equivalent; needs --accept-root-equivalent). `none`: neither.
- */
-function dockerMode(sys, mode, opts = {}) {
-  if (!['none', 'narrow', 'group'].includes(mode))
-    throw new AdminError('docker mode must be none, narrow or group');
-  const L = opts.L || DEFAULT_LAYOUT;
-  const u = requireUser(sys, opts.user || L.user);
-  if (L.instance && u.name !== L.user)
-    throw new AdminError(`the Docker rule of instance ${L.instance} is only for ${L.user}`);
-  const inGroup = () => groupsOf(sys, u.name).includes('docker');
-  if (mode === 'group') {
-    if (!opts.acceptRootEquivalent)
-      throw new AdminError(
-        'the docker group makes the runner root-equivalent: add --accept-root-equivalent if you accept that (narrow is the safer choice)',
-      );
-    if (sys.platform === 'darwin')
-      throw new AdminError('macOS has no docker group: use --docker narrow, or none');
-    if (removeFile(sys, L.sudoersDocker)) note(sys, `Removed ${L.sudoersDocker}.`);
-    if (!inGroup()) addToGroup(sys, u.name, 'docker');
-    note(sys, `${u.name} is in the docker group: the runner is root-equivalent (accepted).`);
-    return;
-  }
-  if (sys.platform !== 'darwin' && inGroup()) {
-    removeFromGroup(sys, u.name, 'docker');
-    note(sys, `Removed ${u.name} from the docker group.`);
-  }
-  if (mode === 'narrow') {
-    installSudoers(sys, L.sudoersDocker, sudoersForDocker(u.name, L.deployCompose));
-    note(
-      sys,
-      `Deploys reach Docker only through ${L.deployCompose}, for apps you approve with \`${adminHint(L, ['approve-app'])}\`.`,
-    );
-  } else {
-    if (removeFile(sys, L.sudoersDocker)) note(sys, `Removed ${L.sudoersDocker}.`);
-    note(sys, 'Deploys have no Docker access.');
+/** `stat` of a system path (tests may give their own, since a fixture cannot be owned by another group). */
+function statOf(sys, abs) {
+  try {
+    return (sys.stat || fs.statSync)(P(sys, abs));
+  } catch {
+    return null;
   }
 }
 
-// ----------------------------------------------------------------------------------------------- approve-app
+/** The real path of a system path inside the system root, as an absolute system path; null when missing. */
+function realOf(sys, abs) {
+  try {
+    const real = fs.realpathSync(P(sys, abs));
+    if (sys.root === '/') return real;
+    const rel = path.relative(fs.realpathSync(sys.root), real);
+    return rel.startsWith('..') ? null : `/${rel.split(path.sep).join('/')}`;
+  } catch {
+    return null;
+  }
+}
 
-function parseAppConf(text) {
-  const out = {};
-  for (const line of String(text).split('\n')) {
-    const m = /^([a-z]+)=(.*)$/.exec(line.trim());
-    if (m) out[m[1]] = m[2];
+/** Group name of a gid (`getent group <gid>`), or the number as text. */
+function groupName(sys, gid) {
+  const r = sys.run('getent', ['group', String(gid)]);
+  const name = r.code === 0 ? r.stdout.trim().split(':')[0] : '';
+  return name || String(gid);
+}
+
+/** Every Docker socket on the machine: the default ones and `/run/<x>/docker.sock`, by real path, with owner and group. */
+function dockerSockets(sys) {
+  const cands = [...DOCKER_SOCKETS];
+  try {
+    for (const d of fs.readdirSync(P(sys, '/run'), { withFileTypes: true }))
+      if (d.isDirectory() && d.name !== 'user') cands.push(`/run/${d.name}/docker.sock`);
+  } catch {
+    // no /run
+  }
+  const seen = new Map();
+  for (const c of cands) {
+    const real = realOf(sys, c);
+    if (!real || seen.has(real)) continue;
+    const st = statOf(sys, real);
+    if (st) seen.set(real, { path: c, real, uid: st.uid, gid: st.gid });
+  }
+  return [...seen.values()];
+}
+
+/**
+ * The docker CLI root may run: the pinned binary in this runner's root-owned folder, else /usr/bin/docker; each must
+ * resolve to a regular file owned by root and not writable by group or others (S1).
+ */
+function trustedDockerCli(sys, L) {
+  for (const c of [`${L.dockerDir}/docker`, '/usr/bin/docker']) {
+    try {
+      const st = fs.statSync(fs.realpathSync(P(sys, c)));
+      if (st.isFile() && st.uid === (sys.rootUid ?? 0) && !(st.mode & 0o022)) return c;
+    } catch {
+      // not there
+    }
+  }
+  return null;
+}
+
+/** The groups that own a Docker socket, plus `docker`: membership of any of them reaches another daemon. */
+function dockerSocketGroups(sys) {
+  return [...new Set(['docker', ...dockerSockets(sys).map((s) => groupName(sys, s.gid))])];
+}
+
+function parseSubids(text) {
+  const out = [];
+  for (const line of String(text || '').split('\n')) {
+    const m = /^([^:#\s]+):(\d+):(\d+)\s*$/.exec(line.trim());
+    if (m) out.push({ name: m[1], start: Number(m[2]), count: Number(m[3]) });
   }
   return out;
 }
 
-/** A root-owned 0755 directory (created when missing; a symlink or a writable-by-others one is refused). */
-function ensureRootDir(sys, abs) {
-  if (sys.dryRun) return;
-  const real = P(sys, abs);
-  if (!fs.existsSync(real)) {
-    fs.mkdirSync(real, { recursive: true, mode: 0o755 });
-    fs.chmodSync(real, 0o755);
-    sys.chown(real, 0, 0);
-  }
-  const st = fs.lstatSync(real);
-  if (st.isSymbolicLink() || !st.isDirectory()) throw new AdminError(`${abs} must be a real directory`);
-  if (st.uid !== (sys.rootUid ?? 0) || st.mode & 0o022)
-    throw new AdminError(`${abs} must be owned by root and not writable by group or others`);
+/** The next free range: aligned to SUBID_COUNT, at or above SUBID_FLOOR and after every existing entry of both files. */
+function nextSubidStart(entries) {
+  const end = entries.reduce((m, e) => Math.max(m, e.start + e.count), SUBID_FLOOR);
+  return Math.ceil(end / SUBID_COUNT) * SUBID_COUNT;
 }
 
-/**
- * Loads the installed deploy-compose helper (W10) after checking that it and its folder are root-owned, not symlinks
- * and not writable by group or others, so root never runs code the runner user could have changed.
- */
-function loadDeployCompose(sys, L = DEFAULT_LAYOUT) {
-  const rootUid = sys.rootUid ?? 0;
-  const DEPLOY_COMPOSE = L.deployCompose;
-  for (const abs of [...new Set([ADMIN_DIR, L.toolsDir]), DEPLOY_COMPOSE]) {
-    const st = fs.lstatSync(P(sys, abs), { throwIfNoEntry: false });
-    if (!st) throw new AdminError(`${abs} is missing: re-run the installer`);
-    if (st.isSymbolicLink() || st.uid !== rootUid || st.mode & 0o022)
-      throw new AdminError(`${abs} must be owned by root, not a symlink and not writable by group or others`);
-  }
-  const helper = (sys.requireHelper || require)(P(sys, DEPLOY_COMPOSE));
-  if (!helper || typeof helper.prepare !== 'function' || typeof helper.formatAppConf !== 'function')
-    throw new AdminError(`${DEPLOY_COMPOSE} is too old (no prepare()): re-run the installer`);
-  return helper;
-}
-
-/**
- * R20 step 4 approval. The installed deploy-compose helper's own `prepare()` freezes, pre-scans, resolves, validates
- * (its allowlist, [rv7-8], [rv7-9]) and pins the folder, so the approval hash is exactly the one deploy-compose checks
- * at every run. After a local yes this writes `/etc/guildwise-runner/apps/<app>.conf` (root 0644) in the helper's own
- * format (`formatAppConf`).
- */
-async function approveApp(sys, app, opts = {}) {
-  if (!APP_RE.test(String(app || '')))
-    throw new AdminError(`not a valid app name: ${JSON.stringify(app)} (a-z, 0-9, -, at most 48)`);
-  const source = checkSafeAbs(opts.source, '--source');
-  const L = opts.L || DEFAULT_LAYOUT;
-  const u = requireUser(sys, opts.user || L.user);
-  // an instance's approvals name only that instance's user: deploy-compose reads them only for that caller
-  if (L.instance && u.name !== L.user)
-    throw new AdminError(`apps of instance ${L.instance} are approved only for ${L.user}`);
-  const rel = path.posix.relative(u.home, source);
-  if (rel.startsWith('..') || rel === '')
-    throw new AdminError(`--source must be one of ${u.name}'s own clones (inside ${u.home}): ${source}`);
-  const st = fs.lstatSync(P(sys, source), { throwIfNoEntry: false });
-  if (!st?.isDirectory()) throw new AdminError(`${source} is not a directory (symlinks are refused)`);
-  assertNoSymlinkBelow(sys, u.home, source);
-  const helper = loadDeployCompose(sys, L);
-  for (const d of [L.etcDir, L.appsConfDir, STATE_DIR]) ensureRootDir(sys, d);
-  const confPath = `${L.appsConfDir}/${app}.conf`;
-  const rootHome = lookupUser(sys, 'root')?.home || (sys.platform === 'darwin' ? '/var/root' : '/root');
-  let res;
+function readSystemFile(sys, abs) {
   try {
-    res = await helper.prepare(app, P(sys, source), {
-      rootUid: sys.rootUid ?? 0,
-      dropPrivileges: true,
-      // W10 [B1]: the freeze reader runs as the runner user this approval names, recorded in the conf below
-      readerUid: u.uid,
-      readerGid: u.gid,
-      homeDir: rootHome,
-      readerCommand: [sys.execPath, P(sys, L.deployCompose)],
-      ...(sys.root === '/' && !L.instance
-        ? {}
-        : { confDir: P(sys, L.appsConfDir), stateDir: P(sys, L.appsStateDir) }),
-      // the same project name deploy-compose derives for this instance's caller, so the pin is the one it checks
-      ...(L.instance ? { projectPrefix: L.composePrefix } : {}),
-    });
-  } catch (e) {
-    throw new AdminError(`${app} was not approved: ${String(e?.message ?? e).slice(0, 1500)}`);
+    return fs.readFileSync(P(sys, abs), 'utf8');
+  } catch {
+    return '';
   }
-  if (!res || typeof res.hash !== 'string' || !/^[0-9a-f]{64}$/.test(res.hash))
-    throw new AdminError('deploy-compose did not return a sha256 hash');
-  const before = fs.existsSync(P(sys, confPath))
-    ? parseAppConf(fs.readFileSync(P(sys, confPath), 'utf8'))
-    : {};
-  note(sys, `Resolved config of ${app} (from the frozen copy of ${source}):`);
-  note(sys, JSON.stringify(res.pinned ?? {}, null, 2));
+}
+
+/** A subuid/subgid range for the user (skipped when it has one). */
+function ensureSubids(sys, u) {
+  const uids = parseSubids(readSystemFile(sys, '/etc/subuid'));
+  const gids = parseSubids(readSystemFile(sys, '/etc/subgid'));
+  if (uids.some((e) => e.name === u.name) && gids.some((e) => e.name === u.name)) {
+    note(sys, `${u.name} already has a subordinate id range.`);
+    return null;
+  }
+  const start = nextSubidStart([...uids, ...gids]);
+  const range = `${start}-${start + SUBID_COUNT - 1}`;
+  mustRun(sys, 'usermod', ['--add-subuids', range, '--add-subgids', range, u.name]);
   note(
     sys,
-    `Hash ${res.hash}${before.hash ? (before.hash === res.hash ? ' (unchanged)' : ` (was ${before.hash})`) : ' (new app)'}`,
+    `Gave ${u.name} the subordinate ids ${range} (its rootless Docker maps container users into them).`,
   );
-  if (!opts.yes) {
-    const a = String(await sys.ask(`Approve ${app} with this config? [y/N] `))
-      .trim()
-      .toLowerCase();
-    if (a !== 'y' && a !== 'yes') {
-      note(sys, `${app} not approved; nothing changed.`);
-      return { approved: false, hash: res.hash };
+  return range;
+}
+
+function apparmorText(L) {
+  return [
+    '# Written by guildwise-admin (deps-without-sudo): only the root-owned rootlesskit of this runner may create',
+    '# user namespaces (Ubuntu 24.04+ restricts them); a copy the runner makes gets no grant.',
+    'abi <abi/4.0>,',
+    'include <tunables/global>',
+    '',
+    `profile ${path.posix.basename(L.apparmorProfile)} "${L.dockerDir}/rootlesskit" flags=(unconfined) {`,
+    '  userns,',
+    '',
+    `  include if exists <local/${path.posix.basename(L.apparmorProfile)}>`,
+    '}',
+    '',
+  ].join('\n');
+}
+
+/**
+ * F2: the profile only where unprivileged user namespaces are restricted (`apparmor_restrict_unprivileged_userns` = 1,
+ * AppArmor 4); on an AppArmor 3 host (Debian 12) `abi <abi/4.0>` and `userns,` do not parse, and nothing needs them.
+ */
+function ensureAppArmor(sys, L) {
+  const flag = readSystemFile(sys, '/proc/sys/kernel/apparmor_restrict_unprivileged_userns').trim();
+  if (flag !== '1') {
+    note(sys, 'Unprivileged user namespaces are not restricted here: no AppArmor profile needed.');
+    return false;
+  }
+  writeRootFile(sys, L.apparmorProfile, apparmorText(L), 0o644);
+  mustRun(sys, 'apparmor_parser', ['-r', L.apparmorProfile]);
+  note(sys, `Wrote and loaded ${L.apparmorProfile} (user namespaces for ${L.dockerDir}/rootlesskit only).`);
+  return true;
+}
+
+function macAclEntries(user, socket) {
+  const m = DESKTOP_SOCKET_RE.exec(socket);
+  const home = `/Users/${m[1]}`;
+  return [
+    [`${user} allow search`, home],
+    [`${user} allow search`, `${home}/.docker`],
+    [`${user} allow list,search,add_file,read,write,append,file_inherit`, `${home}/.docker/run`],
+    [`${user} allow read,write,append`, socket],
+  ];
+}
+
+/**
+ * Writes the root-recorded acceptance of a shared rootless daemon into the runner's policy.json (owner decision
+ * 2026-11-21: "The uat runner will use the rootless docker already installed"). Root writes it at install, after the
+ * typed acceptance; the start-up check then only warns for exactly that socket (and only while the daemon is rootless).
+ */
+function recordSharedDocker(sys, u, socket, group) {
+  const file = path.posix.join(u.home, POLICY_REL);
+  assertNoSymlinkBelow(sys, u.home, file);
+  let policy = {};
+  const text = readOwnedFile(sys, file, u.uid);
+  if (text) {
+    try {
+      policy = JSON.parse(text);
+    } catch {
+      throw new AdminError(`${file} is not valid JSON: fix or remove it, then run this again`);
     }
   }
-  writeRootFile(
-    sys,
-    confPath,
-    helper.formatAppConf({ source, hash: res.hash, owner: u.uid, group: u.gid }),
-    0o644,
-  );
-  note(sys, `Approved ${app}: ${confPath}.`);
-  return { approved: true, hash: res.hash };
+  policy.docker = 'shared';
+  policy.dockerHost = `unix://${socket}`;
+  policy.sharedDocker = { socket, group, acceptedAt: sys.now().toISOString() };
+  ensureOwnedDir(sys, path.posix.join(u.home, '.config'), u, 0o700);
+  ensureOwnedDir(sys, path.posix.dirname(file), u, 0o700);
+  writeUserFile(sys, u, file, `${JSON.stringify(policy, null, 2)}\n`, 0o600);
+  note(sys, `Recorded the accepted shared Docker daemon ${socket} in ${file}.`);
+}
+
+/**
+ * The runner's Docker (DESIGN deps-without-sudo §3):
+ *   rootless  its own rootless daemon: out of every group that owns a Docker socket, a subuid range, the AppArmor
+ *             profile where needed, linger (the daemon is Docker's systemd user service). The binaries are root-owned
+ *             in L.dockerDir; `setup_runner_docker` then runs as the runner.
+ *   host      the installed daemon (root-equivalent; --accept-root-equivalent): the group of the real
+ *             /var/run/docker.sock (never gid 0). macOS: ACLs on the logged-in user's Docker Desktop socket.
+ *   shared    a rootless daemon of another user (`--docker-socket`; --accept-shared-daemon): its socket's group, and
+ *             the acceptance recorded in policy.json.
+ *   none      undoes the above (the subuid range stays).
+ * F1: when the runner is the installing person (current-user mode), groups are never changed for rootless or none.
+ */
+function dockerSet(sys, mode, opts = {}) {
+  if (!['rootless', 'host', 'shared', 'none'].includes(mode))
+    throw new AdminError('docker mode must be rootless, host, shared or none');
+  const L = opts.L || DEFAULT_LAYOUT;
+  const u = requireUser(sys, opts.user || L.user);
+  if (L.instance && u.name !== L.user)
+    throw new AdminError(`the Docker set-up of instance ${L.instance} is only for ${L.user}`);
+  const dedicated = u.name === L.user;
+  const mac = sys.platform === 'darwin';
+  const leaveSocketGroups = () => {
+    if (!dedicated) return;
+    const mine = groupsOf(sys, u.name);
+    for (const g of dockerSocketGroups(sys))
+      if (mine.includes(g)) {
+        removeFromGroup(sys, u.name, g);
+        note(sys, `Removed ${u.name} from the group ${g} (it reaches another Docker daemon).`);
+      }
+  };
+
+  if (mode === 'rootless') {
+    if (mac)
+      throw new AdminError(
+        'macOS has no rootless Docker: use Docker Desktop with `docker host --desktop-socket <path>`, or none',
+      );
+    leaveSocketGroups();
+    if (!dedicated)
+      note(
+        sys,
+        `${u.name} is the person installing: their groups are left alone (the start-up check judges them).`,
+      );
+    ensureSubids(sys, u);
+    ensureAppArmor(sys, L);
+    mustRun(sys, 'loginctl', ['enable-linger', u.name]);
+    note(
+      sys,
+      `${u.name} gets its own rootless Docker (run \`setup_runner_docker\` as ${u.name}; binaries in ${L.dockerDir}).`,
+    );
+    return { mode };
+  }
+
+  if (mode === 'host') {
+    if (!opts.acceptRootEquivalent)
+      throw new AdminError(
+        'the installed Docker daemon makes the runner root-equivalent: add --accept-root-equivalent if you accept that (rootless is the safer choice)',
+      );
+    if (mac) {
+      const socket = String(opts.desktopSocket || '');
+      if (!DESKTOP_SOCKET_RE.test(socket))
+        throw new AdminError(
+          'docker host on macOS needs --desktop-socket /Users/<user>/.docker/run/docker.sock',
+        );
+      for (const [acl, target] of macAclEntries(u.name, socket)) mustRun(sys, 'chmod', ['+a', acl, target]);
+      note(
+        sys,
+        `${u.name} may use the Docker Desktop socket ${socket} (root-equivalent inside Docker Desktop; containers can read and write the folders it shares). Not yet tested on hardware.`,
+      );
+      return { mode, socket };
+    }
+    const real = realOf(sys, '/var/run/docker.sock') || realOf(sys, '/run/docker.sock');
+    const st = real && statOf(sys, real);
+    if (!st)
+      throw new AdminError('no Docker socket at /var/run/docker.sock: is Docker installed and running?');
+    if (st.gid === 0)
+      throw new AdminError(
+        `${real} belongs to group root: adding ${u.name} to it would make it root, refused`,
+      );
+    const group = groupName(sys, st.gid);
+    if (!groupsOf(sys, u.name).includes(group)) addToGroup(sys, u.name, group);
+    note(sys, `${u.name} is in the group ${group} of ${real}: the runner is root-equivalent (accepted).`);
+    return { mode, socket: real, group };
+  }
+
+  if (mode === 'shared') {
+    if (mac) throw new AdminError('a shared rootless daemon is a Linux set-up; on macOS use docker host');
+    if (!opts.acceptSharedDaemon)
+      throw new AdminError(
+        'a shared Docker daemon lets the runner control every container on it: add --accept-shared-daemon if you accept that',
+      );
+    const given = String(opts.dockerSocket || '');
+    if (!SHARED_SOCKET_RE.test(given))
+      throw new AdminError('docker shared needs --docker-socket /run/<name>/docker.sock');
+    // S1: everything is judged on the canonical path: a link to the default socket (or anywhere else) is refused
+    const real = realOf(sys, given);
+    const st = real && statOf(sys, real);
+    if (!st) throw new AdminError(`${given} does not exist`);
+    if (!SHARED_SOCKET_RE.test(real) || DOCKER_SOCKETS.includes(real))
+      throw new AdminError(`${given} resolves to ${real}, which is not a shared daemon's socket: refused`);
+    if (st.gid === 0) throw new AdminError(`${real} belongs to group root: refused`);
+    if (st.uid === u.uid) throw new AdminError(`${real} is ${u.name}'s own socket: use docker rootless`);
+    const group = groupName(sys, st.gid);
+    if (group === 'docker')
+      throw new AdminError(`${real} belongs to the docker group (root-equivalent): use docker host, refused`);
+    // S1: as root, ask the daemon itself (through a root-owned docker CLI, never PATH) whether it runs rootless,
+    // before any group changes; a refusal leaves the groups as they were
+    const cli = trustedDockerCli(sys, L);
+    if (!cli)
+      throw new AdminError(
+        `no root-owned docker CLI to ask ${real} with (${L.dockerDir}/docker or /usr/bin/docker): re-run the installer`,
+      );
+    const info = sys.run(cli, ['-H', `unix://${real}`, 'info', '--format', '{{json .SecurityOptions}}']);
+    if (info.code !== 0 || !/name=rootless/.test(String(info.stdout)))
+      throw new AdminError(
+        `the daemon at ${real} does not run rootless: refused (use docker host for a root daemon)`,
+      );
+    if (!groupsOf(sys, u.name).includes(group)) addToGroup(sys, u.name, group);
+    recordSharedDocker(sys, u, real, group);
+    note(
+      sys,
+      `${u.name} is in the group ${group} of ${real}: it can control every container on that daemon (accepted). Runners that share a daemon can each control the other's containers; this typed acceptance records that you chose it.`,
+    );
+    return { mode, socket: real, group };
+  }
+
+  // none
+  if (mac) {
+    const socket = String(opts.desktopSocket || '');
+    if (DESKTOP_SOCKET_RE.test(socket))
+      for (const [acl, target] of macAclEntries(u.name, socket))
+        mustRun(sys, 'chmod', ['-a', acl, target], { allowFail: true });
+    note(sys, 'The runner has no Docker access.');
+    return { mode };
+  }
+  leaveSocketGroups();
+  if (removeFile(sys, L.apparmorProfile)) {
+    mustRun(sys, 'apparmor_parser', ['-R', L.apparmorProfile], { allowFail: true });
+    note(sys, `Removed ${L.apparmorProfile}.`);
+  }
+  if (dedicated) mustRun(sys, 'loginctl', ['disable-linger', u.name], { allowFail: true });
+  note(sys, 'The runner has no Docker access.');
+  return { mode };
+}
+
+// ----------------------------------------------------------------------------------------------- cleanup-legacy
+
+/**
+ * What 1.10.0 removed, cleaned up on every install (idempotent): the sudoers files, a password the dedicated user had
+ * for sudo (locked), the deploy-compose helper and its approvals, and the sealed sudo password in every pairing, which
+ * is deleted and never opened. Apps narrow mode started are left running, with how to stop them.
+ */
+function cleanupLegacy(sys, opts = {}) {
+  const L = opts.L || DEFAULT_LAYOUT;
+  for (const f of [L.sudoersSudo, L.sudoersDocker])
+    if (removeFile(sys, f)) note(sys, `Removed ${f} (sudo was removed in 1.10.0).`);
+  for (const d of [L.deployCompose, L.appsConfDir]) {
+    const real = P(sys, d);
+    const st = fs.lstatSync(real, { throwIfNoEntry: false });
+    if (!st) continue;
+    if (sys.dryRun) note(sys, `would remove ${d}`);
+    else fs.rmSync(real, { recursive: true, force: true });
+    note(sys, `Removed ${d} (narrow mode was removed in 1.10.0).`);
+  }
+  const u = lookupUser(sys, opts.user || L.user);
+  if (u && u.name === L.user) {
+    if (sys.platform === 'darwin')
+      mustRun(sys, 'dscl', ['.', '-create', `/Users/${u.name}`, 'Password', '*']);
+    else mustRun(sys, 'usermod', ['-L', u.name], { allowFail: true });
+  }
+  if (u) {
+    const dataRoot = runnerDataRoot(u, opts.dataDir);
+    if (fs.existsSync(P(sys, dataRoot)))
+      for (const dir of pairingDirs(sys, u, dataRoot)) {
+        const f = path.posix.join(dir, 'secrets/sudo.enc');
+        // never opened: refuse a link the runner planted, then unlink
+        assertNoSymlinkBelow(sys, u.home, f);
+        const st = fs.lstatSync(P(sys, f), { throwIfNoEntry: false });
+        if (!st) continue;
+        if (sys.dryRun) note(sys, `would remove ${f}`);
+        else fs.unlinkSync(P(sys, f));
+        note(sys, `Removed the sealed sudo password file ${f} (sudo was removed in 1.10.0).`);
+      }
+  }
+  if (fs.existsSync(P(sys, L.appsStateDir)))
+    note(
+      sys,
+      `Apps approved for narrow mode are left as they are in ${L.appsStateDir}; stop them with \`docker compose -p <project> down\` as root when you no longer need them.`,
+    );
 }
 
 // ----------------------------------------------------------------------------------------------- readers (fetch route)
@@ -1615,8 +1700,9 @@ function migrateFinish(sys, opts = {}) {
 // ----------------------------------------------------------------------------------------------- verify
 
 /**
- * [rv6-1] The admin tools and every parent up to / are root-owned and not writable by group or others; the sudoers
- * files are root 0440 and pass visudo; root's PATH (and sudo's secure_path) never reaches into the runner's HOME.
+ * [rv6-1] The admin tools (and the rootless Docker binaries) and every parent up to / are root-owned and not writable by
+ * group or others; no sudoers rule names the runner; root's PATH (and sudo's secure_path) never reaches into the
+ * runner's HOME.
  */
 function verifyInstall(sys, opts = {}) {
   const problems = [];
@@ -1646,15 +1732,20 @@ function verifyInstall(sys, opts = {}) {
     const st = checkNode(abs, true);
     if (st?.isDirectory()) for (const n of fs.readdirSync(P(sys, abs))) walk(path.posix.join(abs, n));
   };
-  for (const f of ['guildwise-admin', 'deploy-compose', 'node']) walk(path.posix.join(L.toolsDir, f));
-  for (const f of [L.sudoersSudo, L.sudoersDocker]) {
-    const st = checkNode(f, false);
-    if (!st) continue;
-    if ((st.mode & 0o777) !== 0o440) problems.push(`${f} must be mode 0440`);
-    const r = sys.run('visudo', ['-cf', P(sys, f)]);
-    if (r.code !== 0) problems.push(`${f} does not pass visudo -cf`);
-  }
+  for (const f of ['guildwise-admin', 'node']) walk(path.posix.join(L.toolsDir, f));
+  if (fs.existsSync(P(sys, L.dockerDir))) walk(L.dockerDir);
   const u = lookupUser(sys, opts.user || L.user);
+  // 1.10.0 has no sudoers rule for a runner: anything left is reported (cleanup-legacy removes ours)
+  const runnerName = u ? u.name : L.user;
+  try {
+    for (const n of fs.readdirSync(P(sys, '/etc/sudoers.d')))
+      if (n === runnerName || n.startsWith(`${runnerName}_`) || n.startsWith(`${runnerName}-`))
+        problems.push(
+          `/etc/sudoers.d/${n} gives the runner sudo (run \`${adminHint(L, ['cleanup-legacy'])}\`)`,
+        );
+  } catch {
+    // no drop-in folder
+  }
   if (u) {
     const pathVars = [sys.env.PATH || '', ...securePaths(sys)];
     for (const v of pathVars)
@@ -1664,7 +1755,7 @@ function verifyInstall(sys, opts = {}) {
   }
   for (const p of problems) sys.err(`problem: ${p}`);
   if (problems.length === 0)
-    note(sys, "The root-owned tools, the sudoers files and root's PATH are as they should be.");
+    note(sys, "The root-owned tools, the sudoers drop-ins and root's PATH are as they should be.");
   return problems;
 }
 
@@ -1698,27 +1789,21 @@ function envFlag(env, name) {
 
 /**
  * The installer's non-interactive form (R20 "Non-interactive"): the same flags as `guildwise-runner setup`, root half
- * only. `--yes` alone gives the safest values: a dedicated user, sudo off, no Docker.
+ * only. Always cleans up what 1.10.0 removed first. `--yes` alone gives the safest values: a dedicated user, no Docker.
  */
 async function apply(sys, o) {
   const env = sys.env || {};
   const runnerUser = o['runner-user'] || envFlag(env, 'RUNNER_USER') || (o.yes ? 'dedicated' : undefined);
-  const sudo = o.sudo || envFlag(env, 'SUDO') || 'off';
   const docker = o.docker || envFlag(env, 'DOCKER') || 'none';
   const accept = o['accept-root-equivalent'] || envFlag(env, 'ACCEPT_ROOT_EQUIVALENT') === '1';
-  const apps = [
-    ...(o['approve-app'] || []),
-    ...String(envFlag(env, 'APPROVE_APP') || '')
-      .split(',')
-      .filter(Boolean),
-  ];
+  const acceptShared = o['accept-shared-daemon'] || envFlag(env, 'ACCEPT_SHARED_DAEMON') === '1';
   if (!['dedicated', 'current'].includes(runnerUser || ''))
     throw new AdminError('--runner-user dedicated|current is required (or --yes for the dedicated user)');
-  if (!['on', 'off'].includes(sudo)) throw new AdminError('--sudo must be on or off');
-  if (!['none', 'narrow', 'group'].includes(docker))
-    throw new AdminError('--docker must be none, narrow or group');
-  if (docker === 'group' && !accept) throw new AdminError('--docker group needs --accept-root-equivalent');
-  if (apps.length > 0 && docker !== 'narrow') throw new AdminError('--approve-app needs --docker narrow');
+  if (!['rootless', 'host', 'shared', 'none'].includes(docker))
+    throw new AdminError('--docker must be rootless, host, shared or none');
+  if (docker === 'host' && !accept) throw new AdminError('--docker host needs --accept-root-equivalent');
+  if (docker === 'shared' && !acceptShared)
+    throw new AdminError('--docker shared needs --accept-shared-daemon');
   const L = o.L || DEFAULT_LAYOUT;
   if (L.instance && runnerUser !== 'dedicated')
     throw new AdminError('--instance needs the dedicated runner user (--runner-user dedicated, or --yes)');
@@ -1734,30 +1819,15 @@ async function apply(sys, o) {
       `Keeping the current user ${user}: the runner refuses to start while that user is root-equivalent, unless accepted.`,
     );
   }
-  if (runnerUser === 'dedicated') {
-    if (sudo === 'on') {
-      // on a fresh install the runner key appears only after pairing and setup as the runner user: defer, keep going
-      const u = lookupUser(sys, L.user);
-      if (!sys.dryRun && u && !runnerKeysPresent(sys, u, runnerDataRoot(u, o['data-dir'])))
-        note(
-          sys,
-          `Sudo needs the runner key, which exists after pairing: once \`sudo -u ${L.user} -H guildwise-runner setup\` has run, run \`${adminHint(L, ['sudo', 'on'])}\`.`,
-        );
-      else sudoOn(sys, { L, dataDir: o['data-dir'] });
-    } else if (lookupUser(sys, L.user)) sudoOff(sys, { L, dataDir: o['data-dir'] });
-  } else if (sudo === 'on') {
-    note(
-      sys,
-      `Sudo for ${user}: \`guildwise-runner setup --sudo on --sudo-password-stdin\` seals your own password.`,
-    );
-  }
-  dockerMode(sys, docker, { L, user, acceptRootEquivalent: accept });
-  for (const spec of apps) {
-    const i = spec.indexOf('=');
-    if (i <= 0) throw new AdminError(`--approve-app takes <app>=<folder>, got ${JSON.stringify(spec)}`);
-    const r = await approveApp(sys, spec.slice(0, i), { L, source: spec.slice(i + 1), user, yes: true });
-    if (!r.approved) throw new AdminError(`${spec.slice(0, i)} was not approved`);
-  }
+  cleanupLegacy(sys, { L, user, dataDir: o['data-dir'] });
+  dockerSet(sys, docker, {
+    L,
+    user,
+    acceptRootEquivalent: accept,
+    acceptSharedDaemon: acceptShared,
+    desktopSocket: o['desktop-socket'],
+    dockerSocket: o['docker-socket'],
+  });
 }
 
 // ----------------------------------------------------------------------------------------------- main
@@ -1765,16 +1835,18 @@ async function apply(sys, o) {
 const USAGE = `usage: sudo ${SELF_PATH} <command> [options]
   user create
   service install [--runner-root <dir>] [--ca-file <pem>] [--start] | service remove
-  sudo on|off [--data-dir <dir>]
-  docker none|narrow|group [--user <name>] [--accept-root-equivalent]
-  approve-app <app> --source <folder> [--yes]
+  docker rootless|none [--user <name>]
+  docker host --accept-root-equivalent [--desktop-socket /Users/<u>/.docker/run/docker.sock (macOS)]
+  docker shared --docker-socket <path> --accept-shared-daemon
+  cleanup-legacy [--data-dir <dir>]
   readers add|remove <user> [--path <clones folder>]
   migrate-user [--from <user>] [--to <user>] [--data-dir <dir>] | migrate-user --finish
-  apply --yes | --runner-user dedicated|current [--sudo on|off] [--docker none|narrow|group]
-        [--accept-root-equivalent] [--approve-app <app>=<folder>]... [--runner-root <dir>] [--ca-file <pem>] [--start]
+  apply --yes | --runner-user dedicated|current [--docker rootless|host|shared|none] [--accept-root-equivalent]
+        [--accept-shared-daemon --docker-socket <path>] [--desktop-socket <path>] [--runner-root <dir>]
+        [--ca-file <pem>] [--start]
   verify
 every command: --dry-run (print what would change; changes nothing)
-every command: --instance <name> for a named runner (user, service, CA, sudoers, approvals of guildwise-runner-<name>)`;
+every command: --instance <name> for a named runner (user, service, CA, Docker of guildwise-runner-<name>)`;
 
 const OPTIONS = {
   'dry-run': { type: 'boolean' },
@@ -1787,14 +1859,14 @@ const OPTIONS = {
   'runner-root': { type: 'string' },
   'ca-file': { type: 'string' },
   start: { type: 'boolean' },
-  source: { type: 'string' },
   path: { type: 'string' },
   finish: { type: 'boolean' },
   'accept-root-equivalent': { type: 'boolean' },
   'runner-user': { type: 'string' },
-  sudo: { type: 'string' },
   docker: { type: 'string' },
-  'approve-app': { type: 'string', multiple: true },
+  'accept-shared-daemon': { type: 'boolean' },
+  'docker-socket': { type: 'string' },
+  'desktop-socket': { type: 'string' },
   // accepted for one-to-one installer flags; handled by the installer and `guildwise-runner setup`
   'devops-orgs': { type: 'string' },
   deploy: { type: 'string' },
@@ -1839,14 +1911,17 @@ async function main(argv, sys = realSystem()) {
         start: o.start,
       });
     else if (cmd === 'service' && sub === 'remove') serviceRemove(sys, { L });
-    else if (cmd === 'sudo' && sub === 'on') sudoOn(sys, { L, user: o.user, dataDir: o['data-dir'] });
-    else if (cmd === 'sudo' && sub === 'off') sudoOff(sys, { L, user: o.user, dataDir: o['data-dir'] });
     else if (cmd === 'docker' && sub)
-      dockerMode(sys, sub, { L, user: o.user, acceptRootEquivalent: o['accept-root-equivalent'] });
-    else if (cmd === 'approve-app' && sub) {
-      const r = await approveApp(sys, sub, { L, source: o.source, user: o.user, yes: o.yes });
-      return r.approved ? 0 : 1;
-    } else if (cmd === 'readers' && sub === 'add' && arg)
+      dockerSet(sys, sub, {
+        L,
+        user: o.user,
+        acceptRootEquivalent: o['accept-root-equivalent'],
+        acceptSharedDaemon: o['accept-shared-daemon'],
+        desktopSocket: o['desktop-socket'],
+        dockerSocket: o['docker-socket'],
+      });
+    else if (cmd === 'cleanup-legacy') cleanupLegacy(sys, { L, user: o.user, dataDir: o['data-dir'] });
+    else if (cmd === 'readers' && sub === 'add' && arg)
       readersAdd(sys, arg, { L, user: o.user, path: o.path });
     else if (cmd === 'readers' && sub === 'remove' && arg) readersRemove(sys, arg, { L, user: o.user });
     else if (cmd === 'migrate-user')
@@ -1875,13 +1950,11 @@ module.exports = {
   ADMIN_DIR,
   NODE_PATH,
   SELF_PATH,
-  DEPLOY_COMPOSE,
   RUNNER_USER,
   READERS_GROUP,
   RUNNER_FLOOR,
   SUDOERS_SUDO,
   SUDOERS_DOCKER,
-  APPS_CONF_DIR,
   MIGRATE_MARKER,
   SYSTEMD_UNIT,
   LAUNCHD_PLIST,
@@ -1894,11 +1967,11 @@ module.exports = {
   toolsInstance,
   main,
   realSystem,
-  sudoersForSudo,
-  sudoersForDocker,
   unitText,
   plistText,
-  parseAppConf,
+  parseSubids,
+  nextSubidStart,
+  apparmorText,
   parseGitVersion,
   versionAtLeast,
   rewriteHome,

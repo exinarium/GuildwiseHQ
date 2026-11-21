@@ -226,6 +226,16 @@ export function detectToolchains(o: DetectOptions): ToolchainEntry[] {
       out.push({ ...e, binDirs, readDirs, source });
   };
 
+  // DESIGN §5: the user-space stack installs DevOps made (checksum verified), first so they win on PATH. The rustup
+  // proxies there need its RUSTUP_HOME; CARGO_HOME stays out (it can hold credentials).
+  const gw = join(home, '.local', 'share', 'guildwise', 'toolchains');
+  add({
+    name: 'guildwise',
+    binDirs: [join(gw, 'bin')],
+    readDirs: [gw],
+    env: isDir(join(gw, 'rust', 'rustup')) ? { RUSTUP_HOME: join(gw, 'rust', 'rustup') } : {},
+  });
+
   // .NET: one root that holds every SDK (the muxer resolves SDKs only inside its own root)
   const dn = selectDotnet({
     home,

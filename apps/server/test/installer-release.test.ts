@@ -38,7 +38,6 @@ beforeAll(() => {
   writeFileSync(join(pkg, 'aom-runner'), '#!/bin/sh\n[ "$1" = --version ] && echo 1.10.0\nexit 0\n');
   chmodSync(join(pkg, 'aom-runner'), 0o755);
   writeFileSync(join(pkg, 'admin/guildwise-admin.mjs'), '#!/usr/local/lib/guildwise/node/bin/node\n');
-  writeFileSync(join(pkg, 'admin/deploy-compose.mjs'), '#!/usr/local/lib/guildwise/node/bin/node\n');
   spawnSync('tar', ['-czf', join(dir, 'aom-runner-1.10.0.tgz'), '-C', join(dir, 'pkg'), 'aom-runner']);
   mkdirSync(join(dir, 'nodepkg/node-v22.0.0-linux-x64/bin'), { recursive: true });
   writeFileSync(join(dir, 'nodepkg/node-v22.0.0-linux-x64/bin/node'), '#!/bin/sh\n');
@@ -252,7 +251,8 @@ describe.skipIf(!canSign)('the root-owned tools', () => {
     });
     expect(r.status, r.stderr).toBe(0);
     const admin = join(setup.home, 'admin');
-    for (const t of ['guildwise-admin', 'deploy-compose']) {
+    expect(existsSync(join(admin, 'deploy-compose'))).toBe(false);
+    for (const t of ['guildwise-admin']) {
       expect(readFileSync(join(admin, t), 'utf8')).toContain('#!/usr/local/lib/guildwise/node/bin/node');
       expect(statSync(join(admin, t)).mode & 0o777).toBe(0o755);
     }
@@ -263,22 +263,19 @@ describe.skipIf(!canSign)('the root-owned tools', () => {
     expect(r.log).toContain('--no-same-owner');
   });
 
-  it('a release without deploy-compose still installs guildwise-admin (narrow Docker is then unavailable)', () => {
+  it('a release without guildwise-admin stops (narrow mode and deploy-compose are gone)', () => {
     setup = shHome();
     const r = runSh(
       setup,
       `${AS_ROOT}
 STAGE_SIGNED=1; STAGE_DIR="$HOME/stage"; STAGE_PKG="$STAGE_DIR/pkg"; STAGE_MANIFEST="$STAGE_DIR/m.json"
 mkdir -p "$STAGE_PKG/aom-runner/admin" "$ADMIN_DIR/node"
-printf '#!/x\\n' > "$STAGE_PKG/aom-runner/admin/guildwise-admin.cjs"
 echo "${'a'.repeat(64)}" > "$ADMIN_DIR/node/.sha256"
 manifest_get() { echo "https://nodejs.example/n.tgz ${'a'.repeat(64)}"; }
 install_admin_tools`,
     );
-    expect(r.status, r.stderr).toBe(0);
-    expect(existsSync(join(setup.home, 'admin/guildwise-admin'))).toBe(true);
-    expect(existsSync(join(setup.home, 'admin/deploy-compose'))).toBe(false);
-    expect(r.stdout + r.stderr).toContain('has no deploy-compose');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('The runner release has no guildwise-admin.');
   });
 
   it('a Node runtime that does not match the signed manifest is refused', () => {
@@ -397,6 +394,7 @@ add_repo_folders`,
 describe('setting local permissions', () => {
   const PERMS = (policy: string, extra = '') => `${AS_ROOT}
 ADMIN_TOOLS_READY=1
+DOCKER_SOCKET_PATHS=("$HOME/none/docker.sock" "$HOME/none/run-docker.sock")
 parse_flags "$@"
 RUNNER_MODE=dedicated; RUNNER_AS=""; RUNNER_NAME=guildwise-runner; RUNNER_HOME="$HOME/rh"
 mkdir -p "$RUNNER_HOME/.config/aom-runner"; printf '%s' '${policy}' > "$RUNNER_HOME/.config/aom-runner/policy.json"
@@ -406,104 +404,130 @@ runner() {
   echo "runner $* stdin=\${stdin}" >> "$STUB_LOG"
 }
 as_root() { echo "as_root $*" >> "$STUB_LOG"; case "$1" in test) return 1 ;; esac; return 0; }
+install_docker_binaries() { echo "install_docker_binaries" >> "$STUB_LOG"; }
+setup_runner_docker() { echo "setup_runner_docker" >> "$STUB_LOG"; }
 ${extra}
 set_local_permissions`;
 
-  it('runs guildwise-runner setup with only the flags given, then the root parts through guildwise-admin', () => {
+  it('runs guildwise-runner setup with only the flags given (plus what it detected), then the root parts', () => {
     setup = shHome();
-    const r = runSh(setup, PERMS('{"docker":"narrow","devops":{"agents":{},"sudo":true}}'), {
+    const r = runSh(setup, PERMS('{"docker":"rootless","devops":{"agents":{}}}'), {
       args: [
         '--yes',
         '--devops-orgs',
         'none',
-        '--sudo',
-        'on',
         '--docker',
-        'narrow',
+        'rootless',
         '--deploy',
         'ask',
         '--deploy-pin-commit',
-        '--approve-app',
-        'web=/srv/web app',
       ],
     });
     expect(r.status, r.stderr).toBe(0);
     expect(r.log).toContain(
-      'runner setup --runner-user dedicated --yes --devops-orgs none --sudo on --docker narrow --deploy ask --deploy-pin-commit stdin=',
+      'runner setup --runner-user dedicated --yes --devops-orgs none --docker rootless --docker-found none --deploy ask --deploy-pin-commit stdin=',
     );
     const admin = `${setup.home}/admin/guildwise-admin`;
-    expect(r.log).toContain(`as_root ${admin} docker narrow --user guildwise-runner`);
-    expect(r.log).toContain(`as_root ${admin} sudo on --user guildwise-runner`);
-    expect(r.log).toContain(
-      `as_root ${admin} approve-app web --source /srv/web app --user guildwise-runner --yes`,
-    );
+    // the legacy clean-up always comes first, then the Docker root part, then the runner's own set-up
+    const order = [
+      `as_root ${admin} cleanup-legacy --user guildwise-runner`,
+      'install_docker_binaries',
+      `as_root ${admin} docker rootless --user guildwise-runner`,
+      'setup_runner_docker',
+    ].map((l) => r.log.indexOf(l));
+    for (const n of order) expect(n).toBeGreaterThanOrEqual(0);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(r.log).not.toMatch(/guildwise-admin (sudo|approve-app)/);
     expect(r.stdout).toContain('Local permissions set');
   });
 
-  it('the docker group passes --accept-root-equivalent to guildwise-admin only when accepted here', () => {
+  it('host passes --accept-root-equivalent to guildwise-admin only when accepted here', () => {
     setup = shHome();
-    const policy = '{"docker":"group","devops":{"agents":{},"sudo":false}}';
-    const ok = runSh(setup, PERMS(policy), { args: ['--docker', 'group', '--accept-root-equivalent'] });
+    const policy = '{"docker":"host","acceptRootEquivalent":true}';
+    const ok = runSh(setup, PERMS(policy), { args: ['--docker', 'host', '--accept-root-equivalent'] });
     expect(ok.status, ok.stderr).toBe(0);
     expect(ok.log).toContain(
-      `as_root ${setup.home}/admin/guildwise-admin docker group --user guildwise-runner --accept-root-equivalent`,
+      `as_root ${setup.home}/admin/guildwise-admin docker host --accept-root-equivalent --user guildwise-runner`,
     );
-    // a policy.json that asks for the group without a yes on this machine (no flag, no keyboard) runs nothing as root
+    // a policy.json that asks for the installed Docker without a yes here (no flag, no keyboard) runs nothing for it
     const refused = runSh(setup, PERMS(policy));
     expect(refused.status).toBe(1);
     expect(refused.stderr).toContain('root-equivalence was not accepted here');
-    expect(refused.log).not.toMatch(/guildwise-admin docker/);
+    expect(refused.log).not.toMatch(/guildwise-admin docker host/);
   });
 
-  it('sudo from policy.json alone (no --sudo on, no keyboard) is refused, nothing runs as root', () => {
+  it('shared (owner 2026-11-21): the socket from policy.json and --accept-shared-daemon, only when accepted here', () => {
     setup = shHome();
-    const r = runSh(setup, PERMS('{"docker":"none","devops":{"agents":{},"sudo":true}}'));
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain('policy.json asks for sudo, but it was not turned on here');
-    expect(r.log).not.toMatch(/guildwise-admin sudo on/);
+    const policy = '{"docker":"shared","dockerHost":"unix:///run/docker-svc/docker.sock"}';
+    const ok = runSh(setup, PERMS(policy), {
+      args: [
+        '--docker',
+        'shared',
+        '--docker-socket',
+        '/run/docker-svc/docker.sock',
+        '--accept-shared-daemon',
+      ],
+    });
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(ok.log).toContain(
+      '--docker shared --docker-found none --docker-socket /run/docker-svc/docker.sock --accept-shared-daemon',
+    );
+    expect(ok.log).toContain(
+      `as_root ${setup.home}/admin/guildwise-admin docker shared --docker-socket /run/docker-svc/docker.sock --accept-shared-daemon --user guildwise-runner`,
+    );
+    const refused = runSh(setup, PERMS(policy));
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain('shared Docker daemon, but it was not accepted here');
+  });
+
+  it('detect_docker: a root socket is "rootful"; a socket elsewhere whose daemon is rootless is "shared"', () => {
+    setup = shHome();
+    const r = runSh(
+      setup,
+      `mkdir -p "$HOME/run/docker-svc"
+python3 -c "import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])" "$HOME/run/docker-svc/docker.sock"
+ln -s "$HOME/run/docker-svc/docker.sock" "$HOME/run/docker.sock"
+DOCKER_SOCKET_PATHS=("$HOME/var-run/docker.sock" "$HOME/run/docker.sock")
+detect_docker; echo "A=$DOCKER_FOUND"
+AUTHORIZED=1
+as_root() { if [ "$1" = env ]; then echo '["name=seccomp","name=rootless"]'; fi; }
+detect_docker; echo "B=$DOCKER_FOUND $DOCKER_SOCKET"`,
+    );
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain('A=rootful');
+    expect(r.stdout).toContain(`B=shared ${setup.home}/run/docker-svc/docker.sock`);
   });
 
   it('stops the dedicated runner service before setup writes policy.json', () => {
     setup = shHome();
-    const r = runSh(
-      setup,
-      PERMS(
-        '{"docker":"none","devops":{"agents":{},"sudo":false}}',
-        'RUNNER_AS=guildwise-runner; as_runner() { "$@"; }',
-      ),
-    );
+    const r = runSh(setup, PERMS('{"docker":"none"}', 'RUNNER_AS=guildwise-runner; as_runner() { "$@"; }'));
     expect(r.status, r.stderr).toBe(0);
     const stop = r.log.indexOf('as_root systemctl stop guildwise-runner.service');
     expect(stop).toBeGreaterThanOrEqual(0);
     expect(stop).toBeLessThan(r.log.indexOf('runner setup'));
   });
 
-  it('with no flags and no keyboard, setup gets --yes (the safest values) and nothing else', () => {
+  it('with no flags and no keyboard, setup gets --yes and what was detected, nothing else', () => {
     setup = shHome();
-    const r = runSh(setup, PERMS('{"docker":"none","devops":{"agents":{},"sudo":false}}'));
+    const r = runSh(setup, PERMS('{"docker":"none"}'));
     expect(r.status, r.stderr).toBe(0);
-    expect(r.log).toContain('runner setup --runner-user dedicated --yes stdin=');
-    expect(r.log).not.toMatch(/guildwise-admin (docker|sudo|approve-app)/);
+    expect(r.log).toContain('runner setup --runner-user dedicated --yes --docker-found none stdin=');
+    expect(r.log).not.toMatch(/guildwise-admin (docker (rootless|host|shared)|sudo|approve-app)/);
   });
 
-  it('runs nothing as root for a policy value outside the known list', () => {
+  it('runs nothing for a policy value outside the known list', () => {
     setup = shHome();
-    const r = runSh(setup, PERMS('{"docker":"group; touch /tmp/x","devops":{"sudo":"yes"}}'));
+    const r = runSh(setup, PERMS('{"docker":"group; touch /tmp/x"}'));
     expect(r.status, r.stderr).toBe(0);
-    expect(r.log).not.toMatch(/guildwise-admin (docker|sudo)/);
+    expect(r.log).not.toMatch(/guildwise-admin docker (rootless|host|shared|group)/);
   });
 
-  it('hands the sudo password from standard input to setup, never on a command line', () => {
-    setup = shHome();
-    const r = runSh(setup, PERMS('{"docker":"none"}', 'RUNNER_MODE=current'), {
-      args: ['--sudo', 'on', '--sudo-password-stdin'],
-      stdin: 'hunter2\n',
-    });
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.log).toContain(
-      'runner setup --runner-user current --yes --sudo on --sudo-password-stdin stdin=hunter2',
-    );
-    expect(r.log.split('\n').filter((l) => l.includes('hunter2'))).toHaveLength(1);
+  it('never asks for GitHub: no gh in the installer flow (owner 2026-11-21)', () => {
+    for (const os of ['linux', 'macos'] as const) {
+      const text = renderBash(os, shParams);
+      expect(text).not.toMatch(/\bgh (auth|login)\b/);
+      expect(text).not.toMatch(/GITHUB_TOKEN|GH_TOKEN/);
+    }
   });
 
   it('an upgrade of a runner kept for your user, without a keyboard or flags, changes nothing (it keeps working)', () => {
@@ -524,20 +548,192 @@ set_local_permissions`;
   });
 });
 
+describe('one authorization (owner 2026-11-21) and the baseline', () => {
+  /** A sudo stub that keeps a timestamp after -v (unless $NO_TIMESTAMP) and logs every call. */
+  const SUDO = `
+sudo() {
+  echo "sudo $*" >> "$STUB_LOG"
+  case "$1" in
+    -v) touch "$HOME/.ts"; return 0 ;;
+    -n) [ -f "$HOME/.ts" ] && [ -z "\${NO_TIMESTAMP:-}" ] || return 1; shift; [ "$1" = -v ] && return 0; [ "$1" = -u ] && return 0; "$@" ;;
+    *) return 0 ;;
+  esac
+}
+id() { if [ "$1" = -u ]; then echo 1000; else command id "$@"; fi; }
+`;
+  it('authorize_once: a single sudo -v, then only sudo -n', () => {
+    setup = shHome();
+    const r = runSh(setup, `${SUDO}\nauthorize_once; as_root true; as_root echo hi; stop_keepalive`);
+    expect(r.status, r.stderr).toBe(0);
+    const calls = r.log.split('\n').filter((l) => l.startsWith('sudo '));
+    expect(calls.filter((l) => l === 'sudo -v')).toHaveLength(1);
+    expect(calls.filter((l) => l !== 'sudo -v').every((l) => l.startsWith('sudo -n'))).toBe(true);
+    expect(r.stdout).toContain('Administrator rights given once for this install');
+    expect(r.stdout).toContain('install the baseline packages');
+  });
+
+  it('F3: a host that keeps no sudo timestamp stops with "run the installer as root"', () => {
+    setup = shHome();
+    const r = runSh(setup, `${SUDO}\nauthorize_once`, { env: { NO_TIMESTAMP: '1' } });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      'sudo keeps no authorization on this computer: run the installer as root (sudo bash <installer>)',
+    );
+  });
+
+  it('a lapsed authorization stops with "run again" instead of a confusing failure', () => {
+    setup = shHome();
+    const r = runSh(setup, `${SUDO}\nauthorize_once; rm -f "$HOME/.ts"; as_root false`);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('The administrator authorization of this install ran out.');
+  });
+
+  const BASE = (present: string, extra = '') => `
+PKG=apt; SUDO="sudo -n"
+dpkg-query() { case " ${present} " in *" $3 "*) echo "install ok installed" ;; *) return 1 ;; esac; }
+apt-cache() { [ "$2" = libasound2t64 ]; }
+pkg_install() { echo "pkg_install $*" >> "$STUB_LOG"; \${PKG_FAIL:+return 1}; return 0; }
+have() { return 0; }
+ensure_modern_git() { :; }
+${extra}
+parse_flags "$@"; install_baseline`;
+
+  it('apt: one call per group with only the missing packages; t64 names where the archive has them; idempotent', () => {
+    setup = shHome();
+    const r = runSh(setup, BASE('ca-certificates curl git'));
+    expect(r.status, r.stderr).toBe(0);
+    const calls = r.log.split('\n').filter((l) => l.startsWith('pkg_install '));
+    expect(calls).toHaveLength(4);
+    expect(calls[0]).toContain('build-essential');
+    expect(calls[0]).not.toMatch(/ curl | git /);
+    expect(calls[1]).toContain('libasound2t64');
+    expect(calls[1]).not.toContain('libatk1.0-0t64');
+    expect(calls[3]).toBe('pkg_install uidmap dbus-user-session iptables slirp4netns');
+  });
+
+  it('a failing core group stops; another group only warns', () => {
+    setup = shHome();
+    const core = runSh(setup, BASE(''), { env: { PKG_FAIL: '1' } });
+    expect(core.status).toBe(1);
+    expect(core.stderr).toContain('Installing the core packages failed');
+    const all =
+      'ca-certificates curl git unzip zip tar gzip xz-utils bzip2 build-essential pkg-config python3 openssh-client jq socat bubblewrap';
+    const fonts = runSh(setup, BASE(all), { env: { PKG_FAIL: '1' } });
+    expect(fonts.status, fonts.stderr).toBe(0);
+    expect(fonts.stdout).toContain('Could not install the playwright packages');
+  });
+
+  it('--skip-baseline installs nothing: missing core stops, the rest warns', () => {
+    setup = shHome();
+    const r = runSh(setup, BASE(''), { args: ['--skip-baseline'] });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('--skip-baseline installs nothing');
+    expect(r.log).not.toContain('pkg_install');
+    const all =
+      'ca-certificates curl git unzip zip tar gzip xz-utils bzip2 build-essential pkg-config python3 openssh-client jq socat bubblewrap';
+    const w = runSh(setup, BASE(all), { args: ['--skip-baseline'] });
+    expect(w.status, w.stderr).toBe(0);
+    expect(w.stdout).toContain('Missing playwright packages (--skip-baseline installs nothing)');
+    expect(w.log).not.toContain('pkg_install');
+  });
+
+  it('dnf and pacman have their own lists; an unknown package manager stops unless --skip-baseline', () => {
+    setup = shHome();
+    const dnf = runSh(setup, BASE('', 'PKG=dnf; rpm() { return 1; }'));
+    expect(dnf.log).toContain('gcc-c++');
+    const pac = runSh(setup, BASE('', 'PKG=pacman; pacman() { return 1; }'));
+    expect(pac.log).toContain('base-devel');
+    const none = runSh(setup, BASE('', 'PKG=""'));
+    expect(none.status).toBe(1);
+    expect(none.stderr).toContain('--skip-baseline');
+  });
+
+  it('manifest_get docker:<plat>:<part> reads the pinned rootless Docker binaries, and nothing malformed', () => {
+    setup = shHome();
+    const m = JSON.stringify({
+      dockerRootless: {
+        'linux-x64': {
+          docker: { url: 'https://download.docker.com/x/docker.tgz', sha256: 'a'.repeat(64) },
+          extras: { url: 'http://insecure/x.tgz', sha256: 'b'.repeat(64) },
+        },
+      },
+    });
+    const r = runSh(
+      setup,
+      `printf '%s' '${m}' > "$HOME/m.json"
+manifest_get "$HOME/m.json" docker:linux-x64:docker; echo "rc=$?"
+manifest_get "$HOME/m.json" docker:linux-x64:extras; echo "rc=$?"
+manifest_get "$HOME/m.json" docker:linux-x64:compose; echo "rc=$?"
+manifest_get "$HOME/m.json" docker:darwin-arm64:docker; echo "rc=$?"`,
+    );
+    expect(r.stdout).toContain(`https://download.docker.com/x/docker.tgz ${'a'.repeat(64)}\nrc=0`);
+    expect(r.stdout.match(/rc=1/g)).toHaveLength(3);
+  });
+
+  it('the pinned docker-rootless.json has docker, extras and compose for both Linux platforms', () => {
+    const pins = JSON.parse(readFileSync(join(__dirname, '../../../scripts/docker-rootless.json'), 'utf8'));
+    for (const plat of ['linux-x64', 'linux-arm64'])
+      for (const part of ['docker', 'extras', 'compose']) {
+        expect(pins[plat][part].url).toMatch(
+          /^https:\/\/(download\.docker\.com|github\.com\/docker\/compose)\//,
+        );
+        expect(pins[plat][part].sha256).toMatch(/^[0-9a-f]{64}$/);
+      }
+  });
+});
+
+describe('macOS: Docker Desktop and the Command Line Tools (not yet tested on hardware)', () => {
+  it('waits for Docker Desktop: shows the link, rechecks on Enter until _ping answers', () => {
+    setup = shHome();
+    const r = runSh(
+      setup,
+      `n=0
+desktop_docker_answers() { n=$((n+1)); [ "$n" -ge 3 ]; }
+interactive() { return 0; }
+wait_enter() { return 0; }
+parse_flags "$@"; wait_for_docker_desktop; echo "checks=$n"`,
+      { os: 'macos' },
+    );
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain('https://www.docker.com/products/docker-desktop/');
+    expect(r.stdout).toContain('checks=3');
+  });
+
+  it('--docker none skips the wait; without a keyboard it never loops (host stops with the link)', () => {
+    setup = shHome();
+    const W = 'desktop_docker_answers() { return 1; }\nparse_flags "$@"; wait_for_docker_desktop; echo done';
+    expect(runSh(setup, W, { os: 'macos', args: ['--docker', 'none'] }).stdout).toContain('done');
+    const y = runSh(setup, W, { os: 'macos' });
+    expect(y.status, y.stderr).toBe(0);
+    expect(y.stdout).toContain('the runner gets no Docker');
+    const h = runSh(setup, W, { os: 'macos', args: ['--docker', 'host', '--accept-root-equivalent'] });
+    expect(h.status).toBe(1);
+    expect(h.stderr).toContain('https://www.docker.com/products/docker-desktop/');
+  });
+});
+
 describe('installer flags', () => {
   const FLAGS = 'parse_flags "$@"; echo OK';
   it.each([
     [['--runner-user', 'root'], '--runner-user is dedicated or current'],
-    [['--sudo', 'yes'], '--sudo is on or off'],
-    [['--docker', 'group'], 'needs --accept-root-equivalent'],
+    [['--sudo', 'on'], 'Unknown option: --sudo'],
+    [['--docker', 'group'], '--docker is rootless, host, shared or none'],
+    [['--docker', 'narrow'], '--docker is rootless, host, shared or none'],
+    [['--docker', 'host'], 'needs --accept-root-equivalent'],
+    [['--docker', 'shared', '--docker-socket', '/run/x/docker.sock'], 'needs --accept-shared-daemon'],
+    [
+      ['--docker', 'shared', '--accept-shared-daemon', '--docker-socket', '/tmp/x.sock'],
+      '--docker-socket /run/<name>/docker.sock',
+    ],
+    [
+      ['--docker', 'shared', '--accept-shared-daemon', '--docker-socket', '/run/./docker.sock'],
+      '--docker-socket /run/<name>/docker.sock',
+    ],
     [['--devops-orgs', 'owned'], '--devops-orgs is none or organization ids'],
-    [['--approve-app', 'web'], '--approve-app is <app>=<absolute folder>'],
-    [['--approve-app', 'web=srv/web'], '--approve-app is <app>=<absolute folder>'],
-    [['--approve-app', 'my_app=/srv/web'], '--approve-app is <app>=<absolute folder>'],
-    [['--docker', 'none', '--approve-app', 'web=/srv/web'], '--approve-app needs --docker narrow'],
+    [['--approve-app', 'web=/srv/web'], 'Unknown option: --approve-app'],
     [['--allow-unsigned-from', 'https://x.example/path'], 'an exact origin'],
     [['--deploy', 'auto'], '--deploy is ask or off'],
-    [['--sudo-password-stdin'], 'no password came on standard input'],
+    [['--sudo-password-stdin'], 'Unknown option: --sudo-password-stdin'],
     [['--frobnicate'], 'Unknown option: --frobnicate'],
     [['--legacy'], '--legacy needs a value'],
   ])('%j is refused', (args, msg) => {
@@ -558,10 +754,10 @@ describe('installer flags', () => {
         'quarantine',
         '--devops-orgs',
         '0b6f6c1e-6a1c-4f3e-9f55-0a4f3a0c9b11,1b6f6c1e-6a1c-4f3e-9f55-0a4f3a0c9b12',
-        '--sudo=off',
         '--docker',
-        'group',
+        'host',
         '--accept-root-equivalent',
+        '--skip-baseline',
         '--deploy',
         'off',
         '--allow-unsigned-from',

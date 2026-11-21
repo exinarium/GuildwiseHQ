@@ -16,7 +16,8 @@ export interface PdfRenderer {
   /** HTML in, PDF bytes out. Throws PdfError. Never logs or returns the HTML in an error. */
   render(html: string, signal: AbortSignal): Promise<Buffer>;
   status(): Promise<{ ready: boolean; version?: string }>;
-  install(opts: { withDeps: boolean; log: (line: string) => void; signal?: AbortSignal }): Promise<void>;
+  /** Downloads the headless browser as the runner user; its system libraries are the installer's baseline (no root here). */
+  install(opts: { log: (line: string) => void; signal?: AbortSignal }): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -245,7 +246,7 @@ export function chromiumPdfRenderer(o: ChromiumPdfOptions): PdfRenderer {
       }
     },
 
-    async install({ withDeps, log, signal }) {
+    async install({ log, signal }) {
       const cli = o.cli ?? playwrightCli();
       if (!cli) throw new PdfError('pdf_unavailable');
       const { execa } = await import('execa');
@@ -262,7 +263,6 @@ export function chromiumPdfRenderer(o: ChromiumPdfOptions): PdfRenderer {
         if (r.all) for (const l of String(r.all).split('\n')) if (l.trim()) log(l);
         if (signal?.aborted || r.exitCode !== 0) throw new PdfError('pdf_failed');
       };
-      if (withDeps && process.platform === 'linux') await run(['install-deps', 'chromium-headless-shell']);
       await run(['install', '--only-shell', 'chromium']);
     },
 

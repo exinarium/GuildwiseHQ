@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 /**
  * `~/.config/aom-runner/policy.json` (R18-S, R20, R21, R22, R30): the runner's local authority. Written only by the CLI
- * on this machine (`guildwise-runner setup`, `approve --pin`, `devops grant`, `sudo enable`, `passkey trust`,
+ * on this machine (`guildwise-runner setup`, `approve --pin`, `devops grant`, `passkey trust`,
  * `signing add-key`, ...), mode 600. The server can narrow what it says, never widen it: nothing in here is ever taken
  * from the server. Missing fields take the safe default; unknown fields are dropped.
  */
@@ -60,29 +60,66 @@ export const SigningKeySchema = z.object({
 });
 export type SigningKey = z.infer<typeof SigningKeySchema>;
 
+/** A Mac's Docker Desktop socket of a logged-in user (`host` on macOS). */
+export const DESKTOP_HOST_RE = /^unix:\/\/\/Users\/[^/]+\/\.docker\/run\/docker\.sock$/;
+/** The socket of another user's rootless daemon (`shared`), such as `unix:///run/docker-svc/docker.sock`. */
+export const SHARED_HOST_RE = /^unix:\/\/\/(?:var\/)?run\/[A-Za-z0-9_-][A-Za-z0-9._-]*\/docker\.sock$/;
+/** Every `dockerHost` setup writes. */
+export const DOCKER_HOST_RE = new RegExp(`${DESKTOP_HOST_RE.source}|${SHARED_HOST_RE.source}`);
+
+/** Docker values of before 1.10.0 (W10 narrow mode was removed; the docker group is the installed daemon). */
+export function mapLegacyDocker(v: unknown): unknown {
+  if (v === 'narrow') return 'none';
+  if (v === 'group') return 'host';
+  return v;
+}
+
 export const PolicySchema = z
   .object({
     version: z.literal(POLICY_VERSION).default(POLICY_VERSION),
-    /** DevOps grants (R18-S): which agent may serve which organization outside the sandbox, and sudo. Local only. */
+    /**
+     * DevOps grants (R18-S): which agent may serve which organization outside the sandbox. Local only. The sudo grant
+     * was removed in 1.10.0: an old `devops.sudo` is dropped like any unknown field, so the file stays valid.
+     */
     devops: z
       .object({
         /** Organization id -> the DevOps agent id granted on this machine (`guildwise-runner devops grant <org>`). */
         agents: z.record(Uuid, Uuid).default({}),
-        sudo: z.boolean().default(false),
       })
-      .default({ agents: {}, sudo: false }),
+      .default({ agents: {} }),
     /** Deploys wait for `guildwise-runner approve` (`ask`) or are refused (`off`). */
     deploy: z.enum(['ask', 'off']).default('ask'),
     /** Whole-command hashes of deploys approved with `--pin` (they redeploy unattended while unchanged) [rv4-4]. */
     deployPins: z.array(Sha256Hex).max(1000).default([]),
     /** Pins also bind the commit, so a new commit needs approval again [rv4-5]. */
     deployPinCommit: z.boolean().default(false),
-    /** DevOps tasks not started on this machine wait for a local yes (`ask`); `auto` is refused while sudo is granted [rv4-2]. */
+    /** DevOps tasks not started on this machine wait for a local yes (`ask`) or run (`auto`) [rv4-2]. */
     devopsRequests: z.enum(['ask', 'auto']).default('ask'),
     /** Origins whose unsigned update manifests are accepted (test machines only) [rv5-6]. */
     allowUnsignedUpdatesFrom: z.array(Origin).max(20).default([]),
-    /** How deploys reach Docker (R20): not at all, the narrow root-owned helper, or the docker group (root-equivalent). */
-    docker: z.enum(['none', 'narrow', 'group']).default('none'),
+    /**
+     * The runner's Docker (1.10.0): `rootless` = its own rootless daemon (one per runner user, so per instance), `host` =
+     * the installed daemon (root-equivalent: needs acceptRootEquivalent), `none` = no Docker. Values of before map:
+     * `narrow` (removed) -> `none`, `group` -> `host`, so an old file still parses instead of resetting every grant.
+     */
+    docker: z.preprocess(mapLegacyDocker, z.enum(['rootless', 'host', 'shared', 'none'])).default('none'),
+    /**
+     * The daemon's socket when it is not the default: for `host` a Mac's Docker Desktop socket of the logged-in user
+     * (`unix:///Users/<user>/.docker/run/docker.sock`); for `shared` the socket of another user's rootless daemon.
+     */
+    dockerHost: z.string().regex(DOCKER_HOST_RE).optional(),
+    /**
+     * `shared` (owner 2026-11-21: "The uat runner will use the rootless docker already installed"; "Prod and UAT can use
+     * the same rootless docker"): the acceptance root recorded at install (`guildwise-admin docker shared`), after the
+     * typed acceptance in setup. The start-up check then only warns for exactly this socket, while its daemon is rootless.
+     */
+    sharedDocker: z
+      .object({
+        socket: z.string().regex(/^\/[A-Za-z0-9._/-]{1,300}$/),
+        group: z.string().min(1).max(64),
+        acceptedAt: z.iso.datetime().optional(),
+      })
+      .optional(),
     /** The account the runner runs as (R20): the dedicated `guildwise-runner` user, or the installing user. */
     runnerUser: z
       .object({ mode: z.enum(['dedicated', 'current']), name: z.string().min(1).max(64) })
@@ -115,18 +152,25 @@ export const PolicySchema = z
     signingKeys: z.array(SigningKeySchema).max(20).default([]),
   })
   .superRefine((p, ctx) => {
-    if (p.devopsRequests === 'auto' && p.devops.sudo)
-      ctx.addIssue({
-        code: 'custom',
-        path: ['devopsRequests'],
-        message: 'devopsRequests "auto" is not allowed while sudo is granted: with sudo, asking is always on',
-      });
-    if (p.docker === 'group' && !p.acceptRootEquivalent)
+    if (p.docker === 'host' && !p.acceptRootEquivalent)
       ctx.addIssue({
         code: 'custom',
         path: ['docker'],
-        message: 'docker "group" makes the runner root-equivalent: it needs acceptRootEquivalent',
+        message: 'docker "host" makes the runner root-equivalent: it needs acceptRootEquivalent',
       });
+    if (
+      p.dockerHost &&
+      !(p.docker === 'host' && DESKTOP_HOST_RE.test(p.dockerHost)) &&
+      !(p.docker === 'shared' && SHARED_HOST_RE.test(p.dockerHost))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['dockerHost'],
+        message:
+          'dockerHost is a Docker Desktop socket with docker "host", or a daemon socket under /run with "shared"',
+      });
+    if (p.docker === 'shared' && !p.dockerHost)
+      ctx.addIssue({ code: 'custom', path: ['dockerHost'], message: 'docker "shared" needs dockerHost' });
     const ids = new Set<string>();
     for (const k of p.signingKeys) {
       if (ids.has(k.keyId))
