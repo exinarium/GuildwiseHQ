@@ -4,6 +4,9 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { normalizeRemoteUrl, ReleaseSignPayloadSchema } from '@aom/shared';
 import type { Command } from 'commander';
+import { entryDir, loadIndex } from '../pairings.ts';
+import { resolveDataDir } from '../paths.ts';
+import { readOffers, type SetupOffer } from '../setup/offers.ts';
 import { RELEASE_PREP_DIR } from '../signing/release-prepare.ts';
 import { type MinisignRunner, runMinisign, secretKeyKind, signArtefact } from '../signing/release-sign.ts';
 import { openOwnerTurn } from './authority.ts';
@@ -29,6 +32,17 @@ export interface PolicyCliDeps {
   minisign?: MinisignRunner;
   minisignAvailable?: () => boolean;
   now?: () => number;
+  /** The organizations the server offers this workstation and their DevOps engineer here (`setup-offers.json`). */
+  offers?: () => SetupOffer[];
+}
+
+/** The offers of every pairing under the data dir (what `setup` shows); none when the runner is not paired. */
+export function localOffers(dataRoot: string = resolveDataDir()): SetupOffer[] {
+  try {
+    return readOffers(loadIndex(dataRoot).pairings.map((e) => entryDir(dataRoot, e)));
+  } catch {
+    return [];
+  }
 }
 
 export function defaultCliDeps(dir: string = policyDir()): PolicyCliDeps {
@@ -52,6 +66,7 @@ export function defaultCliDeps(dir: string = policyDir()): PolicyCliDeps {
       : {}),
     minisignAvailable: () =>
       spawnSync(process.env.AOM_MINISIGN_BIN || 'minisign', ['-v'], { stdio: 'ignore' }).status === 0,
+    offers: () => localOffers(),
   };
 }
 
@@ -152,9 +167,49 @@ function show(d: PolicyCliDeps, p: Policy): void {
   d.out(JSON.stringify(p, null, 2));
 }
 
-export function devopsGrant(d: PolicyCliDeps, orgId: string, agentId: string): Policy {
-  if (!UUID.test(orgId) || !UUID.test(agentId))
-    throw new Error('use: devops grant <organization-id> --agent <agent-id>');
+/**
+ * `guildwise-runner devops list`: the organization and agent ids `devops grant` takes (UAT 1.10.0 bug 5: nothing showed
+ * them), from what the server offers this workstation, with each one's local grant and the command to give it.
+ */
+export function devopsList(d: PolicyCliDeps): void {
+  const offers = d.offers?.() ?? [];
+  const granted = d.store.get().devops.agents;
+  if (!offers.length && !Object.keys(granted).length) {
+    d.out(
+      'No organization offers a DevOps engineer for this workstation yet (start the runner once after pairing).',
+    );
+    return;
+  }
+  for (const o of offers) {
+    const g = granted[o.orgId];
+    d.out(`${o.orgName}  organization ${o.orgId}  (the server says you are ${o.role})`);
+    if (!o.devopsAgentId)
+      d.out('  DevOps engineer: none on this workstation yet (hire one, then run this again)');
+    else d.out(`  DevOps engineer: agent ${o.devopsAgentId}`);
+    if (g)
+      d.out(
+        `  local grant: agent ${g}${o.devopsAgentId && g !== o.devopsAgentId ? ' (not the one the server reports now)' : ''}`,
+      );
+    else if (o.devopsAgentId)
+      d.out(`  not granted; to grant: guildwise-runner devops grant ${o.orgId} --agent ${o.devopsAgentId}`);
+  }
+  for (const [org, agent] of Object.entries(granted))
+    if (!offers.some((o) => o.orgId === org))
+      d.out(`organization ${org} (not offered by the server now)\n  local grant: agent ${agent}`);
+}
+
+export function devopsGrant(d: PolicyCliDeps, orgId: string, agentIdArg?: string): Policy {
+  // without --agent: the DevOps engineer the server reports for that organization on this workstation (what setup offers)
+  const agentId =
+    agentIdArg ?? d.offers?.().find((o) => o.orgId.toLowerCase() === orgId.toLowerCase())?.devopsAgentId;
+  if (!UUID.test(orgId) || (agentIdArg !== undefined && !UUID.test(agentIdArg)))
+    throw new Error(
+      'use: devops grant <organization-id> [--agent <agent-id>] (`guildwise-runner devops list` shows both)',
+    );
+  if (!agentId || !UUID.test(agentId))
+    throw new Error(
+      `no DevOps engineer is known for organization ${orgId} on this workstation: pass --agent <agent-id> (\`guildwise-runner devops list\` shows the ids)`,
+    );
   const p = d.store.update((p) => {
     p.devops.agents[orgId] = agentId;
     return p;
@@ -408,10 +463,19 @@ export function registerPolicyCommands(
 
   const devops = program.command('devops').description('local DevOps grants (R18-S)');
   devops
+    .command('list')
+    .description(
+      'the organizations, their DevOps engineer on this workstation and the local grants (the ids `grant` takes)',
+    )
+    .action(run(() => devopsList(make())));
+  devops
     .command('grant <organization-id>')
-    .requiredOption('--agent <agent-id>', 'the DevOps agent of that organization')
+    .option(
+      '--agent <agent-id>',
+      'the DevOps agent of that organization (default: the one `devops list` shows)',
+    )
     .description('let that DevOps agent work outside the sandbox on this workstation')
-    .action(run((org: string, o: { agent: string }) => devopsGrant(make(), org, o.agent)));
+    .action(run((org: string, o: { agent?: string }) => devopsGrant(make(), org, o.agent)));
   devops.command('revoke <organization-id>').action(run((org: string) => devopsRevoke(make(), org)));
   devops
     .command('requests <ask|auto>')

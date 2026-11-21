@@ -7,6 +7,7 @@ import {
   approve,
   deny,
   devopsGrant,
+  devopsList,
   devopsRequests,
   type PolicyCliDeps,
   passkeyTrust,
@@ -206,6 +207,35 @@ describe('local grants are written only by the CLI (R18-S)', () => {
     expect(t.store.get()).toMatchObject({ devops: { agents: { [ORG]: AGENT } }, devopsRequests: 'auto' });
     expect(t.store.get().devops).not.toHaveProperty('sudo');
     expect(statSync(t.store.file).mode & 0o777).toBe(0o600);
+  });
+
+  it('devops list shows the ids `grant` takes (UAT 1.10.0 bug 5); grant without --agent takes the offered engineer', () => {
+    const t = env();
+    const OTHER = '0190a000-0000-7000-8000-000000000003';
+    t.cli.offers = () => [
+      { orgId: ORG, orgName: 'Acme', role: 'owner', devopsAgentId: AGENT },
+      { orgId: OTHER, orgName: 'Beta', role: 'member' },
+    ];
+    devopsList(t.cli);
+    const text = t.out.join('\n');
+    expect(text).toContain(`Acme  organization ${ORG}  (the server says you are owner)`);
+    expect(text).toContain(`DevOps engineer: agent ${AGENT}`);
+    expect(text).toContain(`to grant: guildwise-runner devops grant ${ORG} --agent ${AGENT}`);
+    expect(text).toContain(`Beta  organization ${OTHER}`);
+    expect(text).toContain('none on this workstation yet');
+    t.out.length = 0;
+    devopsGrant(t.cli, ORG);
+    expect(t.store.get().devops.agents).toEqual({ [ORG]: AGENT });
+    expect(() => devopsGrant(t.cli, OTHER)).toThrow(/devops list/);
+    expect(() => devopsGrant(t.cli, 'not-an-id', AGENT)).toThrow(/devops list/);
+    t.out.length = 0;
+    devopsList(t.cli);
+    expect(t.out.join('\n')).toContain(`local grant: agent ${AGENT}`);
+    // nothing offered and nothing granted: says why
+    const u = env();
+    u.cli.offers = () => [];
+    devopsList(u.cli);
+    expect(u.out.join('\n')).toContain('No organization offers a DevOps engineer');
   });
 
   it('an invalid policy.json grants nothing and is never silently replaced', () => {

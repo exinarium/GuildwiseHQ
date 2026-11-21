@@ -193,6 +193,28 @@ describe.skipIf(!canSign)('downloading and verifying the runner', () => {
     for (const r of [refused, off2]) expect(r.log).not.toContain('/api/runner/release/');
   });
 
+  it('a server behind a private CA: --ca-file is used for every release download; without it the real cause is named', () => {
+    setup = shHome();
+    serve(setup.www);
+    const pem = '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n';
+    writeFileSync(join(setup.home, 'private-ca'), pem);
+    const ca = join(setup.home, 'caddy-root.crt');
+    writeFileSync(ca, pem);
+    const ok = runSh(setup, STAGE, { params: on, args: ['--ca-file', ca] });
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(ok.stdout).toContain('SIGNED=1 VERSION=1.10.0');
+    // the three release files all came through (the stub refuses any call without the CA)
+    expect(ok.log.split('\n').filter((l) => l.startsWith('curl '))).toHaveLength(3);
+    const without = runSh(setup, STAGE, { params: on });
+    expect(without.status).toBe(1);
+    expect(without.stderr).toContain(
+      'Could not fetch the runner release manifest from https://hq.example.com',
+    );
+    expect(without.stderr).toContain('the server certificate is not trusted');
+    expect(without.stderr).toContain('--ca-file');
+    expect(without.stderr).not.toContain('offers no runner release manifest');
+  });
+
   it('the offline route (--from-file) uses local files and still checks the signature', () => {
     setup = shHome();
     const local = join(setup.home, 'offline');

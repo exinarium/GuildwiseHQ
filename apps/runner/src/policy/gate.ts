@@ -80,6 +80,37 @@ function describeGeneric(command: string, payload: Record<string, unknown>): str
   return `${command}\n${JSON.stringify(masked, null, 2)}`;
 }
 
+/**
+ * What a held command is about, for its one-line summary (the log line and `guildwise-runner approvals`). Each command
+ * names its own target; nothing secret (a sealed value is never named). Never empty: `vault.configure` carries a list of
+ * vaults, not one id, and showed "vault.configure for  (...)" (UAT 1.10.0 bug 4).
+ */
+export function heldTarget(command: string, payload: Record<string, unknown>): string {
+  const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+  if (command === 'vault.configure') {
+    const vaults = Array.isArray(payload.vaults) ? (payload.vaults as Array<Record<string, unknown>>) : [];
+    const names = vaults.map((v) => str(v?.name) ?? str(v?.vaultId) ?? '?');
+    const shown = names.slice(0, 5).join(', ');
+    const more = names.length > 5 ? ` and ${names.length - 5} more` : '';
+    const resume =
+      Array.isArray(payload.resume) && payload.resume.length ? `, resume ${payload.resume.length}` : '';
+    return vaults.length
+      ? `${vaults.length} vault${vaults.length === 1 ? '' : 's'} (${shown}${more})${resume}`
+      : `no vaults (stop syncing every vault)${resume}`;
+  }
+  if (command === 'provider.key.reseal')
+    return `the ${str(payload.provider) ?? 'provider'} key of organization ${str(payload.orgId) ?? '?'}${str(payload.targetKeyId) ? ` to runner key ${str(payload.targetKeyId)}` : ''}`;
+  if (command === 'provider.endpoints.set') {
+    const n = Array.isArray(payload.endpoints) ? payload.endpoints.length : 0;
+    return `${n} private endpoint${n === 1 ? '' : 's'}`;
+  }
+  if (command === 'env.secret.set')
+    return `secret ${str(payload.name) ?? '?'} of environment target ${str(payload.targetId) ?? '?'}`;
+  if (command === 'deploy.secret.set')
+    return `secret ${str(payload.name) ?? '?'} of project ${str(payload.projectId) ?? '?'}`;
+  return str(payload.projectId) ?? str(payload.vaultId) ?? str(payload.name) ?? '(no target named)';
+}
+
 function describeRecipeWrite(payload: Record<string, unknown>): string {
   const files = Array.isArray(payload.files)
     ? (payload.files as { path: string; mode: string; content: string }[])
@@ -294,10 +325,7 @@ export function gateCommand(
             0,
             300,
           )
-        : `${command} for ${String(payload.projectId ?? payload.vaultId ?? payload.name ?? '')}`.slice(
-            0,
-            300,
-          ),
+        : `${command} for ${heldTarget(command, payload)}`.slice(0, 300),
     detail: command === 'recipe.write' ? describeRecipeWrite(payload) : describeGeneric(command, payload),
     commandHash: commandHashOf(command, payload),
     ...(setupPending(policy) ? { note: SETUP_PENDING_NOTE } : {}),

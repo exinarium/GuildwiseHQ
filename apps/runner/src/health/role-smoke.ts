@@ -20,8 +20,9 @@ import { type IssuedShiftCredential, issueShiftCredential } from '../session/shi
  *    (private HOME, TMPDIR, config dir), against the runner's IPC server, reading the files the agent would have written
  *    in its scratch folder. The runner answers it itself ("dry run": nothing reaches the server).
  *
- * `aom` itself runs outside Claude Code's shell sandbox by design (it has to reach the runner's socket), so this is the
- * path that matters; the bubblewrap boundary is covered by claude-sandbox-real.test.ts. A role that fails is reported
+ * This runs `aom` outside Claude Code's shell sandbox. With the credential scrub on (the 1.10.0 default) Claude Code runs
+ * it INSIDE the sandbox, over the sandbox proxy (the route this smoke test does not exercise): that path is covered by
+ * aom-sandbox-real.test.ts, the bubblewrap boundary by claude-sandbox-real.test.ts. A role that fails is reported
  * to the server, which offers it no work on this workstation until a later run passes.
  */
 

@@ -991,7 +991,7 @@ Checks prerequisites and connectivity:
 - Git version ≥ 2.40
 - Claude CLI is available (if using claude-code runtime)
 - Docker is available (if testers will run)
-- `yt-dlp` is available (optional: only `aom transcript` for YouTube and other video sites needs it; a warning when missing, and the DevOps engineer can install it)
+- `yt-dlp` is available (optional: only `aom transcript` for YouTube and other video sites needs it; a warning when missing, and the DevOps engineer can install it). The PDF renderer does not use it (it is Chrome Headless Shell, the `PDF renderer` line), so it is not part of the baseline. With a dedicated runner user (`guildwise-runner[-<instance>]`) the installer's optional yt-dlp step runs before that user exists and puts yt-dlp in your own `~/.local/bin`, where the runner does not look: install it into the runner user's `~/.local/bin` (or let its DevOps engineer do it: `aom devops "install yt-dlp"`) when its agents need video transcripts
 - Repos found under repoRoots
 - Server is reachable
 

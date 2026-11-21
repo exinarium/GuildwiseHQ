@@ -75,7 +75,7 @@ report() {
   have curl || return 0
   local detail="${3:-}"
   detail="${detail:0:400}"
-  curl -fsS -m 6 -X POST -H 'content-type: application/json' \
+  server_curl -fsS -m 6 -X POST -H 'content-type: application/json' \
     --data "{\"step\":\"$(json_escape "$1")\",\"status\":\"$2\",\"detail\":\"$(json_escape "${detail}")\"}" \
     "${SERVER_URL}/install/${SESSION_TOKEN}/progress" >/dev/null 2>&1 || true
 }
@@ -716,6 +716,23 @@ STAGE_SIGNED=0
 
 release_url() { printf '%s/api/runner/releases/%s' "${SERVER_URL}" "$1"; }
 
+# curl to this server: with --ca-file its private certificate authority is trusted (TLS verification stays on).
+server_curl() {
+  if [ -n "${OPT_CA_FILE:-}" ]; then curl --cacert "${OPT_CA_FILE}" "$@"; else curl "$@"; fi
+}
+
+# What a curl exit code means for a download from this server (22 is an HTTP error answer, e.g. 404: the file is not there).
+curl_reason() {
+  case "$1" in
+    6) printf 'the server name does not resolve' ;;
+    7) printf 'the server cannot be reached' ;;
+    28) printf 'the connection timed out' ;;
+    35) printf 'the TLS handshake failed' ;;
+    51|58|59|60|77|83|90|91) printf 'the server certificate is not trusted (a private certificate authority? pass --ca-file <pem file>)' ;;
+    *) printf 'curl exit %s' "$1" ;;
+  esac
+}
+
 # Fetches manifest.json and manifest.json.minisig, verifies the signature with this server's release key, then downloads
 # the tarball, checks its sha256 against the manifest and unpacks it into a private staging folder. A server that requires
 # signed runners gets a signed release or nothing. With "Only signed runners" off an unsigned release is accepted (checked
@@ -732,13 +749,18 @@ stage_runner_release() {
     [ -f "${OPT_FROM_FILE}/manifest.json.minisig" ] && { cp "${OPT_FROM_FILE}/manifest.json.minisig" "${s}" || die "Could not read the signature in ${OPT_FROM_FILE}."; }
   else
     note "Fetching the runner release manifest from ${SERVER_URL} ..."
-    if ! curl -fsSL --retry 3 -o "${m}" "$(release_url manifest.json)"; then
+    local rc=0
+    server_curl -fsSL --retry 3 -o "${m}" "$(release_url manifest.json)" || rc=$?
+    if [ "${rc}" != 0 ]; then
       rm -f "${m}"
+      # only an HTTP error answer means the server has no manifest; anything else is a connection or certificate problem
+      [ "${rc}" = 22 ] ||
+        die "Could not fetch the runner release manifest from ${SERVER_URL}: $(curl_reason "${rc}")." "Check that this computer can reach ${SERVER_URL} (and pass --ca-file for a private certificate authority), then run the command again."
       if [ "${REQUIRE_SIGNED_RUNNERS}" = 1 ]; then
         die "This server requires signed runners but offers no runner release manifest." "Ask your administrator to publish a signed runner release, then create a new install command."
       fi
       die "This ${APP_NAME} server offers no ${SIGNED_RUNNER_FLOOR} runner release (no release manifest)." "Ask your administrator to publish the runner release, then create a new install command."
-    elif ! curl -fsSL --retry 3 -o "${s}" "$(release_url manifest.json.minisig)"; then
+    elif ! server_curl -fsSL --retry 3 -o "${s}" "$(release_url manifest.json.minisig)"; then
       rm -f "${s}"
     fi
   fi
@@ -770,7 +792,7 @@ stage_runner_release() {
     cp "${OPT_FROM_FILE}/${file}" "${STAGE_TGZ}" || die "${OPT_FROM_FILE} has no ${file}." "Put the runner .tgz next to manifest.json, then run the command again."
   else
     note "Downloading runner ${STAGE_VERSION} from ${SERVER_URL} ..."
-    curl -fsSL --retry 3 -o "${STAGE_TGZ}" "${tgz_url}" ||
+    server_curl -fsSL --retry 3 -o "${STAGE_TGZ}" "${tgz_url}" ||
       die "Could not download the runner from ${SERVER_URL}." "Check that this computer can reach ${SERVER_URL} in a browser, then run the command again."
   fi
   got="$(sha256_of "${STAGE_TGZ}")" || die "No sha256sum or shasum found to check the download." "Install coreutils, then run the command again."

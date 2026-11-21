@@ -78,6 +78,12 @@ export interface ClaudePolicyContext {
   aomReadPaths: string[];
   /** Unix socket of the runner's IPC server (the `aom` CLI talks over it: the sandbox has no loopback route out). */
   ipcSocket?: string;
+  /**
+   * The runner's loopback IPC endpoint (`AOM_IPC_URL`, `http://127.0.0.1:<port>`). Its exact `host:port` is the one
+   * network entry every sandboxed session gets: with the credential scrub on, Claude Code runs `aom` inside the sandbox,
+   * where Unix sockets are refused, and the sandbox's proxy is the only way out (see `ipcDomains`).
+   */
+  ipcUrl?: string;
   /** The real home directory of the runner's OS user (agents run with a private HOME). */
   realHome: string;
   mode: SandboxMode;
@@ -195,7 +201,7 @@ export interface SandboxProfile {
   readOnlyWorktree: boolean;
   /** macOS: keeps `allowLocalBinding` (`DARWIN_LOCAL_BINDING_ROLES` / browser roles). Ignored on Linux. Default false. */
   darwinLocalBinding?: boolean;
-  /** No network for the shell at all (a reviewer reads a local checkout and needs no host): `allowedDomains` is empty. */
+  /** No network for the shell at all (a reviewer reads a local checkout and needs no host): `allowedDomains` holds only the runner's IPC endpoint (`ipcDomains`). */
   offline?: boolean;
 }
 
@@ -549,8 +555,9 @@ function sandboxBlock(
       ],
     },
     // On Linux the sandbox blocks creating any Unix socket (seccomp cannot filter by path), so the `aom` CLI cannot
-    // reach the runner's IPC socket from inside it: it runs outside the sandbox, like git does for hooks. It only
-    // talks to the runner with the shift's token and writes nothing itself.
+    // reach the runner's IPC socket from inside it. Without the credential scrub it runs outside the sandbox through this
+    // list; WITH the scrub (the 1.10.0 default) Claude Code 2.1.330 sandboxes every Bash call and ignores the list, and
+    // `aom` reaches the loopback endpoint through the sandbox's proxy instead (`ipcDomains` in `network.allowedDomains`).
     // Patterns use Bash(...) rule syntax: a bare word matches only the command with no arguments, so `aom *` is
     // needed for `aom handoff ...`; the shim's absolute path is covered too.
     excludedCommands: aomExcluded(ctx.aomReadPaths),
@@ -558,8 +565,8 @@ function sandboxBlock(
       // Bash only: WebFetch/WebSearch are governed by the permission rules ('web' tool), not by this list.
       allowedDomains:
         shell && !profile.offline
-          ? [...REGISTRY_DOMAINS, ...(ctx.extraAllowedDomains ?? []), ...testDomains]
-          : [],
+          ? [...REGISTRY_DOMAINS, ...(ctx.extraAllowedDomains ?? []), ...testDomains, ...ipcDomains(ctx)]
+          : ipcDomains(ctx),
       strictAllowlist: true,
       allowUnixSockets: ctx.ipcSocket ? [ctx.ipcSocket] : [],
       ...(profile.browser ? { allowAllUnixSockets: true as const } : {}),
@@ -645,6 +652,17 @@ export function shadowedWrites(fs: { allowWrite: string[]; denyWrite: string[] }
 }
 
 /** `aom`, `aom *` and the same for the shim's absolute path in the runner's bin dir. */
+/**
+ * The runner's own IPC endpoint as a sandbox network entry (`127.0.0.1:<port>`), or nothing. Only an `http://` URL on a
+ * loopback literal with an explicit port qualifies, so no other value can ever widen the allowlist. The endpoint takes
+ * nothing but a live shift token; it is the same runner the allowed Unix socket leads to.
+ */
+export function ipcDomains(ctx: Pick<ClaudePolicyContext, 'ipcUrl'>): string[] {
+  const m = /^http:\/\/(127\.0\.0\.1|\[::1\]):([1-9][0-9]{0,4})\/?$/.exec(ctx.ipcUrl ?? '');
+  if (!m || Number(m[2]) > 65535) return [];
+  return [`${m[1]}:${m[2]}`];
+}
+
 export function aomExcluded(aomReadPaths: string[]): string[] {
   const out = ['aom', 'aom *'];
   const bin = aomReadPaths[0];
@@ -817,7 +835,7 @@ export function scanSandboxBlock(
     ]),
   ];
   base.network = {
-    allowedDomains: [],
+    allowedDomains: ipcDomains(ctx),
     strictAllowlist: true,
     allowUnixSockets: ctx.ipcSocket ? [ctx.ipcSocket] : [],
     allowLocalBinding: false,
@@ -1063,7 +1081,7 @@ export function buildChatSettings(
     paths.tmp,
   );
   if (sb) {
-    sb.network.allowedDomains = [];
+    sb.network.allowedDomains = ipcDomains(ctx);
     out.sandbox = sb;
   }
   return out;

@@ -3,15 +3,31 @@ import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { adminDirOf, currentUser, instanceOfUser } from './setup/admin-command.ts';
 
 /**
- * How to run one of the runner's own scripts. Bundled (`dist/aom-runner.mjs` next to `dist/aom.mjs`): plain node.
- * From source (dev, vitest): through the tsx CLI so no build is needed.
+ * The Node a bundled runner runs its own scripts with: the root-owned, pinned Node of its install
+ * (`<ADMIN_DIR>[/<instance>]/node/bin/node`, from the signed release; read only, never written) when it is there, else the Node this
+ * process runs on. UAT 1.10.0 bug 7: the shim followed `process.execPath`, which was `/usr/bin/node` when the launcher found
+ * the system Node first on PATH.
+ */
+export function runnerNode(
+  username: string = currentUser(),
+  exists: (p: string) => boolean = existsSync,
+  fallback: string = process.execPath,
+): string {
+  const pinned = join(adminDirOf(instanceOfUser(username)), 'node', 'bin', 'node');
+  return exists(pinned) ? pinned : fallback;
+}
+
+/**
+ * How to run one of the runner's own scripts. Bundled (`dist/aom-runner.mjs` next to `dist/aom.mjs`): the install's own
+ * Node (`runnerNode`). From source (dev, vitest): through the tsx CLI so no build is needed.
  */
 export function selfCommand(script: 'aom' | 'mock-agent'): string[] {
   const here = dirname(fileURLToPath(import.meta.url));
   const bundled = join(here, `${script}.mjs`);
-  if (existsSync(bundled)) return [process.execPath, bundled];
+  if (existsSync(bundled)) return [runnerNode(), bundled];
   const src = script === 'aom' ? join(here, 'aom', 'aom-cli.ts') : join(here, 'adapters', 'mock-agent.ts');
   try {
     const pkg = createRequire(import.meta.url).resolve('tsx/package.json');

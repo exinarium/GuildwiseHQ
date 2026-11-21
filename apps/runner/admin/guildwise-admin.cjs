@@ -540,7 +540,41 @@ function isTestOwner(sys, uid) {
 
 // ----------------------------------------------------------------------------------------------- service
 
-function unitText(u, runnerRoot, caFile = null, L = DEFAULT_LAYOUT) {
+/**
+ * NoNewPrivileges for the runner unit (UAT 1.10.0 bug 6). Since 1.10.0 nothing the runner starts needs to gain privileges:
+ * no sudo, and rootless Docker's setuid newuidmap runs in the runner's systemd USER service, not under this unit. The one
+ * open point is bubblewrap (the agents' sandbox, `aom devops install`) on a host that restricts unprivileged user
+ * namespaces (Ubuntu 24.04+), where bwrap gets its namespace through an AppArmor profile transition. So it is probed the
+ * way the unit runs it: as the runner user, with no_new_privs set. `yes` when that works; `no` (as before) only where it
+ * fails, with the reason printed.
+ */
+function noNewPrivilegesWorks(sys, u) {
+  const r = sys.run(
+    'setpriv',
+    [
+      '--reuid',
+      String(u.uid),
+      '--regid',
+      String(u.gid),
+      '--clear-groups',
+      '--no-new-privs',
+      '--',
+      'bwrap',
+      '--ro-bind',
+      '/',
+      '/',
+      '--dev',
+      '/dev',
+      '--unshare-user',
+      '--unshare-net',
+      'true',
+    ],
+    { timeoutMs: 30000 },
+  );
+  return r.code === 0;
+}
+
+function unitText(u, runnerRoot, caFile = null, L = DEFAULT_LAYOUT, noNewPrivileges = false) {
   checkSafeAbs(runnerRoot, '--runner-root');
   checkSafeAbs(u.home, 'the runner HOME');
   if (caFile) checkSafeAbs(caFile, 'the CA file');
@@ -564,8 +598,8 @@ function unitText(u, runnerRoot, caFile = null, L = DEFAULT_LAYOUT) {
     'RestartSec=10',
     // the start-up refusal exits 78: no restart loop
     'RestartPreventExitStatus=78',
-    // bubblewrap and rootless Docker's setuid newuidmap need it (DESIGN deps-without-sudo decision 12: a follow-up)
-    'NoNewPrivileges=no',
+    // yes unless bubblewrap fails under it on this host (noNewPrivilegesWorks)
+    `NoNewPrivileges=${noNewPrivileges ? 'yes' : 'no'}`,
     'ProtectSystem=full',
     'StandardOutput=journal',
     'StandardError=journal',
@@ -655,8 +689,15 @@ function serviceInstall(sys, opts = {}) {
     }
     return;
   }
-  writeRootFile(sys, L.systemdUnit, unitText(u, runnerRoot, ca, L), 0o644);
+  const nnp = noNewPrivilegesWorks(sys, u);
+  writeRootFile(sys, L.systemdUnit, unitText(u, runnerRoot, ca, L, nnp), 0o644);
   note(sys, `Wrote ${L.systemdUnit} (system unit, User=${u.name}).`);
+  note(
+    sys,
+    nnp
+      ? 'NoNewPrivileges=yes: nothing the runner starts can gain privileges.'
+      : `NoNewPrivileges=no: bubblewrap could not start as ${u.name} with no_new_privs on this host (an AppArmor user-namespace rule?), and the agents' sandbox needs it.`,
+  );
   mustRun(sys, 'systemctl', ['daemon-reload']);
   mustRun(sys, 'systemctl', opts.start ? ['enable', '--now', L.service] : ['enable', L.service]);
 }
@@ -1707,13 +1748,22 @@ function migrateFinish(sys, opts = {}) {
 function verifyInstall(sys, opts = {}) {
   const problems = [];
   const rootUid = opts.rootUid ?? sys.rootUid ?? 0;
-  const checkNode = (abs, mustExist) => {
+  // `tree`: the root-owned folder being walked. A root-owned link inside it that stays inside it is part of the tree (the
+  // Node tarball's bin/npm, bin/npx and bin/corepack): a link's own mode is always 777 and means nothing, its target is
+  // walked and checked on its own. A link that leaves the tree, dangles, or is a parent of the tools folder is a problem.
+  const checkNode = (abs, mustExist, tree = null) => {
     const st = fs.lstatSync(P(sys, abs), { throwIfNoEntry: false });
     if (!st) {
       if (mustExist) problems.push(`${abs} is missing`);
       return null;
     }
-    if (st.isSymbolicLink()) problems.push(`${abs} is a symlink`);
+    if (st.isSymbolicLink()) {
+      if (st.uid !== rootUid) problems.push(`${abs} is not owned by root`);
+      if (!tree) problems.push(`${abs} is a symlink`);
+      else if (!linkStaysInside(sys, abs, tree))
+        problems.push(`${abs} is a symlink that leads out of ${tree}`);
+      return st;
+    }
     if (st.uid !== rootUid) problems.push(`${abs} is not owned by root`);
     if (st.mode & 0o022)
       problems.push(`${abs} is writable by group or others (mode ${(st.mode & 0o777).toString(8)})`);
@@ -1728,12 +1778,15 @@ function verifyInstall(sys, opts = {}) {
   }
   parents.unshift('/');
   for (const p of parents) checkNode(p, true);
-  const walk = (abs) => {
-    const st = checkNode(abs, true);
-    if (st?.isDirectory()) for (const n of fs.readdirSync(P(sys, abs))) walk(path.posix.join(abs, n));
+  const walk = (abs, tree) => {
+    const st = checkNode(abs, true, abs === tree ? null : tree);
+    if (st?.isDirectory()) for (const n of fs.readdirSync(P(sys, abs))) walk(path.posix.join(abs, n), tree);
   };
-  for (const f of ['guildwise-admin', 'node']) walk(path.posix.join(L.toolsDir, f));
-  if (fs.existsSync(P(sys, L.dockerDir))) walk(L.dockerDir);
+  for (const f of ['guildwise-admin', 'node']) {
+    const top = path.posix.join(L.toolsDir, f);
+    walk(top, top);
+  }
+  if (fs.existsSync(P(sys, L.dockerDir))) walk(L.dockerDir, L.dockerDir);
   const u = lookupUser(sys, opts.user || L.user);
   // 1.10.0 has no sudoers rule for a runner: anything left is reported (cleanup-legacy removes ours)
   const runnerName = u ? u.name : L.user;
@@ -1757,6 +1810,63 @@ function verifyInstall(sys, opts = {}) {
   if (problems.length === 0)
     note(sys, "The root-owned tools, the sudoers drop-ins and root's PATH are as they should be.");
   return problems;
+}
+
+/**
+ * Does the link at `abs` stay inside `tree` the way the kernel resolves it, at EVERY hop (REVIEW B1)? Each hop's target may
+ * use `..` only as leading segments, is resolved from the link's physical folder, must land inside the tree's real path,
+ * and may pass through no directory link on the way (only its last component may be a link: the next hop). An absolute
+ * target must name a path inside `tree` with no `..`. A hop that leaves the tree, even to come back later, a dangling
+ * chain, or a loop is refused.
+ */
+function linkStaysInside(sys, abs, tree) {
+  const posix = path.posix;
+  let baseReal;
+  let cur;
+  try {
+    baseReal = fs.realpathSync.native(P(sys, tree));
+    cur = posix.join(fs.realpathSync.native(posix.dirname(P(sys, abs))), posix.basename(abs));
+  } catch {
+    return false;
+  }
+  const inside = (p) => p === baseReal || p.startsWith(`${baseReal}/`);
+  if (!inside(cur)) return false;
+  for (let hop = 0; hop < 40; hop++) {
+    let st;
+    try {
+      st = fs.lstatSync(cur);
+    } catch {
+      return false;
+    }
+    if (!st.isSymbolicLink()) return true;
+    const target = fs.readlinkSync(cur);
+    const seg = target.split('/').filter((x) => x !== '' && x !== '.');
+    let next;
+    if (posix.isAbsolute(target)) {
+      if (seg.includes('..')) return false;
+      const t = `/${seg.join('/')}`;
+      if (t !== tree && !t.startsWith(`${tree}/`)) return false;
+      next = posix.join(baseReal, posix.relative(tree, t));
+    } else {
+      const firstReal = seg.findIndex((x) => x !== '..');
+      if (firstReal !== -1 && seg.slice(firstReal).includes('..')) return false;
+      // the folder of `cur` is physical (checked below for every hop), so leading `..` resolve exactly as the kernel does
+      next = posix.join(posix.dirname(cur), ...seg);
+    }
+    if (!inside(next)) return false;
+    const parts = posix.relative(baseReal, next).split('/').filter(Boolean);
+    let p = baseReal;
+    for (let k = 0; k < parts.length - 1; k++) {
+      p = posix.join(p, parts[k]);
+      try {
+        if (fs.lstatSync(p).isSymbolicLink()) return false;
+      } catch {
+        return false;
+      }
+    }
+    cur = next;
+  }
+  return false;
 }
 
 function securePaths(sys) {

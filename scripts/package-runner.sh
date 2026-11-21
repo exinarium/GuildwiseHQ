@@ -142,7 +142,16 @@ if [ "$1" = start ]; then
     fi
   fi
 fi
-exec node "$HERE/dist/aom-runner.mjs" "$@"
+# The install's own root-owned Node, pinned in the signed release (/usr/local/lib/guildwise[/<instance>]/node), before any
+# Node on PATH: the system /usr/bin/node may be any version, or none.
+NODE=node
+case "$(id -un 2>/dev/null)" in
+  guildwise-runner) PINNED=/usr/local/lib/guildwise/node/bin/node ;;
+  guildwise-runner-*) PINNED="/usr/local/lib/guildwise/$(id -un | sed 's/^guildwise-runner-//')/node/bin/node" ;;
+  *) PINNED=/usr/local/lib/guildwise/node/bin/node ;;
+esac
+[ -x "$PINNED" ] && NODE="$PINNED"
+exec "$NODE" "$HERE/dist/aom-runner.mjs" "$@"
 LAUNCH
 sed -i.bak "s/@FLOOR@/$FLOOR/" "$PKG/aom-runner" && rm -f "$PKG/aom-runner.bak"
 chmod +x "$PKG/aom-runner" "$PKG/dist/"*.mjs

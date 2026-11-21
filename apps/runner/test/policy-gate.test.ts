@@ -146,6 +146,41 @@ describe('other held commands', () => {
       });
   });
 
+  it('every held summary names its target (vault.configure carries a vault list, not one id: UAT 1.10.0 bug 4)', () => {
+    const sum = (cmd: string, payload: Record<string, unknown>) => {
+      const d = gateCommand(set({}), cmd, payload);
+      return d.action === 'hold' ? d.summary : '';
+    };
+    const vaults = [
+      { vaultId: 'v1', kind: 'org_knowledge', name: 'Knowledge', remoteUrl: '', syncIntervalSec: 60 },
+      { vaultId: 'v2', kind: 'project_design', name: 'Designs', remoteUrl: '', syncIntervalSec: 60 },
+    ];
+    expect(sum('vault.configure', { vaults, identity: { name: 'd', email: 'd@x' }, resume: [] })).toBe(
+      'vault.configure for 2 vaults (Knowledge, Designs)',
+    );
+    expect(
+      sum('vault.configure', { vaults: [], identity: { name: 'd', email: 'd@x' }, resume: ['v1'] }),
+    ).toBe('vault.configure for no vaults (stop syncing every vault), resume 1');
+    const many = Array.from({ length: 7 }, (_, i) => ({ ...vaults[0], vaultId: `v${i}`, name: `N${i}` }));
+    expect(sum('vault.configure', { vaults: many })).toBe(
+      'vault.configure for 7 vaults (N0, N1, N2, N3, N4 and 2 more)',
+    );
+    expect(sum('provider.key.reseal', { provider: 'anthropic', orgId: 'o-1', targetKeyId: 'k9' })).toBe(
+      'provider.key.reseal for the anthropic key of organization o-1 to runner key k9',
+    );
+    expect(sum('provider.endpoints.set', { endpoints: ['http://10.0.0.5:11434'] })).toBe(
+      'provider.endpoints.set for 1 private endpoint',
+    );
+    expect(
+      sum('env.secret.set', { targetId: 't-1', name: 'DB_PASSWORD', keyId: 'k', ciphertext: 'CIPH' }),
+    ).toBe('env.secret.set for secret DB_PASSWORD of environment target t-1');
+    expect(sum('deploy.secret.set', { projectId: 'p-1', name: 'API', keyId: 'k', ciphertext: 'CIPH' })).toBe(
+      'deploy.secret.set for secret API of project p-1',
+    );
+    for (const cmd of ['vault.configure', 'provider.key.reseal', 'provider.endpoints.set', 'env.secret.set'])
+      expect(sum(cmd, {}), cmd).not.toMatch(/ for $| for {2}/);
+  });
+
   it('never prints a secret value in the detail', () => {
     const d = gateCommand(set({}), 'env.secret.set', {
       name: 'DB_PASSWORD',

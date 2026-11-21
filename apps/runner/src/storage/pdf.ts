@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 
@@ -98,6 +98,31 @@ export function playwrightCli(): string | undefined {
   }
 }
 
+/**
+ * Is the browser the renderer launches installed under `browsersPath`? `install --only-shell chromium` fetches Chrome
+ * Headless Shell only (`chromium_headless_shell-<rev>`), which a headless launch uses; `chromium.executablePath()` names the
+ * FULL Chromium (`chromium-<rev>`), which is never installed here, so checking that path said "missing" forever (doctor
+ * said missing while the runner reinstalled the shell on every start, and no PDF copy was ever made). Playwright writes
+ * INSTALLATION_COMPLETE into a browser's folder when its download finished.
+ */
+export function headlessShellInstalled(browsersPath: string, browsersJson?: string): boolean {
+  let file = browsersJson;
+  try {
+    file ??= join(
+      dirname(createRequire(import.meta.url).resolve('playwright-core/package.json')),
+      'browsers.json',
+    );
+    const list = (
+      JSON.parse(readFileSync(file, 'utf8')) as { browsers?: Array<{ name?: string; revision?: string }> }
+    ).browsers;
+    const rev = list?.find((b) => b.name === 'chromium-headless-shell')?.revision;
+    if (!rev || !/^[0-9]+$/.test(rev)) return false;
+    return existsSync(join(browsersPath, `chromium_headless_shell-${rev}`, 'INSTALLATION_COMPLETE'));
+  } catch {
+    return false;
+  }
+}
+
 /** Chrome Headless Shell through playwright-core: prints the received HTML with scripts and network off. */
 export function chromiumPdfRenderer(o: ChromiumPdfOptions): PdfRenderer {
   const idleMs = o.idleMs ?? 10 * 60_000;
@@ -148,7 +173,8 @@ export function chromiumPdfRenderer(o: ChromiumPdfOptions): PdfRenderer {
       let pw: PwModule;
       try {
         pw = await loadPlaywright(o.browsersPath);
-        if (!existsSync(o.executablePath ?? pw.chromium.executablePath())) throw new Error('missing');
+        if (o.executablePath ? !existsSync(o.executablePath) : !headlessShellInstalled(o.browsersPath))
+          throw new Error('missing');
         const b = await pw.chromium.launch({
           headless: true,
           args: LAUNCH_ARGS,
@@ -237,9 +263,8 @@ export function chromiumPdfRenderer(o: ChromiumPdfOptions): PdfRenderer {
 
     async status() {
       try {
-        const pw = await loadPlaywright(o.browsersPath);
-        const exe = o.executablePath ?? pw.chromium.executablePath();
-        if (!existsSync(exe)) return { ready: false };
+        if (o.executablePath ? !existsSync(o.executablePath) : !headlessShellInstalled(o.browsersPath))
+          return { ready: false };
         return { ready: true, ...(browser ? { version: browser.version() } : {}) };
       } catch {
         return { ready: false };

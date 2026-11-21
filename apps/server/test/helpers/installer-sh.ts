@@ -21,10 +21,11 @@ export const shParams: InstallerParams = {
 
 const STUBS: Record<string, string> = {
   curl: `#!/bin/bash
-out=""; url=""; post=0
+out=""; url=""; post=0; ca=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -o) out="$2"; shift 2 ;;
+    --cacert) ca="$2"; shift 2 ;;
     -X) post=1; shift 2 ;;
     -m|-H|--data|--retry) shift 2 ;;
     -*) shift ;;
@@ -33,6 +34,8 @@ while [ "$#" -gt 0 ]; do
 done
 [ "$post" = 1 ] && exit 0
 echo "curl $url" >> "$STUB_LOG"
+# a server behind a private CA ($STUB_HOME/private-ca holds its PEM): without --cacert naming it, curl exits 60
+if [ -f "$STUB_HOME/private-ca" ] && ! cmp -s "$ca" "$STUB_HOME/private-ca"; then exit 60; fi
 p="\${url#*://}"; p="/\${p#*/}"
 [ -f "$STUB_WWW$p" ] || exit 22
 if [ -n "$out" ]; then cp "$STUB_WWW$p" "$out"; else cat "$STUB_WWW$p"; fi

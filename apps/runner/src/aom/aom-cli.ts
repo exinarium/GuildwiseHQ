@@ -2976,9 +2976,9 @@ const isEntry = (() => {
   }
 })();
 
-/** Shown when neither the IPC socket nor the loopback endpoint can be reached (typically: called inside the sandbox). */
+/** Shown when neither the IPC socket, the loopback endpoint nor the sandbox's proxy reaches the runner. */
 export const SANDBOX_HINT =
-  'aom cannot reach the runner from inside the shell sandbox. Run aom as a standalone command (no pipes, redirects, `;`, `&&` or `cd`) so it runs outside the sandbox';
+  'aom cannot reach the runner from this shell (the IPC socket, the loopback endpoint and the sandbox proxy all failed). Run aom as a standalone command (no pipes, redirects, `;`, `&&` or `cd`); if it still fails, the runner may have restarted: say so in your report';
 
 /** `fetch` over a Unix socket (`AOM_IPC_SOCKET`): the agent sandbox has no network route to the loopback endpoint. */
 export function socketFetch(socketPath: string, fallback?: typeof fetch): typeof fetch {
@@ -3000,6 +3000,9 @@ export function socketFetch(socketPath: string, fallback?: typeof fetch): typeof
           );
         },
       );
+      // the socket connected: from here on a byte of the call may have reached the runner, so it is never sent again
+      let connected = false;
+      req.on('socket', (s) => s.once('connect', () => (connected = true)));
       req.on('error', (err) => {
         const fail = (e: unknown) =>
           reject(
@@ -3007,11 +3010,139 @@ export function socketFetch(socketPath: string, fallback?: typeof fetch): typeof
               `${SANDBOX_HINT} (${(err as NodeJS.ErrnoException).code ?? err.message}${e === err ? '' : `; ${e instanceof Error ? e.message : String(e)}`})`,
             ),
           );
-        if (fallback) fallback(input as string, init).then(resolve, fail);
+        // only a socket that could not be reached at all falls back (a handoff or an install must never run twice)
+        const code = (err as NodeJS.ErrnoException).code;
+        if (fallback && !connected && code && CONNECT_ERRORS.has(code))
+          fallback(input as string, init).then(resolve, fail);
         else fail(err);
       });
       req.end(typeof init?.body === 'string' ? init.body : undefined);
     })) as typeof fetch;
+}
+
+/** Errors of the connect phase: nothing reached the runner, so trying the next route cannot run a call twice. */
+const CONNECT_ERRORS = new Set([
+  'ECONNREFUSED',
+  'EPERM',
+  'EACCES',
+  'ENETUNREACH',
+  'EHOSTUNREACH',
+  'EADDRNOTAVAIL',
+  'ENOENT',
+]);
+const errCodeOf = (err: unknown): string | undefined => {
+  for (
+    let e: unknown = err, i = 0;
+    e && typeof e === 'object' && i < 4;
+    e = (e as { cause?: unknown }).cause, i++
+  ) {
+    const code = (e as { code?: unknown }).code;
+    if (typeof code === 'string') return code;
+  }
+  return undefined;
+};
+
+/** Hosts a proxy may have to carry a shift's call: this machine only. */
+const LOOPBACK_PROXY_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
+
+/**
+ * The HTTP proxy of Claude Code's shell sandbox (`HTTP_PROXY`, with its per-session credential), when the shell has one.
+ * NO_PROXY is ignored on purpose: the sandbox lists loopback there, and the loopback endpoint is what the proxy is for here.
+ * Only a proxy on loopback counts (Claude Code's always is): an inherited proxy on another host (a company proxy) never
+ * gets the shift token or a call's body.
+ */
+export function sandboxProxy(env: Record<string, string | undefined>): URL | undefined {
+  for (const k of ['HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy']) {
+    const v = env[k];
+    if (!v) continue;
+    try {
+      const u = new URL(v);
+      if (u.protocol === 'http:' && LOOPBACK_PROXY_HOSTS.has(u.hostname.toLowerCase())) return u;
+    } catch {
+      // not a URL: try the next one
+    }
+  }
+  return undefined;
+}
+
+/**
+ * `fetch` of an `http://` URL through an HTTP proxy (absolute-form request). In Claude Code's Linux sandbox (every Bash
+ * call when the credential scrub is on, `aom` included) the shell has no route out but the sandbox's proxy, which lets
+ * through only the `host:port` entries of `sandbox.network.allowedDomains`; the runner lists exactly its own IPC endpoint
+ * there (claude-policy.ts `ipcDomains`). The shift token travels to Claude Code's own proxy process, which started the
+ * session with it.
+ */
+export function proxyFetch(proxy: URL): typeof fetch {
+  const auth =
+    proxy.username || proxy.password
+      ? `Basic ${Buffer.from(`${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`).toString('base64')}`
+      : undefined;
+  return ((input: unknown, init?: RequestInit) =>
+    new Promise<Response>((resolve, reject) => {
+      const target = new URL(String(input));
+      if (target.protocol !== 'http:') {
+        reject(new Error(`the sandbox proxy route carries http:// only, not ${target.protocol}`));
+        return;
+      }
+      const req = httpRequest(
+        {
+          host: proxy.hostname,
+          port: Number(proxy.port || 80),
+          path: target.href,
+          method: init?.method ?? 'GET',
+          headers: {
+            ...(init?.headers as Record<string, string>),
+            host: target.host,
+            ...(auth ? { 'proxy-authorization': auth } : {}),
+          },
+        },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c: Buffer) => chunks.push(c));
+          res.on('end', () => {
+            const body = Buffer.concat(chunks);
+            // the proxy's own refusal (not the runner's answer): a plain-text body, never JSON from the runner
+            if (res.statusCode === 403 && !/json/i.test(String(res.headers['content-type'] ?? '')))
+              reject(
+                new Error(
+                  `the sandbox proxy refused the runner's endpoint ${target.host} (${body.toString('utf8').trim().slice(0, 120)})`,
+                ),
+              );
+            else resolve(new Response(body, { status: res.statusCode ?? 500 }));
+          });
+        },
+      );
+      req.on('error', reject);
+      req.end(typeof init?.body === 'string' ? init.body : undefined);
+    })) as typeof fetch;
+}
+
+/** `first`, then `next` when `first` failed to connect at all (a call that may have reached the runner is never sent twice). */
+export function connectFallback(first: typeof fetch, next: typeof fetch): typeof fetch {
+  return (async (input: unknown, init?: RequestInit) => {
+    try {
+      return await first(input as string, init);
+    } catch (err) {
+      const code = errCodeOf(err);
+      if (!code || !CONNECT_ERRORS.has(code)) throw err;
+      try {
+        return await next(input as string, init);
+      } catch (err2) {
+        throw new Error(`${code}; ${err2 instanceof Error ? err2.message : String(err2)}`);
+      }
+    }
+  }) as typeof fetch;
+}
+
+/**
+ * How `aom` reaches the runner: the Unix socket (`AOM_IPC_SOCKET`), then the loopback endpoint, then the loopback endpoint
+ * through the sandbox's proxy. Claude Code 2.1.330 runs EVERY Bash call inside the sandbox once the credential scrub is on
+ * (`excludedCommands` no longer takes `aom` out), and its seccomp filter refuses Unix sockets there: the proxy is the route.
+ */
+export function ipcFetch(env: Record<string, string | undefined>, base: typeof fetch = fetch): typeof fetch {
+  const proxy = sandboxProxy(env);
+  const tcp = proxy ? connectFallback(base, proxyFetch(proxy)) : base;
+  return env.AOM_IPC_SOCKET ? socketFetch(env.AOM_IPC_SOCKET, tcp) : tcp;
 }
 
 /**
@@ -3088,7 +3219,7 @@ if (isEntry) {
     return runAom(process.argv.slice(2), {
       env: entryEnv,
       io: { out: (s) => process.stdout.write(s), err: (s) => process.stderr.write(s) },
-      fetch: entryEnv.AOM_IPC_SOCKET ? socketFetch(entryEnv.AOM_IPC_SOCKET, fetch) : fetch,
+      fetch: ipcFetch(entryEnv),
       readFile: (path) => (stdinText !== undefined && path === '-' ? stdinText : confined(path)),
       shiftEnvAttempts,
     });

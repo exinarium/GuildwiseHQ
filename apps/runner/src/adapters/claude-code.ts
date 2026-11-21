@@ -632,6 +632,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       ...(input.scopedVaults?.length ? { scopedVaults: input.scopedVaults } : {}),
       aomReadPaths: [this.paths?.bin ?? join(root, 'bin'), ...(script ? [dirname(script)] : [])],
       ...(input.env.AOM_IPC_SOCKET ? { ipcSocket: input.env.AOM_IPC_SOCKET } : {}),
+      ...(input.env.AOM_IPC_URL ? { ipcUrl: input.env.AOM_IPC_URL } : {}),
       realHome: this.realHome(),
       accountDirs: this.registry.list().flatMap((a) => (a.configDir ? [a.configDir] : [])),
       mode: this.cfg.sandbox,

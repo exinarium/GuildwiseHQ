@@ -149,7 +149,7 @@ describe('service install [R18-P]', () => {
     for (const line of [
       'User=guildwise-runner',
       'RestartPreventExitStatus=78',
-      'NoNewPrivileges=no',
+      'NoNewPrivileges=yes',
       'ProtectSystem=full',
       'ExecStart="/home/guildwise-runner/.local/share/guildwise/runner/current/aom-runner" start',
       'WantedBy=multi-user.target',
@@ -157,6 +157,43 @@ describe('service install [R18-P]', () => {
       expect(unit).toContain(`${line}\n`);
     expect(statSync(join(f.root, admin.SYSTEMD_UNIT)).mode & 0o777).toBe(0o644);
     expect(f.calls).toContainEqual({ cmd: 'systemctl', args: ['daemon-reload'] });
+  });
+
+  it('NoNewPrivileges: probed as the runner user with no_new_privs on bubblewrap; no only where that fails (UAT bug 6)', async () => {
+    const f = fakeSystem({ users: [RUNNER] });
+    expect(await admin.main(['service', 'install'], f.sys)).toBe(0);
+    const probe = f.calls.find((c) => c.cmd === 'setpriv');
+    expect(probe?.args).toEqual([
+      '--reuid',
+      String(RUNNER.uid),
+      '--regid',
+      String(RUNNER.gid),
+      '--clear-groups',
+      '--no-new-privs',
+      '--',
+      'bwrap',
+      '--ro-bind',
+      '/',
+      '/',
+      '--dev',
+      '/dev',
+      '--unshare-user',
+      '--unshare-net',
+      'true',
+    ]);
+    expect(f.out.join('\n')).toContain('NoNewPrivileges=yes');
+    const g = fakeSystem({
+      users: [RUNNER],
+      handle: (c) =>
+        c.cmd === 'setpriv'
+          ? { code: 1, stdout: '', stderr: 'bwrap: setting up uid map: Permission denied' }
+          : undefined,
+    });
+    expect(await admin.main(['service', 'install'], g.sys)).toBe(0);
+    const unit = readFileSync(join(g.root, admin.SYSTEMD_UNIT), 'utf8');
+    expect(unit).toContain('NoNewPrivileges=no\n');
+    expect(unit).not.toContain('NoNewPrivileges=yes');
+    expect(g.out.join('\n')).toContain('bubblewrap could not start as guildwise-runner with no_new_privs');
   });
 
   it('refuses a runner root that could inject into the unit', async () => {
@@ -598,6 +635,74 @@ describe('verify: root-owned install, no sudoers rule, root PATH [rv6-1]', () =>
     g.sys.rootUid = 12345;
     expect(await admin.main(['verify'], g.sys)).toBe(1);
     expect(g.err.join('\n')).toContain('/usr/local/lib/guildwise is not owned by root');
+  });
+
+  it("accepts the Node tarball's root-owned links inside the tree (bin/npm, npx, corepack), flags one that leaves it or dangles", async () => {
+    const f = installed();
+    const node = join(f.root, 'usr/local/lib/guildwise/node');
+    mkdirSync(join(node, 'lib/node_modules/npm/bin'), { recursive: true });
+    mkdirSync(join(node, 'lib/node_modules/corepack/dist'), { recursive: true });
+    for (const d of ['lib', 'lib/node_modules', 'lib/node_modules/npm', 'lib/node_modules/npm/bin'])
+      chmodSync(join(node, d), 0o755);
+    chmodSync(join(node, 'lib/node_modules/corepack'), 0o755);
+    chmodSync(join(node, 'lib/node_modules/corepack/dist'), 0o755);
+    for (const fl of ['npm/bin/npm-cli.js', 'npm/bin/npx-cli.js', 'corepack/dist/corepack.js']) {
+      writeFileSync(join(node, 'lib/node_modules', fl), '#!/usr/bin/env node\n');
+      chmodSync(join(node, 'lib/node_modules', fl), 0o755);
+    }
+    symlinkSync('../lib/node_modules/npm/bin/npm-cli.js', join(node, 'bin/npm'));
+    symlinkSync('../lib/node_modules/npm/bin/npx-cli.js', join(node, 'bin/npx'));
+    // an absolute link that stays in the tree
+    symlinkSync(
+      '/usr/local/lib/guildwise/node/lib/node_modules/corepack/dist/corepack.js',
+      join(node, 'bin/corepack'),
+    );
+    expect(await admin.main(['verify'], f.sys)).toBe(0);
+    expect(f.err).toEqual([]);
+
+    symlinkSync('/etc/passwd', join(node, 'bin/evil'));
+    symlinkSync('../../../../../../tmp', join(node, 'bin/up'));
+    symlinkSync('../nowhere', join(node, 'bin/dangling'));
+    expect(await admin.main(['verify'], f.sys)).toBe(1);
+    const e = f.err.join('\n');
+    for (const n of ['evil', 'up', 'dangling'])
+      expect(e).toContain(
+        `/usr/local/lib/guildwise/node/bin/${n} is a symlink that leads out of /usr/local/lib/guildwise/node`,
+      );
+    expect(e).not.toMatch(/bin\/(npm|npx|corepack) /);
+    expect(e).not.toContain('mode 777');
+  });
+
+  it('resolves links the way the kernel does: a `..` after a folder link, or a hop through /tmp, is refused (REVIEW B1)', async () => {
+    const f = installed();
+    const node = join(f.root, 'usr/local/lib/guildwise/node');
+    mkdirSync(join(node, 'a/b'), { recursive: true });
+    for (const d of ['a', 'a/b']) chmodSync(join(node, d), 0o755);
+    writeFileSync(join(node, 'bin/real'), '#!/bin/sh\n');
+    chmodSync(join(node, 'bin/real'), 0o755);
+    // outside the tree, next to it: what the kernel really opens for npm2
+    writeFileSync(join(f.root, 'usr/local/lib/guildwise/x'), 'OUTSIDE\n');
+    // a folder link to the tree top (itself inside), then `sub/../x`: lexically node/a/b/x (a decoy that exists), really
+    // <parent of node>/x
+    writeFileSync(join(node, 'a/b/x'), 'DECOY\n');
+    chmodSync(join(node, 'a/b/x'), 0o644);
+    symlinkSync('../..', join(node, 'a/b/sub'));
+    symlinkSync('sub/../x', join(node, 'a/b/npm2'));
+    // the first hop leaves the tree into /tmp (others may write there), then comes back to a real file of the tree
+    mkdirSync(join(f.root, 'tmp'), { recursive: true });
+    symlinkSync('/usr/local/lib/guildwise/node/bin/real', join(f.root, 'tmp/hop'));
+    symlinkSync('/tmp/hop', join(node, 'bin/npm3'));
+    // a path through the folder link (no `..`, lands on node/bin/real): refused too, no directory link may be crossed
+    symlinkSync('sub/bin/real', join(node, 'a/b/npm4'));
+    expect(readFileSync(join(node, 'a/b/npm2'), 'utf8')).toBe('OUTSIDE\n'); // the kernel's view
+    expect(await admin.main(['verify'], f.sys)).toBe(1);
+    const e = f.err.join('\n');
+    for (const n of ['a/b/npm2', 'bin/npm3', 'a/b/npm4'])
+      expect(e).toContain(
+        `/usr/local/lib/guildwise/node/${n} is a symlink that leads out of /usr/local/lib/guildwise/node`,
+      );
+    // the folder link itself points at the tree top: inside, accepted
+    expect(e).not.toContain('a/b/sub is a symlink');
   });
 
   it('flags any sudoers drop-in left for the runner, and a secure_path into the runner HOME', async () => {
