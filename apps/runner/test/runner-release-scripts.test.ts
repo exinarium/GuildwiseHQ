@@ -74,10 +74,10 @@ describe('set-runner-release-key.sh', () => {
     expect(spawnSync('ls', [join(dir, 'apps')]).status).not.toBe(0);
   });
 
-  it('the repository still holds the placeholder (the owner sets his key after the merge)', () => {
-    expect(
-      readFileSync(join(REPO, 'apps/runner/release-key/guildwise-runner-release.pub'), 'utf8'),
-    ).toContain('PLACEHOLDER');
+  it("the repository holds the owner's release key, set with this script (0403EF6CE164E7D8)", () => {
+    const pub = readFileSync(join(REPO, 'apps/runner/release-key/guildwise-runner-release.pub'), 'utf8');
+    expect(pub).toContain('minisign public key 0403EF6CE164E7D8');
+    expect(pub).not.toContain('PLACEHOLDER');
   });
 });
 

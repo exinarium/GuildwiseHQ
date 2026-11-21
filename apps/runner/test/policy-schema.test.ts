@@ -98,10 +98,10 @@ describe('policy.json schema', () => {
 });
 
 describe('release key and test fixtures', () => {
-  it('the official key is the placeholder until the owner commits his', () => {
-    expect(releaseKeyIsPlaceholder()).toBe(true);
-    expect(RELEASE_KEY_ID).toBeNull();
-    expect(read('../../../release-key/guildwise-runner-release.pub')).toContain('PLACEHOLDER');
+  it("the official key is the owner's committed key (0403EF6CE164E7D8), not the placeholder", () => {
+    expect(releaseKeyIsPlaceholder()).toBe(false);
+    expect(RELEASE_KEY_ID).toBe('0403EF6CE164E7D8');
+    expect(read('../../../release-key/guildwise-runner-release.pub')).toContain('0403EF6CE164E7D8');
   });
 
   it('test keys parse as minisign public keys with the ids minisign printed', () => {

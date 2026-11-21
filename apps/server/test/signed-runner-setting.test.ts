@@ -1,7 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { join, resolve } from 'node:path';
-import { runnerAtLeast, SIGNED_RUNNER_CLOSE_CODE, UNPAIRED_CLOSE_REASON, WS_CLOSE } from '@aom/shared';
+import {
+  OFFICIAL_RUNNER_RELEASE_KEY_ID,
+  OFFICIAL_RUNNER_RELEASE_PUBKEY,
+  runnerAtLeast,
+  SIGNED_RUNNER_CLOSE_CODE,
+  UNPAIRED_CLOSE_REASON,
+  WS_CLOSE,
+} from '@aom/shared';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import {
   checkReleaseProof,
@@ -85,11 +92,12 @@ describe('the signed-release proof', () => {
     });
   });
 
-  it('trusts nothing while the official key is the placeholder and no own key is set', () => {
-    expect(trustedReleaseKey({ runnerReleasePubkey: undefined })).toBeNull();
+  it("trusts the owner's committed official key when no own key is set, and refuses a proof signed by another key", () => {
+    expect(trustedReleaseKey({ runnerReleasePubkey: undefined })).toBe(OFFICIAL_RUNNER_RELEASE_PUBKEY);
+    expect(OFFICIAL_RUNNER_RELEASE_KEY_ID).toBe('0403EF6CE164E7D8');
     expect(checkReleaseProof({ runnerReleasePubkey: undefined }, '1.10.0', fixtureProof())).toEqual({
       ok: false,
-      reason: 'no_trusted_key',
+      reason: 'bad_signature',
     });
   });
 
