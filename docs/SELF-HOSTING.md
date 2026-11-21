@@ -197,6 +197,10 @@ curl -fsSL 'https://guildwise.example.com/install/<short-lived-token>/install.sh
 
 The installer installs git, bubblewrap and socat (Linux), Node 22 and Claude Code, asks which folders hold your code, runs `guildwise-runner repos add` for each, walks you through the Claude sign-in, and installs the service (`guildwise-runner` on systemd, a launchd service on macOS).
 
+### Two runners on one machine (UAT and production)
+
+A test machine can serve a UAT server and production with two fully separate runners: run each server's installer with its own `--instance` name, for example `... | bash -s -- --instance uat --ca-file ~/uat-ca.pem` from the UAT server and `... | bash -s -- --instance prod` from production. Each gets its own user (`guildwise-runner-uat`, `guildwise-runner-prod`), service, data, policy, clones, CA copy, sudoers rules and approved apps, and neither can read the other's. This isolation is between the runners as unprivileged users only. Whoever holds either server's release signing key is effectively root on the machine, because each instance's install and deploy tools run as root, so treat the UAT key as production-grade. Sudo or the docker group for either runner makes it root-equivalent and breaks the isolation, so keep both on `--sudo off` and `--docker none` or `narrow`. [docs/RUNNER.md](RUNNER.md) ("Two runners on one machine") has the details.
+
 ### Pair by hand
 
 1. In the app, open **Workstations > Pair with a code** and copy the one-time code. It is valid for 10 minutes and for one pairing attempt.

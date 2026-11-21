@@ -4,6 +4,8 @@
  * installer template. A flag beats its variable.
  */
 
+import { isInstanceName } from './admin-command.ts';
+
 export class SetupError extends Error {
   constructor(
     message: string,
@@ -28,6 +30,7 @@ export interface RawSetupFlags {
   deployPinCommit?: boolean;
   allowUnsignedFrom?: string[];
   dataDir?: string;
+  instance?: string;
 }
 
 export interface ApproveApp {
@@ -53,6 +56,8 @@ export interface SetupOptions {
   deployPinCommit?: boolean;
   allowUnsignedFrom?: string[];
   dataDir?: string;
+  /** A named runner instance (`guildwise-runner-<name>`); absent: the single runner of before. */
+  instance?: string;
 }
 
 const APP_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
@@ -95,6 +100,16 @@ export function exactOrigin(v: string): string {
       `--allow-unsigned-from needs an exact origin without a path (got ${JSON.stringify(v)})`,
     );
   return u.origin;
+}
+
+/** `--instance <name>`: lowercase letters, digits and inner dashes, at most 15 (INSTANCE_RE). */
+export function parseInstance(v: string | undefined): string | undefined {
+  if (v === undefined || v === '') return undefined;
+  if (!isInstanceName(v))
+    throw new SetupError(
+      `--instance takes lowercase letters, digits and inner dashes, at most 15, not node, guildwise-admin or deploy-compose (got ${JSON.stringify(v)})`,
+    );
+  return v;
 }
 
 export function parseApproveApp(spec: string): ApproveApp {
@@ -143,6 +158,7 @@ export function parseSetupOptions(raw: RawSetupFlags, env: NodeJS.ProcessEnv = p
     deployPinCommit: raw.deployPinCommit === true || truthy(e('DEPLOY_PIN_COMMIT')) ? true : undefined,
     allowUnsignedFrom: unsignedRaw.length > 0 ? [...new Set(unsignedRaw.map(exactOrigin))] : undefined,
     dataDir: raw.dataDir,
+    instance: parseInstance(raw.instance ?? e('INSTANCE')),
   };
   if (opts.docker === 'group' && !opts.acceptRootEquivalent)
     throw new SetupError(

@@ -28,6 +28,14 @@
  * any interpreter but /usr/local/lib/guildwise/node/bin/node. guildwise-admin's approve-app may require() this file
  * (it is CommonJS, so it loads from an extensionless path) and call prepare() to get the same freeze, checks and pin.
  *
+ * Named runner instances (`guildwise-admin --instance <name>`): sudo sets SUDO_USER and SUDO_UID itself (the sudoers rule
+ * pins the environment), so a caller `guildwise-runner-<name>` reads only /etc/guildwise-runner-<name>/apps, freezes into
+ * /var/lib/guildwise/apps-<name>, runs the compose project `guildwise_<name>_<app>`, and only an approval whose owner is
+ * its own uid. Two instances on one machine never see, deploy or stop each other's apps (instanceOptions below). Any
+ * other caller (the default runner) gets the paths above, as before. An instance's sudoers rule names its own copy,
+ * /usr/local/lib/guildwise/<name>/deploy-compose, which runs only under /usr/local/lib/guildwise/<name>/node and only
+ * for that instance's caller (cliOptions): the tools of one server's release never serve another instance.
+ *
  * Exit codes: 0 ok, 1 docker failed, 2 usage, 3 held (the config differs from the approved one), 4 refused (an escape
  * or a key outside the allowlist), 5 environment (not root, wrong interpreter, unsafe ownership or permissions).
  */
@@ -1669,7 +1677,7 @@ async function prepare(app, sourceDir, options) {
 }
 
 async function prepareLocked(app, sourceDir, opts, appDir) {
-  const project = `guildwise-${app}`;
+  const project = `${opts.projectPrefix || 'guildwise-'}${app}`;
   const snap = await freeze(sourceDir, appDir, opts);
   if (typeof opts.afterFreeze === 'function') await opts.afterFreeze(snap);
   const files = composeFiles(snap.dir);
@@ -1732,6 +1740,9 @@ async function deploy(app, action, options = {}) {
   if (!ACTIONS.has(action))
     throw new DeployError(`unknown action ${JSON.stringify(action)}: up, pull, down or resolve`, EXIT.USAGE);
   const conf = readAppConf(app, withDefaults(options));
+  // an instance runs only its own approvals: the reader uid fixed at approval must be the caller's own
+  if (options.callerUid !== undefined && conf.owner !== options.callerUid)
+    throw envError(`${app} was not approved for this runner instance`);
   // [B1] the reader identity comes only from the root-owned approval, never from the caller or the path
   const opts = withDefaults({ ...options, readerUid: conf.owner, readerGid: conf.group });
   const appDir = ensureAppDir(app, opts);
@@ -1804,6 +1815,55 @@ async function deploy(app, action, options = {}) {
 /* CLI                                                                                                                */
 /* ------------------------------------------------------------------------------------------------------------------ */
 
+/** The same rule as guildwise-admin's INSTANCE_RE (this file may not import it; a test keeps the two equal). */
+const INSTANCE_RE = /^[a-z0-9](?:[a-z0-9-]{0,13}[a-z0-9])?$/;
+const RESERVED_INSTANCES = ['node', 'guildwise-admin', 'deploy-compose'];
+/** The top-level root-owned tools folder; an instance's copy lives in <TOOLS_DIR>/<name>/. */
+const TOOLS_DIR = '/usr/local/lib/guildwise';
+
+/**
+ * The paths of the calling runner instance, from the SUDO_USER/SUDO_UID sudo sets (never from the caller's own
+ * variables: the sudoers rule has env_reset, !env_keep, !setenv). `guildwise-runner-<name>` gets that instance's conf and
+ * state folders, compose project prefix and its uid as the only approval owner it may run; anyone else gets {} (the
+ * defaults, as before).
+ */
+function instanceOptions(env) {
+  const m = /^guildwise-runner-(.+)$/.exec(String(env?.SUDO_USER || ''));
+  if (!m) return {};
+  const name = m[1];
+  const uid = Number(env.SUDO_UID);
+  if (!INSTANCE_RE.test(name) || RESERVED_INSTANCES.includes(name) || !Number.isSafeInteger(uid) || uid <= 0)
+    throw new DeployError(
+      `not a runner instance this helper knows: ${JSON.stringify(env.SUDO_USER)}`,
+      EXIT.ENV,
+    );
+  return {
+    confDir: `/etc/guildwise-runner-${name}/apps`,
+    stateDir: `/var/lib/guildwise/apps-${name}`,
+    projectPrefix: `guildwise_${name}_`,
+    callerUid: uid,
+    adminCommand: `sudo ${TOOLS_DIR}/${name}/guildwise-admin --instance ${name}`,
+    toolsDir: `${TOOLS_DIR}/${name}`,
+  };
+}
+
+/**
+ * The options of a CLI run: the caller's instance (instanceOptions) and the Node this copy must run under. This file
+ * must be the copy in the caller's own tools folder (the top-level one for the single runner and people,
+ * /usr/local/lib/guildwise/<name>/ for an instance), so one instance's release never runs another instance's deploys.
+ */
+function cliOptions(env, file) {
+  const inst = instanceOptions(env);
+  const toolsDir = inst.toolsDir || TOOLS_DIR;
+  if (path.dirname(String(file)) !== toolsDir)
+    throw new DeployError(
+      `this deploy-compose (${file}) does not serve ${env?.SUDO_USER || 'this caller'}: use ${toolsDir}/deploy-compose`,
+      EXIT.ENV,
+    );
+  const { toolsDir: _t, ...rest } = inst;
+  return { ...rest, nodeBin: `${toolsDir}/node/bin/node` };
+}
+
 async function main(argv) {
   if (argv[0] === '--reader') {
     // The unprivileged half of the freeze. Never as root: it would read root-only files for the caller.
@@ -1816,12 +1876,19 @@ async function main(argv) {
   try {
     if (argv.length !== 2)
       throw new DeployError('usage: deploy-compose <app> up|pull|down|resolve', EXIT.USAGE);
-    preflight(DEFAULTS);
+    // the interpreter first (as before), then whether this copy serves the caller
+    preflight({
+      ...DEFAULTS,
+      nodeBin: `${instanceOptions(process.env).toolsDir || TOOLS_DIR}/node/bin/node`,
+    });
+    const cli = cliOptions(process.env, __filename);
     const [app, action] = argv;
     checkAppName(app);
     if (!ACTIONS.has(action))
       throw new DeployError('usage: deploy-compose <app> up|pull|down|resolve', EXIT.USAGE);
+    const { nodeBin: _n, ...inst } = cli;
     const result = await deploy(app, action, {
+      ...inst,
       rootUid: 0,
       dropPrivileges: true,
       homeDir: os.userInfo().homedir,
@@ -1868,6 +1935,9 @@ module.exports = {
   cleanEnv,
   prepare,
   deploy,
+  instanceOptions,
+  cliOptions,
+  INSTANCE_RE,
   main,
 };
 

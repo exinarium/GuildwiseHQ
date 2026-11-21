@@ -37,7 +37,7 @@ The link works for 30 minutes. The script embeds the server URL, a fresh **singl
 **1.10.0 changes to the install** (the numbering above is the older flow; the installer now adds these steps).
 
 - **First: "Looking for an older runner".** The installer detects a runner from before Guildwise 1.10.0: `~/.local/share/guildwise/runner`, `~/.aom-runner` (or `AOM_RUNNER_HOME`), `~/.config/aom-runner`, `~/.local/bin/guildwise-runner` and `aom-runner`, the systemd user unit `aom-runner`, the macOS LaunchAgent `com.guildwisehq.runner`, Windows scheduled tasks, the same inside the default WSL distribution, and running processes. It stops them and **quarantines** them (the default) into one tar under `~/.guildwise-quarantine/<UTC timestamp>/` (folder mode 700, files 600, execute bits stripped, with a `MANIFEST.txt` of paths, sizes and sha256), or deletes them with `--legacy remove`. Nothing is read, copied or reused: no token, key, sealed sudo password, policy or clone. It prints where the quarantine is and that it may be deleted after review. If sudo was granted to the old runner, change that user's password: the old runner's sealed sudo password may be known.
-- **Then: "Setting local permissions".** After the package is installed and verified, the installer runs `guildwise-runner setup` (below), then pairs. Scripted installs pass flags through: `--runner-user dedicated|current`, `--devops-orgs`, `--sudo on|off`, `--docker none|narrow|group`, `--yes`, `--accept-root-equivalent`, `--legacy quarantine|remove`. Answers never come from the server.
+- **Then: "Setting local permissions".** After the package is installed and verified, the installer runs `guildwise-runner setup` (below), then pairs. Scripted installs pass flags through: `--runner-user dedicated|current`, `--devops-orgs`, `--sudo on|off`, `--docker none|narrow|group`, `--yes`, `--accept-root-equivalent`, `--legacy quarantine|remove`, `--instance <name>` (a named runner; see "Two runners on one machine"). Answers never come from the server.
 - **Offline: `--from-file`.** Install from a package you downloaded and verified yourself. The installer script is otherwise served by the server (trust on first use).
 - The installer keeps `manifest.json` and `manifest.json.minisig` beside the runner; the runner sends that proof at pairing and hello.
 - The macOS dedicated user and the Windows dedicated WSL distribution are not yet tested on hardware.
@@ -857,7 +857,39 @@ The runner refuses to start, with **exit code 78** (the workstation page shows i
 
 ### `guildwise-admin`
 
-A root-owned program the installer copies from the verified package to `/usr/local/lib/guildwise/`; it runs only under the bundled Node at `/usr/local/lib/guildwise/node`. The runner can never change it. Commands: `user create`, `service install|remove`, `sudo on|off`, `docker none|narrow|group`, `approve-app`, `readers add|remove`, `migrate-user [--finish]`, `apply`, `verify`.
+A root-owned program the installer copies from the verified package to `/usr/local/lib/guildwise/`; it runs only under the bundled Node at `/usr/local/lib/guildwise/node`. The runner can never change it. Commands: `user create`, `service install|remove`, `sudo on|off`, `docker none|narrow|group`, `approve-app`, `readers add|remove`, `migrate-user [--finish]`, `apply`, `verify`. Every command takes `--dry-run` and `--instance <name>` (below).
+
+### Two runners on one machine (named instances)
+
+One machine can run several fully separate runners, for example one paired with a UAT server and one with production. Give each a name with `--instance <name>` (lowercase letters, digits and inner dashes, at most 15 characters). Each instance gets its own:
+
+| | single runner (no `--instance`) | instance `uat` |
+|---|---|---|
+| dedicated user and HOME | `guildwise-runner` | `guildwise-runner-uat` (Linux `/home/guildwise-runner-uat`, macOS `/var/guildwise-runner-uat`) |
+| runner root, data, `policy.json`, clones | in that HOME | in that HOME (mode 0700: the other runner cannot read or write them) |
+| service | systemd `guildwise-runner`, LaunchDaemon `com.guildwisehq.runner` | systemd `guildwise-runner-uat`, LaunchDaemon `com.guildwisehq.runner.uat` |
+| CA copy (`--ca-file`) | `/etc/guildwise-runner/ca.pem` | `/etc/guildwise-runner-uat/ca.pem` |
+| sudoers rules | `/etc/sudoers.d/guildwise-runner`, `guildwise-runner-docker` | `/etc/sudoers.d/guildwise-runner-uat_sudo`, `guildwise-runner-uat_docker` |
+| approved compose apps | `/etc/guildwise-runner/apps`, project `guildwise-<app>` | `/etc/guildwise-runner-uat/apps`, project `guildwise_uat_<app>` (volumes and networks `guildwise_uat_<app>_<name>`) |
+| readers group, migration marker | `guildwise-readers`, `/var/lib/guildwise/migrate-user.json` | `guildwise-readers-uat`, `/var/lib/guildwise/migrate-user-uat.json` |
+| root-owned tools (guildwise-admin, deploy-compose, their Node) | `/usr/local/lib/guildwise/` | `/usr/local/lib/guildwise/uat/` |
+
+Each instance pairs with the server whose installer you run, and runs that server's runner package, so it trusts only that server's release key (a UAT build key on UAT, the official key on production). `deploy-compose` knows the calling instance from the `SUDO_USER` and `SUDO_UID` that sudo sets, so one instance can never resolve, deploy or stop the other's approved apps. The start-up check treats a `policy.json` written for another runner user as foreign (refused when the refusal is on, a warning otherwise), and checks that the instance's `/etc/guildwise-runner-<name>` is root-owned.
+
+**What the isolation does not cover.** The two runners are isolated from each other as unprivileged users. Root on the machine is a different matter. Whoever holds an instance's release signing key is effectively root on this machine, because that instance's install (its guildwise-admin) and its deploy tools (its deploy-compose, through the NOPASSWD rule) run as root. That holds for the UAT key on a machine that also runs production, so treat the UAT signing key as production-grade. Turning on sudo (`--sudo on`) or the docker group (`--docker group`) for either runner makes that runner root-equivalent, which reaches the other runner and breaks the isolation. Keep both runners on `--sudo off`, and on `--docker none` or `--docker narrow`.
+
+Install both with the command each server's **Add a workstation** page gives you, adding the instance name (and, for a server with a private CA, its certificate):
+
+```sh
+# UAT (its own CA)
+curl -fsSL 'https://uat.example.com/install/<token>/install.sh' | bash -s -- --instance uat --ca-file ~/uat-ca.pem
+# production
+curl -fsSL 'https://hq.example.com/install/<token>/install.sh' | bash -s -- --instance prod
+```
+
+Manage each one with its own copy of the tools: `sudo /usr/local/lib/guildwise/uat/guildwise-admin --instance uat <command>` (every command takes it, including `service install|remove`, `sudo on|off`, `docker`, `approve-app`, `readers`, `migrate-user`, `apply` and `verify`), and `sudo -u guildwise-runner-uat -H guildwise-runner setup` for its local permissions (setup prints the root steps with `--instance uat`). Without `--instance` everything is the single `guildwise-runner` as before; an existing single runner can stay next to named ones.
+
+Each instance has its own root-owned tools in `/usr/local/lib/guildwise/<name>/`, installed from its own server's verified release (only the interpreter line of guildwise-admin and deploy-compose is changed, to that folder's Node), so a release signed with the UAT key never supplies the tools production's runner uses. An install for one instance never writes another's folder or the top-level one. The tools enforce it: the top-level `guildwise-admin` refuses `--instance`, an instance's copy refuses any other instance (and manages its own without the flag), and an instance's `deploy-compose` serves only that instance's runner user. Both servers must be on a release that knows `--instance`.
 
 ### `deploy-compose` (the narrow Docker helper)
 

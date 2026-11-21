@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { OFFICIAL_RUNNER_RELEASE_KEY_ID, OFFICIAL_RUNNER_RELEASE_PUBKEY } from '@aom/shared';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createTestApp, type TestApp, uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool } from './helpers/db.ts';
@@ -38,10 +39,11 @@ async function scripts(env: Record<string, string>) {
 }
 
 describe('the served installer header', () => {
-  it('self-hosted default: setting off, and no key while the official key is still the placeholder', async () => {
+  it("self-hosted default: setting off, and the official key (the owner's 0403EF6CE164E7D8)", async () => {
     const { sh, ps } = await scripts({});
+    expect(OFFICIAL_RUNNER_RELEASE_KEY_ID).toBe('0403EF6CE164E7D8');
     expect(sh).toContain('\nREQUIRE_SIGNED_RUNNERS=0\n');
-    expect(sh).toContain("\nRELEASE_PUBKEY=''\n");
+    expect(sh).toContain(`\nRELEASE_PUBKEY='${OFFICIAL_RUNNER_RELEASE_PUBKEY}'\n`);
     expect(ps).toContain('$RequireSignedRunners = $false');
   });
 

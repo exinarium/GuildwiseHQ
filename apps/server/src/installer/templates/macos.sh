@@ -91,15 +91,18 @@ stop_legacy_services() {
 }
 
 # The LaunchDaemon of the dedicated user: guildwise-admin writes it (UserName guildwise-runner, the runner root below) and
-# loads and starts it; a kickstart picks up an upgraded runner.
+# loads and starts it; a kickstart picks up an upgraded runner. A named instance (--instance <name>) has its own label,
+# com.guildwisehq.runner.<name>, and never touches another runner's.
+dedicated_label() { printf '%s' "${LABEL}${OPT_INSTANCE:+.${OPT_INSTANCE}}"; }
+
 # Stops the dedicated user's LaunchDaemon (if there is one yet).
-stop_dedicated_service() { as_root launchctl bootout "system/${LABEL}" >/dev/null 2>&1 || true; }
+stop_dedicated_service() { as_root launchctl bootout "system/$(dedicated_label)" >/dev/null 2>&1 || true; }
 
 install_dedicated_service() {
-  as_root "${ADMIN}" service install --runner-root "${RUNNER_ROOT}" ${RUNNER_CA:+--ca-file "${RUNNER_CA}"} --start ||
-    die "guildwise-admin could not install the runner's LaunchDaemon." "Run: sudo ${ADMIN} service install --runner-root ${RUNNER_ROOT} --start   to see why, then run the command again."
-  as_root launchctl kickstart -k "system/${LABEL}" >/dev/null 2>&1 || true
-  good "The runner starts at boot as ${RUNNER_NAME} (LaunchDaemon ${LABEL})"
+  run_admin service install --runner-root "${RUNNER_ROOT}" ${RUNNER_CA:+--ca-file "${RUNNER_CA}"} --start ||
+    die "guildwise-admin could not install the runner's LaunchDaemon." "Run: sudo ${ADMIN_HINT} service install --runner-root ${RUNNER_ROOT} --start   to see why, then run the command again."
+  as_root launchctl kickstart -k "system/$(dedicated_label)" >/dev/null 2>&1 || true
+  good "The runner starts at boot as ${RUNNER_NAME} (LaunchDaemon $(dedicated_label))"
   SERVICE_MODE=launchd; record_service_mode launchd
   report "Service" ok "launchd daemon running as ${RUNNER_NAME}"
 }

@@ -24,6 +24,22 @@ export interface HostFacts {
   writableDockerSocket: string | null;
   /** Files or folders that matter (runner root, policy.json, admin tools) and that another user can write. */
   writableByOthers: string[];
+  /** The account this runner runs as (absent: unknown, the check below is skipped). */
+  user?: string;
+}
+
+/**
+ * Named runner instances: a policy.json written for another dedicated runner user (the other instance's, say UAT's
+ * under production) is foreign. It is treated like a file another user can write: refused when the check refuses, a
+ * warning otherwise. A current-user policy names the person and is not checked here.
+ */
+export function foreignPolicyReason(
+  policy: Pick<Policy, 'runnerUser'>,
+  user: string | undefined,
+): string | null {
+  const ru = policy.runnerUser;
+  if (!user || !ru || ru.mode !== 'dedicated' || ru.name === user) return null;
+  return `policy.json belongs to the runner user ${ru.name}, not ${user} (another runner instance's files)`;
 }
 
 export function rootEquivalentReasons(f: HostFacts): string[] {
@@ -45,12 +61,14 @@ export const STARTUP_FIX =
 
 export function decideStartup(i: {
   facts: HostFacts;
-  policy: Pick<Policy, 'startupRefusal' | 'acceptRootEquivalent'>;
+  policy: Pick<Policy, 'startupRefusal' | 'acceptRootEquivalent'> & Partial<Pick<Policy, 'runnerUser'>>;
   /** A server of this machine said "Only signed runners" is on (cached from `welcome`). */
   serverRequiresSigned: boolean;
 }): StartupDecision {
   const rootEq = rootEquivalentReasons(i.facts);
   const unsafe = i.facts.writableByOthers.map((p) => `${p} is writable by another user`);
+  const foreign = foreignPolicyReason(i.policy, i.facts.user);
+  if (foreign) unsafe.unshift(foreign);
   const refusing = i.policy.startupRefusal === true || i.serverRequiresSigned;
   if (refusing) {
     if (unsafe.length)
@@ -153,5 +171,6 @@ export async function probeHost(o: {
     groups: posix ? groupNames(user, process.getgroups?.() ?? []) : [],
     writableDockerSocket: posix ? writableSocket(env) : null,
     writableByOthers: o.paths.filter((p) => existsSync(p) && writableByOthers(p, uid)),
+    ...(posix && user ? { user } : {}),
   };
 }

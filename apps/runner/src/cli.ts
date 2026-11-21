@@ -82,7 +82,7 @@ import { FileReviewerTokenStore } from './review/reviewer-tokens.ts';
 import { probeLocalPort, type TestServicesSeen } from './sandbox/test-services.ts';
 import { fileKeyOf, RunnerKeys } from './secrets/keys.ts';
 import { registerSecret } from './secrets/redact.ts';
-import { ADMIN_DIR } from './setup/admin-command.ts';
+import { ADMIN_DIR, instanceStartupPaths } from './setup/admin-command.ts';
 import { registerSetupCommand } from './setup/command.ts';
 import { chromiumPdfRenderer } from './storage/pdf.ts';
 import { clamdClient } from './storage/scan.ts';
@@ -251,6 +251,8 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
     policyStore.file,
     ...(layout ? [layout.root, layout.packageDir] : []),
     ADMIN_DIR,
+    // a named instance's root-owned CA copy and approvals (`/etc/guildwise-runner-<name>`): never another user's
+    ...instanceStartupPaths(),
   ];
   const startupCheck = async (serverRequiresSigned: boolean) =>
     decideStartup({

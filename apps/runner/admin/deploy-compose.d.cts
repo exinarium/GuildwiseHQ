@@ -19,6 +19,10 @@ export interface DeployOptions {
   readerCommand: string[];
   path?: string;
   adminCommand?: string;
+  /** A named runner instance: the compose project is `<projectPrefix><app>` (default `guildwise-`). */
+  projectPrefix?: string;
+  /** A named runner instance: deploy() runs only an approval whose owner is this uid. */
+  callerUid?: number;
   /** Test hook: runs after the freeze, before the checks. */
   afterFreeze?: (snap: { dir: string; hash: string }) => void | Promise<void>;
 }
@@ -105,4 +109,12 @@ export declare function deploy(
   action: 'up' | 'pull' | 'down' | 'resolve',
   options: DeployOptions,
 ): Promise<DeployResult>;
+export declare const INSTANCE_RE: RegExp;
+export declare function instanceOptions(
+  env: Record<string, string | undefined>,
+): Partial<DeployOptions> & { toolsDir?: string };
+export declare function cliOptions(
+  env: Record<string, string | undefined>,
+  file: string,
+): Partial<DeployOptions> & { nodeBin: string };
 export declare function main(argv: string[]): Promise<number>;

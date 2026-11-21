@@ -454,3 +454,45 @@ describe('setup flags and environment', () => {
       expect(flags).toContain(f);
   });
 });
+
+describe('guildwise-runner setup for a named runner instance', () => {
+  it('as guildwise-runner-uat: dedicated mode, every root command carries --instance uat', async () => {
+    const m = machine({ username: 'guildwise-runner-uat' });
+    const r = await runSetup(
+      m.deps(),
+      opts({ yes: true, docker: 'narrow', approveApp: [`shop=${join(m.home, 'src/shop')}`] }),
+    );
+    expect(r.exitCode).toBe(0);
+    expect(m.policy().runnerUser).toEqual({ mode: 'dedicated', name: 'guildwise-runner-uat' });
+    expect(r.adminCommands).toEqual([
+      `sudo /usr/local/lib/guildwise/uat/guildwise-admin --instance uat docker narrow`,
+      `sudo /usr/local/lib/guildwise/uat/guildwise-admin --instance uat approve-app shop --source ${join(m.home, 'src/shop')}`,
+    ]);
+    expect(m.out.join('\n')).toContain('guildwise-runner-uat (dedicated, instance uat)');
+  });
+
+  it('refuses --instance prod when run as the uat runner user', async () => {
+    const m = machine({ username: 'guildwise-runner-uat' });
+    await expect(runSetup(m.deps(), opts({ yes: true, instance: 'prod' }))).rejects.toThrow(
+      /not the runner user of instance prod/,
+    );
+    expect(existsSync(policyPath(m.home))).toBe(false);
+  });
+
+  it('as a person with --instance prod: prints the root steps of that instance; current mode is refused', async () => {
+    const m = machine({ username: 'alice' });
+    const r = await runSetup(m.deps(), opts({ yes: true, instance: 'prod' }));
+    expect(r.exitCode).toBe(3);
+    expect(r.adminCommands).toEqual([
+      `sudo /usr/local/lib/guildwise/prod/guildwise-admin --instance prod user create`,
+      `sudo /usr/local/lib/guildwise/prod/guildwise-admin --instance prod service install`,
+      `sudo /usr/local/lib/guildwise/prod/guildwise-admin --instance prod migrate-user --from alice`,
+    ]);
+    expect(m.out.join('\n')).toContain(
+      'sudo -u guildwise-runner-prod -H guildwise-runner setup --instance prod',
+    );
+    await expect(
+      runSetup(m.deps(), opts({ yes: true, instance: 'prod', runnerUser: 'current' })),
+    ).rejects.toThrow(/needs the dedicated runner user guildwise-runner-prod/);
+  });
+});

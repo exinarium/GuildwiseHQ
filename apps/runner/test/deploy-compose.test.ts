@@ -1018,3 +1018,34 @@ withCompose('deploy-compose rework: the resolved file must resolve to the approv
     expect(h.log()).not.toMatch(/ pull$/m);
   });
 });
+
+withCompose('named runner instances: their own compose project and approvals', () => {
+  it('runs guildwise_<instance>_<app> for an instance caller, never the default project, and only its own approval', async () => {
+    const h = harness({
+      'compose.yaml':
+        'services:\n  web:\n    image: alpine:3\n    volumes:\n      - data:/data\n    networks:\n      - back\nvolumes:\n  data: {}\nnetworks:\n  back: {}\n',
+    });
+    const inst = { ...h.options, projectPrefix: 'guildwise_uat_', callerUid: process.getuid!() };
+    h.writeConf('');
+    const first = await dc.deploy('demo', 'resolve', inst);
+    expect(first.project).toBe('guildwise_uat_demo');
+    h.writeConf(first.hash);
+    const r = await dc.deploy('demo', 'up', inst);
+    expect(r.approved).toBe(true);
+    expect(h.log()).toMatch(/-p guildwise_uat_demo -f \S+ up -d --build\n/);
+    expect(h.log()).not.toMatch(/-p guildwise-demo /);
+    // volumes and networks carry the instance prefix too (never a default runner's guildwise-<app>_...)
+    const ran = JSON.parse(h.lastCompose());
+    expect(ran.name).toBe('guildwise_uat_demo');
+    expect(ran.volumes.data.name).toBe('guildwise_uat_demo_data');
+    expect(ran.networks.back.name).toBe('guildwise_uat_demo_back');
+    // the default runner's project pins differently: an instance approval never runs as the default project
+    await expect(dc.deploy('demo', 'up', h.options)).rejects.toMatchObject({ exitCode: dc.EXIT.HELD });
+    // another instance's uid is refused before anything is frozen
+    await expect(
+      dc.deploy('demo', 'up', { ...inst, callerUid: process.getuid!() + 1 }),
+    ).rejects.toMatchObject({
+      exitCode: dc.EXIT.ENV,
+    });
+  });
+});

@@ -6,7 +6,7 @@ import type { Policy } from '../policy/schema.ts';
 import { RunnerKeys } from '../secrets/keys.ts';
 import { SudoVault } from '../secrets/sudo.ts';
 import type { Executor } from '../toolchain/exec.ts';
-import { adminCommand, DEDICATED_USER } from './admin-command.ts';
+import { adminCommand, dedicatedUserOf, instanceOfUser, isDedicatedUser } from './admin-command.ts';
 import { readOffers } from './offers.ts';
 import { type ApproveApp, parseApproveApp, SetupError, type SetupOptions } from './options.ts';
 import { policyPath, readPolicy, writePolicy } from './policy-file.ts';
@@ -86,8 +86,17 @@ function sealFor(keys: RunnerKeys, password: string): string {
 export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<SetupResult> {
   if (deps.uid === 0)
     throw new SetupError(
-      '`guildwise-runner setup` refuses to run as root. Run it as the runner user (`sudo -u guildwise-runner -H guildwise-runner setup`); the root steps it needs are printed for `guildwise-admin`.',
+      `\`guildwise-runner setup\` refuses to run as root. Run it as the runner user (\`sudo -u ${dedicatedUserOf(opts.instance)} -H guildwise-runner setup\`); the root steps it needs are printed for \`guildwise-admin\`.`,
     );
+  // a named instance is the user it runs as (guildwise-runner-<name>); --instance may only confirm it
+  const ownInstance = instanceOfUser(deps.username);
+  if (opts.instance !== undefined && isDedicatedUser(deps.username) && opts.instance !== ownInstance)
+    throw new SetupError(
+      `this is ${deps.username}, not the runner user of instance ${opts.instance} (${dedicatedUserOf(opts.instance)}): run setup as that user`,
+    );
+  const instance = ownInstance ?? opts.instance ?? null;
+  const DEDICATED_USER = dedicatedUserOf(instance);
+  const adminCmd = (args: readonly string[]) => adminCommand(args, instance);
   const p = opts.yes ? null : deps.prompter;
   const say = deps.out;
   const policyFile = deps.policyFile ?? policyPath(deps.home);
@@ -100,7 +109,7 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
   // ---- 1. runner user [R20 step 1, R18-P]
   let mode: 'dedicated' | 'current';
   if (!posix) mode = 'current';
-  else if (deps.username === DEDICATED_USER) mode = 'dedicated';
+  else if (isDedicatedUser(deps.username)) mode = 'dedicated';
   else {
     const want =
       opts.runnerUser ??
@@ -112,17 +121,23 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
     if (want === 'dedicated') {
       say(`The runner should run as ${DEDICATED_USER}, not as ${deps.username}. As an administrator, run:`);
       const cmds = [
-        adminCommand(['user', 'create']),
-        adminCommand(['service', 'install']),
-        adminCommand(['migrate-user', '--from', deps.username]),
+        adminCmd(['user', 'create']),
+        adminCmd(['service', 'install']),
+        adminCmd(['migrate-user', '--from', deps.username]),
       ];
       for (const c of cmds) say(`  ${c}`);
       say(
         `(migrate-user only if this user already has a 1.10.0 runner to move.) Then run setup as that user:`,
       );
-      say(`  sudo -u ${DEDICATED_USER} -H guildwise-runner setup`);
+      say(
+        `  sudo -u ${DEDICATED_USER} -H guildwise-runner setup${instance ? ` --instance ${instance}` : ''}`,
+      );
       return { policy: null, adminCommands: cmds, exitCode: 3, wrote: false };
     }
+    if (instance)
+      throw new SetupError(
+        `--instance ${instance} needs the dedicated runner user ${DEDICATED_USER} (not --runner-user current)`,
+      );
     mode = 'current';
     say(
       `The runner keeps running as ${deps.username}. It refuses to start while ${deps.username} is root-equivalent (passwordless sudo, the docker group, a writable Docker socket) unless you accept that below.`,
@@ -147,8 +162,9 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
         );
       else {
         const who = (await p.text('Their user name on this machine:')).trim();
-        if (!USER_RE.test(who) || who === DEDICATED_USER) say(`Not a user name: ${who}; skipped.`);
-        else admin.push(adminCommand(['readers', 'add', who]));
+        // never another runner user: two instances never read each other's clones
+        if (!USER_RE.test(who) || isDedicatedUser(who)) say(`Not a user name: ${who}; skipped.`);
+        else admin.push(adminCmd(['readers', 'add', who]));
       }
     }
   }
@@ -202,7 +218,7 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
         'pair this machine first (`guildwise-runner pair`), then run setup again: sudo is sealed with the pairing key',
       );
     const keys = dirs.map((d) => ({ dir: d, keys: new RunnerKeys(join(d, 'secrets', 'runner-key.pem')) }));
-    if (mode === 'dedicated') admin.push(adminCommand(['sudo', 'on']));
+    if (mode === 'dedicated') admin.push(adminCmd(['sudo', 'on']));
     else {
       let password: string;
       if (opts.sudoPasswordStdin) password = (await deps.readStdin()).replace(/\r?\n$/, '');
@@ -234,7 +250,7 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
     // with sudo, asking is always on
     next.devopsRequests = 'ask';
   } else {
-    if (current.devops.sudo && mode === 'dedicated') admin.push(adminCommand(['sudo', 'off']));
+    if (current.devops.sudo && mode === 'dedicated') admin.push(adminCmd(['sudo', 'off']));
     if (mode === 'current') for (const d of dirs) rmSync(join(d, 'secrets', 'sudo.enc'), { force: true });
     next.devops = { ...next.devops, sudo: false };
   }
@@ -268,10 +284,10 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
     ).catch(() => false);
   next.docker = docker;
   next.acceptRootEquivalent = accept;
-  if (docker === 'narrow') admin.push(adminCommand(['docker', 'narrow', ...userArg]));
+  if (docker === 'narrow') admin.push(adminCmd(['docker', 'narrow', ...userArg]));
   else if (docker === 'group')
-    admin.push(adminCommand(['docker', 'group', '--accept-root-equivalent', ...userArg]));
-  else if (current.docker !== 'none') admin.push(adminCommand(['docker', 'none', ...userArg]));
+    admin.push(adminCmd(['docker', 'group', '--accept-root-equivalent', ...userArg]));
+  else if (current.docker !== 'none') admin.push(adminCmd(['docker', 'none', ...userArg]));
   const apps: ApproveApp[] = [...opts.approveApps];
   if (p && docker === 'narrow' && apps.length === 0) {
     const t = (
@@ -289,7 +305,7 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
       throw new SetupError(
         `${a.folder} is not one of the runner's own clones (inside ${deps.home}): clone the app there first`,
       );
-    admin.push(adminCommand(['approve-app', a.app, '--source', a.folder]));
+    admin.push(adminCmd(['approve-app', a.app, '--source', a.folder]));
   }
 
   // ---- 6. deploy defaults [R20 step 5]
@@ -345,7 +361,7 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
   say('');
   say(`Local policy written to ${policyFile} (mode 600):`);
   say(
-    `  runner user      ${mode === 'dedicated' ? `${deps.username} (dedicated)` : `${deps.username} (current user)`}`,
+    `  runner user      ${mode === 'dedicated' ? `${deps.username} (dedicated${instance ? `, instance ${instance}` : ''})` : `${deps.username} (current user)`}`,
   );
   say(`  clones           ${clones}`);
   say(

@@ -29,10 +29,20 @@ RUNNER_AS=""
 RUNNER_NAME="$(id -un)"
 RUNNER_HOME="${HOME}"
 DEDICATED_USER="guildwise-runner"
+# --instance <name>: a named runner (two runners on one machine, say one paired with UAT and one with production). It gets
+# its own user guildwise-runner-<name>, service, CA copy, sudoers rules and approved apps; every guildwise-admin call
+# below carries --instance <name> (run_admin). Without it: the single guildwise-runner, as before.
+# shellcheck disable=SC2034 # used by linux.sh (macOS names its LaunchDaemon from the instance instead)
+DEDICATED_SERVICE="guildwise-runner"
+SUDOERS_SUDO_FILE="/etc/sudoers.d/guildwise-runner"
+SUDOERS_DOCKER_FILE="/etc/sudoers.d/guildwise-runner-docker"
+INSTANCE_ARGS=()
 # Root-owned, read-only tools (guildwise-admin, deploy-compose) and the pinned Node they run on. The runner can never
 # change them; they change only when you run this installer again.
 ADMIN_DIR="/usr/local/lib/guildwise"
 ADMIN="${ADMIN_DIR}/guildwise-admin"
+# The admin command as printed in hints (with --instance <name> for a named runner).
+ADMIN_HINT="${ADMIN}"
 BUNDLED_NODE_BIN="${ADMIN_DIR}/node/bin"
 ADMIN_TOOLS_READY=0
 # The first signed runner release: an install below it, or one this installer did not verify, is an "older runner".
@@ -149,10 +159,11 @@ OPT_FROM_FILE="${GUILDWISE_FROM_FILE:-}"
 # (Caddy `tls internal`, a company CA): Node's NODE_EXTRA_CA_CERTS. TLS checks stay on.
 OPT_CA_FILE="${GUILDWISE_CA_FILE:-}"
 RUNNER_CA=""
+OPT_INSTANCE="${GUILDWISE_INSTANCE:-}"
 SUDO_PASSWORD=""
 
 bad_flag() {
-  die "$1" "Options: --yes, --runner-user dedicated|current, --legacy quarantine|remove, --accept-root-equivalent, --devops-orgs none|<id,...>, --sudo off|on, --sudo-password-stdin, --docker none|narrow|group, --approve-app <app>=<folder>, --deploy ask|off, --deploy-pin-commit, --allow-unsigned-from <origin>, --from-file <folder>, --ca-file <pem file>, --choose-folders."
+  die "$1" "Options: --yes, --runner-user dedicated|current, --legacy quarantine|remove, --accept-root-equivalent, --devops-orgs none|<id,...>, --sudo off|on, --sudo-password-stdin, --docker none|narrow|group, --approve-app <app>=<folder>, --deploy ask|off, --deploy-pin-commit, --allow-unsigned-from <origin>, --from-file <folder>, --ca-file <pem file>, --instance <name>, --choose-folders."
 }
 
 set_flag() {
@@ -167,6 +178,7 @@ set_flag() {
     --allow-unsigned-from) OPT_ALLOW_UNSIGNED_FROM="$2" ;;
     --from-file) OPT_FROM_FILE="$2" ;;
     --ca-file) OPT_CA_FILE="$2" ;;
+    --instance) OPT_INSTANCE="$2" ;;
     *) bad_flag "Unknown option: $1" ;;
   esac
 }
@@ -184,7 +196,7 @@ parse_flags() {
       --accept-root-equivalent) OPT_ACCEPT_ROOT_EQ=1 ;;
       --deploy-pin-commit) OPT_DEPLOY_PIN_COMMIT=1 ;;
       --sudo-password-stdin) OPT_SUDO_PW_STDIN=1 ;;
-      --runner-user|--legacy|--devops-orgs|--sudo|--docker|--approve-app|--deploy|--allow-unsigned-from|--from-file|--ca-file)
+      --runner-user|--legacy|--devops-orgs|--sudo|--docker|--approve-app|--deploy|--allow-unsigned-from|--from-file|--ca-file|--instance)
         [ "$#" -gt 0 ] || bad_flag "${a} needs a value."
         set_flag "${a}" "$1"; shift ;;
       --*=*) set_flag "${a%%=*}" "${a#*=}" ;;
@@ -230,6 +242,25 @@ validate_flags() {
     [ -f "${OPT_CA_FILE}" ] && [ -r "${OPT_CA_FILE}" ] || bad_flag "--ca-file is a readable PEM certificate file (cannot read ${OPT_CA_FILE})."
     grep -q -- '-----BEGIN CERTIFICATE-----' "${OPT_CA_FILE}" || bad_flag "--ca-file holds no PEM certificate (-----BEGIN CERTIFICATE-----): ${OPT_CA_FILE}."
   fi
+  if [ -n "${OPT_INSTANCE}" ]; then
+    [[ "${OPT_INSTANCE}" =~ ^[a-z0-9]([a-z0-9-]{0,13}[a-z0-9])?$ ]] ||
+      bad_flag "--instance is a short name of lowercase letters, digits and inner dashes, at most 15 (got ${OPT_INSTANCE})."
+    case "${OPT_INSTANCE}" in node|guildwise-admin|deploy-compose) bad_flag "--instance ${OPT_INSTANCE} is a reserved name; pick another." ;; esac
+    [ "${OPT_RUNNER_USER}" = current ] && bad_flag "--instance gives the runner its own dedicated user: it cannot go with --runner-user current."
+    OPT_RUNNER_USER=dedicated
+    DEDICATED_USER="guildwise-runner-${OPT_INSTANCE}"
+    # shellcheck disable=SC2034 # used by linux.sh
+    DEDICATED_SERVICE="${DEDICATED_USER}"
+    SUDOERS_SUDO_FILE="/etc/sudoers.d/${DEDICATED_USER}_sudo"
+    SUDOERS_DOCKER_FILE="/etc/sudoers.d/${DEDICATED_USER}_docker"
+    INSTANCE_ARGS=(--instance "${OPT_INSTANCE}")
+    # Its own root-owned tools, from this server's verified release: another instance's install never replaces them,
+    # and this one never replaces theirs (or the single runner's in the top-level folder).
+    ADMIN_DIR="${ADMIN_DIR}/${OPT_INSTANCE}"
+    ADMIN="${ADMIN_DIR}/guildwise-admin"
+    BUNDLED_NODE_BIN="${ADMIN_DIR}/node/bin"
+    ADMIN_HINT="${ADMIN} --instance ${OPT_INSTANCE}"
+  fi
   if [ "${OPT_SUDO_PW_STDIN}" = 1 ]; then
     IFS= read -r SUDO_PASSWORD || true
     [ -n "${SUDO_PASSWORD}" ] || bad_flag "--sudo-password-stdin was given, but no password came on standard input."
@@ -242,6 +273,9 @@ as_root() {
   elif have sudo; then sudo "$@"
   else return 127; fi
 }
+
+# run_admin <args...>: guildwise-admin as root, for this install's runner (with --instance <name> for a named one).
+run_admin() { as_root "${ADMIN}" ${INSTANCE_ARGS[@]+"${INSTANCE_ARGS[@]}"} "$@"; }
 
 runner_path() { printf '%s' "${RUNNER_HOME}/.local/bin:${BUNDLED_NODE_BIN}:/usr/local/bin:/usr/bin:/bin"; }
 
@@ -532,7 +566,7 @@ choose_runner_user() {
     if [ "${kept_mine}" = 1 ]; then mode=current; else mode=dedicated; fi
   fi
   if [ "${mode}" = dedicated ] && [ "${kept_mine}" = 1 ]; then
-    die "A runner is already installed for your own user (${H_RUNNER_ROOT})." "Keep it: run the installer with --runner-user current. Move it to the dedicated user: sudo ${ADMIN} migrate-user. Replace it: run the installer with --legacy quarantine."
+    die "A runner is already installed for your own user (${H_RUNNER_ROOT})." "Keep it: run the installer with --runner-user current. Move it to the dedicated user: sudo ${ADMIN_HINT} migrate-user. Replace it: run the installer with --legacy quarantine."
   fi
   if [ "${mode}" = dedicated ]; then
     dedicated_supported
@@ -575,7 +609,9 @@ install_admin_tools() {
     note "Downloading the Node runtime for the root-owned tools ..."
     curl -fsSL --retry 3 -o "${f}" "${url}" || die "Could not download the Node runtime (${url})." "Check this computer can reach it, then run the command again."
     [ "$(sha256_of "${f}")" = "${sha}" ] || die "The Node runtime did not match its checksum in the signed release manifest." "Try again; if it repeats, contact us."
-    { as_root mkdir -p "${ADMIN_DIR}" && as_root chown 0:0 "${ADMIN_DIR}" && as_root chmod 755 "${ADMIN_DIR}" &&
+    # an instance's folder sits in the top-level one, which must be root-owned 0755 as well
+    { { [ -z "${OPT_INSTANCE}" ] || { as_root mkdir -p "${ADMIN_DIR%/*}" && as_root chown 0:0 "${ADMIN_DIR%/*}" && as_root chmod 755 "${ADMIN_DIR%/*}"; }; } &&
+      as_root mkdir -p "${ADMIN_DIR}" && as_root chown 0:0 "${ADMIN_DIR}" && as_root chmod 755 "${ADMIN_DIR}" &&
       as_root rm -rf "${ADMIN_DIR}/node.new" && as_root mkdir "${ADMIN_DIR}/node.new" &&
       as_root tar -xf "${f}" -C "${ADMIN_DIR}/node.new" --strip-components=1 --no-same-owner &&
       as_root chown -R 0:0 "${ADMIN_DIR}/node.new" && as_root chmod -R go-w "${ADMIN_DIR}/node.new" &&
@@ -596,6 +632,14 @@ install_admin_tools() {
       warn "The runner release has no ${t}: the narrow Docker access for deploys is not available with this release."
       continue
     fi
+    if [ -n "${OPT_INSTANCE}" ]; then
+      # An instance's copy runs under its own Node: only the interpreter line changes (from the top-level Node).
+      [ "$(head -n 1 "${src}")" = "#!/usr/local/lib/guildwise/node/bin/node" ] ||
+        die "The runner release's ${t} does not start with the bundled Node line." "Ask your administrator to publish a complete release."
+      { printf '#!%s/node/bin/node\n' "${ADMIN_DIR}"; tail -n +2 "${src}"; } >"${STAGE_DIR}/${t}.instance" ||
+        die "Could not prepare ${t} for instance ${OPT_INSTANCE}." "Run the command again."
+      src="${STAGE_DIR}/${t}.instance"
+    fi
     as_root install -o 0 -g 0 -m 0755 "${src}" "${ADMIN_DIR}/${t}" || die "Could not install ${ADMIN_DIR}/${t}." "Run the command again."
   done
   ADMIN_TOOLS_READY=1
@@ -611,9 +655,9 @@ setup_runner_user() {
   fi
   install_admin_tools
   local home
-  as_root "${ADMIN}" user create || die "guildwise-admin could not set up the ${DEDICATED_USER} user." "Run: sudo ${ADMIN} user create   to see why, then run the command again."
+  run_admin user create || die "guildwise-admin could not set up the ${DEDICATED_USER} user." "Run: sudo ${ADMIN_HINT} user create   to see why, then run the command again."
   home="$(user_home "${DEDICATED_USER}")"
-  case "${home}" in ""|/) die "The ${DEDICATED_USER} user has no home folder." "Run: sudo ${ADMIN} user create" ;; esac
+  case "${home}" in ""|/) die "The ${DEDICATED_USER} user has no home folder." "Run: sudo ${ADMIN_HINT} user create" ;; esac
   RUNNER_AS="${DEDICATED_USER}"
   RUNNER_NAME="${DEDICATED_USER}"
   RUNNER_HOME="${home}"
@@ -968,12 +1012,12 @@ apply_root_choices() {
         acc=(--accept-root-equivalent)
       fi
       install_admin_tools
-      as_root "${ADMIN}" docker "${docker}" --user "${RUNNER_NAME}" ${acc[@]+"${acc[@]}"} ||
-        die "guildwise-admin could not set up Docker access for deploys (${docker})." "Run: sudo ${ADMIN} docker ${docker} --user ${RUNNER_NAME}   to see why."
+      run_admin docker "${docker}" --user "${RUNNER_NAME}" ${acc[@]+"${acc[@]}"} ||
+        die "guildwise-admin could not set up Docker access for deploys (${docker})." "Run: sudo ${ADMIN_HINT} docker ${docker} --user ${RUNNER_NAME}   to see why."
       good "Docker access for deploys: ${docker}" ;;
     *)
-      if [ "${RUNNER_MODE}" = dedicated ] && as_root test -e /etc/sudoers.d/guildwise-runner-docker; then
-        as_root "${ADMIN}" docker none --user "${RUNNER_NAME}" || die "guildwise-admin could not remove the Docker rule." "Run: sudo ${ADMIN} docker none --user ${RUNNER_NAME}"
+      if [ "${RUNNER_MODE}" = dedicated ] && as_root test -e "${SUDOERS_DOCKER_FILE}"; then
+        run_admin docker none --user "${RUNNER_NAME}" || die "guildwise-admin could not remove the Docker rule." "Run: sudo ${ADMIN_HINT} docker none --user ${RUNNER_NAME}"
         good "Docker access for deploys: none (the earlier rule was removed)"
       fi ;;
   esac
@@ -981,10 +1025,10 @@ apply_root_choices() {
     if [ "${sudo_on}" = true ]; then
       [ "${OPT_SUDO}" = on ] || interactive ||
         die "policy.json asks for sudo, but it was not turned on here." "Run the installer with --sudo on, or run guildwise-runner setup on this computer."
-      as_root "${ADMIN}" sudo on --user "${RUNNER_NAME}" || die "guildwise-admin could not turn sudo on for ${RUNNER_NAME}." "Run: sudo ${ADMIN} sudo on --user ${RUNNER_NAME}"
+      run_admin sudo on --user "${RUNNER_NAME}" || die "guildwise-admin could not turn sudo on for ${RUNNER_NAME}." "Run: sudo ${ADMIN_HINT} sudo on --user ${RUNNER_NAME}"
       good "Sudo is on for ${RUNNER_NAME} (password required; every privileged step still needs your local yes)"
-    elif as_root test -e /etc/sudoers.d/guildwise-runner; then
-      as_root "${ADMIN}" sudo off --user "${RUNNER_NAME}" || die "guildwise-admin could not turn sudo off for ${RUNNER_NAME}." "Run: sudo ${ADMIN} sudo off --user ${RUNNER_NAME}"
+    elif as_root test -e "${SUDOERS_SUDO_FILE}"; then
+      run_admin sudo off --user "${RUNNER_NAME}" || die "guildwise-admin could not turn sudo off for ${RUNNER_NAME}." "Run: sudo ${ADMIN_HINT} sudo off --user ${RUNNER_NAME}"
       good "Sudo is off for ${RUNNER_NAME}"
     fi
   fi
@@ -992,7 +1036,7 @@ apply_root_choices() {
     name="${app%%=*}"
     folder="${app#*=}"
     install_admin_tools
-    as_root "${ADMIN}" approve-app "${name}" --source "${folder}" --user "${RUNNER_NAME}" --yes ||
+    run_admin approve-app "${name}" --source "${folder}" --user "${RUNNER_NAME}" --yes ||
       die "The app ${name} did not pass the Docker helper's checks (the reason is above; its folder must be inside ${RUNNER_HOME})." "Fix its compose setup, or leave out --approve-app ${name}, then run the command again."
     good "App ${name} approved for deploys (${folder})"
   done
@@ -1081,6 +1125,7 @@ summary() {
       say "  This computer now appears on the Workstations page and will start again by itself after a restart."
     fi
     [ -n "${RUNNER_AS}" ] && say "  The runner runs as ${RUNNER_NAME} and works in its own clones; change its permissions with: sudo -u ${RUNNER_NAME} -H ${BIN_DIR}/guildwise-runner setup"
+    [ -n "${OPT_INSTANCE}" ] && say "  This is runner instance ${OPT_INSTANCE}, paired with ${SERVER_URL}; manage its root part with: sudo ${ADMIN_HINT} <command>"
     [ -n "${QUARANTINE_DIR}" ] && say "  The old runner is in ${QUARANTINE_DIR}; delete it after you have looked at it."
     if [ "${#WARNINGS[@]}" -gt 0 ]; then
       say ""

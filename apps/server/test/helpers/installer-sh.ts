@@ -96,9 +96,11 @@ export function runSh(
     env?: Record<string, string>;
     args?: string[];
     stdin?: string;
+    /** The macOS installer instead of the Linux one (its functions only; nothing here is a Mac). */
+    os?: 'linux' | 'macos';
   } = {},
 ): ShRun {
-  const text = renderBash('linux', { ...shParams, ...opts.params });
+  const text = renderBash(opts.os ?? 'linux', { ...shParams, ...opts.params });
   const body = text.slice(0, text.lastIndexOf('main "$@"'));
   const file = join(setup.home, '.run.sh');
   writeFileSync(file, `${body}\n${script}\n`);

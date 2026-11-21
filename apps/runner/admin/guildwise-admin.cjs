@@ -19,6 +19,12 @@
  *   guildwise-admin verify                          check the root-owned install, the sudoers files and root's PATH
  *
  * Every command takes --dry-run (print what would change, change nothing; also allowed without root).
+ * Every command takes --instance <name> for a named runner (two or more runners on one machine, for example one paired
+ * with UAT and one with production): its own user `guildwise-runner-<name>`, service, CA copy, sudoers rules, readers
+ * group, migration marker and approved apps (instanceLayout below). Without it, the single `guildwise-runner` of before.
+ * A named instance also has its own copy of the root-owned tools, /usr/local/lib/guildwise/<name>/ (guildwise-admin,
+ * deploy-compose, node), installed from that instance's server's verified release: an instance is managed only by its
+ * own copy (the interpreter decides, see checkInterpreter), so one server's release never supplies another's root tools.
  * Secrets (the generated sudo password) are never printed, logged or put on a command line.
  */
 
@@ -62,6 +68,86 @@ const USER_RE = /^[a-z_][a-z0-9_-]{0,31}$/;
 const SAFE_ABS_RE = /^\/[A-Za-z0-9._/-]{0,500}$/;
 const MAX_COPY_FILE = 512 * 1024 * 1024;
 const PLATFORMS = ['linux', 'darwin'];
+/**
+ * `--instance <name>`: lowercase letters, digits and inner dashes, at most 15 (`guildwise-runner-<name>` stays within the
+ * 32 characters of a Linux user name). No underscore, so the instance's sudoers files (`..._sudo`, `..._docker`) and
+ * compose projects (`guildwise_<name>_<app>`) can never collide with the default runner's or another instance's: every
+ * default project, volume and network starts `guildwise-`, every instance's starts `guildwise_`, and the first `_` after
+ * it ends the instance name.
+ */
+const INSTANCE_RE = /^[a-z0-9](?:[a-z0-9-]{0,13}[a-z0-9])?$/;
+/** Names already taken inside /usr/local/lib/guildwise (an instance's tools folder may never be one of them). */
+const RESERVED_INSTANCES = ['node', 'guildwise-admin', 'deploy-compose'];
+
+/**
+ * Every name and path that belongs to one runner. `null`: the single runner of before (the exact constants above); a
+ * name: a fully separate set, so two instances share nothing they could read or write of each other's.
+ */
+function instanceLayout(name) {
+  if (name === undefined || name === null || name === '')
+    return Object.freeze({
+      instance: null,
+      user: RUNNER_USER,
+      service: 'guildwise-runner',
+      systemdUnit: SYSTEMD_UNIT,
+      launchdLabel: LAUNCHD_LABEL,
+      launchdPlist: LAUNCHD_PLIST,
+      macHome: MAC_HOME,
+      sudoersSudo: SUDOERS_SUDO,
+      sudoersDocker: SUDOERS_DOCKER,
+      etcDir: '/etc/guildwise-runner',
+      appsConfDir: APPS_CONF_DIR,
+      appsStateDir: `${STATE_DIR}/apps`,
+      composePrefix: 'guildwise-',
+      caFile: RUNNER_CA_FILE,
+      migrateMarker: MIGRATE_MARKER,
+      readersGroup: READERS_GROUP,
+      logName: 'guildwise-runner.log',
+      toolsDir: ADMIN_DIR,
+      adminPath: SELF_PATH,
+      deployCompose: DEPLOY_COMPOSE,
+      nodePath: NODE_PATH,
+      flag: [],
+    });
+  if (!INSTANCE_RE.test(String(name)) || RESERVED_INSTANCES.includes(String(name)))
+    throw new AdminError(
+      `not a valid instance name: ${JSON.stringify(name)} (lowercase letters, digits and inner dashes, at most 15)`,
+      64,
+    );
+  const user = `${RUNNER_USER}-${name}`;
+  const etcDir = `/etc/${user}`;
+  return Object.freeze({
+    instance: name,
+    user,
+    service: user,
+    systemdUnit: `/etc/systemd/system/${user}.service`,
+    launchdLabel: `${LAUNCHD_LABEL}.${name}`,
+    launchdPlist: `/Library/LaunchDaemons/${LAUNCHD_LABEL}.${name}.plist`,
+    macHome: `/var/${user}`,
+    sudoersSudo: `/etc/sudoers.d/${user}_sudo`,
+    sudoersDocker: `/etc/sudoers.d/${user}_docker`,
+    etcDir,
+    appsConfDir: `${etcDir}/apps`,
+    appsStateDir: `${STATE_DIR}/apps-${name}`,
+    composePrefix: `guildwise_${name}_`,
+    caFile: `${etcDir}/ca.pem`,
+    migrateMarker: `${STATE_DIR}/migrate-user-${name}.json`,
+    readersGroup: `${READERS_GROUP}-${name}`,
+    logName: `${user}.log`,
+    toolsDir: `${ADMIN_DIR}/${name}`,
+    adminPath: `${ADMIN_DIR}/${name}/guildwise-admin`,
+    deployCompose: `${ADMIN_DIR}/${name}/deploy-compose`,
+    nodePath: `${ADMIN_DIR}/${name}/node/bin/node`,
+    flag: ['--instance', name],
+  });
+}
+
+const DEFAULT_LAYOUT = instanceLayout(null);
+
+/** `sudo guildwise-admin [--instance <name>] <args>` for the messages this tool prints. */
+function adminHint(L, args) {
+  return ['sudo', L.adminPath, ...L.flag, ...args].join(' ');
+}
 
 class AdminError extends Error {
   constructor(message, code = 1) {
@@ -148,12 +234,25 @@ function mustRun(sys, cmd, args, opts = {}) {
 // ----------------------------------------------------------------------------------------------- guards
 
 /** [rv7-12] Only the bundled, root-owned Node may run this file (never /usr/bin/node, nvm or Homebrew). */
-function checkInterpreter(sys) {
-  if (sys.execPath !== NODE_PATH)
+function checkInterpreter(sys, L = DEFAULT_LAYOUT) {
+  if (sys.execPath !== L.nodePath)
     throw new AdminError(
-      `guildwise-admin runs only under the bundled Node at ${NODE_PATH} (this is ${sys.execPath}). Run it as \`sudo ${SELF_PATH} ...\`.`,
+      `guildwise-admin runs only under the bundled Node at ${L.nodePath} (this is ${sys.execPath}). Run it as \`sudo ${L.adminPath} ...\`.`,
       2,
     );
+}
+
+/**
+ * The instance whose tools are running: the bundled Node of /usr/local/lib/guildwise/<name>/ belongs to instance
+ * <name>; the top-level one (or any other interpreter, refused by checkInterpreter) to no instance.
+ */
+function toolsInstance(execPath) {
+  const prefix = `${ADMIN_DIR}/`;
+  const tail = '/node/bin/node';
+  const p = String(execPath || '');
+  if (!p.startsWith(prefix) || !p.endsWith(tail)) return null;
+  const name = p.slice(prefix.length, p.length - tail.length);
+  return INSTANCE_RE.test(name) && !RESERVED_INSTANCES.includes(name) ? name : null;
 }
 
 function checkRoot(sys) {
@@ -254,9 +353,10 @@ function freeMacUid(sys) {
 
 /** R20 step 1: the dedicated user, not in sudo or docker, with its own HOME and `~/src` for its own clones. */
 function userCreate(sys, opts = {}) {
-  const name = checkUserName(opts.name || RUNNER_USER);
+  const L = opts.L || DEFAULT_LAYOUT;
+  const name = checkUserName(opts.name || L.user);
   // it removes the account from admin groups: only ever the dedicated user, never a person's account
-  if (name !== RUNNER_USER) throw new AdminError(`user create is only for the dedicated ${RUNNER_USER} user`);
+  if (name !== L.user) throw new AdminError(`user create is only for the dedicated ${L.user} user`);
   let u = lookupUser(sys, name);
   if (u) note(sys, `User ${name} exists (uid ${u.uid}, home ${u.home}).`);
   else if (sys.platform === 'darwin') {
@@ -264,14 +364,20 @@ function userCreate(sys, opts = {}) {
     const rec = `/Users/${name}`;
     mustRun(sys, 'dscl', ['.', '-create', rec]);
     mustRun(sys, 'dscl', ['.', '-create', rec, 'UserShell', '/usr/bin/false']);
-    mustRun(sys, 'dscl', ['.', '-create', rec, 'RealName', 'Guildwise runner']);
+    mustRun(sys, 'dscl', [
+      '.',
+      '-create',
+      rec,
+      'RealName',
+      L.instance ? `Guildwise runner ${L.instance}` : 'Guildwise runner',
+    ]);
     mustRun(sys, 'dscl', ['.', '-create', rec, 'UniqueID', String(uid)]);
     mustRun(sys, 'dscl', ['.', '-create', rec, 'PrimaryGroupID', String(MAC_STAFF_GID)]);
-    mustRun(sys, 'dscl', ['.', '-create', rec, 'NFSHomeDirectory', MAC_HOME]);
+    mustRun(sys, 'dscl', ['.', '-create', rec, 'NFSHomeDirectory', L.macHome]);
     mustRun(sys, 'dscl', ['.', '-create', rec, 'IsHidden', '1']);
     mustRun(sys, 'dscl', ['.', '-create', rec, 'Password', '*']);
-    u = { name, uid, gid: MAC_STAFF_GID, home: MAC_HOME };
-    note(sys, `Created the hidden standard user ${name} (uid ${uid}, home ${MAC_HOME}).`);
+    u = { name, uid, gid: MAC_STAFF_GID, home: L.macHome };
+    note(sys, `Created the hidden standard user ${name} (uid ${uid}, home ${L.macHome}).`);
   } else {
     mustRun(sys, 'useradd', ['--system', '--create-home', '--shell', '/usr/sbin/nologin', name]);
     u = sys.dryRun ? { name, uid: -1, gid: -1, home: `/home/${name}` } : requireUser(sys, name);
@@ -455,28 +561,29 @@ function sudoersForSudo(user) {
   ].join('\n');
 }
 
-function sudoersForDocker(user) {
+function sudoersForDocker(user, helper = DEPLOY_COMPOSE) {
+  checkSafeAbs(helper, 'the deploy-compose path');
   checkUserName(user);
   return [
     '# Written by guildwise-admin (R20): the only passwordless rule. deploy-compose runs approved, frozen compose',
     '# apps and nothing else; no wildcards. Its environment is pinned whatever the local sudo defaults say: Node',
     '# reads NODE_OPTIONS before any check in the script could run.',
-    `Defaults!${DEPLOY_COMPOSE} env_reset, !env_keep, !setenv`,
-    `${user} ALL=(root) NOPASSWD: ${DEPLOY_COMPOSE}`,
+    `Defaults!${helper} env_reset, !env_keep, !setenv`,
+    `${user} ALL=(root) NOPASSWD: ${helper}`,
     '',
   ].join('\n');
 }
 
 // ----------------------------------------------------------------------------------------------- service
 
-function unitText(u, runnerRoot, caFile = null) {
+function unitText(u, runnerRoot, caFile = null, L = DEFAULT_LAYOUT) {
   checkSafeAbs(runnerRoot, '--runner-root');
   checkSafeAbs(u.home, 'the runner HOME');
   if (caFile) checkSafeAbs(caFile, 'the CA file');
   return [
     '# Written by guildwise-admin (R20, R18-P). The runner runs as its own unprivileged user.',
     '[Unit]',
-    'Description=Guildwise runner (user guildwise-runner)',
+    `Description=Guildwise runner${L.instance ? ` ${L.instance}` : ''} (user ${u.name})`,
     'After=network-online.target',
     'Wants=network-online.target',
     '',
@@ -505,7 +612,7 @@ function unitText(u, runnerRoot, caFile = null) {
   ].join('\n');
 }
 
-function plistText(u, runnerRoot, caFile = null) {
+function plistText(u, runnerRoot, caFile = null, L = DEFAULT_LAYOUT) {
   checkSafeAbs(runnerRoot, '--runner-root');
   checkSafeAbs(u.home, 'the runner HOME');
   if (caFile) checkSafeAbs(caFile, 'the CA file');
@@ -515,7 +622,7 @@ function plistText(u, runnerRoot, caFile = null) {
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
     '<plist version="1.0">',
     '<dict>',
-    `  <key>Label</key>${s(LAUNCHD_LABEL)}`,
+    `  <key>Label</key>${s(L.launchdLabel)}`,
     `  <key>UserName</key>${s(u.name)}`,
     '  <key>ProgramArguments</key>',
     `  <array>${s(`${runnerRoot}/current/aom-runner`)}${s('start')}</array>`,
@@ -530,8 +637,8 @@ function plistText(u, runnerRoot, caFile = null) {
     // launchd has no "do not restart on exit 78": restart after a crash only, so the start-up refusal cannot loop
     '  <key>KeepAlive</key><dict><key>Crashed</key><true/></dict>',
     '  <key>ThrottleInterval</key><integer>30</integer>',
-    `  <key>StandardOutPath</key>${s(`${u.home}/Library/Logs/guildwise-runner.log`)}`,
-    `  <key>StandardErrorPath</key>${s(`${u.home}/Library/Logs/guildwise-runner.log`)}`,
+    `  <key>StandardOutPath</key>${s(`${u.home}/Library/Logs/${L.logName}`)}`,
+    `  <key>StandardErrorPath</key>${s(`${u.home}/Library/Logs/${L.logName}`)}`,
     '</dict>',
     '</plist>',
     '',
@@ -546,7 +653,7 @@ function defaultRunnerRoot(u) {
  * `--ca-file <pem>`: copies the certificate(s) to a root-owned RUNNER_CA_FILE (a snapshot: the runner cannot change what
  * its service trusts). Without the option a copy installed before is kept. Returns the path for the service, or null.
  */
-function installRunnerCa(sys, caFile) {
+function installRunnerCa(sys, caFile, L = DEFAULT_LAYOUT) {
   if (caFile) {
     checkSafeAbs(caFile, '--ca-file');
     const pem = readOwnedFile(sys, caFile, undefined, MAX_CA_FILE);
@@ -555,49 +662,59 @@ function installRunnerCa(sys, caFile) {
       throw new AdminError(`--ca-file ${caFile} holds no PEM certificate`);
     if (/PRIVATE KEY/.test(pem))
       throw new AdminError(`--ca-file ${caFile} holds a private key: give the certificate only`);
-    writeRootFile(sys, RUNNER_CA_FILE, pem, 0o644);
-    note(sys, `Wrote ${RUNNER_CA_FILE} (the runner service trusts this certificate authority as well).`);
-    return RUNNER_CA_FILE;
+    writeRootFile(sys, L.caFile, pem, 0o644);
+    note(sys, `Wrote ${L.caFile} (the runner service trusts this certificate authority as well).`);
+    return L.caFile;
   }
-  return fs.existsSync(P(sys, RUNNER_CA_FILE)) ? RUNNER_CA_FILE : null;
+  return fs.existsSync(P(sys, L.caFile)) ? L.caFile : null;
 }
 
 function serviceInstall(sys, opts = {}) {
-  const u = requireUser(sys, opts.user || RUNNER_USER, 'run `guildwise-admin user create` first');
+  const L = opts.L || DEFAULT_LAYOUT;
+  const u = requireUser(sys, opts.user || L.user, `run \`${adminHint(L, ['user', 'create'])}\` first`);
+  // an instance's service runs only as that instance's user (never the other instance's, never a person)
+  if (L.instance && u.name !== L.user)
+    throw new AdminError(`the service of instance ${L.instance} runs only as ${L.user}`);
   const runnerRoot = opts.runnerRoot || defaultRunnerRoot(u);
   checkSafeAbs(runnerRoot, '--runner-root');
-  const ca = installRunnerCa(sys, opts.caFile);
+  if (L.instance) checkInsideHome(u, runnerRoot, '--runner-root');
+  const ca = installRunnerCa(sys, opts.caFile, L);
   if (sys.platform === 'darwin') {
-    writeRootFile(sys, LAUNCHD_PLIST, plistText(u, runnerRoot, ca), 0o644);
+    writeRootFile(sys, L.launchdPlist, plistText(u, runnerRoot, ca, L), 0o644);
     ensureOwnedDir(sys, path.posix.join(u.home, 'Library'), u, 0o700);
     ensureOwnedDir(sys, path.posix.join(u.home, 'Library/Logs'), u, 0o700);
-    note(sys, `Wrote ${LAUNCHD_PLIST} (LaunchDaemon, UserName ${u.name}).`);
+    note(sys, `Wrote ${L.launchdPlist} (LaunchDaemon, UserName ${u.name}).`);
     if (opts.start) {
-      mustRun(sys, 'launchctl', ['bootstrap', 'system', LAUNCHD_PLIST], { allowFail: true });
-      mustRun(sys, 'launchctl', ['enable', `system/${LAUNCHD_LABEL}`]);
-      mustRun(sys, 'launchctl', ['kickstart', '-k', `system/${LAUNCHD_LABEL}`]);
+      mustRun(sys, 'launchctl', ['bootstrap', 'system', L.launchdPlist], { allowFail: true });
+      mustRun(sys, 'launchctl', ['enable', `system/${L.launchdLabel}`]);
+      mustRun(sys, 'launchctl', ['kickstart', '-k', `system/${L.launchdLabel}`]);
     }
     return;
   }
-  writeRootFile(sys, SYSTEMD_UNIT, unitText(u, runnerRoot, ca), 0o644);
-  note(sys, `Wrote ${SYSTEMD_UNIT} (system unit, User=${u.name}).`);
+  writeRootFile(sys, L.systemdUnit, unitText(u, runnerRoot, ca, L), 0o644);
+  note(sys, `Wrote ${L.systemdUnit} (system unit, User=${u.name}).`);
   mustRun(sys, 'systemctl', ['daemon-reload']);
-  mustRun(
-    sys,
-    'systemctl',
-    opts.start ? ['enable', '--now', 'guildwise-runner'] : ['enable', 'guildwise-runner'],
-  );
+  mustRun(sys, 'systemctl', opts.start ? ['enable', '--now', L.service] : ['enable', L.service]);
 }
 
-function serviceRemove(sys) {
+function serviceRemove(sys, opts = {}) {
+  const L = opts.L || DEFAULT_LAYOUT;
   if (sys.platform === 'darwin') {
-    mustRun(sys, 'launchctl', ['bootout', `system/${LAUNCHD_LABEL}`], { allowFail: true });
-    if (removeFile(sys, LAUNCHD_PLIST)) note(sys, `Removed ${LAUNCHD_PLIST}.`);
+    mustRun(sys, 'launchctl', ['bootout', `system/${L.launchdLabel}`], { allowFail: true });
+    if (removeFile(sys, L.launchdPlist)) note(sys, `Removed ${L.launchdPlist}.`);
     return;
   }
-  mustRun(sys, 'systemctl', ['disable', '--now', 'guildwise-runner'], { allowFail: true });
-  if (removeFile(sys, SYSTEMD_UNIT)) note(sys, `Removed ${SYSTEMD_UNIT}.`);
+  mustRun(sys, 'systemctl', ['disable', '--now', L.service], { allowFail: true });
+  if (removeFile(sys, L.systemdUnit)) note(sys, `Removed ${L.systemdUnit}.`);
   mustRun(sys, 'systemctl', ['daemon-reload']);
+}
+
+/** `abs` lies inside the user's HOME (an instance's runner root and data never reach another account). */
+function checkInsideHome(u, abs, what) {
+  const rel = path.posix.relative(u.home, abs);
+  if (rel === '' || rel.startsWith('..') || path.posix.isAbsolute(rel))
+    throw new AdminError(`${what} must be inside ${u.home} (the home of ${u.name}): ${abs}`);
+  return abs;
 }
 
 // ----------------------------------------------------------------------------------------------- runner data
@@ -668,10 +785,11 @@ function runnerKeysPresent(sys, u, dataRoot) {
  * The password is never printed. With the current user, `guildwise-runner setup` seals the user's own password.
  */
 function sudoOn(sys, opts = {}) {
-  const u = requireUser(sys, opts.user || RUNNER_USER, 'run `guildwise-admin user create` first');
-  if (u.name !== RUNNER_USER && !opts.allowOtherUser)
+  const L = opts.L || DEFAULT_LAYOUT;
+  const u = requireUser(sys, opts.user || L.user, `run \`${adminHint(L, ['user', 'create'])}\` first`);
+  if (u.name !== L.user && !opts.allowOtherUser)
     throw new AdminError(
-      `sudo on is for the dedicated ${RUNNER_USER} user; with the current user, \`guildwise-runner setup --sudo on\` seals your own sudo password`,
+      `sudo on is for the dedicated ${L.user} user; with the current user, \`guildwise-runner setup --sudo on\` seals your own sudo password`,
     );
   const dataRoot = runnerDataRoot(u, opts.dataDir);
   if (!sys.dryRun && !runnerKeysPresent(sys, u, dataRoot))
@@ -689,7 +807,7 @@ function sudoOn(sys, opts = {}) {
   } else {
     mustRun(sys, 'chpasswd', [], { input: `${u.name}:${password}\n` });
   }
-  installSudoers(sys, SUDOERS_SUDO, sudoersForSudo(u.name));
+  installSudoers(sys, L.sudoersSudo, sudoersForSudo(u.name));
   const n = sys.dryRun ? 0 : sealSudoPassword(sys, u, dataRoot, password);
   if (!sys.dryRun)
     note(sys, `Sealed the new sudo password for ${n} pairing(s) of ${u.name}; it is not shown anywhere.`);
@@ -697,11 +815,12 @@ function sudoOn(sys, opts = {}) {
 }
 
 function sudoOff(sys, opts = {}) {
+  const L = opts.L || DEFAULT_LAYOUT;
   // it locks the account's password: only ever the dedicated user
-  if ((opts.user || RUNNER_USER) !== RUNNER_USER)
-    throw new AdminError(`sudo off is only for the dedicated ${RUNNER_USER} user`);
-  const u = requireUser(sys, RUNNER_USER);
-  if (removeFile(sys, SUDOERS_SUDO)) note(sys, `Removed ${SUDOERS_SUDO}.`);
+  if ((opts.user || L.user) !== L.user)
+    throw new AdminError(`sudo off is only for the dedicated ${L.user} user`);
+  const u = requireUser(sys, L.user);
+  if (removeFile(sys, L.sudoersSudo)) note(sys, `Removed ${L.sudoersSudo}.`);
   if (sys.platform === 'darwin') {
     mustRun(sys, 'dscl', ['.', '-create', `/Users/${u.name}`, 'Password', '*']);
   } else {
@@ -725,7 +844,10 @@ function sudoOff(sys, opts = {}) {
 function dockerMode(sys, mode, opts = {}) {
   if (!['none', 'narrow', 'group'].includes(mode))
     throw new AdminError('docker mode must be none, narrow or group');
-  const u = requireUser(sys, opts.user || RUNNER_USER);
+  const L = opts.L || DEFAULT_LAYOUT;
+  const u = requireUser(sys, opts.user || L.user);
+  if (L.instance && u.name !== L.user)
+    throw new AdminError(`the Docker rule of instance ${L.instance} is only for ${L.user}`);
   const inGroup = () => groupsOf(sys, u.name).includes('docker');
   if (mode === 'group') {
     if (!opts.acceptRootEquivalent)
@@ -734,7 +856,7 @@ function dockerMode(sys, mode, opts = {}) {
       );
     if (sys.platform === 'darwin')
       throw new AdminError('macOS has no docker group: use --docker narrow, or none');
-    if (removeFile(sys, SUDOERS_DOCKER)) note(sys, `Removed ${SUDOERS_DOCKER}.`);
+    if (removeFile(sys, L.sudoersDocker)) note(sys, `Removed ${L.sudoersDocker}.`);
     if (!inGroup()) addToGroup(sys, u.name, 'docker');
     note(sys, `${u.name} is in the docker group: the runner is root-equivalent (accepted).`);
     return;
@@ -744,13 +866,13 @@ function dockerMode(sys, mode, opts = {}) {
     note(sys, `Removed ${u.name} from the docker group.`);
   }
   if (mode === 'narrow') {
-    installSudoers(sys, SUDOERS_DOCKER, sudoersForDocker(u.name));
+    installSudoers(sys, L.sudoersDocker, sudoersForDocker(u.name, L.deployCompose));
     note(
       sys,
-      `Deploys reach Docker only through ${DEPLOY_COMPOSE}, for apps you approve with \`approve-app\`.`,
+      `Deploys reach Docker only through ${L.deployCompose}, for apps you approve with \`${adminHint(L, ['approve-app'])}\`.`,
     );
   } else {
-    if (removeFile(sys, SUDOERS_DOCKER)) note(sys, `Removed ${SUDOERS_DOCKER}.`);
+    if (removeFile(sys, L.sudoersDocker)) note(sys, `Removed ${L.sudoersDocker}.`);
     note(sys, 'Deploys have no Docker access.');
   }
 }
@@ -785,9 +907,10 @@ function ensureRootDir(sys, abs) {
  * Loads the installed deploy-compose helper (W10) after checking that it and its folder are root-owned, not symlinks
  * and not writable by group or others, so root never runs code the runner user could have changed.
  */
-function loadDeployCompose(sys) {
+function loadDeployCompose(sys, L = DEFAULT_LAYOUT) {
   const rootUid = sys.rootUid ?? 0;
-  for (const abs of [ADMIN_DIR, DEPLOY_COMPOSE]) {
+  const DEPLOY_COMPOSE = L.deployCompose;
+  for (const abs of [...new Set([ADMIN_DIR, L.toolsDir]), DEPLOY_COMPOSE]) {
     const st = fs.lstatSync(P(sys, abs), { throwIfNoEntry: false });
     if (!st) throw new AdminError(`${abs} is missing: re-run the installer`);
     if (st.isSymbolicLink() || st.uid !== rootUid || st.mode & 0o022)
@@ -809,16 +932,20 @@ async function approveApp(sys, app, opts = {}) {
   if (!APP_RE.test(String(app || '')))
     throw new AdminError(`not a valid app name: ${JSON.stringify(app)} (a-z, 0-9, -, at most 48)`);
   const source = checkSafeAbs(opts.source, '--source');
-  const u = requireUser(sys, opts.user || RUNNER_USER);
+  const L = opts.L || DEFAULT_LAYOUT;
+  const u = requireUser(sys, opts.user || L.user);
+  // an instance's approvals name only that instance's user: deploy-compose reads them only for that caller
+  if (L.instance && u.name !== L.user)
+    throw new AdminError(`apps of instance ${L.instance} are approved only for ${L.user}`);
   const rel = path.posix.relative(u.home, source);
   if (rel.startsWith('..') || rel === '')
     throw new AdminError(`--source must be one of ${u.name}'s own clones (inside ${u.home}): ${source}`);
   const st = fs.lstatSync(P(sys, source), { throwIfNoEntry: false });
   if (!st?.isDirectory()) throw new AdminError(`${source} is not a directory (symlinks are refused)`);
   assertNoSymlinkBelow(sys, u.home, source);
-  const helper = loadDeployCompose(sys);
-  for (const d of ['/etc/guildwise-runner', APPS_CONF_DIR, STATE_DIR]) ensureRootDir(sys, d);
-  const confPath = `${APPS_CONF_DIR}/${app}.conf`;
+  const helper = loadDeployCompose(sys, L);
+  for (const d of [L.etcDir, L.appsConfDir, STATE_DIR]) ensureRootDir(sys, d);
+  const confPath = `${L.appsConfDir}/${app}.conf`;
   const rootHome = lookupUser(sys, 'root')?.home || (sys.platform === 'darwin' ? '/var/root' : '/root');
   let res;
   try {
@@ -829,8 +956,12 @@ async function approveApp(sys, app, opts = {}) {
       readerUid: u.uid,
       readerGid: u.gid,
       homeDir: rootHome,
-      readerCommand: [sys.execPath, P(sys, DEPLOY_COMPOSE)],
-      ...(sys.root === '/' ? {} : { confDir: P(sys, APPS_CONF_DIR), stateDir: P(sys, `${STATE_DIR}/apps`) }),
+      readerCommand: [sys.execPath, P(sys, L.deployCompose)],
+      ...(sys.root === '/' && !L.instance
+        ? {}
+        : { confDir: P(sys, L.appsConfDir), stateDir: P(sys, L.appsStateDir) }),
+      // the same project name deploy-compose derives for this instance's caller, so the pin is the one it checks
+      ...(L.instance ? { projectPrefix: L.composePrefix } : {}),
     });
   } catch (e) {
     throw new AdminError(`${app} was not approved: ${String(e?.message ?? e).slice(0, 1500)}`);
@@ -944,10 +1075,15 @@ function reposUnder(sys, abs) {
 }
 
 function readersAdd(sys, human, opts = {}) {
+  const L = opts.L || DEFAULT_LAYOUT;
+  const READERS_GROUP = L.readersGroup;
   checkUserName(human);
-  if (human === RUNNER_USER) throw new AdminError('the runner user does not need read access to itself');
+  if (human === L.user) throw new AdminError('the runner user does not need read access to itself');
+  // a runner user never reads another runner's clones (two instances stay apart)
+  if (human === RUNNER_USER || human.startsWith(`${RUNNER_USER}-`))
+    throw new AdminError(`${human} is a runner user: runners never read each other's clones`);
   const h = requireUser(sys, human);
-  const u = requireUser(sys, opts.user || RUNNER_USER);
+  const u = requireUser(sys, opts.user || L.user);
   const srcRoot = path.posix.join(u.home, 'src');
   const clones = opts.path ? checkSafeAbs(opts.path, '--path') : srcRoot;
   const rel = path.posix.relative(srcRoot, clones);
@@ -1004,9 +1140,10 @@ function readersAdd(sys, human, opts = {}) {
 }
 
 function readersRemove(sys, human, opts = {}) {
+  const L = opts.L || DEFAULT_LAYOUT;
   const h = requireUser(sys, checkUserName(human));
-  if (groupsOf(sys, h.name).includes(READERS_GROUP)) removeFromGroup(sys, h.name, READERS_GROUP);
-  const u = lookupUser(sys, opts.user || RUNNER_USER);
+  if (groupsOf(sys, h.name).includes(L.readersGroup)) removeFromGroup(sys, h.name, L.readersGroup);
+  const u = lookupUser(sys, opts.user || L.user);
   note(sys, `${h.name} no longer reads the runner's clones${u ? ` in ${u.home}/src` : ''}.`);
 }
 
@@ -1209,12 +1346,19 @@ function loginsToRedo(sys, to) {
  */
 function migrateUser(sys, opts = {}) {
   if (opts.finish) return migrateFinish(sys, opts);
+  const L = opts.L || DEFAULT_LAYOUT;
+  const MIGRATE_MARKER = L.migrateMarker;
   const fromName = opts.from || sys.env.SUDO_USER;
   if (!fromName) throw new AdminError('name the user whose runner to move: --from <user>');
   const from = requireUser(sys, fromName);
-  const to = requireUser(sys, opts.to || RUNNER_USER, 'run `guildwise-admin user create` first');
+  const to = requireUser(sys, opts.to || L.user, `run \`${adminHint(L, ['user', 'create'])}\` first`);
   if (from.uid === 0) throw new AdminError('refusing to migrate root');
   if (from.uid === to.uid) throw new AdminError('the runner already runs as that user');
+  // never from or into another runner's account: each instance keeps its own token, policy and clones
+  if (L.instance && to.name !== L.user)
+    throw new AdminError(`instance ${L.instance} migrates only into ${L.user}`);
+  if (from.name === RUNNER_USER || from.name.startsWith(`${RUNNER_USER}-`))
+    throw new AdminError(`${from.name} is a runner user: one runner's data is never moved into another`);
   if (fs.existsSync(P(sys, MIGRATE_MARKER)))
     throw new AdminError(`a migration is waiting for --finish (${MIGRATE_MARKER}); finish it first`);
   const oldData = runnerDataRoot(from, opts.dataDir);
@@ -1350,7 +1494,7 @@ function migrateUser(sys, opts = {}) {
     );
   note(
     sys,
-    `Sudo is off for ${to.name} (your sealed sudo password was not copied): \`sudo ${SELF_PATH} sudo on\` if you want it, then run \`sudo -u ${to.name} -H guildwise-runner setup\`.`,
+    `Sudo is off for ${to.name} (your sealed sudo password was not copied): \`${adminHint(L, ['sudo', 'on'])}\` if you want it, then run \`sudo -u ${to.name} -H guildwise-runner setup\`.`,
   );
   disableOldService(sys, from);
   if (Array.isArray(policy.signingKeys) && policy.signingKeys.length > 0)
@@ -1362,7 +1506,7 @@ function migrateUser(sys, opts = {}) {
   for (const l of loginsToRedo(sys, to)) note(sys, `  ${l}`);
   note(
     sys,
-    `Then start the runner as ${to.name}, and after its first good start run: sudo ${SELF_PATH} migrate-user --finish`,
+    `Then start the runner as ${to.name}, and after its first good start run: ${adminHint(L, ['migrate-user', '--finish'])}`,
   );
   return { stats, marker };
 }
@@ -1408,12 +1552,16 @@ function ensureParents(sys, u, abs) {
   }
 }
 
-function migrateFinish(sys) {
+function migrateFinish(sys, opts = {}) {
+  const L = opts.L || DEFAULT_LAYOUT;
+  const MIGRATE_MARKER = L.migrateMarker;
   const text = fs.existsSync(P(sys, MIGRATE_MARKER)) ? readOwnedFile(sys, MIGRATE_MARKER, 0) : null;
   if (!text) throw new AdminError('no migration is waiting to be finished');
   const m = JSON.parse(text);
   const from = requireUser(sys, m.from);
   const to = requireUser(sys, m.to);
+  if (L.instance && to.name !== L.user)
+    throw new AdminError(`the waiting migration is into ${to.name}, not instance ${L.instance}`);
   const startedAt = Date.parse(m.startedAt);
   let good = false;
   for (const dir of pairingDirs(sys, to, m.newData)) {
@@ -1485,7 +1633,8 @@ function verifyInstall(sys, opts = {}) {
       problems.push(`${abs} is writable by group or others (mode ${(st.mode & 0o777).toString(8)})`);
     return st;
   };
-  let cur = ADMIN_DIR;
+  const L = opts.L || DEFAULT_LAYOUT;
+  let cur = L.toolsDir;
   const parents = [];
   while (cur !== '/') {
     parents.unshift(cur);
@@ -1497,15 +1646,15 @@ function verifyInstall(sys, opts = {}) {
     const st = checkNode(abs, true);
     if (st?.isDirectory()) for (const n of fs.readdirSync(P(sys, abs))) walk(path.posix.join(abs, n));
   };
-  for (const f of ['guildwise-admin', 'deploy-compose', 'node']) walk(path.posix.join(ADMIN_DIR, f));
-  for (const f of [SUDOERS_SUDO, SUDOERS_DOCKER]) {
+  for (const f of ['guildwise-admin', 'deploy-compose', 'node']) walk(path.posix.join(L.toolsDir, f));
+  for (const f of [L.sudoersSudo, L.sudoersDocker]) {
     const st = checkNode(f, false);
     if (!st) continue;
     if ((st.mode & 0o777) !== 0o440) problems.push(`${f} must be mode 0440`);
     const r = sys.run('visudo', ['-cf', P(sys, f)]);
     if (r.code !== 0) problems.push(`${f} does not pass visudo -cf`);
   }
-  const u = lookupUser(sys, opts.user || RUNNER_USER);
+  const u = lookupUser(sys, opts.user || L.user);
   if (u) {
     const pathVars = [sys.env.PATH || '', ...securePaths(sys)];
     for (const v of pathVars)
@@ -1570,10 +1719,13 @@ async function apply(sys, o) {
     throw new AdminError('--docker must be none, narrow or group');
   if (docker === 'group' && !accept) throw new AdminError('--docker group needs --accept-root-equivalent');
   if (apps.length > 0 && docker !== 'narrow') throw new AdminError('--approve-app needs --docker narrow');
-  let user = RUNNER_USER;
+  const L = o.L || DEFAULT_LAYOUT;
+  if (L.instance && runnerUser !== 'dedicated')
+    throw new AdminError('--instance needs the dedicated runner user (--runner-user dedicated, or --yes)');
+  let user = L.user;
   if (runnerUser === 'dedicated') {
-    userCreate(sys);
-    serviceInstall(sys, { runnerRoot: o['runner-root'], caFile: o['ca-file'], start: o.start });
+    userCreate(sys, { L });
+    serviceInstall(sys, { L, runnerRoot: o['runner-root'], caFile: o['ca-file'], start: o.start });
   } else {
     user = o.user || sys.env.SUDO_USER;
     if (!user) throw new AdminError('with --runner-user current, name the user: --user <name>');
@@ -1585,25 +1737,25 @@ async function apply(sys, o) {
   if (runnerUser === 'dedicated') {
     if (sudo === 'on') {
       // on a fresh install the runner key appears only after pairing and setup as the runner user: defer, keep going
-      const u = lookupUser(sys, RUNNER_USER);
+      const u = lookupUser(sys, L.user);
       if (!sys.dryRun && u && !runnerKeysPresent(sys, u, runnerDataRoot(u, o['data-dir'])))
         note(
           sys,
-          `Sudo needs the runner key, which exists after pairing: once \`sudo -u ${RUNNER_USER} -H guildwise-runner setup\` has run, run \`sudo ${SELF_PATH} sudo on\`.`,
+          `Sudo needs the runner key, which exists after pairing: once \`sudo -u ${L.user} -H guildwise-runner setup\` has run, run \`${adminHint(L, ['sudo', 'on'])}\`.`,
         );
-      else sudoOn(sys, { dataDir: o['data-dir'] });
-    } else if (lookupUser(sys, RUNNER_USER)) sudoOff(sys, { dataDir: o['data-dir'] });
+      else sudoOn(sys, { L, dataDir: o['data-dir'] });
+    } else if (lookupUser(sys, L.user)) sudoOff(sys, { L, dataDir: o['data-dir'] });
   } else if (sudo === 'on') {
     note(
       sys,
       `Sudo for ${user}: \`guildwise-runner setup --sudo on --sudo-password-stdin\` seals your own password.`,
     );
   }
-  dockerMode(sys, docker, { user, acceptRootEquivalent: accept });
+  dockerMode(sys, docker, { L, user, acceptRootEquivalent: accept });
   for (const spec of apps) {
     const i = spec.indexOf('=');
     if (i <= 0) throw new AdminError(`--approve-app takes <app>=<folder>, got ${JSON.stringify(spec)}`);
-    const r = await approveApp(sys, spec.slice(0, i), { source: spec.slice(i + 1), user, yes: true });
+    const r = await approveApp(sys, spec.slice(0, i), { L, source: spec.slice(i + 1), user, yes: true });
     if (!r.approved) throw new AdminError(`${spec.slice(0, i)} was not approved`);
   }
 }
@@ -1621,10 +1773,12 @@ const USAGE = `usage: sudo ${SELF_PATH} <command> [options]
   apply --yes | --runner-user dedicated|current [--sudo on|off] [--docker none|narrow|group]
         [--accept-root-equivalent] [--approve-app <app>=<folder>]... [--runner-root <dir>] [--ca-file <pem>] [--start]
   verify
-every command: --dry-run (print what would change; changes nothing)`;
+every command: --dry-run (print what would change; changes nothing)
+every command: --instance <name> for a named runner (user, service, CA, sudoers, approvals of guildwise-runner-<name>)`;
 
 const OPTIONS = {
   'dry-run': { type: 'boolean' },
+  instance: { type: 'string' },
   yes: { type: 'boolean' },
   user: { type: 'string' },
   from: { type: 'string' },
@@ -1653,12 +1807,20 @@ const OPTIONS = {
 
 async function main(argv, sys = realSystem()) {
   try {
-    checkInterpreter(sys);
-    const { values: o, positionals: pos } = util.parseArgs({
-      args: argv,
-      options: OPTIONS,
-      allowPositionals: true,
-    });
+    let parsed;
+    try {
+      parsed = util.parseArgs({ args: argv, options: OPTIONS, allowPositionals: true });
+    } catch (e) {
+      checkInterpreter(sys, instanceLayout(toolsInstance(sys.execPath)));
+      throw e;
+    }
+    const { values: o, positionals: pos } = parsed;
+    // Only the flag, or the instance's own tools folder, names an instance (no variable: without either nothing changes
+    // from before). An instance is managed only by its own copy of the tools: the top-level guildwise-admin refuses
+    // --instance, and an instance's copy refuses another instance.
+    const own = toolsInstance(sys.execPath);
+    const L = instanceLayout(o.instance ?? own);
+    checkInterpreter(sys, L);
     if (o.help || pos.length === 0) {
       sys.out(USAGE);
       return pos.length === 0 && !o.help ? 64 : 0;
@@ -1667,29 +1829,30 @@ async function main(argv, sys = realSystem()) {
     checkPlatform(sys);
     checkRoot(sys);
     const [cmd, sub, arg] = pos;
-    if (cmd === 'user' && sub === 'create') userCreate(sys, { name: o.user });
+    if (cmd === 'user' && sub === 'create') userCreate(sys, { L, name: o.user });
     else if (cmd === 'service' && sub === 'install')
       serviceInstall(sys, {
+        L,
         user: o.user,
         runnerRoot: o['runner-root'],
         caFile: o['ca-file'],
         start: o.start,
       });
-    else if (cmd === 'service' && sub === 'remove') serviceRemove(sys);
-    else if (cmd === 'sudo' && sub === 'on') sudoOn(sys, { user: o.user, dataDir: o['data-dir'] });
-    else if (cmd === 'sudo' && sub === 'off') sudoOff(sys, { user: o.user, dataDir: o['data-dir'] });
+    else if (cmd === 'service' && sub === 'remove') serviceRemove(sys, { L });
+    else if (cmd === 'sudo' && sub === 'on') sudoOn(sys, { L, user: o.user, dataDir: o['data-dir'] });
+    else if (cmd === 'sudo' && sub === 'off') sudoOff(sys, { L, user: o.user, dataDir: o['data-dir'] });
     else if (cmd === 'docker' && sub)
-      dockerMode(sys, sub, { user: o.user, acceptRootEquivalent: o['accept-root-equivalent'] });
+      dockerMode(sys, sub, { L, user: o.user, acceptRootEquivalent: o['accept-root-equivalent'] });
     else if (cmd === 'approve-app' && sub) {
-      const r = await approveApp(sys, sub, { source: o.source, user: o.user, yes: o.yes });
+      const r = await approveApp(sys, sub, { L, source: o.source, user: o.user, yes: o.yes });
       return r.approved ? 0 : 1;
     } else if (cmd === 'readers' && sub === 'add' && arg)
-      readersAdd(sys, arg, { user: o.user, path: o.path });
-    else if (cmd === 'readers' && sub === 'remove' && arg) readersRemove(sys, arg, { user: o.user });
+      readersAdd(sys, arg, { L, user: o.user, path: o.path });
+    else if (cmd === 'readers' && sub === 'remove' && arg) readersRemove(sys, arg, { L, user: o.user });
     else if (cmd === 'migrate-user')
-      migrateUser(sys, { from: o.from, to: o.to, dataDir: o['data-dir'], finish: o.finish });
-    else if (cmd === 'apply') await apply(sys, o);
-    else if (cmd === 'verify') return verifyInstall(sys, { user: o.user }).length === 0 ? 0 : 1;
+      migrateUser(sys, { L, from: o.from, to: o.to, dataDir: o['data-dir'], finish: o.finish });
+    else if (cmd === 'apply') await apply(sys, { ...o, L });
+    else if (cmd === 'verify') return verifyInstall(sys, { L, user: o.user }).length === 0 ? 0 : 1;
     else {
       sys.err(USAGE);
       return 64;
@@ -1724,7 +1887,11 @@ module.exports = {
   LAUNCHD_PLIST,
   RUNNER_CA_FILE,
   MIN_FETCH_GIT,
+  INSTANCE_RE,
+  RESERVED_INSTANCES,
   AdminError,
+  instanceLayout,
+  toolsInstance,
   main,
   realSystem,
   sudoersForSudo,

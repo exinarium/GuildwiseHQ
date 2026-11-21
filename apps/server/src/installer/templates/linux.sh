@@ -282,16 +282,17 @@ stop_legacy_services() {
 }
 
 # The system service of the dedicated user: guildwise-admin writes the unit (User=guildwise-runner, the runner root below)
-# and enables and starts it; a restart picks up an upgraded runner.
+# and enables and starts it; a restart picks up an upgraded runner. A named instance (--instance <name>) has its own
+# service, guildwise-runner-<name>, and never touches another runner's.
 # Stops the dedicated user's system service (if there is one yet).
-stop_dedicated_service() { as_root systemctl stop guildwise-runner.service >/dev/null 2>&1 || true; }
+stop_dedicated_service() { as_root systemctl stop "${DEDICATED_SERVICE}.service" >/dev/null 2>&1 || true; }
 
 install_dedicated_service() {
-  as_root "${ADMIN}" service install --runner-root "${RUNNER_ROOT}" ${RUNNER_CA:+--ca-file "${RUNNER_CA}"} --start ||
-    die "guildwise-admin could not install the guildwise-runner service." "Run: sudo ${ADMIN} service install --runner-root ${RUNNER_ROOT} --start   to see why, then run the command again."
-  as_root systemctl restart guildwise-runner.service ||
-    die "The service could not be started." "Run \`sudo systemctl status guildwise-runner\` to see why, then run the command again."
-  good "Service enabled and started (system service \"guildwise-runner\", running as ${RUNNER_NAME})"
+  run_admin service install --runner-root "${RUNNER_ROOT}" ${RUNNER_CA:+--ca-file "${RUNNER_CA}"} --start ||
+    die "guildwise-admin could not install the ${DEDICATED_SERVICE} service." "Run: sudo ${ADMIN_HINT} service install --runner-root ${RUNNER_ROOT} --start   to see why, then run the command again."
+  as_root systemctl restart "${DEDICATED_SERVICE}.service" ||
+    die "The service could not be started." "Run \`sudo systemctl status ${DEDICATED_SERVICE}\` to see why, then run the command again."
+  good "Service enabled and started (system service \"${DEDICATED_SERVICE}\", running as ${RUNNER_NAME})"
   SERVICE_MODE=systemd; record_service_mode systemd
   report "Service" ok "systemd system service running as ${RUNNER_NAME}"
 }

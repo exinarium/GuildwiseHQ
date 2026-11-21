@@ -48,6 +48,10 @@ export function registerSetupCommand(program: Command): void {
       collect,
     )
     .option('--data-dir <path>', 'runner data directory (default: $AOM_RUNNER_HOME or ~/.aom-runner)')
+    .option(
+      '--instance <name>',
+      'a named runner instance (its own user guildwise-runner-<name>, for example uat or prod); default: the single runner',
+    )
     .action(async (raw: RawSetupFlags) => {
       try {
         const opts = parseSetupOptions(raw);
