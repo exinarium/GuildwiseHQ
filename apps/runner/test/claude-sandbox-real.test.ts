@@ -5,7 +5,8 @@ import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import { BUILTIN_ROLES } from '@aom/shared';
 import { afterAll, describe, expect, it } from 'vitest';
-import { buildShiftSettings } from '../src/adapters/claude-policy.ts';
+import { addInstallRedirect } from '../src/adapters/claude-code.ts';
+import { buildShiftSettings, gitDirsOf } from '../src/adapters/claude-policy.ts';
 import { createSandboxPlaceholders } from '../src/adapters/sandbox-placeholders.ts';
 import { runnerPaths } from '../src/paths.ts';
 import { ensureSandbox, sandboxEnv } from '../src/sandbox/sandbox.ts';
@@ -48,7 +49,13 @@ afterAll(() => {
 async function runBashAs(
   roleKey: string,
   command: string,
-  opts: { cwdKind?: 'worktree' | 'scratch' } = {},
+  opts: {
+    cwdKind?: 'worktree' | 'scratch';
+    scrub?: boolean;
+    linkedNode?: boolean;
+    env?: Record<string, string>;
+    before?: (root: string) => void;
+  } = {},
 ): Promise<{ output: string; stderr: string; settings: any; cwd: string }> {
   // Under the user's home, like the real data dir: the failure does not show with a root under /tmp.
   mkdirSync(HOME_BASE, { recursive: true });
@@ -61,7 +68,30 @@ async function runBashAs(
   mkdirSync(join(root, 'worktrees', 'P-1', 'X-2'), { recursive: true });
   mkdirSync(join(root, 'worktrees', 'P-9', 'Y-1'), { recursive: true });
   writeFileSync(join(root, 'config.json'), '{}');
-  if (opts.cwdKind !== 'scratch') {
+  opts.before?.(root);
+  const gitEnv = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 'a',
+    GIT_AUTHOR_EMAIL: 'a@b.c',
+    GIT_COMMITTER_NAME: 'a',
+    GIT_COMMITTER_EMAIL: 'a@b.c',
+  };
+  if (opts.linkedNode) {
+    // a card worktree (linked: `.git` is a file) of a Node project with package.json, a lockfile and scripts/ committed
+    rmSync(cwd, { recursive: true, force: true });
+    const repo = join(root, 'repos', 'P-1');
+    mkdirSync(join(repo, 'scripts'), { recursive: true });
+    spawnSync('git', ['init', '-q', '-b', 'main', repo]);
+    writeFileSync(join(repo, 'package.json'), '{"name":"probe","version":"1.0.0","private":true}\n');
+    writeFileSync(
+      join(repo, 'package-lock.json'),
+      '{"name":"probe","lockfileVersion":3,"requires":true,"packages":{}}\n',
+    );
+    writeFileSync(join(repo, 'scripts', 'build.sh'), 'echo build\n');
+    spawnSync('git', ['-C', repo, 'add', '-A']);
+    spawnSync('git', ['-C', repo, 'commit', '-q', '-m', 'init'], { env: gitEnv });
+    spawnSync('git', ['-C', repo, 'worktree', 'add', '-q', '-b', 'X-1', cwd]);
+  } else if (opts.cwdKind !== 'scratch') {
     spawnSync('git', ['init', '-q', '-b', 'main', cwd]);
     spawnSync('git', ['-C', cwd, 'commit', '-q', '--allow-empty', '-m', 'init'], {
       env: {
@@ -83,7 +113,7 @@ async function runBashAs(
       runnerRoot: root,
       agentDir: paths.agentDir(A),
       cwd,
-      gitDirs: [],
+      gitDirs: opts.linkedNode ? gitDirsOf(cwd) : [],
       aomReadPaths: [paths.bin],
       realHome: userInfo().homedir,
       sharedCacheDir: sb.cacheRoot,
@@ -91,6 +121,8 @@ async function runBashAs(
     sb,
     roleKey,
   );
+  // what the adapter adds to a scrubbed, non-DevOps session: an install in Bash is refused with the way to ask DevOps
+  if (opts.scrub) addInstallRedirect(settings);
   mkdirSync(sb.configDir, { recursive: true });
   writeFileSync(join(sb.configDir, 'settings.json'), JSON.stringify(settings, null, 2));
   writeFileSync(join(sb.configDir, 'mcp.json'), '{"mcpServers":{}}');
@@ -108,6 +140,9 @@ async function runBashAs(
     ANTHROPIC_API_KEY: 'sk-ant-fake-fake-fake',
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     DISABLE_AUTOUPDATER: '1',
+    // what sessionEnv adds with `scrubSubprocessEnv` (on by default since 1.10.0)
+    ...(opts.scrub ? { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1' } : {}),
+    ...(opts.env ?? {}),
   };
   const child = spawn(
     CLAUDE as string,
@@ -165,6 +200,99 @@ describe.skipIf(!enabled)(
       expect(r.output, r.stderr).toContain('TMP-WRITE-OK');
       // the empty placeholders the runner made are gone again
       expect(existsSync(join(r.cwd, '.gitconfig'))).toBe(false);
+    }, 120_000);
+
+    it('builder with the scrub on (the 1.10.0 default) in a Node project: Bash cannot write the build files (owner question)', async () => {
+      // Claude Code 2.1.330's scrub denies Bash writes to <cwd>/package.json, the lockfiles, node_modules/.bin, scripts,
+      // .github, .claude and .env*, so a dependency install fails; other files stay writable. This pins today's behaviour
+      // (BUILD.md, Questions): if Claude Code changes it, this test says so.
+      const r = await runBashAs(
+        'builder',
+        [
+          'echo "{}" > package.json && echo PKG-WRITE-OK',
+          'mkdir -p node_modules/.bin && touch node_modules/.bin/x && echo BIN-WRITE-OK',
+          'echo more >> scripts/build.sh && echo SCRIPTS-WRITE-OK',
+          // `env npm`: past the install hint hook (a hint only; the scrub is what blocks the write)
+          'env npm install --offline --no-audit --no-fund >/dev/null 2>&1 && echo NPM-INSTALL-OK',
+          'echo SRC > src.txt && echo SRC-WRITE-OK',
+          'true',
+        ].join('; '),
+        { scrub: true, linkedNode: true },
+      );
+      expect(r.output, r.stderr).toContain('SRC-WRITE-OK');
+      expect(r.output, r.stderr).toMatch(/package\.json: Read-only file system/);
+      for (const blocked of ['PKG-WRITE-OK', 'BIN-WRITE-OK', 'SCRIPTS-WRITE-OK', 'NPM-INSTALL-OK'])
+        expect(r.output, blocked).not.toContain(blocked);
+    }, 120_000);
+
+    it('builder with the scrub on: `npm install` in Bash is refused with the way to ask DevOps (aom devops install)', async () => {
+      const r = await runBashAs('builder', 'npm install', { scrub: true, linkedNode: true });
+      expect(r.output, r.stderr).toContain('aom devops install');
+      expect(r.output, r.stderr).not.toContain('Read-only file system');
+    }, 120_000);
+
+    it('tester (a browser role, Unix sockets open): no other user runtime dir and no container socket is reachable', async () => {
+      const r = await runBashAs(
+        'tester',
+        'echo "RUNUSER=[$(ls -A /run/user 2>/dev/null | tr \'\\n\' \' \')]"; for p in /run/docker.sock /var/run/docker.sock /run/docker-svc/docker.sock /run/containerd/containerd.sock; do [ -S "$p" ] && echo "SOCKET $p"; done; echo PROBE-DONE',
+      );
+      expect(r.output, r.stderr).toContain('PROBE-DONE');
+      expect(r.output, r.stderr).toContain('RUNUSER=[]');
+      expect(r.output, r.stderr).not.toContain('SOCKET ');
+    }, 120_000);
+
+    it('a shift shell (builder) cannot read or write the install caches of any worktree (<data dir>/install-cache)', async () => {
+      const r = await runBashAs(
+        'builder',
+        'cat ../../../install-cache/0123456789abcdef/npm/packument.json 2>&1 | head -1; echo x > ../../../install-cache/0123456789abcdef/npm/evil.json 2>&1 | head -1; ls ../../../install-cache 2>&1 | head -1; echo PROBE-DONE',
+        {
+          before: (root) => {
+            mkdirSync(join(root, 'install-cache', '0123456789abcdef', 'npm'), { recursive: true });
+            writeFileSync(
+              join(root, 'install-cache', '0123456789abcdef', 'npm', 'packument.json'),
+              'OTHER-WORKTREE-CACHE',
+            );
+          },
+        },
+      );
+      expect(r.output, r.stderr).toContain('PROBE-DONE');
+      expect(r.output, r.stderr).not.toContain('OTHER-WORKTREE-CACHE');
+      expect(r.output, r.stderr).not.toContain('0123456789abcdef\n');
+      expect(
+        existsSync(join(r.cwd, '..', '..', '..', 'install-cache', '0123456789abcdef', 'npm', 'evil.json')),
+      ).toBe(false);
+    }, 120_000);
+
+    it('the scrub keeps DOCKER_HOST, drops XDG_RUNTIME_DIR and strips a token (why DevOps is never scrubbed)', async () => {
+      // Claude Code 2.1.330. DevOps, the only role that gets these two (DEVOPS_INHERITED_ENV), runs unscrubbed, so its
+      // rootless Docker keeps working; a sandboxed role is not given either (INHERITED_ENV). This pins what the scrub does.
+      const r = await runBashAs(
+        'builder',
+        'echo "DH=${DOCKER_HOST:-unset}"; echo "XDG=${XDG_RUNTIME_DIR:-unset}"; echo "TOK=${AOM_SHIFT_TOKEN:-unset}"',
+        {
+          scrub: true,
+          linkedNode: true,
+          env: {
+            DOCKER_HOST: 'unix:///run/user/1234/docker.sock',
+            XDG_RUNTIME_DIR: '/run/user/1234',
+            AOM_SHIFT_TOKEN: 'aom-test-token-0123456789abcdef',
+          },
+        },
+      );
+      expect(r.output, r.stderr).toContain('DH=unix:///run/user/1234/docker.sock');
+      expect(r.output, r.stderr).toContain('XDG=unset');
+      expect(r.output, r.stderr).toContain('TOK=unset');
+    }, 120_000);
+
+    it('reviewer with the scrub on (the 1.10.0 default): the scrub’s extra mount points exist, no bwrap error, cleaned up', async () => {
+      // a standalone repository (`.git` is a directory), like a PR review checkout: Claude Code also mounts over
+      // .git/config.lock there; and `scripts`, `.github`, `package.json`, the `.env` files, ... at the root
+      const r = await runBashAs('reviewer', 'echo PROBE-OK; git log --oneline | head -1', { scrub: true });
+      expect(r.output, r.stderr).not.toContain("Can't create file");
+      expect(r.output, r.stderr).toContain('PROBE-OK');
+      expect(r.output, r.stderr).toContain('init');
+      for (const n of ['scripts', 'package.json', '.env', join('.git', 'config.lock')])
+        expect(existsSync(join(r.cwd, n)), n).toBe(false);
     }, 120_000);
   },
 );

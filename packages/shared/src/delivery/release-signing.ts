@@ -84,6 +84,11 @@ export type SetDeployTargetSigningRequest = z.infer<typeof SetDeployTargetSignin
 export const ReleaseSigningPrepareRequestSchema = z.object({
   targetId: z.uuid(),
   commit: z.string().trim().min(7).max(64),
+  /**
+   * Package a release that is kept for rollback (the current or the previous good deploy, signed) again anyway: only when
+   * the deploying workstation lost its artefact files. The new artefact needs a new signature.
+   */
+  repackage: z.literal(true).optional(),
 });
 export type ReleaseSigningPrepareRequest = z.infer<typeof ReleaseSigningPrepareRequestSchema>;
 
@@ -106,6 +111,11 @@ export const ReleaseSigningManifestQuerySchema = z.object({ releaseId: z.uuid(),
 /** The 409 of a prepare or upload before anything was packaged, and of an upload over an artefact packaged again since. */
 export const ARTEFACT_NOT_PREPARED = 'artefact_not_prepared';
 export const ARTEFACT_CHANGED = 'artefact_changed';
+/**
+ * The 409 of packaging a release kept for rollback again (the target's current or previous good deploy, signed) without
+ * `repackage: true`: its signed artefact stays as it is.
+ */
+export const ARTEFACT_KEPT_FOR_ROLLBACK = 'artefact_kept_for_rollback';
 /** The 422 of a signature that does not verify against the target's key and artefact, or is by another key. */
 export const SIGNATURE_INVALID = 'signature_invalid';
 export const SIGNATURE_WRONG_KEY = 'signature_wrong_key';

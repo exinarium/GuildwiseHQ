@@ -5,7 +5,7 @@ import {
   RUNNER_SIGNATURE_REQUIRED,
   targetArtefactPath,
 } from '@aom/shared';
-import { one, type Queryable, type Row } from '../db/sql.ts';
+import { one, type Queryable, type Row, rows } from '../db/sql.ts';
 
 /**
  * The deploy gate of R30: a target with `signing.required` deploys only a shipped release whose runner artefact, packaged
@@ -84,6 +84,33 @@ export async function signatureFor(
     `SELECT * FROM release_signatures WHERE release_id=$1 AND target_id=$2 AND key_id=$3 AND artefact_sha256=$4`,
     [releaseId, targetId, keyId, artefactSha256],
   );
+}
+
+/**
+ * The releases a target keeps signed for rollback (owner 2026-11-21, R30): the shipped releases of its two newest
+ * successful real deploys of different releases (not trials, not dry runs), newest first: the one running now and the one
+ * before it. Their signed artefacts are kept as they are, so a rollback never waits on a new signature.
+ */
+export async function keptForRollback(
+  db: Queryable,
+  projectId: string,
+  targetId: string,
+): Promise<ShippedRelease[]> {
+  const runs = await rows<{ commit: string | null }>(
+    db,
+    `SELECT COALESCE(deployed_commit, commit) AS commit FROM deploy_runs
+      WHERE project_id=$1 AND target_id=$2 AND status='succeeded' AND NOT trial AND NOT dry_run
+      ORDER BY finished_at DESC NULLS LAST, created_at DESC LIMIT 50`,
+    [projectId, targetId],
+  );
+  const out: ShippedRelease[] = [];
+  for (const r of runs) {
+    if (!r.commit) continue;
+    const rel = await releaseForCommit(db, projectId, r.commit, { exact: true });
+    if (rel && !out.some((x) => x.id === rel.id)) out.push(rel);
+    if (out.length === 2) break;
+  }
+  return out;
 }
 
 export type SigningGateAnswer =

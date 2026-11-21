@@ -11,6 +11,7 @@ import { ClaudeRuntimeConfigSchema } from '../src/config.ts';
 import { IpcServer } from '../src/ipc/server.ts';
 import { runnerPaths } from '../src/paths.ts';
 import { ensureSandbox, sandboxEnv } from '../src/sandbox/sandbox.ts';
+import { issueShiftCredential } from '../src/session/shift-credential.ts';
 import { cleanupTmp } from './helpers.ts';
 
 cleanupTmp();
@@ -167,13 +168,20 @@ describe.skipIf(!enabled)('real Claude Code with native subagents (fake API, ski
     const asked: Array<Record<string, unknown>> = [];
     const ipc = new IpcServer();
     await ipc.start();
-    const token = ipc.registerShift({
-      report: async () => ({ accepted: false, message: 'no', error: 'no' }) as never,
-      rpc: async (r: IpcRpcRequest) => {
-        asked.push({ method: r.method, ...r.params });
-        return r.method === 'delegate.guard' ? { ok: true, result: {} } : { ok: false, error: 'no' };
+    // as the runner issues it: a token plus the session's 0600 env file (the hooks read it once the scrub strips the token)
+    const cred = issueShiftCredential(
+      { ipc, runnerRoot: paths.root },
+      {
+        sessionId: 'zz',
+        handler: {
+          report: async () => ({ accepted: false, message: 'no', error: 'no' }) as never,
+          rpc: async (r: IpcRpcRequest) => {
+            asked.push({ method: r.method, ...r.params });
+            return r.method === 'delegate.guard' ? { ok: true, result: {} } : { ok: false, error: 'no' };
+          },
+        },
       },
-    });
+    );
     const api = await fakeAgentApi('general-purpose', 'rev');
     const adapter = new ClaudeCodeAdapter(
       ClaudeRuntimeConfigSchema.parse({
@@ -206,9 +214,7 @@ describe.skipIf(!enabled)('real Claude Code with native subagents (fake API, ski
         subagents: [subagent],
         env: {
           ...sandboxEnv(sandbox),
-          AOM_IPC_URL: ipc.url,
-          AOM_SHIFT_TOKEN: token,
-          AOM_SHIFT_ID: 'zz',
+          ...cred.env,
           ANTHROPIC_BASE_URL: api.url,
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
           DISABLE_AUTOUPDATER: '1',
@@ -255,6 +261,7 @@ describe.skipIf(!enabled)('real Claude Code with native subagents (fake API, ski
       expect(parent && 'usage' in parent ? parent.usage.costUsd : 0).toBeUndefined();
     } finally {
       delete process.env.AOM_CLAUDE_SMOKE;
+      cred.revoke();
       await ipc.stop();
     }
   }, 120_000);
@@ -270,11 +277,17 @@ describe.skipIf(!enabled)('real Claude Code with native subagents (fake API, ski
     spawnSync('git', ['init', '-q', '-b', 'main', cwd]);
     const ipc = new IpcServer();
     await ipc.start();
-    const token = ipc.registerShift({
-      report: async () => ({ accepted: false, message: 'no', error: 'no' }) as never,
-      rpc: async (r: IpcRpcRequest) =>
-        r.method === 'delegate.guard' ? { ok: true, result: {} } : { ok: false, error: 'no' },
-    });
+    const cred = issueShiftCredential(
+      { ipc, runnerRoot: paths.root },
+      {
+        sessionId: 'zz2',
+        handler: {
+          report: async () => ({ accepted: false, message: 'no', error: 'no' }) as never,
+          rpc: async (r: IpcRpcRequest) =>
+            r.method === 'delegate.guard' ? { ok: true, result: {} } : { ok: false, error: 'no' },
+        },
+      },
+    );
     // a subagent that reads one file at once, then waits past the limit before the next read, until a tool result tells it the time is over
     // (the first read has the whole limit to arrive in, so a loaded machine does not turn it into a refusal)
     const seen = { subResults: [] as string[], parentResults: [] as string[], subCalls: 0 };
@@ -419,9 +432,7 @@ describe.skipIf(!enabled)('real Claude Code with native subagents (fake API, ski
         subagents: [subagent],
         env: {
           ...sandboxEnv(sandbox),
-          AOM_IPC_URL: ipc.url,
-          AOM_SHIFT_TOKEN: token,
-          AOM_SHIFT_ID: 'zz2',
+          ...cred.env,
           ANTHROPIC_BASE_URL: url,
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
           DISABLE_AUTOUPDATER: '1',
@@ -451,6 +462,7 @@ describe.skipIf(!enabled)('real Claude Code with native subagents (fake API, ski
       expect(seen.parentResults.join(' ')).toContain('SUB-STOPPED');
     } finally {
       delete process.env.AOM_CLAUDE_SMOKE;
+      cred.revoke();
       await ipc.stop();
     }
   }, 120_000);

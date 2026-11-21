@@ -2,7 +2,7 @@
 // Mock agent process (docs/ARCHITECTURE.md section 12.3). Standalone: node builtins only, talks to the runner
 // exclusively through the real `aom` CLI. Stdout is JSON lines of RuntimeEvent.
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
@@ -17,6 +17,8 @@ type Action =
   | 'edit_outside_scope'
   | 'devops'
   | 'devops_install'
+  /** A builder asks DevOps to add a dependency in its worktree (`aom devops install npm add ...`), then builds as usual. */
+  | 'deps_install'
   | 'fabricate'
   | 'uncited'
   | 'answer'
@@ -2230,6 +2232,17 @@ async function main(): Promise<number> {
     emit({
       kind: 'progress',
       text: `mock asked DevOps: ${(asked.code === 0 ? asked.out : asked.err).trim()}`,
+    });
+  }
+  if (action === 'deps_install') {
+    // a Node project: the root manifest the install works from
+    if (!existsSync('package.json')) writeFileSync('package.json', '{"name":"toy","private":true}\n');
+    const r = aom(['devops', 'install', 'npm', 'add', 'left-pad@1.3.0', '--dev']);
+    mkdirSync('.guildwise-mock', { recursive: true });
+    writeFileSync(join('.guildwise-mock', 'deps-install.txt'), `${r.code}\n${r.out}${r.err}`);
+    emit({
+      kind: 'progress',
+      text: `mock asked DevOps to install: ${(r.code === 0 ? r.out : r.err).trim()}`,
     });
   }
   if (action === 'suggest') {

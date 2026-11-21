@@ -109,12 +109,17 @@ describe('the signed-release proof', () => {
     const treeVersion = /RUNNER_VERSION = '([^']+)'/.exec(
       read(join(runner, 'src/version.ts')),
     )?.[1] as string;
-    // Runner and product share one number space from 1.10.0 on: the floor is the 1.10.0 runner.
+    // Runner and product share one number space from 1.10.0 on: the floor is the 1.10.0 runner. It does not follow the
+    // releases (owner, 2026-11-21): at or below the version in the tree, raised only by hand (docs/RUNNER.md).
     expect(MIN_PAIRABLE_RUNNER).toBe('1.10.0');
+    expect(runnerAtLeast(treeVersion, MIN_PAIRABLE_RUNNER)).toBe(true);
     if (existsSync(floorSrc))
       expect(/MIN_TRUSTED_RUNNER = '([^']+)'/.exec(read(floorSrc))?.[1]).toBe(MIN_PAIRABLE_RUNNER);
-    // Before the runner workstream lands its floor.ts, the floor is at or above the version in the tree.
-    else expect(runnerAtLeast(MIN_PAIRABLE_RUNNER, treeVersion)).toBe(true);
+    expect(
+      /SIGNED_RUNNER_FLOOR="([^"]+)"/.exec(
+        read(resolve(import.meta.dirname, '../src/installer/templates/common.sh')),
+      )?.[1],
+    ).toBe(MIN_PAIRABLE_RUNNER);
     if (existsSync(adminSrc))
       expect(/RUNNER_FLOOR = '([^']+)'/.exec(read(adminSrc))?.[1]).toBe(MIN_PAIRABLE_RUNNER);
   });

@@ -121,6 +121,30 @@ function TargetSigning({
           </Button>
         </div>
       )}
+      {t.state === 'signed' && commit && (
+        <div className="flex flex-col gap-1">
+          <p className="text-xs text-muted">
+            This signed runner is kept for a rollback of {t.targetName}. Package it again only if the
+            workstation that deploys {t.targetName} lost its files: it then needs a new signature before it
+            deploys.
+          </p>
+          <div>
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={prepare.isPending}
+              onClick={() =>
+                window.confirm(
+                  `Package the runner of ${version ?? 'this release'} for ${t.targetName} again? Its signature no longer counts, and it waits for a new one.`,
+                ) && prepare.mutate({ targetId: t.targetId, commit, repackage: true })
+              }
+              data-testid={`${tid}-repackage`}
+            >
+              Package again (needs a new signature)
+            </Button>
+          </div>
+        </div>
+      )}
       {canSign && releaseId && (
         <div className="flex flex-col gap-2">
           <p className="text-xs text-muted">

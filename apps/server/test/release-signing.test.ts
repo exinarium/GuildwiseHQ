@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { requestDeployRun } from '../src/delivery/runs.ts';
-import { signingGate } from '../src/delivery/signing-gate.ts';
+import { keptForRollback, signingGate } from '../src/delivery/signing-gate.ts';
 import { PREPARE_TTL_MS } from '../src/release/signing.ts';
 import { keepOnline } from './helpers/ceo.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
@@ -383,6 +383,79 @@ describe('route 1: the workstation holding the key, under a local approval', () 
     const [row] = await q('SELECT by_user FROM release_signatures WHERE release_id=$1', [release2]);
     expect(row!.by_user).toBeNull();
     expect((await call('POST', signUrl, { releaseId: release2, targetId: target() })).status).toBe(409);
+  });
+});
+
+describe('rollback: the current and the previous good release stay signed (owner 2026-11-21)', () => {
+  it('after N+1 deployed, N and N+1 keep their signatures; N deploys again at once and is not packaged again', async () => {
+    // release1 (COMMIT) was signed and deployed above, and that deploy succeeded; release2 (COMMIT2, signed in route 1)
+    // deployed successfully after it
+    const [run1] = await q(
+      `UPDATE deploy_runs SET status='succeeded', finished_at=$3, deployed_commit=$2 WHERE project_id=$1 AND commit=$2 RETURNING id`,
+      [d.w.projectId, COMMIT, d.w.t.clock.now()],
+    );
+    await q(
+      `INSERT INTO deploy_runs SELECT (jsonb_populate_record(NULL::deploy_runs, to_jsonb(r) ||
+         jsonb_build_object('id', $2::text, 'commit', $3::text, 'deployed_commit', $3::text, 'finished_at', $4::text))).*
+         FROM deploy_runs r WHERE id=$1`,
+      [run1!.id, randomUUID(), COMMIT2, new Date(d.w.t.clock.now().getTime() + 60_000).toISOString()],
+    );
+    const pool = d.w.t.app.ctx.pool;
+    expect((await keptForRollback(pool, d.w.projectId, target())).map((x) => x.id)).toEqual([
+      release2,
+      release1,
+    ]);
+    const before = (await artefact(release1))[0];
+    const prepares = cmds('release.prepare').length;
+    for (const commit of [COMMIT, COMMIT2]) {
+      const again = await call('POST', `${base()}/prepare`, { targetId: target(), commit });
+      expect(again.status).toBe(409);
+      expect(again.body.error.code).toBe('artefact_kept_for_rollback');
+      expect(again.body.error.message).toContain('needs a new signature');
+    }
+    expect(cmds('release.prepare')).toHaveLength(prepares);
+    expect((await artefact(release1))[0]).toEqual(before);
+    // the rollback to N: the gate hands out its kept signature at once
+    const [row] = await q('SELECT * FROM deploy_targets WHERE id=$1', [target()]);
+    expect(await signingGate(pool, d.w.projectId, row!, COMMIT)).toMatchObject({
+      required: true,
+      signing: { releaseId: release1, keyId: TEST_KEY_ID, artefactSha256: sha(MANIFEST) },
+    });
+  });
+
+  it('when the workstation lost the files, N is packaged again on purpose and then waits for a new signature', async () => {
+    const before = cmds('release.prepare').length;
+    await ok(call('POST', `${base()}/prepare`, { targetId: target(), commit: COMMIT, repackage: true }), 202);
+    await until(
+      async () => cmds('release.prepare').length === before + 1,
+      4000,
+      'repackage reached the runner',
+    );
+    expect(cmds('release.prepare')[before]!.payload).toMatchObject({ releaseId: release1, repackage: true });
+    prepared(release1, TAMPERED);
+    await until(
+      async () => (await artefact(release1))[0]?.artefact_sha256 === sha(TAMPERED),
+      4000,
+      'packaged again',
+    );
+    const [ev] = await q(
+      `SELECT payload FROM events WHERE type='ReleaseArtefactPrepared' AND payload->>'releaseId'=$1 ORDER BY seq DESC LIMIT 1`,
+      [release1],
+    );
+    expect(ev!.payload).toMatchObject({ repackaged: true, artefactSha256: sha(TAMPERED) });
+    expect(await status(COMMIT)).toMatchObject({ state: 'waiting_signature' });
+    const [row] = await q('SELECT * FROM deploy_targets WHERE id=$1', [target()]);
+    expect(await signingGate(d.w.t.app.ctx.pool, d.w.projectId, row!, COMMIT)).toMatchObject({
+      required: true,
+      refusal: expect.stringContaining('waits for a signature'),
+    });
+    // back to the state the next tests expect: release2's deploy undone, release1 packaged as MANIFEST (signed) again
+    await q(`DELETE FROM deploy_runs WHERE project_id=$1 AND commit=$2`, [d.w.projectId, COMMIT2]);
+    const n = cmds('release.prepare').length;
+    await ok(call('POST', `${base()}/prepare`, { targetId: target(), commit: COMMIT, repackage: true }), 202);
+    await until(async () => cmds('release.prepare').length === n + 1, 4000, 'restore reached the runner');
+    prepared(release1, MANIFEST);
+    await until(async () => (await status(COMMIT)).state === 'signed', 4000, 'release1 signed again');
   });
 });
 

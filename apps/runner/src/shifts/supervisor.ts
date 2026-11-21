@@ -102,6 +102,11 @@ import {
   delegateUsageReporter,
 } from '../delegate/delegate.ts';
 import { recordDevopsAudit } from '../devops/audit.ts';
+import {
+  DEVOPS_INSTALL_RPC,
+  type DependencyChange,
+  parseDependencyChange,
+} from '../devops/dependency-install.ts';
 import { devopsPushPlan, devopsRequestIdentity, withAppPushRefusal } from '../devops/devops-git.ts';
 import { redactCommand } from '../devops/guard.ts';
 import { type HygieneDeps, runHygiene } from '../devops/hygiene.ts';
@@ -362,6 +367,16 @@ export interface SupervisorDeps {
   envChecker?: EnvChecker;
   /** How `aom transcript` reaches yt-dlp and the web (default: the real ones; tests inject fakes). */
   transcript?: TranscriptDeps;
+  /**
+   * `aom devops install` (owner 2026-11-21): the DevOps side of the runner runs a project package install in the shift's
+   * worktree under the local policy (the agent's scrubbed Bash cannot write package.json or the lockfiles).
+   */
+  devopsInstall?: (req: {
+    shiftId: string;
+    dir: string;
+    repo: string;
+    change: DependencyChange;
+  }) => Promise<IpcRpcResponse>;
   /** `aom git status|connect` for the DevOps engineer (the runner drives the login on this workstation). */
   git?: { handle(method: string, params: Record<string, unknown>): Promise<IpcRpcResponse> };
   /** The ticket systems of this workstation: a batch intake shift reads its ticket (`aom source read`) like an intake chat. */
@@ -2448,6 +2463,7 @@ export class ShiftSupervisor {
             : ({ ok: false, error: 'only the DevOps engineer probes' } as IpcRpcResponse);
         if (req.method === 'card.attachments') return this.cardAttachments(s, req.params);
         if (req.method === 'transcript.fetch') return this.transcriptFetch(s, req.params);
+        if (req.method === DEVOPS_INSTALL_RPC) return this.devopsInstall(s, req.params);
         if (req.method === 'devops.audit')
           return recordDevopsAudit(req.params, {
             isDevops: s.msg.agent.isDevops === true,
@@ -2817,6 +2833,30 @@ export class ShiftSupervisor {
    * repository that posts as an app fetches, pulls and pushes with the app's token (which never reaches the agent) and
    * the commits a pull rewrites get the app as committer. The spec comes from this runner's copy of the brief.
    */
+  /** `aom devops install ...`: a card shift's package install, run for it by the DevOps side of the runner. */
+  private async devopsInstall(s: ActiveShift, params: Record<string, unknown>): Promise<IpcRpcResponse> {
+    if (s.msg.agent.isDevops)
+      return { ok: false, error: 'the DevOps engineer runs the package manager itself' };
+    if (!s.worktree || !s.msg.worktree)
+      return {
+        ok: false,
+        error:
+          '`aom devops install` works in a card shift with a worktree; otherwise ask with `aom devops "<request>"`',
+      };
+    if (!s.msg.agent.permissions.allowedTools.includes('edit'))
+      return { ok: false, error: 'your role does not change the worktree, so it does not install packages' };
+    if (!this.deps.devopsInstall)
+      return { ok: false, error: '`aom devops install` is not available on this workstation' };
+    const parsed = parseDependencyChange(params);
+    if (!parsed.ok) return { ok: false, error: parsed.reason };
+    return this.deps.devopsInstall({
+      shiftId: s.msg.shiftId,
+      dir: s.worktree.path,
+      repo: s.msg.worktree.remoteUrlNormalized,
+      change: parsed.change,
+    });
+  }
+
   private async hygieneRun(s: ActiveShift): Promise<IpcRpcResponse> {
     const { msg } = s;
     if (msg.kind !== 'devops' || msg.agent.isDevops !== true)

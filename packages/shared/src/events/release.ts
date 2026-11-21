@@ -145,6 +145,8 @@ export const releaseEvents = [
       version: z.string().min(1).max(40),
       /** The artefact's raw text (public data), so a signature can be verified and the file offered for offline signing (W14). */
       manifest: z.string().max(16_384).optional(),
+      /** A signed release kept for rollback was packaged again on purpose (its workstation lost the files): signed anew. */
+      repackaged: z.literal(true).optional(),
     }),
   ),
   /**

@@ -80,7 +80,11 @@ describe('the native subagent definitions', () => {
 });
 
 describe('the Agent tool in the settings the adapter writes', () => {
-  async function settingsFor(subagents: NativeSubagent[] | undefined, agent: Record<string, unknown> = {}) {
+  async function settingsFor(
+    subagents: NativeSubagent[] | undefined,
+    agent: Record<string, unknown> = {},
+    env: (root: string) => Record<string, string> = () => ({}),
+  ) {
     const t = tmp();
     const bin = join(t, 'fakeclaude');
     writeFileSync(
@@ -102,7 +106,7 @@ describe('the Agent tool in the settings the adapter writes', () => {
         cwd,
         sandbox,
         addDirs: [],
-        env: {},
+        env: env(paths.root),
         maxShiftMinutes: 5,
         ...(subagents ? { subagents } : {}),
         agent: {
@@ -187,10 +191,25 @@ describe('the Agent tool in the settings the adapter writes', () => {
     // the check costs a shell test when nothing is running, and it fails closed: a vanished folder or a hook that cannot start refuses
     expect(pre.hooks[0].command).toContain('[ -d ');
     expect(pre.hooks[0].command).toContain('|| exit 2; [ -n "$(ls -A ');
-    expect(pre.hooks[0].command).toContain('|| exit 0; AOM_SUBAGENT_GUARD=');
+    expect(pre.hooks[0].command).toContain(`|| exit 0; cd '${r.dir}' && AOM_SUBAGENT_GUARD=`);
     expect(pre.hooks[0].command).toMatch(/subagent-deadline.* \|\| exit 2$/);
     const post = r.settings.hooks.PostToolUse.find((h: { matcher: string }) => h.matcher === 'Agent|Task');
     expect(post.hooks[0].command).toMatch(/subagent-done.* \|\| exit 0$/);
+  });
+
+  it('runs every hook in the config dir and points it at the session env file (the scrub strips the token from hooks)', async () => {
+    let file = '';
+    const r = await settingsFor([sub('rev', { timeoutSec: 45 })], {}, (root) => {
+      file = join(root, 'session-env', 'zz.0a1b2c3d', 'env.json');
+      return { AOM_SHIFT_ENV_FILE: file };
+    });
+    // the `aom` hooks (the Bash install hint is plain shell and runs no `aom`)
+    const commands = [...r.settings.hooks.PreToolUse, ...r.settings.hooks.PostToolUse]
+      .filter((h: { matcher: string }) => h.matcher !== 'Bash')
+      .flatMap((h: { hooks: Array<{ command: string }> }) => h.hooks.map((x) => x.command));
+    expect(commands).toHaveLength(3);
+    for (const c of commands)
+      expect(c).toContain(`cd '${r.dir}' && AOM_SHIFT_ENV_FILE='${file}' AOM_SUBAGENT_GUARD=`);
   });
 
   it('adds no hook and no limit for a grant without a time limit', async () => {

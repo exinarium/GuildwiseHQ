@@ -439,12 +439,29 @@ describe('the agent process gets a minimal environment (review H2a)', () => {
     // the same dir is in the sandbox's write list
     expect(settings(builder.permissions).sandbox?.filesystem.allowWrite).toContain('/data/agents/a1/tmp');
   });
-  it("does not forward the runner's ANTHROPIC_API_KEY in default auth mode, and scrubbing is opt-in", () => {
+  it('DevOps keeps DOCKER_HOST and XDG_RUNTIME_DIR (the rootless Docker of the runner) and is never scrubbed', () => {
+    const env = {
+      ...parent,
+      DOCKER_HOST: 'unix:///run/user/1234/docker.sock',
+      XDG_RUNTIME_DIR: '/run/user/1234',
+    };
+    const devops = sessionEnv(
+      { ...input(), agent: { isDevops: true } },
+      ClaudeRuntimeConfigSchema.parse({ scrubSubprocessEnv: true }),
+      env,
+    );
+    expect(devops.DOCKER_HOST).toBe('unix:///run/user/1234/docker.sock');
+    expect(devops.XDG_RUNTIME_DIR).toBe('/run/user/1234');
+    expect(devops.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
+  });
+
+  it("does not forward the runner's ANTHROPIC_API_KEY in default auth mode, and scrubbing is on by default (1.10.0)", () => {
     const def = sessionEnv(input(), ClaudeRuntimeConfigSchema.parse({}), parent);
     expect(def.ANTHROPIC_API_KEY).toBeUndefined();
-    expect(def.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
-    const scrub = sessionEnv(input(), ClaudeRuntimeConfigSchema.parse({ scrubSubprocessEnv: true }), parent);
-    expect(scrub.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1');
+    expect(ClaudeRuntimeConfigSchema.parse({}).scrubSubprocessEnv).toBe(true);
+    expect(def.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1');
+    const off = sessionEnv(input(), ClaudeRuntimeConfigSchema.parse({ scrubSubprocessEnv: false }), parent);
+    expect(off.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
   });
 });
 

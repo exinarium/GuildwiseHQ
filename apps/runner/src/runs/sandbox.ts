@@ -1,7 +1,12 @@
 import { execFile } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, statSync } from 'node:fs';
 import { delimiter, dirname, join, resolve as resolvePath, sep } from 'node:path';
-import { BROWSER_MASKED, DEVOPS_INHERITED_ENV, HOME_SECRETS, onPath } from '../adapters/claude-policy.ts';
+import {
+  containerRuntimeMasks,
+  DEVOPS_INHERITED_ENV,
+  HOME_SECRETS,
+  onPath,
+} from '../adapters/claude-policy.ts';
 import { SECRETISH } from '../toolchain/registry.ts';
 
 /**
@@ -30,6 +35,8 @@ export interface SandboxSpec {
   runTmp: string;
   /** The clones' git dirs the linked worktrees point at: readable (git needs them), never writable. */
   gitDirs?: string[];
+  /** More paths made readable again (read-only) after the masks, like the toolchains of a hidden home. */
+  readOnly?: string[];
   /** OS user id for `/run/user/<uid>` (injectable for tests). */
   uid?: number;
   /** Mount the .NET user secrets (default true). The builder's checks never get them. */
@@ -48,7 +55,7 @@ export interface SandboxSpec {
   dieWithParent?: boolean;
   /** The resolver config to make reachable (default `/etc/resolv.conf`; injectable for tests). */
   resolvConf?: string;
-  /** The system paths that are masked (default `BROWSER_MASKED`; injectable for tests). */
+  /** The system paths that are masked (default `containerRuntimeMasks()`; injectable for tests). */
   systemMasks?: string[];
 }
 
@@ -63,13 +70,17 @@ export function maskedPaths(
   spec: Pick<SandboxSpec, 'runnerRoot' | 'realHome' | 'uid' | 'extraMasked' | 'systemMasks'>,
 ): string[] {
   const uid = spec.uid ?? process.getuid?.();
-  return existingReal([
+  const all = existingReal([
     ...(spec.extraMasked ?? []),
     spec.runnerRoot,
     ...HOME_SECRETS.map((p) => join(spec.realHome, p)),
-    ...(spec.systemMasks ?? BROWSER_MASKED),
+    ...(spec.systemMasks ?? containerRuntimeMasks()),
     ...(uid !== undefined ? [`/run/user/${uid}`] : []),
   ]);
+  // a mask inside a masked runtime dir (`/run/user/<uid>` under `/run/user`) adds only an empty mount point whose name
+  // would show in the parent's listing
+  const runtime = all.filter((q) => q.startsWith('/run/') || q.startsWith('/var/run/'));
+  return all.filter((p) => !runtime.some((q) => q !== p && p.startsWith(`${q}${sep}`)));
 }
 
 /** The real paths of the entries that exist, each once. */
@@ -168,7 +179,7 @@ function bwrapSetup(spec: SandboxSpec): { args: string[]; warning?: string } {
   // DNS: after the masks, so the one file shows through the tmpfs. Not for `none`: no network, no lookups to serve.
   let warning: string | undefined;
   if (spec.network !== 'none') {
-    const systemMasked = existingReal(spec.systemMasks ?? BROWSER_MASKED);
+    const systemMasked = existingReal(spec.systemMasks ?? containerRuntimeMasks());
     const uid = spec.uid ?? process.getuid?.();
     const otherMasked = existingReal([
       spec.runnerRoot,
@@ -179,7 +190,10 @@ function bwrapSetup(spec: SandboxSpec): { args: string[]; warning?: string } {
     if (m.bind) args.push('--ro-bind', m.bind, m.bind);
     warning = m.warning;
   }
-  for (const g of spec.gitDirs ?? []) if (existsSync(g)) args.push('--ro-bind', g, g);
+  // a re-open never exposes a masked path again: an entry that is a masked path or holds one is dropped
+  const masks = maskedPaths(spec);
+  const safe = (spec.readOnly ?? []).filter((r) => !masks.some((m) => m === r || m.startsWith(`${r}${sep}`)));
+  for (const g of [...(spec.gitDirs ?? []), ...safe]) if (existsSync(g)) args.push('--ro-bind', g, g);
   args.push('--bind', spec.runTmp, '/tmp');
   for (const w of [...spec.worktrees, spec.cacheRoot]) args.push('--bind', w, w);
   // .NET user secrets (`dotnet run` in Development reads them): read-only, at the services' HOME. Services only: an

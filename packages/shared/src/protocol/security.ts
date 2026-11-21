@@ -157,5 +157,7 @@ export const ReleasePreparePayloadSchema = z.object({
   publicKey: z.string().regex(/^RW[A-Za-z0-9+/]{54}$/),
   /** Where the artefact lands, relative to the repository (`release/<target>/manifest.json`). */
   artefact: z.string().min(1).max(300),
+  /** Set when the owner packages a signed release kept for rollback again (its workstation lost the files). */
+  repackage: z.literal(true).optional(),
 });
 export type ReleasePreparePayload = z.infer<typeof ReleasePreparePayloadSchema>;

@@ -41,7 +41,7 @@ function useSigningMutation<B>(projectId: string, path: string) {
 }
 
 export const usePrepareRelease = (projectId: string) =>
-  useSigningMutation<{ targetId: string; commit: string }>(projectId, 'prepare');
+  useSigningMutation<{ targetId: string; commit: string; repackage?: true }>(projectId, 'prepare');
 export const useSignOnWorkstation = (projectId: string) =>
   useSigningMutation<{ releaseId: string; targetId: string }>(projectId, 'sign');
 export const useUploadSignature = (projectId: string) =>

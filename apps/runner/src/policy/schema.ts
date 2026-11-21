@@ -128,6 +128,10 @@ export const PolicySchema = z
     setupDone: z.boolean().default(false),
     /** Repositories whose installs may run their scripts (`guildwise-runner repo allow-scripts <url>`) [rv3-2]. */
     installScripts: z.record(z.string().min(1).max(500), z.literal(true)).default({}),
+    /** Registry hosts an `aom devops install` may use besides registry.npmjs.org and registry.yarnpkg.com (owner 2026-11-21). */
+    installRegistries: z.array(z.string().min(1).max(253)).max(50).default([]),
+    /** Proxy and TLS keys (proxy, https-proxy, strict-ssl, ca, cafile, ...) in a project's .npmrc/.yarnrc/bunfig may apply. */
+    installNetworkConfig: z.boolean().default(false),
     /** Hashes of release formatter configs approved locally [rv3-2]. */
     formatterPins: z.array(Sha256Hex).max(1000).default([]),
     /** `aom devops` requests from agents: wait for a local approval (`ask`) or are refused (`deny`) (R18-D). */

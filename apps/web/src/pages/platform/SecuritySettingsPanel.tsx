@@ -68,6 +68,21 @@ export function SecuritySettingsPanel() {
             : 'Every account has two-factor login.'
         }
       />
+      {s.refuseLegacyTwoFactor ? (
+        <SettingRow
+          id="refuseLegacyTwoFactor"
+          title="Refuse legacy two-factor"
+          state={s.refuseLegacyTwoFactor}
+          pending={save.isPending}
+          onChange={change}
+          detail="When on, recovery codes made before 1.10.0 and authenticator apps set up with the key kept in the database are refused at sign-in, password reset and when you confirm it's you. Those users reset two-factor login by email and set it up again. Needs AOM_TWO_FACTOR_KEY (or AOM_SECRET_KEY) on the server."
+          count={
+            s.refuseLegacyTwoFactor.value
+              ? 'Old recovery codes and authenticator apps are refused.'
+              : 'Old recovery codes and authenticator apps keep working.'
+          }
+        />
+      ) : null}
       <ErrorBox error={save.error} />
       <ConfirmDialog
         open={confirmUnlink}

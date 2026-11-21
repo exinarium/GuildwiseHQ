@@ -279,6 +279,8 @@ The runner that ships with Guildwise 1.10.0 no longer trusts the server for what
 - **Paths.** `GET /api/runner/releases/manifest.json`, `/api/runner/releases/manifest.json.minisig` and `/api/runner/releases/aom-runner-<version>.tgz`, served in both modes. The manifest holds the sha256 of the package; the `.minisig` is a minisign signature over `manifest.json`.
 - **Check.** The runner verifies the signature with the public key embedded in the runner package, then the sha256 of the package, before it installs anything. A failed check means no update.
 - **Floor.** A runner never installs, or rolls back to, a version below its floor. A `?version=` pin below the floor is answered `409 runner_pin_below_floor`, and Platform, Runners refuses to store such a pin.
+- **The floor does not follow the releases.** Runner and product share one version space, but a release does not raise the floor: it is 1.10.0, and a release (Ship release, the runner component bump) only rewrites `RUNNER_VERSION` in `apps/runner/src/version.ts`. So not every release forces a runner upgrade, and the release before stays a rollback target.
+- **Raising the floor on purpose.** Only by hand, in one commit, in all four places: `MIN_TRUSTED_RUNNER` (`apps/runner/src/update/floor.ts`), `RUNNER_FLOOR` (`apps/runner/admin/guildwise-admin.cjs`), `MIN_PAIRABLE_RUNNER` (`apps/server/src/installer/release.ts`) and `SIGNED_RUNNER_FLOOR` (`apps/server/src/installer/templates/common.sh`). Pick a version that has already been released and signed (at or below `RUNNER_VERSION`), then update the expected value in `apps/runner/test/runner-floor.test.ts` and `apps/server/test/signed-runner-setting.test.ts`. Runners below the new floor refuse those versions, and with **Only signed runners** on the server refuses them too, so such machines must be reinstalled.
 - **Old paths.** `GET /api/runner/release` and `/api/runner/release/:file` keep serving while **Only signed runners** is off, so older runners can update themselves into 1.10.0. When it is on they answer `410 reinstall_required`.
 - **Setting off (the self-hosted default).** Nothing is revoked or refused. Old runners keep connecting and, with auto-update on, move to the runner that ships with 1.10.0 within about a day. That runner starts in **setup pending**: sandboxed card shifts keep running, but DevOps, deploys and other unsandboxed steps wait until `guildwise-runner setup` has been run once on the machine. Its start-up check only warns. The server still records whether each runner is signed.
 - **Setting on (locked on in Guildwise Cloud).** Pairing an unsigned or older runner is refused (`403 signed_runner_required`, the pairing code is not spent). A connected one is closed (WebSocket 4403), stops cleanly (exit 0, no restart loop) and its workstation is unlinked, which deletes its runner token, keys, pending commands, pairing codes and installer sessions. It cannot be paired again in place: reinstall from the server's own installer. The web page shows **Reinstall required**. The server refuses to boot when the setting is on and its own runner release does not verify.
@@ -2198,7 +2200,7 @@ shifts (see [DevOps shifts are unsandboxed](#devops-shifts-are-unsandboxed)); ev
 
 Config keys (`runtimes.claude-code`): `sandbox` (`required` default, `best_effort`, `off`), `extraAllowedDomains`
 (array of hosts), `toolchainPaths` (array of directories sandboxed commands may read, e.g. `["~/.dotnet", "~/.cargo"]`;
-the home directory itself and credential stores are refused), `scrubSubprocessEnv` (boolean, default `false`). With `sandbox: "required"` the runtime reports itself
+the home directory itself and credential stores are refused), `scrubSubprocessEnv` (boolean, default `true` since 1.10.0; `false` opts out). With `sandbox: "required"` the runtime reports itself
 unavailable (no agent is scheduled on it) when `bwrap` and `socat` are missing on Linux (`sudo apt-get install
 bubblewrap socat`; on Ubuntu 24.04+ see the AppArmor note in the Claude Code sandboxing docs) or on native Windows (use
 WSL2; see "Windows: run the runner inside WSL2"); `claude` must be 2.1.257 or newer.
@@ -2215,6 +2217,64 @@ Effective sandbox state, reported per runtime in `hello` (and again whenever a r
 `allowUnsandboxed` (boolean, default `false`, `runtimes.claude-code`) is the acknowledgement that agents may run with no
 OS sandbox; it only matters for `best_effort`. Test only: `AOM_RUNNER_MOCK_SANDBOX=unsandboxed|unavailable|enforced`
 makes the mock runtime report that state.
+
+**Package installs go through DevOps (owner, 1.10.0).** With the scrub on (the default), Claude Code 2.1.330 makes the
+worktree root's `package.json`, lockfiles (`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `bunfig.toml`, `.npmrc`,
+`.yarnrc*`), `node_modules/.bin`, `scripts/`, `.github/`, `.claude/` and `.env*` read-only inside an agent's Bash. An agent
+in a card shift whose role edits the worktree asks instead: `aom devops install <npm|pnpm|yarn|bun>` (the locked
+dependencies), `aom devops install <tool> add <pkg>[@range]... [--dev]` or `... remove <pkg>...`. What the runner enforces:
+- **Atomic, boxed staging.** The files that decide what is fetched (every `package.json` and `pnpm-workspace.yaml`, the
+  lockfiles, `.npmrc`, `.yarnrc`, `.yarnrc.yml`, `bunfig.toml`, in the root and any folder, not `node_modules`) are copied
+  into a stage under the runner's data folder, which no agent can reach. The listing (`find`, no symlink followed, one
+  file system, at most depth 9 and 2000 files) and the copy run in a bubblewrap box that sees only the worktree
+  (read-only), the stage and the system binaries, so a symlink resolves inside that view: one that leaves the worktree,
+  or a file that is not a regular file, refuses the install. The check below runs on the stage and the package
+  manager runs in it, so a change the shift makes in its worktree meanwhile is not installed. Afterwards a second box that
+  sees only the worktree, the stage and the pristine copy puts back the files the install changed, a new lockfile, Yarn
+  PnP state and the `node_modules` of each package folder. It first checks every target (a folder whose real path leaves
+  the worktree stops it before anything is written), then writes each file through a temporary file and a rename and
+  builds each new `node_modules` beside the old one and swaps it in with renames, so a failure leaves the old one in place. A refusal names the file and the rule, never a value from it.
+- **Registry packages only.** Names on the command line must be registry names with an optional range. In the copy,
+  every dependency, `overrides`, `resolutions` and `packageExtensions` entry (`package.json`, its `pnpm` block,
+  `pnpm-workspace.yaml` overrides/catalog/catalogs/packageExtensions, `.yarnrc.yml` packageExtensions) must be a registry
+  version (a range or tag, `npm:<name>@<range>`, `workspace:`, `catalog:`); git, `github:`, `owner/repo`, `file:`, `link:`,
+  `patch:`, URLs and tarballs refuse the install, and so do patched dependencies. Lockfiles with git, `file:`, `patch:` or
+  absolute `link:` entries refuse it. Every URL in a lockfile or registry setting is parsed as Node parses it: it must be
+  https, without user or password or backslash, and its host must be `registry.npmjs.org` or `registry.yarnpkg.com`
+  (others only if listed in policy.json `installRegistries`; a listed host may also be a private or LAN address, which the
+  egress proxy then reaches on 443, and only then). A binary `bun.lockb` refuses the install (use the text
+  `bun.lock`).
+- **No proxy or TLS settings from the project.** `.npmrc` `proxy`, `https-proxy`, `http-proxy`, `noproxy`, `strict-ssl`,
+  `ca`, `cafile`, `cert`, `key` (and the like), `.yarnrc` `proxy`/`https-proxy`/`strict-ssl`/`ca`/`cafile`, `.yarnrc.yml`
+  `httpProxy`, `httpsProxy`, `enableStrictSsl`, `caFilePath`, `httpsCaFilePath`, `httpsCertFilePath`, `httpsKeyFilePath`,
+  `unsafeHttpWhitelist`, and `bunfig.toml` `ca`/`cafile`/proxy keys refuse the install unless the owner turns on policy.json
+  `installNetworkConfig`.
+- **Sandboxed (Linux, bubblewrap), own network.** The package manager runs in the runner's bubblewrap profile with a
+  network namespace of its own (only loopback): its only way out is the runner's egress proxy, reached through a bridge on
+  `127.0.0.1` inside the box, which lets a CONNECT through only to the allowed registry hosts, on port 443, and only to
+  public addresses. So no other host, no host loopback service and no abstract Unix socket of the host is reachable.
+  Writable are only the stage, this worktree's own package cache (`<data dir>/install-cache/<hash>`: no cache is shared
+  between worktrees, and no agent sandbox can see or write it, unlike the shared agent cache `<data dir>/cache`; the
+  caches of worktrees that are gone are removed at runner start and before each install) and a private `/tmp`. The runner's data folder (worktrees, tokens, keys) and the whole real home are
+  hidden; re-opened read-only are exactly the package manager (the binary file itself, or for a JavaScript one its package
+  folder) and the Node install, never the home, `~/.local`, `~/.local/share`, `~/.config`, `~/.cache` or a folder that holds
+  a masked path. Every container socket and runtime dir is hidden too: `/run/user` as a whole (every user's runtime dir,
+  so another user's rootless Docker or Podman, the own one included), `/run/docker*`, `/run/docker-svc`,
+  `/var/run/docker.sock`, `/run/containerd`, `/run/podman`, `/run/crio`, `/run/buildkit`, `/run/k3s`, `/run/libpod`,
+  `/run/lxd`, `/run/incus`, any other container-looking entry of `/run`, and the real target of each such entry that is a
+  symlink. Without bubblewrap (and `socat` for the bridge) the install is refused: on macOS and Windows
+  `aom devops install` always refuses (fail closed); there the owner or DevOps installs by hand.
+- **Minimal environment.** The install gets only PATH (the Node install and the system), a private HOME, temp, its
+  package cache settings, locale and CA variables, the box's egress bridge as its proxy, git with no system or global
+  config, and the package-manager switches. No token, SSH agent, git credential helper, `AOM_*`, cloud variable or proxy
+  of the runner's own.
+- **Script-free** (`--ignore-scripts` and the like, Yarn plugins refused) unless the owner allowed install scripts for the
+  repository (`guildwise-runner repo allow-scripts <url>`); those scripts then run in the same box, with the same
+  environment and network.
+- **One install per worktree at a time**; a second request while one runs is refused.
+The agent gets the result and carries on; package.json and the lockfile are committed with its work. An install typed in
+Bash is refused up front with this way to ask (a hint only: the read-only files are what stop it). Writing `scripts/`,
+`.github/` or `.env*` from Bash stays blocked.
 
 `scrubSubprocessEnv: true` sets `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`: Claude Code then strips credentials from the
 environment of everything its shell starts and, on Linux, isolates the PID namespace so `/proc/<pid>/environ` of other
@@ -2274,8 +2334,11 @@ organization owner). It also keeps `aom` working, since a browser role may now c
 
 What that opens, and how it is compensated: a shell that can create Unix sockets can connect to any socket it can reach
 by path. A path in the sandbox's `filesystem.denyRead` is masked and cannot be connected to, so browser shifts
-additionally hide `/var/run/docker.sock`, `/run/docker.sock`, `/run/containerd`, `/run/podman`, `/run/WSL` (WSL interop),
-`/run/dbus`, `/run/systemd`, `/run/user/<uid>` (session bus, keyrings, ssh/gpg agents) and any `/tmp/ssh-*`, `keyring-*`,
+additionally hide `/var/run/docker.sock`, `/run/docker.sock`, `/run/containerd`, `/run/podman`, `/run/docker*`,
+`/run/docker-svc`, `/run/crio`, `/run/buildkit`, `/run/k3s`, `/run/libpod`, `/run/lxd`, `/run/incus` and any other
+container-looking entry of `/run` (with the real target of each that is a symlink), `/run/WSL` (WSL interop),
+`/run/dbus`, `/run/systemd`, all of `/run/user` (every user's runtime dir: session buses, keyrings, ssh/gpg agents and
+another user's rootless Docker or Podman socket) and any `/tmp/ssh-*`, `keyring-*`,
 `gpg-*`, `dbus-*` entries present when the shift starts, on top of the credential stores listed above (`~/.ssh`, ...).
 `WSL_INTEROP`, `SSH_AUTH_SOCK`, `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR` and `DOCKER_HOST` never reach any agent
 (the agent environment is an allow-list; there is a test). Residual risk: a socket in a location not listed (a custom

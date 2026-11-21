@@ -114,6 +114,7 @@ const BOOLEAN_FLAGS = new Set([
   'allow-free-text',
   'no-free-text',
   'tests-only',
+  'dev',
 ]);
 
 /** Verbs whose JSON body can be passed inline (`--json '<json>'`): there `--json` takes a value instead of being a switch. */
@@ -1996,6 +1997,21 @@ const VERBS: Record<string, Verb> = {
     throw new UsageError(usage);
   },
   devops: async (ctx, p) => {
+    // `aom devops install <npm|pnpm|yarn|bun> [add|remove <pkg>... [--dev]]`: a package install in your worktree, run by DevOps
+    if (p.positionals[0] === 'install') {
+      const usage =
+        'usage: aom devops install <npm|pnpm|yarn|bun>                      (install the locked dependencies)\n       aom devops install <npm|pnpm|yarn|bun> add <pkg>[@range]... [--dev]\n       aom devops install <npm|pnpm|yarn|bun> remove <pkg>...';
+      const [, tool, action = 'install', ...packages] = p.positionals;
+      if (!tool) throw new UsageError(usage);
+      const r = (await rpc(ctx, 'devops.install', {
+        tool,
+        action,
+        packages,
+        dev: has(p, 'dev'),
+      })) as { message?: string };
+      ctx.io.out(`${r.message ?? 'Done.'}\n`);
+      return 0;
+    }
     const text = p.positionals[0] ?? one(p, 'text');
     if (!text?.trim()) throw new UsageError('usage: aom devops "<what you need from the DevOps engineer>"');
     const r = (await rpc(ctx, 'devops.request', { text })) as { requestId?: string; message?: string };

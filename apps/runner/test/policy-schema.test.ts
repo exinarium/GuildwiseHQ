@@ -28,6 +28,8 @@ describe('policy.json schema', () => {
       docker: 'none',
       setupDone: false,
       installScripts: {},
+      installRegistries: [],
+      installNetworkConfig: false,
       formatterPins: [],
       devopsAgentRequests: 'ask',
       allowDocker: false,

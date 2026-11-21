@@ -31,8 +31,46 @@ export const SANDBOX_PROTECTED_FILES = [
   '.zprofile',
   '.profile',
   '.ripgreprc',
+  // with CLAUDE_CODE_SUBPROCESS_ENV_SCRUB (on by default since 1.10.0) Claude Code 2.1.330 protects these too
+  '.github',
+  '.mcp.json',
+  'scripts',
+  '.npmrc',
+  '.yarnrc',
+  '.yarnrc.yml',
+  'bunfig.toml',
+  'package.json',
+  'package-lock.json',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  '.env',
+  '.env.local',
+  '.env.development',
+  '.env.development.local',
+  '.env.production',
+  '.env.production.local',
+  '.env.test',
+  '.env.test.local',
 ] as const;
 export const SANDBOX_PROTECTED_DIRS = ['.vscode', '.idea'] as const;
+/**
+ * With the scrub, Claude Code also mounts over these inside a `.git` DIRECTORY (a standalone repository, such as a PR
+ * review checkout; a linked worktree's `.git` is a file and needs none). The runner denies writes to `.git`, so in a
+ * read-only shift the mount points must already exist. Only made for read-only shifts: a stale `config.lock` would stop
+ * `git config` writes, which a read-only shift never makes.
+ */
+/**
+ * The empty folders Claude Code's scrub start-up makes in the working directory (2.1.330), deepest first: removed at
+ * shift end while they are empty (`rmdir` fails on anything with content, so a real `node_modules` or `.claude` stays).
+ */
+export const SCRUB_STUB_DIRS = [
+  join('node_modules', '.bin'),
+  'node_modules',
+  join('.claude', 'commands'),
+  join('.claude', 'agents'),
+  '.claude',
+] as const;
+export const SANDBOX_PROTECTED_GIT_FILES = ['config.lock', 'config.worktree.lock'] as const;
 
 /**
  * Names (at the worktree root) of the sandbox mount stubs: the protected files, which show up in `git status` as empty
@@ -65,6 +103,14 @@ export function otherShiftsUse(cwd: string, shiftId: string): boolean {
   const s = worktreeUsers.get(resolve(cwd));
   return !!s && [...s].some((id) => id !== shiftId);
 }
+
+const isDir = (p: string): boolean => {
+  try {
+    return lstatSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+};
 
 const isEmptyFile = (p: string): boolean => {
   try {
@@ -114,7 +160,7 @@ export async function removeSandboxStubs(cwd: string): Promise<string[]> {
       removed.push(n);
     } catch {}
   }
-  for (const n of SANDBOX_PROTECTED_DIRS) {
+  for (const n of [...SANDBOX_PROTECTED_DIRS, ...SCRUB_STUB_DIRS]) {
     try {
       rmdirSync(join(cwd, n)); // fails unless empty
       removed.push(n);
@@ -140,6 +186,14 @@ export function createSandboxPlaceholders(cwd: string, shiftId?: string): () => 
       mkdirSync(p);
       dirs.push(p);
     }
+    const gitDir = join(cwd, '.git');
+    if (isDir(gitDir))
+      for (const n of SANDBOX_PROTECTED_GIT_FILES) {
+        const p = join(gitDir, n);
+        if (existsSync(p)) continue;
+        closeSync(openSync(p, 'wx', 0o444));
+        files.push(p);
+      }
   } catch {
     // best effort: a worktree that cannot be written to is as before
   }

@@ -209,7 +209,7 @@ export function repoScripts(d: PolicyCliDeps, url: string, allow: boolean): Poli
   });
   d.out(
     allow
-      ? `Installs of ${key} may run their scripts on this workstation (outside the sandbox).`
+      ? `Installs of ${key} may run their scripts on this workstation (environment set-up: outside the sandbox; "aom devops install": inside it).`
       : `Installs of ${key} run without scripts again.`,
   );
   return p;

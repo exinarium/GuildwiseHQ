@@ -1,5 +1,5 @@
 import { createApp } from './app.ts';
-import { describeSecuritySettings } from './auth/security-settings.ts';
+import { describeSecuritySettings, legacyTwoFactorAtBoot } from './auth/security-settings.ts';
 import { registerBuiltins } from './catalogue/boot.ts';
 import { ensureBusinessWorkflowsAtBoot } from './catalogue/business-workflows.ts';
 import { createClock } from './clock.ts';
@@ -63,6 +63,8 @@ export async function startServer(extensions: ServerExtension[] = []): Promise<v
     // start: the served release must verify, else boot refuses; then the signed-runner sweep (idempotent, nothing on an
     // empty DB or with the setting off) and the reinstall mails.
     beforeBackground: async (ctx) => {
+      // "Refuse legacy two-factor" without a key outside the database would refuse every two-factor login: boot refuses
+      await legacyTwoFactorAtBoot(ctx);
       const signed = await signedRunnersAtBoot(ctx);
       if (signed.unlinked || signed.mailed) ctx.log.warn(signed, 'signed-runner sweep');
     },

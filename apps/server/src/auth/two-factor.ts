@@ -8,12 +8,13 @@ import { badRequest, conflict } from '../errors.ts';
 import { secondFactorFailedMail } from '../mail/templates.ts';
 import { enforceLoginGuard, recordFailedSignIn } from './login-guard.ts';
 import { claimSecurityNotice, sendSecurityMail } from './security-mail.ts';
+import { hasEnvTwoFactorKey, legacyTwoFactorRefused, securitySetting } from './security-settings.ts';
 import { generateTotpSecret, otpauthUri, totpStep, verifyTotp } from './totp.ts';
 import {
   hashRecoveryCode,
   normalizeRecoveryCode,
   openSeed,
-  recoveryCodeCandidates,
+  recoveryCodeForms,
   sealSeed,
 } from './two-factor-key.ts';
 
@@ -82,20 +83,31 @@ async function writeRecoveryCodes(ctx: Ctx, tx: Queryable, userId: string): Prom
  * by email (R17-2).
  */
 async function seedOf(ctx: Ctx, tx: Queryable, userId: string, blob: string): Promise<string | null> {
-  let opened: { seed: string; reseal: boolean };
+  return (await openSeedOf(ctx, tx, userId, blob))?.seed ?? null;
+}
+
+/** `seedOf` plus whether the seed is legacy; `reseal: false` leaves a legacy seed as it is (it is about to be refused). */
+async function openSeedOf(
+  ctx: Ctx,
+  tx: Queryable,
+  userId: string,
+  blob: string,
+  opts: { reseal?: boolean } = {},
+): Promise<{ seed: string; legacy: boolean } | null> {
+  let opened: { seed: string; reseal: boolean; legacy: boolean };
   try {
     opened = await openSeed(ctx, userId, blob);
   } catch (err) {
     ctx.log.warn({ userId, err: (err as Error).message }, 'two-factor seed opens with no available key');
     return null;
   }
-  const { seed, reseal } = opened;
-  if (reseal)
+  const { seed, reseal, legacy } = opened;
+  if (reseal && (opts.reseal !== false || !legacy))
     await exec(tx, 'UPDATE user_totp SET secret_enc=$2 WHERE user_id=$1', [
       userId,
       await sealSeed(ctx, userId, seed),
     ]);
-  return seed;
+  return { seed, legacy };
 }
 
 /** Confirms the enrolment with a code from the app; returns the recovery codes (shown once). */
@@ -151,17 +163,38 @@ export async function verifySecondFactor(
       [userId],
     );
     if (!row) return null;
+    // never refuse with only the database key (boot refuses that combination; this is the second line)
+    const refuseLegacy =
+      hasEnvTwoFactorKey(ctx.config) && (await securitySetting(ctx, 'refuseLegacyTwoFactor', tx));
     if (looksLikeRecoveryCode(code)) {
       // Every stored form the code may have (each available key, and the legacy sha256); the used row is re-hashed
-      // under the current key.
+      // under the current key. With "Refuse legacy two-factor" on, only the env keys' forms count; a right legacy
+      // code is refused with the way out, and stays unused.
+      const forms = await recoveryCodeForms(ctx, code);
       const used = await exec(
         tx,
         `UPDATE user_recovery_codes SET used_at=$3, code_hash=$4
           WHERE ctid = (SELECT ctid FROM user_recovery_codes
                          WHERE user_id=$1 AND code_hash = ANY($2) AND used_at IS NULL LIMIT 1)`,
-        [userId, await recoveryCodeCandidates(ctx, code), ctx.clock.now(), await hashRecoveryCode(ctx, code)],
+        [
+          userId,
+          refuseLegacy ? forms.current : [...forms.current, ...forms.legacy],
+          ctx.clock.now(),
+          await hashRecoveryCode(ctx, code),
+        ],
       );
-      if (!used) return null;
+      if (!used) {
+        if (
+          refuseLegacy &&
+          (await one(
+            tx,
+            'SELECT 1 FROM user_recovery_codes WHERE user_id=$1 AND code_hash = ANY($2) AND used_at IS NULL',
+            [userId, forms.legacy],
+          ))
+        )
+          throw legacyTwoFactorRefused('recovery');
+        return null;
+      }
       await ctx.store.append(
         [
           {
@@ -175,15 +208,17 @@ export async function verifySecondFactor(
       );
       return 'recovery';
     }
-    const seed = await seedOf(ctx, tx, userId, row.secret_enc);
-    if (seed === null) return null;
+    const opened = await openSeedOf(ctx, tx, userId, row.secret_enc, { reseal: !refuseLegacy });
+    if (opened === null) return null;
     const step = verifyTotp(
-      seed,
+      opened.seed,
       code,
       ctx.clock.now(),
       row.last_used_step === null ? null : Number(row.last_used_step),
     );
     if (step === null) return null;
+    // a right code from an app set up with the database-stored key: refused with the way out (nothing is recorded)
+    if (refuseLegacy && opened.legacy) throw legacyTwoFactorRefused('totp');
     await exec(tx, 'UPDATE user_totp SET last_used_step=$2 WHERE user_id=$1', [userId, step]);
     return 'totp';
   });

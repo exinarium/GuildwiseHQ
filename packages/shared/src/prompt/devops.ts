@@ -18,6 +18,8 @@ import { clientWorkRef, workRefLine } from './work-ref.ts';
 export const ENVIRONMENT_HELP_SECTION = `# Environment help
 
 Need the app started, a tool installed or the environment fixed? Run \`aom devops "<request>"\`: it asks this workstation's DevOps engineer and does not end your shift. Do not change the machine yourself.
+
+Need a project package installed, added or removed (npm, pnpm, yarn or bun)? Your shell cannot write package.json, the lockfiles or node_modules/.bin, so DevOps runs it in your worktree: \`aom devops install <npm|pnpm|yarn|bun>\` (the locked dependencies), \`aom devops install <tool> add <pkg>[@range]... [--dev]\` or \`aom devops install <tool> remove <pkg>...\`. It answers when done (package.json and the lockfile are then updated in your worktree; commit them with your change). Only registry packages; install scripts do not run unless the workstation owner allowed them for the repository.
 `;
 
 /** The card a DevOps request was filed for: its fields and comments fenced as organisation text (R18-T). */

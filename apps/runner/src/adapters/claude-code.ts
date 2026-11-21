@@ -30,7 +30,7 @@ import {
   usablePnpmLockDirs,
   userNugetPackages,
 } from '../sandbox/sandbox.ts';
-import { sessionEnvDirOf } from '../session/shift-credential.ts';
+import { SHIFT_ENV_POINTER, sessionEnvDirOf } from '../session/shift-credential.ts';
 import { selfCommand } from '../shims.ts';
 import { type AccountCredential, type ClaudeAccount, ClaudeAccountRegistry } from './claude-accounts.ts';
 import {
@@ -186,6 +186,41 @@ export function sessionEnv(
     parent,
     extra,
   );
+}
+
+/**
+ * The start of every `aom` hook command (skill and subagent guards). With the scrub on (the 1.10.0 default) Claude Code
+ * strips AOM_SHIFT_TOKEN from what its hooks inherit, so a hook reads the session's 0600 env file instead: its path is
+ * written into the command (`AOM_SHIFT_ENV_FILE=...`), whatever the hook inherits. And the hook runs in the agent's config
+ * dir, not the worktree: the scrub leaves an empty `package.json` mount point there, and a Node started with a preload
+ * (`tsx` when the runner runs from source) refuses an empty package.json in its working directory.
+ */
+export function hookPrefix(configDir: string, env: Record<string, string | undefined>): string {
+  const quote = (w: string) => `'${w.replace(/'/g, `'\\''`)}'`;
+  const file = env[SHIFT_ENV_POINTER];
+  return `cd ${quote(configDir)} && ${file ? `${SHIFT_ENV_POINTER}=${quote(file)} ` : ''}`;
+}
+
+/**
+ * With the scrub on, an agent's Bash cannot write package.json, the lockfiles or node_modules/.bin (Claude Code 2.1.330), so
+ * a package install fails with "Read-only file system". This PreToolUse hook (plain shell, no node start per call) refuses
+ * an install command up front and says how to ask DevOps instead (owner 2026-11-21).
+ */
+export const INSTALL_REDIRECT_MESSAGE =
+  'Package installs do not run in your shell (it cannot write package.json, the lockfiles or node_modules/.bin). Ask DevOps to run it in your worktree: `aom devops install <npm|pnpm|yarn|bun>` for the locked dependencies, `aom devops install <tool> add <pkg>[@range]... [--dev]` or `aom devops install <tool> remove <pkg>...`. It answers when done; then carry on.';
+export const INSTALL_COMMAND_RE =
+  '(^|[;&|(]|&&|\\|\\||"command": *")[[:space:]]*(npm|pnpm|yarn|bun)[[:space:]]+(install|i|ci|add|remove|rm|uninstall|un)([[:space:]]|"|$)';
+
+export function addInstallRedirect(settings: ClaudeSettings): void {
+  const quote = (w: string) => `'${w.replace(/'/g, `'\\''`)}'`;
+  const command = `grep -qE ${quote(INSTALL_COMMAND_RE)} && { printf '%s\\n' ${quote(INSTALL_REDIRECT_MESSAGE)} >&2; exit 2; }; exit 0`;
+  settings.hooks = {
+    ...(settings.hooks ?? {}),
+    PreToolUse: [
+      ...(settings.hooks?.PreToolUse ?? []),
+      { matcher: 'Bash', hooks: [{ type: 'command' as const, command, timeout: 5 }] },
+    ],
+  };
 }
 
 /** Whether this call loads the agent's granted skills natively (and so cannot use `--disable-slash-commands`). */
@@ -754,11 +789,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
    * allow-list hook that refuses every other `Skill` call (the account's synced skills and plugins load natively otherwise).
    * Returns the input with only the skills that were written.
    */
-  private prepareSkills<T extends { grantedSkills?: GrantedSkill[]; agent: { isDevops?: boolean } }>(
-    dir: string,
-    input: T,
-    settings: ClaudeSettings,
-  ): T {
+  private prepareSkills<
+    T extends { grantedSkills?: GrantedSkill[]; agent: { isDevops?: boolean }; env: Record<string, string> },
+  >(dir: string, input: T, settings: ClaudeSettings): T {
     if (input.grantedSkills === undefined || input.agent.isDevops) return input;
     const written = materializeSkills(skillsDirOf(dir), input.grantedSkills);
     const kept = input.grantedSkills.filter((g) => written.includes(g.name));
@@ -770,7 +803,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     // `|| exit 2` makes every failure of the guard, a missing `aom` included, a refusal. A hook that is killed at its time
     // limit still counts as failed-open, so the guard has its own 7 s deadline below the 10 s limit and denies by itself; the
     // deny rules below are the second line for names we can list.)
-    const command = `AOM_SKILL_GUARD=${quote(file)} ${[...selfCommand('aom'), 'skill-guard'].map(quote).join(' ')} || exit 2`;
+    const command = `${hookPrefix(dir, input.env)}AOM_SKILL_GUARD=${quote(file)} ${[...selfCommand('aom'), 'skill-guard'].map(quote).join(' ')} || exit 2`;
     settings.hooks = {
       PreToolUse: [
         ...(settings.hooks?.PreToolUse ?? []),
@@ -830,14 +863,15 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     );
     const quote = (w: string) => `'${w.replace(/'/g, `'\\''`)}'`;
     // `|| exit 2`: any failure of the guard, a missing `aom` included, is a refusal (a hook that fails any other way lets the call through)
-    const command = `AOM_SUBAGENT_GUARD=${quote(guardFile)} ${[...selfCommand('aom'), 'subagent-guard'].map(quote).join(' ')} || exit 2`;
+    const pre = hookPrefix(dir, input.env);
+    const command = `${pre}AOM_SUBAGENT_GUARD=${quote(guardFile)} ${[...selfCommand('aom'), 'subagent-guard'].map(quote).join(' ')} || exit 2`;
     const aom = (verb: string) => [...selfCommand('aom'), verb].map(quote).join(' ');
     // R3c, the time limit of one call: every tool call is checked against the start markers, but only when a call is running (the
     // shell test costs nothing; the node process starts only then). The end of an `Agent` call removes its marker. Fail closed.
     // Fails closed: a folder that is gone, or a deadline hook that cannot even start, refuses the tool call (exit 2). The hook itself
     // answers with a decision, so its own failures are refusals too (aom subagent-deadline).
-    const deadline = `[ -d ${quote(liveDir)} ] || exit 2; [ -n "$(ls -A ${quote(liveDir)} 2>/dev/null)" ] || exit 0; AOM_SUBAGENT_GUARD=${quote(guardFile)} ${aom('subagent-deadline')} || exit 2`;
-    const done = `AOM_SUBAGENT_GUARD=${quote(guardFile)} ${aom('subagent-done')} || exit 0`;
+    const deadline = `[ -d ${quote(liveDir)} ] || exit 2; [ -n "$(ls -A ${quote(liveDir)} 2>/dev/null)" ] || exit 0; ${pre}AOM_SUBAGENT_GUARD=${quote(guardFile)} ${aom('subagent-deadline')} || exit 2`;
+    const done = `${pre}AOM_SUBAGENT_GUARD=${quote(guardFile)} ${aom('subagent-done')} || exit 0`;
     settings.hooks = {
       PreToolUse: [
         ...(settings.hooks?.PreToolUse ?? []),
@@ -1003,6 +1037,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         );
     input = this.prepareSkills(dir, input, settings);
     input = this.prepareSubagents(dir, input, settings);
+    if (this.cfg.scrubSubprocessEnv && !input.agent.isDevops) addInstallRedirect(settings);
     await writeFile(join(dir, 'settings.json'), `${JSON.stringify(settings, null, 2)}\n`);
     // A read-only worktree (reviewer): Claude Code's sandbox must find its protected dotfile names already there.
     const dropPlaceholders = settings.sandbox?.filesystem.denyWrite.includes(input.cwd)

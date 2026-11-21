@@ -1,17 +1,19 @@
 import {
   CONFIRM_UNLINK_REQUIRED,
   type EventMeta,
+  LEGACY_TWO_FACTOR_REFUSED,
   SECURITY_SETTING_KEYS,
   SETTING_LOCKED,
   type SecuritySettingKey,
   type SecuritySettingState,
   type SecuritySettingsResponse,
   streamId,
+  TWO_FACTOR_KEY_REQUIRED,
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
 import { exec, one, type Queryable, rows } from '../db/sql.ts';
 import { afterCommit, withAppendTx } from '../db/tx.ts';
-import { conflict } from '../errors.ts';
+import { conflict, HttpError } from '../errors.ts';
 import { verifyServedRelease } from '../installer/release.ts';
 import {
   mailRunnerReinstallNotices,
@@ -23,8 +25,9 @@ import {
 export const RUNNER_RELEASE_UNSIGNED = 'runner_release_unsigned';
 
 /**
- * Security settings (R27, R28): "Only signed runners" (`requireSignedRunners`) and "Require two-factor login"
- * (`enforceTwoFactor`). Both off by default in core. Effective value = the extension lock (`lockedSecuritySettings`),
+ * Security settings (R27, R28): "Only signed runners" (`requireSignedRunners`), "Require two-factor login"
+ * (`enforceTwoFactor`) and "Refuse legacy two-factor" (`refuseLegacyTwoFactor`, owner 2026-11-21: Cloud only, locked).
+ * All off by default in core. Effective value = the extension lock (`lockedSecuritySettings`),
  * else the platform setting (`platform_settings`), else the env default (`AOM_REQUIRE_SIGNED_RUNNERS`,
  * `AOM_ENFORCE_TWO_FACTOR`), else off. A hosted build locks both on, so neither the UI, the API nor the config can turn
  * them off there. Every change is a `SecuritySettingChanged` event (platform audit, `always`).
@@ -34,7 +37,37 @@ export const RUNNER_RELEASE_UNSIGNED = 'runner_release_unsigned';
 export const SECURITY_SETTING_STORE_KEYS: Record<SecuritySettingKey, string> = {
   requireSignedRunners: 'security.require_signed_runners',
   enforceTwoFactor: 'security.enforce_two_factor',
+  refuseLegacyTwoFactor: 'security.refuse_legacy_two_factor',
 };
+
+/** Whether a two-factor key outside the database is configured (`AOM_TWO_FACTOR_KEY`, or one derived from `AOM_SECRET_KEY`). */
+export const hasEnvTwoFactorKey = (config: {
+  twoFactorKey?: string | undefined;
+  secretKey?: string | undefined;
+}) => !!(config.twoFactorKey || config.secretKey);
+
+/**
+ * Boot: "Refuse legacy two-factor" on from any source (lock, platform setting, env default) without a two-factor key
+ * outside the database would refuse every two-factor login (every seed and code is then under the database key, and a new
+ * enrolment too). The server refuses to start instead.
+ */
+export async function legacyTwoFactorAtBoot(ctx: Ctx): Promise<void> {
+  if (hasEnvTwoFactorKey(ctx.config)) return;
+  const s = await securitySettingState(ctx, 'refuseLegacyTwoFactor');
+  if (!s.value) return;
+  throw new Error(
+    `"Refuse legacy two-factor" is on (${s.source === 'locked' ? 'locked by the hosting platform' : s.source === 'env' ? 'AOM_REFUSE_LEGACY_TWO_FACTOR' : 'platform setting'}) but no two-factor key is set outside the database, so every two-factor login would be refused. Set AOM_TWO_FACTOR_KEY (or AOM_SECRET_KEY) and start again${s.source === 'locked' ? '' : ', or turn the setting off'}.`,
+  );
+}
+
+/** 403 `legacy_two_factor_refused`: a right but legacy second factor while "Refuse legacy two-factor" is on. */
+export const legacyTwoFactorRefused = (what: 'recovery' | 'totp') =>
+  new HttpError(
+    403,
+    LEGACY_TWO_FACTOR_REFUSED,
+    `${what === 'recovery' ? 'This recovery code was made before Guildwise 1.10.0' : 'Your authenticator app was set up with a key this server no longer accepts'}: this server refuses old two-factor logins. Reset two-factor login by email ("Lost your authenticator and your recovery codes?" on the sign-in page), then set it up again; you get new recovery codes.`,
+    { reenrol: '/api/auth/2fa/recovery/start' },
+  );
 
 // Read on every pairing, hello and session lookup: cached per process, dropped after a change commits.
 const cache = new WeakMap<Ctx, Map<SecuritySettingKey, SecuritySettingState>>();
@@ -103,6 +136,7 @@ export async function securitySettingsView(ctx: Ctx): Promise<SecuritySettingsRe
   return {
     requireSignedRunners: await securitySettingState(ctx, 'requireSignedRunners'),
     enforceTwoFactor: await securitySettingState(ctx, 'enforceTwoFactor'),
+    refuseLegacyTwoFactor: await securitySettingState(ctx, 'refuseLegacyTwoFactor'),
     unsignedWorkstations: await countUnsignedWorkstations(ctx.pool),
     usersWithout2fa: await countUsersWithout2fa(ctx.pool),
   };
@@ -134,6 +168,12 @@ export async function setSecuritySetting(
         `this server's runner release does not verify (${served.reason}): build it with RUNNER_RELEASE=official or own-key first`,
       );
   }
+  // With only the database-stored key, refusing it would refuse every two-factor login: an env key comes first.
+  if (key === 'refuseLegacyTwoFactor' && value && !hasEnvTwoFactorKey(ctx.config))
+    throw conflict(
+      TWO_FACTOR_KEY_REQUIRED,
+      'set AOM_TWO_FACTOR_KEY (or AOM_SECRET_KEY) first: this server keeps its only two-factor key in the database, so refusing it would refuse every two-factor login',
+    );
   const out = await withAppendTx(ctx.pool, async (tx) => {
     const before = await securitySettingState(ctx, key, tx);
     const stored = await storedValue(tx, key);

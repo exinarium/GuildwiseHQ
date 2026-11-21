@@ -117,7 +117,11 @@ export const STEP_UP_MAX_FAILURES = 5;
 
 // ---------------------------------------------------------------- security settings (R27, R28)
 
-export const SECURITY_SETTING_KEYS = ['requireSignedRunners', 'enforceTwoFactor'] as const;
+export const SECURITY_SETTING_KEYS = [
+  'requireSignedRunners',
+  'enforceTwoFactor',
+  'refuseLegacyTwoFactor',
+] as const;
 export const SecuritySettingKeySchema = z.enum(SECURITY_SETTING_KEYS);
 export type SecuritySettingKey = z.infer<typeof SecuritySettingKeySchema>;
 
@@ -142,6 +146,12 @@ export type SecuritySettingState = z.infer<typeof SecuritySettingStateSchema>;
 export const SecuritySettingsResponseSchema = z.object({
   requireSignedRunners: SecuritySettingStateSchema,
   enforceTwoFactor: SecuritySettingStateSchema,
+  /**
+   * "Refuse legacy two-factor": recovery codes stored before 1.10.0 (plain sha256) and authenticator keys sealed with the
+   * database-stored key are refused at sign-in, password reset and step-up; the user resets two-factor by email and
+   * sets it up again. Off in core (self-hosters keep accepting them); Guildwise Cloud locks it on.
+   */
+  refuseLegacyTwoFactor: SecuritySettingStateSchema,
   /** Active workstations without a valid signed-release proof (turning signed runners on unlinks them). */
   unsignedWorkstations: z.number().int().nonnegative(),
   /** Active accounts without two-factor login (turning enforcement on sends them through enrolment). */
@@ -154,6 +164,7 @@ export const PatchSecuritySettingsRequestSchema = z
   .object({
     requireSignedRunners: z.boolean().optional(),
     enforceTwoFactor: z.boolean().optional(),
+    refuseLegacyTwoFactor: z.boolean().optional(),
     /** Required to turn signed runners on while `unsignedWorkstations > 0`: those workstations are unlinked. */
     confirmUnlink: z.boolean().optional(),
   })
@@ -162,6 +173,10 @@ export type PatchSecuritySettingsRequest = z.infer<typeof PatchSecuritySettingsR
 
 /** 409 of a PATCH on a locked key; 409 of turning signed runners on without `confirmUnlink`. */
 export const SETTING_LOCKED = 'setting_locked';
+/** 403 of a second factor that is right but legacy while `refuseLegacyTwoFactor` is on (the message names the way out). */
+export const LEGACY_TWO_FACTOR_REFUSED = 'legacy_two_factor_refused';
+/** 409 of turning `refuseLegacyTwoFactor` on while the only two-factor key is the database-stored one. */
+export const TWO_FACTOR_KEY_REQUIRED = 'two_factor_key_required';
 export const CONFIRM_UNLINK_REQUIRED = 'confirm_unlink_required';
 
 // ---------------------------------------------------------------- signed runner releases (R18-U, R21, R27)

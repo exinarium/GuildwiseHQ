@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative, resolve, sep } from 'node:path';
 import { type AgentPermissions, TEST_SERVICE_HOSTS, testServiceDomain } from '@aom/shared';
@@ -262,10 +262,46 @@ export const BROWSER_MASKED = [
   '/run/docker.sock',
   '/run/containerd',
   '/run/podman',
+  // container runtimes and sockets that are not the sandboxed process's own (owner standing order: zero known gaps)
+  '/run/docker',
+  '/run/docker-svc', // a shared daemon of a service user (deps-without-sudo `docker-svc`)
+  '/run/crio',
+  '/run/buildkit',
+  '/run/k3s',
+  '/run/libpod',
+  '/run/lxd',
+  '/run/incus',
+  '/run/user', // every user's runtime dir: rootless Docker/Podman sockets, session buses, agents (the own one too)
   '/run/WSL', // WSL2 interop: launches Windows binaries
   '/run/dbus', // system bus
   '/run/systemd',
 ];
+
+/** Names under /run that belong to a container runtime (any `docker*`, `containerd*`, `podman*`, ...). */
+const CONTAINER_RUN =
+  /^(docker|containerd|podman|crio|cri-|buildkit|k3s|k0s|libpod|lxd|incus|nerdctl|rootless)/i;
+
+/**
+ * The container sockets and runtime dirs present on this machine: `BROWSER_MASKED`, every container-looking entry of `/run`
+ * (and `/var/run`), and the real target of each that is a symlink (`/run/docker.sock -> /run/docker-svc/docker.sock`),
+ * since a mask on a symlink does not cover what it points at.
+ */
+export function containerRuntimeMasks(runDirs: string[] = ['/run', '/var/run']): string[] {
+  const out = new Set<string>(BROWSER_MASKED);
+  for (const d of runDirs) {
+    let names: string[] = [];
+    try {
+      names = readdirSync(d);
+    } catch {}
+    for (const n of names) if (CONTAINER_RUN.test(n)) out.add(join(d, n));
+  }
+  for (const p of [...out]) {
+    try {
+      if (lstatSync(p).isSymbolicLink()) out.add(realpathSync(p));
+    } catch {}
+  }
+  return [...out];
+}
 
 /** `/run/user/<uid>` (session bus, keyrings, ssh/gpg agent sockets) and ssh-agent directories in `/tmp`. */
 export function browserMask(ctx: Pick<ClaudePolicyContext, 'uid' | 'tmpEntries'>): string[] {
@@ -279,7 +315,7 @@ export function browserMask(ctx: Pick<ClaudePolicyContext, 'uid' | 'tmpEntries'>
     }
   }
   return [
-    ...BROWSER_MASKED,
+    ...containerRuntimeMasks(),
     ...(uid !== undefined ? [`/run/user/${uid}`] : []),
     // ssh-agent: /tmp/ssh-XXXXXX/agent.<pid>; gpg-agent and keyring sockets may sit directly in /tmp too
     ...tmpNames.filter((n) => /^(ssh-|keyring-|gpg-|\.?dbus-)/.test(n)).map((n) => join('/tmp', n)),

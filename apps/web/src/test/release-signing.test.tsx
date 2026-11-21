@@ -201,6 +201,34 @@ describe('ReleaseSheet: runner signature per place (R30)', () => {
     await waitFor(() => expect(screen.getByTestId('release-now')).toBeEnabled());
   });
 
+  it('signed and kept for rollback: packaging again is offered only on purpose, after a confirm, and says it needs a new signature', async () => {
+    route(
+      signingBody(
+        target({
+          state: 'signed',
+          signature: { keyId: KEY, source: 'upload', at: new Date().toISOString() },
+        }),
+      ),
+    );
+    open();
+    const button = await screen.findByTestId('release-signing-uat-repackage');
+    expect(button).toHaveTextContent('Package again (needs a new signature)');
+    expect(screen.getByTestId('release-signing-uat')).toHaveTextContent('kept for a rollback');
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    await userEvent.click(button);
+    expect(calls.some((c) => c.url.endsWith('/release-signing/prepare'))).toBe(false);
+    await userEvent.click(button);
+    await waitFor(() =>
+      expect(calls.find((c) => c.url.endsWith('/release-signing/prepare'))?.body).toEqual({
+        targetId: U(5),
+        commit: SHA,
+        repackage: true,
+      }),
+    );
+    expect(confirm.mock.calls[0]?.[0]).toContain('waits for a new one');
+    confirm.mockRestore();
+  });
+
   it('a place that takes no signed runner shows no signing step and does not hold the release', async () => {
     route(
       signingBody(target({ signing: null, state: 'not_required', artefact: null, artefactSha256: null })),

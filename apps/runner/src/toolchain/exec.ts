@@ -15,6 +15,8 @@ export interface ExecOptions {
   /** Written to stdin. Never logged. */
   input?: string;
   env?: Record<string, string>;
+  /** `env` is the whole environment: nothing inherited from the runner, no PATH or other additions (sandboxed installs). */
+  exactEnv?: boolean;
 }
 
 /** Runs one command (no shell). Tests inject a scripted one; the runner uses `realExecutor`. */
@@ -48,17 +50,20 @@ export const realExecutor: Executor = {
         ...(opts.input !== undefined ? { input: opts.input } : {}),
         cwd: opts.cwd,
         timeout: opts.timeoutMs ?? 30 * 60_000,
-        env: {
-          ...process.env,
-          ...opts.env,
-          PATH: [opts.env?.PATH ?? '', ...userBinDirs(), process.env.PATH ?? '', ...BREW_BIN_DIRS]
-            .filter(Boolean)
-            .join(delimiter),
-          DEBIAN_FRONTEND: 'noninteractive',
-          DOTNET_CLI_TELEMETRY_OPTOUT: '1',
-          DOTNET_NOLOGO: '1',
-          GIT_TERMINAL_PROMPT: '0',
-        },
+        ...(opts.exactEnv ? { extendEnv: false } : {}),
+        env: opts.exactEnv
+          ? { ...opts.env }
+          : {
+              ...process.env,
+              ...opts.env,
+              PATH: [opts.env?.PATH ?? '', ...userBinDirs(), process.env.PATH ?? '', ...BREW_BIN_DIRS]
+                .filter(Boolean)
+                .join(delimiter),
+              DEBIAN_FRONTEND: 'noninteractive',
+              DOTNET_CLI_TELEMETRY_OPTOUT: '1',
+              DOTNET_NOLOGO: '1',
+              GIT_TERMINAL_PROMPT: '0',
+            },
       });
       return {
         exitCode: typeof r.exitCode === 'number' ? r.exitCode : r.failed ? 1 : 0,

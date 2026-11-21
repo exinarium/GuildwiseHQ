@@ -59,6 +59,7 @@ describe('security settings', () => {
     expect(r.body).toEqual({
       requireSignedRunners: { value: false, locked: false, source: 'default' },
       enforceTwoFactor: { value: false, locked: false, source: 'default' },
+      refuseLegacyTwoFactor: { value: false, locked: false, source: 'default' },
       unsignedWorkstations: 0,
       usersWithout2fa: 1,
     });

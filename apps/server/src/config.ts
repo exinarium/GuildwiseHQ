@@ -288,6 +288,7 @@ const EnvSchema = z.object({
   /** Env defaults of the two security settings (R27, R28); the platform setting and a hosting lock win. */
   AOM_REQUIRE_SIGNED_RUNNERS: bool(false),
   AOM_ENFORCE_TWO_FACTOR: bool(false),
+  AOM_REFUSE_LEGACY_TWO_FACTOR: bool(false),
   /** Own-key mode (R27): the minisign public key this server trusts for runner releases instead of the official one. */
   AOM_RUNNER_RELEASE_PUBKEY: z.string().optional(),
   /** The platform team's organization and project (R17-1): server config, no longer a super-admin setting. */
@@ -505,7 +506,11 @@ export interface Config {
   /** Idle limit of a super-admin session in seconds (`AOM_SUPER_ADMIN_IDLE_SEC`, R4). */
   superAdminIdleSec: number;
   /** Env defaults of the security settings (R27, R28); the effective value is `securitySetting()` (auth/security-settings.ts). */
-  securityDefaults: { requireSignedRunners: boolean; enforceTwoFactor: boolean };
+  securityDefaults: {
+    requireSignedRunners: boolean;
+    enforceTwoFactor: boolean;
+    refuseLegacyTwoFactor: boolean;
+  };
   /** Own-key mode: the minisign public key line trusted for runner releases (`AOM_RUNNER_RELEASE_PUBKEY`); undefined: the official key. */
   runnerReleasePubkey: string | undefined;
   /** The platform team's designation from server config (R17-1); both undefined: not set by env. */
@@ -712,6 +717,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     securityDefaults: {
       requireSignedRunners: e.AOM_REQUIRE_SIGNED_RUNNERS,
       enforceTwoFactor: e.AOM_ENFORCE_TWO_FACTOR,
+      refuseLegacyTwoFactor: e.AOM_REFUSE_LEGACY_TWO_FACTOR,
     },
     runnerReleasePubkey: parseRunnerReleasePubkey(e.AOM_RUNNER_RELEASE_PUBKEY),
     platformTeam: { orgId: e.AOM_PLATFORM_TEAM_ORG_ID, projectId: e.AOM_PLATFORM_TEAM_PROJECT_ID },

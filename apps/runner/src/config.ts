@@ -61,12 +61,12 @@ export const ClaudeRuntimeConfigSchema = z.object({
    * Sets CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1: Claude Code removes credentials from the environment of everything its
    * shell starts and, on Linux, isolates the PID namespace so `/proc/<pid>/environ` of other processes is unreadable.
    * It also removes AOM_SHIFT_TOKEN (Claude Code 2.1.251+); `aom` then reads it from the session's own 0600 file named
-   * by AOM_SHIFT_ENV_FILE (session/shift-credential.ts). Off by default; try it on one workstation first (docs/RUNNER.md).
-   * R18-L asks for it on by default, but with it on, real Claude Code's subagent hooks and working delegates lose the AOM
-   * variables they need (test/claude-subagents-real.test.ts, test/delegate-real.test.ts fail), so the default stays off
-   * until those read the session file (W8 BUILD.md, deviation).
+   * by AOM_SHIFT_ENV_FILE (session/shift-credential.ts), and the `aom` hooks (skill and subagent guards) get that path in
+   * their command (claude-code.ts `hookPrefix`). On by default since 1.10.0 (R18-L, owner 2026-11-21); `false` opts out.
+   * With it, Claude Code 2.1.330 mounts over more names in the working directory (`package.json`, lockfiles, `.env*`,
+   * `scripts`, `.git/config.lock`, ...): the read-only placeholders and the stub filters cover them (sandbox-placeholders.ts).
    */
-  scrubSubprocessEnv: z.boolean().default(false),
+  scrubSubprocessEnv: z.boolean().default(true),
   /** Additional accounts besides the main one (today's credential); named by the key a project uses. */
   accounts: z.array(ClaudeAccountConfigSchema).default([]),
   intake: z

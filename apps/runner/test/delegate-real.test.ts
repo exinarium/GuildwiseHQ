@@ -54,10 +54,13 @@ describe.skipIf(!enabled)(
       const root = realpathSync(mkdtempSync(join(HOME_BASE, 'r-')));
       const paths = runnerPaths(root);
       mkdirSync(paths.root, { recursive: true });
+      // a linked worktree of a repository, as the runner makes for a card (its `.git` is a file)
+      const repo = join(root, 'repos', 'P-1');
       const cwd = join(root, 'worktrees', 'P-1', 'X-1');
-      mkdirSync(cwd, { recursive: true });
-      spawnSync('git', ['init', '-q', '-b', 'main', cwd]);
-      spawnSync('git', ['-C', cwd, 'commit', '-q', '--allow-empty', '-m', 'init'], {
+      mkdirSync(repo, { recursive: true });
+      mkdirSync(join(root, 'worktrees', 'P-1'), { recursive: true });
+      spawnSync('git', ['init', '-q', '-b', 'main', repo]);
+      spawnSync('git', ['-C', repo, 'commit', '-q', '--allow-empty', '-m', 'init'], {
         env: {
           ...process.env,
           GIT_AUTHOR_NAME: 'a',
@@ -66,6 +69,7 @@ describe.skipIf(!enabled)(
           GIT_COMMITTER_EMAIL: 'a@b.c',
         },
       });
+      spawnSync('git', ['-C', repo, 'worktree', 'add', '-q', '-b', 'X-1', cwd]);
       const outside = join(root, 'outside.txt');
       const adapter = new ClaudeCodeAdapter(
         ClaudeRuntimeConfigSchema.parse({

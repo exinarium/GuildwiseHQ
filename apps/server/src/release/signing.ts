@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   ARTEFACT_CHANGED,
+  ARTEFACT_KEPT_FOR_ROLLBACK,
   ARTEFACT_NOT_PREPARED,
   type DeployTargetSigning,
   parseMinisignPublicKey,
@@ -31,6 +32,7 @@ import { loadRecipeRow, projectVault } from '../delivery/recipes.ts';
 import { deployWorkstation } from '../delivery/runs.ts';
 import {
   currentArtefact,
+  keptForRollback,
   releaseForCommit,
   type ShippedRelease,
   signatureFor,
@@ -279,7 +281,7 @@ export async function prepareReleaseArtefact(
   ctx: Ctx,
   user: AuthSession['user'],
   projectId: string,
-  req: { targetId: string; commit: string },
+  req: { targetId: string; commit: string; repackage?: true | undefined },
 ): Promise<{ commandId: string; releaseId: string; state: ReleaseSigningState }> {
   const project = await requireDeployer(ctx, user, projectId);
   const t = await projectTarget(ctx.pool, projectId, req.targetId);
@@ -290,6 +292,21 @@ export async function prepareReleaseArtefact(
       'not_a_release',
       `commit ${req.commit.slice(0, 10)} is not a shipped release: only a release is signed`,
     );
+  // The releases kept for rollback (the current and the previous good deploy) stay signed (owner 2026-11-21): packaging one
+  // again replaces the artefact its signature covers. Only on purpose (`repackage`, the workstation lost the files), and
+  // then it needs a new signature.
+  let repackage = false;
+  if ((await keptForRollback(ctx.pool, projectId, t.id)).some((k) => k.id === release.id)) {
+    const a = await currentArtefact(ctx.pool, release.id, t.id);
+    if (a && (await signatureFor(ctx.pool, release.id, t.id, s.keyId, a.artefact_sha256))) {
+      if (req.repackage !== true)
+        throw conflict(
+          ARTEFACT_KEPT_FOR_ROLLBACK,
+          `the runner of ${release.version} is kept signed for a rollback of ${t.name}, so it is not packaged again. Only if the workstation that deploys ${t.name} lost its files, package it again on purpose (repackage); it then needs a new signature before it deploys`,
+        );
+      repackage = true;
+    }
+  }
   const pending = await latestCommand(ctx.pool, 'release.prepare', release.id, t.id);
   if (open(pending, ctx.clock.now()))
     return { commandId: pending?.id as string, releaseId: release.id, state: 'preparing' };
@@ -315,6 +332,7 @@ export async function prepareReleaseArtefact(
     keyId: s.keyId,
     publicKey: s.publicKey,
     artefact: targetArtefactPath(s.artefact, t.name),
+    ...(repackage ? { repackage: true as const } : {}),
   };
   const commandId = await enqueueRunnerCommand(
     ctx.pool,
@@ -381,6 +399,7 @@ export async function applyArtefactPrepared(
             artefactSha256: msg.artefactSha256,
             version: msg.version,
             manifest: msg.manifest,
+            ...(cmd.payload.repackage === true ? { repackaged: true as const } : {}),
           },
         },
         actor: runnerActor(workstationId),

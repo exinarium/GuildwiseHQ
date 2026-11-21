@@ -103,6 +103,33 @@ describe('regression #77 (89f77b67): sandbox dotfile stubs, the post-shift guard
     expect(await resetReadOnlyWorktree({ worktree: path, branchName: 'aom/toy-1-x', startSha })).toBe(false);
   });
 
+  it('builder autocommit never commits the scrub’s empty stubs (package.json, lockfiles, .env files)', async () => {
+    const { path } = await setup('builder');
+    for (const n of ['package.json', 'pnpm-lock.yaml', '.env', '.env.local', '.npmrc', 'bunfig.toml'])
+      writeFileSync(join(path, n), '');
+    expect((await autoCommit({ worktree: path, env: {} })).committed).toBe(false);
+    await removeSandboxStubs(path);
+    expect(existsSync(join(path, 'package.json'))).toBe(false);
+  });
+
+  it('removes the empty folders the scrub leaves (node_modules/.bin, .claude/*), never ones with content', async () => {
+    const { path } = await setup('builder');
+    for (const d of [join('node_modules', '.bin'), join('.claude', 'commands'), join('.claude', 'agents')])
+      mkdirSync(join(path, d), { recursive: true });
+    await removeSandboxStubs(path);
+    expect(existsSync(join(path, 'node_modules'))).toBe(false);
+    expect(existsSync(join(path, '.claude'))).toBe(false);
+    // a real install and a project's own .claude content stay
+    mkdirSync(join(path, 'node_modules', '.bin'), { recursive: true });
+    writeFileSync(join(path, 'node_modules', '.bin', 'tsc'), '#!/bin/sh\n');
+    mkdirSync(join(path, '.claude', 'commands'), { recursive: true });
+    writeFileSync(join(path, '.claude', 'settings.json'), '{}');
+    await removeSandboxStubs(path);
+    expect(existsSync(join(path, 'node_modules', '.bin', 'tsc'))).toBe(true);
+    expect(existsSync(join(path, '.claude', 'settings.json'))).toBe(true);
+    expect(existsSync(join(path, '.claude', 'commands'))).toBe(false);
+  });
+
   it('removeSandboxStubs removes empty untracked stubs only', async () => {
     const { path } = await setup('builder');
     stubs(path);

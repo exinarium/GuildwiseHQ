@@ -95,11 +95,11 @@ export async function openSeed(
   env: TwoFactorKeyEnv,
   userId: string,
   blob: string,
-): Promise<{ seed: string; reseal: boolean }> {
+): Promise<{ seed: string; reseal: boolean; legacy: boolean }> {
   if (blob.startsWith('v1:')) {
     // `decryptSecret` reads `ctx.pool` and `ctx.config.secretKey` only.
     const seed = await decryptSecret(env as unknown as Ctx, blob);
-    return { seed, reseal: true };
+    return { seed, reseal: true, legacy: true };
   }
   const [v, kid, iv, tag, ct] = blob.split(':');
   if (v !== 't2' || !kid || !iv || !tag || !ct) throw new Error('unknown two-factor seed format');
@@ -110,7 +110,8 @@ export async function openSeed(
   d.setAAD(Buffer.from(userId, 'utf8'));
   d.setAuthTag(Buffer.from(tag, 'base64url'));
   const seed = Buffer.concat([d.update(Buffer.from(ct, 'base64url')), d.final()]).toString('utf8');
-  return { seed, reseal: k.kid !== current.kid };
+  // legacy (what "Refuse legacy two-factor" refuses): sealed with the database-stored key
+  return { seed, reseal: k.kid !== current.kid, legacy: k.source === 'db' };
 }
 
 /** Whether a stored seed is already sealed with the current key (nothing to re-seal). */
@@ -132,6 +133,24 @@ export async function hashRecoveryCode(env: TwoFactorKeyEnv, code: string): Prom
 
 /** Every stored form this code may have: `h2` under each available key, plus the legacy sha256 (before 1.10.0). */
 export async function recoveryCodeCandidates(env: TwoFactorKeyEnv, code: string): Promise<string[]> {
-  const legacy = createHash('sha256').update(normalizeRecoveryCode(code)).digest('hex');
-  return [...(await candidateKeys(env)).map((k) => hmacCode(k, code)), legacy];
+  const { current, legacy } = await recoveryCodeForms(env, code);
+  return [...current, ...legacy];
+}
+
+/**
+ * The stored forms of a code, split: `legacy` = the sha256 of before 1.10.0 and the `h2` under the database-stored key
+ * (what "Refuse legacy two-factor" refuses); `current` = the `h2` under the env keys.
+ */
+export async function recoveryCodeForms(
+  env: TwoFactorKeyEnv,
+  code: string,
+): Promise<{ current: string[]; legacy: string[] }> {
+  const keys = await candidateKeys(env);
+  return {
+    current: keys.filter((k) => k.source !== 'db').map((k) => hmacCode(k, code)),
+    legacy: [
+      ...keys.filter((k) => k.source === 'db').map((k) => hmacCode(k, code)),
+      createHash('sha256').update(normalizeRecoveryCode(code)).digest('hex'),
+    ],
+  };
 }

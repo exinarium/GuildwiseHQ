@@ -138,6 +138,7 @@ import { DeployMover } from './delivery/move.ts';
 import { DeployPreparer } from './delivery/prepare.ts';
 import { runDeployProbe } from './delivery/probe.ts';
 import { DeliveryService } from './delivery/service.ts';
+import { installCacheRoot, runDependencyChange, sweepInstallCaches } from './devops/dependency-install.ts';
 import { verifyRights } from './devops/rights.ts';
 import { ProviderStore } from './direct/store.ts';
 import { type AppTokenSource, brokerTokenSource } from './external/app-token.ts';
@@ -917,6 +918,23 @@ export class Runner {
       ...(opts.prepareWorktree ? { prepareWorktree: opts.prepareWorktree } : {}),
       ...(opts.checksBudgetMs ? { checksBudgetMs: opts.checksBudgetMs } : {}),
       ...(opts.initWorktreeSubmodules ? { initWorktreeSubmodules: opts.initWorktreeSubmodules } : {}),
+      // R18-S: script-free unless the owner allowed install scripts for the repository on this workstation
+      devopsInstall: (r) =>
+        runDependencyChange({
+          dir: r.dir,
+          repo: r.repo,
+          change: r.change,
+          exec: this.exec,
+          scriptsAllowed: this.authority.policy().installScripts[r.repo] === true,
+          allowedRegistries: this.authority.policy().installRegistries,
+          allowNetworkConfig: this.authority.policy().installNetworkConfig,
+          runnerRoot: this.paths.root,
+          realHome: homedir(),
+          // outside every agent sandbox (the data dir is denied to agents): never the shared agent cache
+          cacheRoot: installCacheRoot(this.paths),
+          tmpRoot: join(this.paths.root, 'install-stage'),
+          log: (l) => process.stderr.write(`[devops] ${r.shiftId.slice(0, 8)} ${l}\n`),
+        }),
       git: this.agentGit,
       toolchains: this.toolchains,
       runs: this.runs,
@@ -1494,6 +1512,12 @@ export class Runner {
         if (n) this.log.info(`temp sweep: removed ${n} temp dir(s) of agents that no longer exist`);
       })
       .catch((err) => this.log.warn(`temp sweep failed: ${String(err)}`));
+    // install caches of worktrees that are gone (`aom devops install`)
+    await sweepInstallCaches(installCacheRoot(this.paths))
+      .then((n) => {
+        if (n) this.log.info(`install cache sweep: removed ${n} cache(s) of worktrees that no longer exist`);
+      })
+      .catch((err) => this.log.warn(`install cache sweep failed: ${String(err)}`));
     // session env files of a crashed runner: no token of an earlier process is live (the IPC registry is in memory)
     this.sweepSessionEnv('start');
     this.startScratchSweeps();
