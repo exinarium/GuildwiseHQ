@@ -5,6 +5,7 @@ import {
   APP_INTEGRATIONS_CAPABILITY,
   ApprovalPasskeyPayloadSchema,
   BOARD_VERBS_CAPABILITY,
+  blockedSwitch,
   CAPABILITY_REGISTRY_FEATURE,
   CEO_DIAGNOSTICS_CAPABILITY,
   CEO_FULL_POWER_CAPABILITY,
@@ -24,9 +25,11 @@ import {
   DEPLOY_MOVE_CAPABILITY,
   DEPLOY_SETUP_CAPABILITY,
   DEPLOY_SETUP_V2_CAPABILITY,
+  DEVOPS_SWITCH_LABEL,
   type DeployExecPayload,
   DeployExecPayloadSchema,
   type DeployExecResult,
+  DevopsApprovalDataSchema,
   DIRECT_MODEL_CAPABILITY,
   defaultHost,
   type EnvEnsurePayload,
@@ -216,11 +219,12 @@ import {
   gateDevopsShift,
   localEnvEnsure,
   narrowAccess,
+  plainText,
   rememberVaultRemotes,
   setupPending,
 } from './policy/gate.ts';
 import { type HeldRecord, HeldStore } from './policy/held.ts';
-import { runnerCli } from './policy/local-command.ts';
+import { localCommand, runnerCli } from './policy/local-command.ts';
 import { PasskeyStore } from './policy/passkey-store.ts';
 import { readSetupOffers, recordSetupOffer, writeOffers } from './policy/setup-offers.ts';
 import type { StartupDecision } from './policy/startup.ts';
@@ -274,6 +278,8 @@ export interface RunnerOptions {
   log?: Logger;
   backoff?: BackoffOptions;
   random?: () => number;
+  /** Connection timeouts for tests (the client's defaults otherwise). */
+  connection?: { handshakeTimeoutMs?: number; stallMs?: number };
   maxShiftMsOverride?: number;
   reportWaitMs?: number;
   exitGraceMs?: number;
@@ -529,6 +535,16 @@ export class Runner {
 
   /** The connection state last written to the status file. */
   private connected = false;
+  /** UAT 1.10.0 finding 3: DevOps requests that wait for a switch of this workstation, one per request (memory). */
+  private blocked = new Map<string, import('./window/server.ts').BlockedDevops>();
+  /**
+   * Rework 2: DevOps requests refused on this workstation (request id -> when). A refusal that reached a shift the server
+   * had already ended as `lost` (a reconnect race) changed nothing there, and the request came back as a new held item.
+   * A new shift of such a request is now refused at once, as refused locally, for 24 hours.
+   */
+  private refusedRequests = new Map<string, number>();
+  /** The local install choice last sent to the server on this connection (undefined: not yet). */
+  private sentInstall: boolean | undefined;
   /** R18-S: policy.json and the local actions; held items and their approvals. */
   readonly authority: LocalAuthority;
   readonly approvals: Approvals;
@@ -587,6 +603,7 @@ export class Runner {
       refuse: (r, reason) => this.refuseHeld(r, reason),
       log: this.log,
       ...(opts.approvalsPollMs ? { pollMs: opts.approvalsPollMs } : {}),
+      onTick: () => this.reportInstallChoice(),
       // easy-runner-setup: every held item and local step carries the exact copy-paste command
       cli: this.localCliText(),
       windowPort: () => (this.windowState?.error ? undefined : this.windowState?.port),
@@ -832,6 +849,7 @@ export class Runner {
       log: this.log,
       backoff: opts.backoff,
       random: opts.random,
+      ...(opts.connection ?? {}),
       buildHello: () => this.buildHello(),
       buildHeartbeat: () => ({
         activeShifts: this.supervisor.activeShifts().map((s) => s.shiftId),
@@ -892,6 +910,7 @@ export class Runner {
       ...(opts.runTiming ? { timing: opts.runTiming } : {}),
     });
     this.supervisor = new ShiftSupervisor({
+      onDevopsApproval: (msg, data) => this.noteDevopsApproval(msg, data),
       windowPort: () => this.windowState?.port,
       capabilities: this.capabilities,
       onProjectCapabilities: (projectId, r) => {
@@ -1119,6 +1138,8 @@ export class Runner {
     });
     this.client.on('message', (m) => this.onMessage(m));
     this.client.on('welcome', (w) => {
+      this.sentInstall = undefined;
+      this.reportInstallChoice();
       if (this.refusedReason) {
         // R21: the refusal is reported (hello.startupRefused); nothing runs, and the process ends with exit 78
         this.log.error(`start-up refused, reported to the server: ${this.refusedReason}`);
@@ -1169,6 +1190,13 @@ export class Runner {
       void this.chat.cancelAll('workstation offline: the connection to the server dropped', {
         keepFullPower: true,
       });
+    });
+    // UAT 1.10.0 finding 4: every failed attempt updates status.json (doctor reads it); a hard stall exits non-zero so the
+    // service manager (Restart=always) starts a fresh process.
+    this.client.on('retry', () => this.writeStatus(false));
+    this.client.on('stalled', (why) => {
+      this.log.error(`exiting: the connection to the server stalled (${why})`);
+      this.fatalResolve?.(75);
     });
     this.client.on('fatal', (code, why) => {
       this.unpaired = why === UNPAIRED_MESSAGE;
@@ -1714,6 +1742,7 @@ export class Runner {
           repos: this.repos.length,
           outboxPending: this.outbox.count(),
           testServices: this.supervisor.testServices(),
+          connection: this.client.state(),
         }),
       );
     } catch {
@@ -2691,7 +2720,75 @@ export class Runner {
       void this.supervisor.handleStart(this.narrowShift(msg));
       return;
     }
-    this.approvals.hold({ decision: d, replay: { type: 'shift.start', body: msg } });
+    // UAT 1.10.0 finding 3: a held DevOps shift is accepted (it waits here, for the person at the machine). Without that
+    // the server released it after 30 s, put the request back in the queue and sent a new shift a minute later, each
+    // held again. One held item per request: a new shift of a request already held updates that item.
+    const requestId = msg.devops?.requestId;
+    const refusedAt = requestId ? this.refusedRequests.get(requestId) : undefined;
+    if (requestId && refusedAt !== undefined) {
+      if (Date.now() - refusedAt < 24 * 3_600_000) {
+        this.supervisor.refuseStart(msg.shiftId, 'refused on this workstation earlier', {
+          refusedLocally: true,
+        });
+        return;
+      }
+      this.refusedRequests.delete(requestId);
+    }
+    this.client.send('shift.accepted', { shiftId: msg.shiftId });
+    if (requestId) this.blocked.delete(requestId);
+    this.approvals.hold({
+      decision: d,
+      replay: { type: 'shift.start', body: msg },
+      ...(requestId ? { requestKey: `devops:${requestId}` } : {}),
+    });
+  }
+
+  /** The DevOps requests waiting for a switch of this workstation (Approvals on this computer). */
+  blockedDevops(): import('./window/server.ts').BlockedDevops[] {
+    const now = Date.now();
+    for (const [k, b] of this.blocked) if (now - Date.parse(b.at) > 24 * 3_600_000) this.blocked.delete(k);
+    return [...this.blocked.values()];
+  }
+
+  /**
+   * A DevOps shift asked for approval (`aom devops-approval`): when a switch of this workstation that is off explains it,
+   * the request waits for that switch (the server holds it), and Approvals on this computer shows it as one item.
+   */
+  private noteDevopsApproval(
+    msg: Extract<ServerToRunner, { type: 'shift.start' }>,
+    data: Record<string, unknown>,
+  ): void {
+    const requestId = msg.devops?.requestId;
+    const access = msg.devops?.access;
+    const parsed = DevopsApprovalDataSchema.safeParse(data);
+    if (!requestId || !access || !parsed.success) return;
+    const sw = blockedSwitch(access, parsed.data);
+    if (!sw) return;
+    const label = DEVOPS_SWITCH_LABEL[sw];
+    this.blocked.set(requestId, {
+      requestId,
+      switch: sw,
+      switchLabel: label,
+      // REVIEW S3: server text without control or bidi characters
+      agentName: plainText(msg.agent.name).slice(0, 100),
+      summary: plainText(msg.devops?.summary ?? parsed.data.action).slice(0, 300),
+      at: new Date().toISOString(),
+    });
+    const command =
+      sw === 'allowInstall' ? localCommand(this.localCliText(), 'devops install', ['on']) : null;
+    this.log.info(
+      `DevOps request ${requestId.slice(0, 8)} waits: "${label}" is off for this workstation. Turn it on on the Workstations page${command ? `, or run on this computer: ${command}` : ''}. It continues by itself once the switch is on.`,
+    );
+  }
+
+  /** Sends the local install choice to the server when it is set and not sent yet on this connection. */
+  private reportInstallChoice(): void {
+    if (!this.client.isReady) return;
+    const on = this.authority.policy().devopsInstall;
+    if (on === undefined || on === this.sentInstall) return;
+    this.client.send('devops.install.local', { on });
+    this.sentInstall = on;
+    if (on) for (const [k, b] of this.blocked) if (b.switch === 'allowInstall') this.blocked.delete(k);
   }
 
   /**
@@ -2785,7 +2882,16 @@ export class Runner {
       return;
     }
     if (r.replay.type === 'shift.start') {
-      this.supervisor.refuseStart((r.replay.body as { shiftId: string }).shiftId, reason);
+      // REVIEW S1: a local no (or no answer in 24 h) ends the request; it is not sent back to the queue
+      const requestId = (r.replay.body as { devops?: { requestId?: unknown } }).devops?.requestId;
+      if (typeof requestId === 'string') {
+        this.refusedRequests.set(requestId, Date.now());
+        while (this.refusedRequests.size > 1000)
+          this.refusedRequests.delete(this.refusedRequests.keys().next().value as string);
+      }
+      this.supervisor.refuseStart((r.replay.body as { shiftId: string }).shiftId, reason, {
+        refusedLocally: true,
+      });
       return;
     }
     const commandId = (r.replay.body as { commandId?: string }).commandId;

@@ -307,6 +307,11 @@ export interface ShiftTransport {
 }
 
 export interface SupervisorDeps {
+  /**
+   * UAT 1.10.0 finding 3: a DevOps shift asks for approval (`aom devops-approval`); the runner checks whether a switch of
+   * this workstation that is off explains it, to show that on Approvals on this computer.
+   */
+  onDevopsApproval?: (msg: ShiftStartMsg, data: Record<string, unknown>) => void;
   /** The capability registry (`aom skill show|list`, and the index in the instructions of an agent whose role lists skills). */
   capabilities?: CapabilityRegistry;
   /** The capabilities found in a project's checkout changed: tell the server (metadata only). */
@@ -1000,7 +1005,17 @@ export class ShiftSupervisor {
   }
 
   /** Refuses a shift before it starts (the runner's post-as gate): nothing is prepared, the reason goes to the server. */
-  refuseStart(shiftId: string, detail: string): void {
+  refuseStart(shiftId: string, detail: string, opts: { refusedLocally?: boolean } = {}): void {
+    if (opts.refusedLocally) {
+      this.log.warn(`shift ${shiftId} refused on this workstation: ${detail}`);
+      this.deps.transport.send('shift.rejected', {
+        shiftId,
+        reason: 'internal',
+        detail,
+        refusedLocally: true,
+      });
+      return;
+    }
     this.reject(shiftId, 'internal', detail);
   }
 
@@ -3746,6 +3761,19 @@ export class ShiftSupervisor {
         }
       }, this.deps.reportWaitMs ?? 120_000).unref?.();
     });
+    if (
+      msg.agent.isDevops &&
+      toSend.kind === 'outcome' &&
+      (toSend as { outcomeId?: string }).outcomeId === 'devops_approval'
+    )
+      try {
+        this.deps.onDevopsApproval?.(
+          msg,
+          ((toSend as { data?: unknown }).data ?? {}) as Record<string, unknown>,
+        );
+      } catch {
+        // advisory: the server raises the Desk item either way
+      }
     this.deps.transport.send('shift.report', { shiftId: msg.shiftId, reportId, report: toSend, ...attach });
     const result = await verdict;
 

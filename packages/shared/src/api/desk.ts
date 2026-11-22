@@ -124,6 +124,10 @@ export const DeskItemDtoSchema = z.object({
       /** easy-runner-setup (`workstation_local_step`): the copy-paste command and the step kind for its sentence. */
       command: z.string().max(900).optional(),
       stepKind: z.string().max(60).optional(),
+      /** UAT 1.10.0 finding 3: a DevOps request waiting for this workstation switch (and the names the Desk shows). */
+      devopsSwitch: z.string().max(40).optional(),
+      switchLabel: z.string().max(80).optional(),
+      workstationName: z.string().max(200).optional(),
       /** `gate` for an escalated gate (the desk hides "Continue the journey"). */
       waitKind: z.string().optional(),
       /** Runner-offline items (`form_offline_link`, `form_offline_hold_expired`): strings only, never an email address. */

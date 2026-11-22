@@ -3,7 +3,7 @@ import { localCli } from '../policy/local-command.ts';
 import type { Policy } from '../policy/schema.ts';
 import type { Executor } from '../toolchain/exec.ts';
 import { adminCommand, dedicatedUserOf, instanceOfUser, isDedicatedUser } from './admin-command.ts';
-import { applyChoices, initialChoices } from './choices.ts';
+import { applyChoices, initialChoices, replacedGrants } from './choices.ts';
 import { readAllOffers } from './offers.ts';
 import {
   DESKTOP_SOCKET_RE,
@@ -205,6 +205,11 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
   });
   if (p) choices = await runScreen(choices, p, say);
   applyChoices(choices, next);
+  // UAT 1.10.0 finding 2: a grant for an agent the server no longer reports moves to the current helper (logged)
+  for (const g of replacedGrants(choices))
+    say(
+      `DevOps grant for ${g.orgName}: now the current helper${g.agentName ? ` "${g.agentName}"` : ''} (agent ${g.to}); the old agent ${g.from} is no longer this workstation's helper and was dropped.`,
+    );
 
   // ---- 4. Docker for the runner [R20 step 4, DESIGN deps-without-sudo §3]
   const userArg = mode === 'current' ? ['--user', deps.username] : [];

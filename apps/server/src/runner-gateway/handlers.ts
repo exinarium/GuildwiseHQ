@@ -39,7 +39,12 @@ import { syncClaudeAccountNotices } from '../commands/claude-account-notices.ts'
 import { applyAccountEnsureResult, queueMissingAccountEnsures } from '../commands/claude-accounts.ts';
 import { cardMessage, SYSTEM_ACTOR, userScope } from '../commands/common.ts';
 import { designRpc } from '../commands/design-rpc.ts';
-import { alignDevopsRuntime, createDevOpsRequestIn, endDevopsShift } from '../commands/devops.ts';
+import {
+  alignDevopsRuntime,
+  applyLocalInstallChoice,
+  createDevOpsRequestIn,
+  endDevopsShift,
+} from '../commands/devops.ts';
 import { devopsCardRpc } from '../commands/devops-card.ts';
 import { outboundDraftRpc } from '../commands/drafts.ts';
 import { endQuestionShift } from '../commands/escalation.ts';
@@ -546,6 +551,10 @@ export class RunnerHandlers {
         return;
       case 'deploy.progress':
         await applyDeployProgress(this.ctx, conn.workstationId, msg);
+        return;
+      case 'devops.install.local':
+        // UAT 1.10.0 finding 3: the local "may install tools" choice sets the workstation's Install switch
+        await applyLocalInstallChoice(this.ctx, conn.workstationId, msg.on);
         return;
       case 'approvals.held':
         // What the runner holds for a local approval (R18-S): shown on the workstation page, never approved here (R22).

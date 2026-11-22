@@ -59,7 +59,19 @@ export interface WindowStatus {
   docker?: string;
 }
 
+/** A DevOps request that waits for a switch of this workstation (UAT 1.10.0 finding 3). */
+export interface BlockedDevops {
+  requestId: string;
+  switch: 'allowInstall' | 'allowDocker' | 'allowedPaths';
+  switchLabel: string;
+  agentName: string;
+  summary: string;
+  at: string;
+}
+
 export interface ApprovalsWindowDeps {
+  /** DevOps requests waiting for a switch (shown as one item each). */
+  blocked?: () => BlockedDevops[];
   instance: string | null;
   serverOrigins: string[];
   version: string;

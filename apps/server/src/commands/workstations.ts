@@ -90,13 +90,18 @@ export async function pairRunner(
     release?: SignedReleaseProof | undefined;
     /** Server-internal pairing of a simulation organization's simulated workstation. */
     simulationOrgId?: string;
+    /** The workstation this runner is paired as now, proven by its token (UAT 1.10.0 finding 5). */
+    previous?: { workstationId: string; runnerToken: string } | undefined;
+    /** The person's explicit yes to a new workstation although `previous` could not be re-linked. */
+    newWorkstation?: boolean | undefined;
   },
 ) {
   // Refused with 403 `signed_runner_required` before the code is spent, while "Only signed runners" is on (R21).
   const release = await pairingRelease(ctx, input);
   const now = ctx.clock.now();
   const runnerToken = `aomr_${randomToken(32)}`;
-  const workstationId = randomUUID();
+  let workstationId: string = randomUUID();
+  let relinked = false;
   const hash = sha256Hex(normalizePairingCode(input.code));
   // The attempt counter is bumped in its own committed statement so a failure cannot roll it back.
   const bumped = await one(
@@ -113,6 +118,33 @@ export async function pairRunner(
     );
     if (!c || c.used_at || new Date(c.expires_at) <= now || c.attempts > MAX_CODE_ATTEMPTS)
       throw new PairingError();
+    if (input.previous && !input.newWorkstation && !input.simulationOrgId) {
+      const prev = await relinkTarget(tx, input.previous, c.user_id as string);
+      workstationId = prev.id;
+      relinked = true;
+      await exec(tx, 'UPDATE pairing_codes SET used_at=$2, workstation_id=$3 WHERE id=$1', [
+        c.id,
+        now,
+        prev.id,
+      ]);
+      // the same workstation, a fresh token: nothing is hired, retired, reset or moved
+      await exec(tx, 'DELETE FROM runner_token_rotations WHERE workstation_id=$1', [prev.id]);
+      await ctx.store.append(
+        [
+          {
+            streamId: streamId.workstation(prev.id),
+            event: {
+              type: 'WorkstationTokenRotated',
+              payload: { workstationId: prev.id, tokenHash: sha256Hex(runnerToken) },
+            },
+            actor: SYSTEM_ACTOR,
+            scope: userScope(c.user_id),
+          },
+        ],
+        { tx },
+      );
+      return;
+    }
     await exec(tx, 'UPDATE pairing_codes SET used_at=$2, workstation_id=$3 WHERE id=$1', [
       c.id,
       now,
@@ -170,7 +202,53 @@ export async function pairRunner(
         ctx.log.warn({ err }, 'setup offers not built');
         return undefined;
       });
-  return { workstationId, runnerToken, ...(setupOffers ? { setupOffers } : {}) };
+  return {
+    workstationId,
+    runnerToken,
+    ...(setupOffers ? { setupOffers } : {}),
+    ...(relinked ? { relinked: true } : {}),
+  };
+}
+
+/**
+ * The workstation a re-run of the installer may re-link (UAT 1.10.0 finding 5): the runner proves it holds that
+ * workstation's current token, the workstation is still linked, and the pairing code belongs to the same account. Anything
+ * else is 409 `relink_refused` (the transaction rolls back, so the code is not spent) and the installer asks the person
+ * before it makes a new workstation. Whether the account differs is only said to a runner that proved the token, so a
+ * code alone never learns anything about another account's workstation, and a link for one account can never take over
+ * another account's workstation (or its organizations' DevOps engineer).
+ */
+async function relinkTarget(
+  tx: Tx,
+  previous: { workstationId: string; runnerToken: string },
+  codeUserId: string,
+): Promise<{ id: string; name: string }> {
+  const ws = await one(
+    tx,
+    'SELECT id, user_id, status, token_hash, name FROM workstations WHERE id=$1 FOR UPDATE',
+    [previous.workstationId],
+  );
+  const tokenHash = sha256Hex(previous.runnerToken);
+  const pending = ws
+    ? await one(tx, 'SELECT 1 AS ok FROM runner_token_rotations WHERE workstation_id=$1 AND token_hash=$2', [
+        ws.id,
+        tokenHash,
+      ])
+    : undefined;
+  const proven = !!ws && ws.status === 'active' && (ws.token_hash === tokenHash || !!pending);
+  if (!proven)
+    throw conflict(
+      'relink_refused',
+      'The workstation this computer was linked to is no longer linked to this account, so this link would add a NEW workstation (with its own DevOps engineer, every switch off).',
+      { reason: 'gone' },
+    );
+  if (ws.user_id !== codeUserId)
+    throw conflict(
+      'relink_refused',
+      `This link belongs to a different account than the workstation "${ws.name}" this computer is linked to. Using it adds a NEW workstation for that account; "${ws.name}" stops working on this computer.`,
+      { reason: 'other_account', workstationName: ws.name },
+    );
+  return { id: ws.id as string, name: ws.name as string };
 }
 
 export async function renameWorkstation(ctx: Ctx, user: AuthSession['user'], id: string, name: string) {

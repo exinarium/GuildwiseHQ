@@ -23,14 +23,18 @@ export interface BackoffOptions {
 }
 export const DEFAULT_BACKOFF: BackoffOptions = { baseMs: 1000, capMs: 30_000, resetAfterMs: 60_000 };
 
-/** Exponential backoff with full jitter: uniform in [0, min(cap, base * 2^attempt)]. */
+/**
+ * Capped exponential backoff with "equal" jitter: uniform in [c/2, c] where c = min(cap, base * 2^attempt). Half of the
+ * interval is fixed, so the logged intervals visibly grow (UAT 1.10.0 finding 4), and the other half spreads runners
+ * that reconnect after the same server restart.
+ */
 export function backoffDelay(
   attempt: number,
   opts: BackoffOptions,
   random: () => number = Math.random,
 ): number {
-  const ceiling = Math.min(opts.capMs, opts.baseMs * 2 ** attempt);
-  return Math.floor(random() * ceiling);
+  const ceiling = Math.min(opts.capMs, opts.baseMs * 2 ** Math.min(attempt, 30));
+  return Math.floor(ceiling / 2 + random() * (ceiling / 2));
 }
 
 export function toWsUrl(serverUrl: string): string {
@@ -45,6 +49,12 @@ export const HANDSHAKE_TIMEOUT_MS = 15_000;
 export const WELCOME_TIMEOUT_MS = 30_000;
 /** A ready connection is dead when nothing was received for this many heartbeat intervals. */
 export const LIVENESS_HEARTBEATS = 3;
+/**
+ * A hard stall: no connection attempt started or ended for this long while offline (an attempt that hangs past every
+ * timeout, a retry timer that never fired). The client then emits `stalled` and the runner exits non-zero, so its
+ * service manager starts a fresh process (UAT 1.10.0 finding 4: "reconnecting in 308 ms", then 18 hours of nothing).
+ */
+export const STALL_MS = 5 * 60_000;
 
 export interface ClientOptions {
   url: string;
@@ -61,6 +71,21 @@ export interface ClientOptions {
   welcomeTimeoutMs?: number;
   /** Silence after which a ready connection is declared dead (default 3 x heartbeat interval). */
   livenessMs?: number;
+  /** Hard-stall limit (default STALL_MS). */
+  stallMs?: number;
+}
+
+/** What the client knows about its connection, for status.json, doctor and the logs. */
+export interface ConnectionState {
+  connected: boolean;
+  /** When the connection was last lost (or the first attempt started); absent while connected. */
+  offlineSince?: string;
+  /** Failed attempts since the connection was lost. */
+  failedAttempts: number;
+  lastAttemptAt?: string;
+  /** Why the last attempt failed (an HTTP status, a socket error, a close code). */
+  lastError?: string;
+  nextAttemptAt?: string;
 }
 
 export interface ClientEvents {
@@ -70,6 +95,10 @@ export interface ClientEvents {
   disconnected: [number];
   /** Close codes 4401/4403/4409: retrying would not help. */
   fatal: [number, string];
+  /** A failed attempt; the state carries the reason and the next try. */
+  retry: [ConnectionState];
+  /** No attempt progressed within `stallMs`: the process should exit and be restarted. */
+  stalled: [string];
 }
 
 /**
@@ -91,6 +120,16 @@ export class RunnerClient extends EventEmitter<ClientEvents> {
   private welcomeTimer: NodeJS.Timeout | null = null;
   private livenessTimer: NodeJS.Timeout | null = null;
   private lastRx = 0;
+  /** Last time an attempt started, opened, got its welcome or ended (the hard-stall watchdog). */
+  private lastProgress = 0;
+  private watchdog: NodeJS.Timeout | null = null;
+  private failed = 0;
+  private offlineSince = 0;
+  private lastAttemptAt = 0;
+  private lastError = '';
+  /** Why the current attempt failed, set by its error/response handlers. */
+  private attemptError = '';
+  private nextAttemptAt = 0;
   private readonly log: Logger;
   private readonly backoff: BackoffOptions;
   private readonly random: () => number;
@@ -107,14 +146,52 @@ export class RunnerClient extends EventEmitter<ClientEvents> {
     return this.ready;
   }
 
+  /** The connection as the client sees it (for status.json and doctor). */
+  state(): ConnectionState {
+    const iso = (t: number) => (t ? new Date(t).toISOString() : undefined);
+    return {
+      connected: this.ready,
+      ...(this.ready ? {} : { offlineSince: iso(this.offlineSince) }),
+      failedAttempts: this.failed,
+      ...(this.lastAttemptAt ? { lastAttemptAt: iso(this.lastAttemptAt) } : {}),
+      ...(this.lastError ? { lastError: this.lastError } : {}),
+      ...(!this.ready && this.nextAttemptAt > Date.now() ? { nextAttemptAt: iso(this.nextAttemptAt) } : {}),
+    };
+  }
+
   start(): void {
     this.stopped = false;
+    this.offlineSince = Date.now();
+    this.lastProgress = Date.now();
+    const stallMs = this.opts.stallMs ?? STALL_MS;
+    if (this.watchdog) clearInterval(this.watchdog);
+    this.watchdog = setInterval(
+      () => {
+        if (this.stopped || this.ready || Date.now() - this.lastProgress < stallMs) return;
+        const why = `no connection attempt progressed for ${Math.round(stallMs / 1000)} s (last error: ${this.lastError || 'none'})`;
+        this.log.error(`connection stalled: ${why}; exiting so the service manager restarts the runner`);
+        if (this.watchdog) clearInterval(this.watchdog);
+        this.watchdog = null;
+        this.stopped = true;
+        if (this.retryTimer) clearTimeout(this.retryTimer);
+        try {
+          this.ws?.terminate();
+        } catch {
+          // going away anyway
+        }
+        this.emit('stalled', why);
+      },
+      Math.max(20, Math.min(10_000, Math.floor(stallMs / 4))),
+    );
+    this.watchdog.unref?.();
     this.connect();
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);
+    if (this.watchdog) clearInterval(this.watchdog);
+    this.watchdog = null;
     this.clearHeartbeat();
     this.clearWelcomeTimer();
     this.ready = false;
@@ -159,12 +236,17 @@ export class RunnerClient extends EventEmitter<ClientEvents> {
 
   private connect(): void {
     if (this.stopped) return;
+    this.lastProgress = Date.now();
+    this.lastAttemptAt = Date.now();
+    this.nextAttemptAt = 0;
+    this.attemptError = '';
     const ws = new WebSocket(this.opts.url, RUNNER_SUBPROTOCOL, {
       headers: { Authorization: `Bearer ${this.opts.token}` },
       handshakeTimeout: this.opts.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS,
     });
     this.ws = ws;
     ws.on('open', () => {
+      this.lastProgress = Date.now();
       this.connectedAt = Date.now();
       this.lastRx = Date.now();
       this.clearWelcomeTimer();
@@ -190,9 +272,19 @@ export class RunnerClient extends EventEmitter<ClientEvents> {
       if (res.statusCode === 401 || res.statusCode === 403) {
         this.stopped = true;
         this.emit('fatal', res.statusCode, `server rejected the runner token (HTTP ${res.statusCode})`);
+      } else {
+        // UAT 1.10.0 finding 4: with this listener attached, ws leaves the handshake to us. A 502/503 from a reverse
+        // proxy while the server restarts must end the attempt, or the runner waits forever without a close.
+        this.attemptError = `the server answered HTTP ${res.statusCode} instead of opening the connection`;
       }
+      res.resume();
+      if (ws.readyState === WebSocket.CONNECTING) ws.terminate();
     });
-    ws.on('error', (err) => this.log.warn(`websocket error: ${err.message}`));
+    ws.on('error', (err) => {
+      if (ws === this.ws && !this.attemptError.startsWith('the server answered HTTP'))
+        this.attemptError = err.message;
+      this.log.warn(`websocket error: ${err.message}`);
+    });
     ws.on('close', (code, reason) => this.onClose(ws, code, reason.toString()));
   }
 
@@ -241,6 +333,14 @@ export class RunnerClient extends EventEmitter<ClientEvents> {
     for (const entry of this.opts.outbox.list()) this.raw(entry.frame);
     this.raw(makeEnvelope('outbox.flushed', {}));
     this.ready = true;
+    this.lastProgress = Date.now();
+    if (this.failed > 0 || this.offlineSince)
+      this.log.info(
+        `connected${this.failed ? ` after ${this.failed} failed attempt${this.failed === 1 ? '' : 's'}` : ''}${this.offlineSince ? `, offline for ${Math.round((Date.now() - this.offlineSince) / 1000)} s` : ''}`,
+      );
+    this.failed = 0;
+    this.offlineSince = 0;
+    this.lastError = '';
     this.clearWelcomeTimer();
     this.clearHeartbeat();
     const sec = msg.heartbeatSec || HEARTBEAT_SEC;
@@ -284,6 +384,7 @@ export class RunnerClient extends EventEmitter<ClientEvents> {
   private onClose(ws: WebSocket, code: number, reason = ''): void {
     if (ws !== this.ws) return;
     this.ws = null;
+    this.lastProgress = Date.now();
     const wasReady = this.ready;
     this.ready = false;
     this.clearHeartbeat();
@@ -304,8 +405,22 @@ export class RunnerClient extends EventEmitter<ClientEvents> {
     if (this.connectedAt && Date.now() - this.connectedAt >= this.backoff.resetAfterMs) this.attempt = 0;
     this.connectedAt = 0;
     const delay = backoffDelay(this.attempt++, this.backoff, this.random);
-    this.log.info(`disconnected (code ${code}); reconnecting in ${delay} ms`);
+    if (wasReady) {
+      this.offlineSince = Date.now();
+      this.failed = 0;
+      this.lastError = '';
+      this.log.info(`disconnected (code ${code}); reconnecting in ${delay} ms`);
+    } else {
+      this.failed++;
+      this.lastError = this.attemptError || `closed with code ${code}`;
+      const offline = this.offlineSince ? Math.round((Date.now() - this.offlineSince) / 1000) : 0;
+      this.log.warn(
+        `connection attempt ${this.failed} failed (${this.lastError}); offline for ${offline} s; retrying in ${delay} ms`,
+      );
+    }
+    this.nextAttemptAt = Date.now() + delay;
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = setTimeout(() => this.connect(), delay);
+    if (!wasReady) this.emit('retry', this.state());
   }
 }

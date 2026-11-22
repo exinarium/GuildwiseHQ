@@ -565,6 +565,11 @@ export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?:
         item.subkind === DESK_SUBKIND.mcpNeedsSignIn ||
         item.subkind === 'claude_account_login' ||
         item.subkind === 'provider_account_login') && <SignInFromWeb item={item} />}
+      {item.kind === 'approval' &&
+        item.subkind === 'devops' &&
+        typeof item.data?.devopsSwitch === 'string' && (
+          <DevopsSwitchBlock data={item.data as Record<string, unknown>} />
+        )}
       {item.subkind === DESK_SUBKIND.workstationLocalStep && typeof item.data?.command === 'string' && (
         <div className="mt-3" data-testid="desk-local-step">
           <LocalCommand
@@ -1179,6 +1184,37 @@ export function AgentAnsweredBy({ item }: { item: DeskItemDto }) {
 }
 
 /** A step waiting on the workstation shows its sentence and command in the copy box, so its text body is not repeated. */
+/**
+ * UAT 1.10.0 finding 3: a DevOps request that waits for a switch of the workstation. The text names the switch; this adds
+ * the one-click way to the switch and, for Install, the copy-paste command for the computer itself.
+ */
+export function DevopsSwitchBlock({ data }: { data: Record<string, unknown> }) {
+  const label = typeof data.switchLabel === 'string' ? data.switchLabel : 'the switch';
+  const name =
+    typeof data.workstationName === 'string' && data.workstationName
+      ? data.workstationName
+      : 'the workstation';
+  const command = typeof data.command === 'string' && localCommandOk(data.command) ? data.command : null;
+  return (
+    <div className="mt-3 flex flex-col gap-2" data-testid="desk-devops-switch">
+      <Link
+        to={
+          typeof data.workstationId === 'string'
+            ? `/workstations?open=${data.workstationId}`
+            : '/workstations'
+        }
+        className="text-brand-text underline"
+        data-testid="desk-devops-switch-link"
+      >
+        Turn on “{label}” for {name}
+      </Link>
+      {command && (
+        <LocalCommand command={command} kind="devops.install" testId="desk-devops-switch-command" />
+      )}
+    </div>
+  );
+}
+
 function localStepBlock(item: { subkind?: string | null; data?: { command?: string } | null }): boolean {
   return (
     item.subkind === DESK_SUBKIND.workstationLocalStep &&

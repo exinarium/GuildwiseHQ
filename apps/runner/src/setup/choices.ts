@@ -20,6 +20,12 @@ export interface OrgItem {
   agentName?: string;
   /** A grant the policy holds for an organisation the server no longer offers: kept unless edited away. */
   notOffered?: boolean;
+  /**
+   * UAT 1.10.0 finding 2: the policy granted this organisation's helper under an agent id the server no longer reports
+   * for this workstation (a new workstation or a newly hired DevOps engineer). The item carries the CURRENT agent id from
+   * the offers; this is the stale one it replaces when the grant is written.
+   */
+  replaces?: string;
   allow: boolean;
 }
 
@@ -39,6 +45,12 @@ export interface Choices {
   deploy: 'ask' | 'off';
   repos: RepoItem[];
   ytdlp: boolean;
+  /**
+   * Item 7 (UAT 1.10.0 finding 3): may the DevOps helpers install the tools projects need? Safe default No. Written to
+   * the policy only when it was chosen (here or before), so a re-run never turns off a switch set on the website.
+   */
+  devopsInstall: boolean;
+  devopsInstallChosen: boolean;
 }
 
 export interface ChoicesInput {
@@ -159,13 +171,16 @@ export function initialChoices(input: ChoicesInput): Choices {
   const orgs: OrgItem[] = input.orgs.map((o) => {
     const held = current.devops.agents[o.orgId];
     const allow = explicit ? explicit.some((x) => x.orgId === o.orgId) : !!held;
-    const agentId = explicit && allow ? o.devopsAgentId : (held ?? o.devopsAgentId);
+    // the organisation's helper as the server reports it NOW; a grant for another agent id is stale and is replaced
+    const agentId = o.devopsAgentId ?? held;
+    const stale = !!held && !!o.devopsAgentId && held !== o.devopsAgentId;
     return {
       key: '',
       orgId: o.orgId,
       orgName: o.orgName,
       role: o.role,
       ...(agentId ? { agentId } : {}),
+      ...(stale ? { replaces: held } : {}),
       ...(o.devopsAgentName && agentId === o.devopsAgentId ? { agentName: o.devopsAgentName } : {}),
       allow,
     };
@@ -209,6 +224,8 @@ export function initialChoices(input: ChoicesInput): Choices {
     deploy: opts.deploy ?? current.deploy,
     repos,
     ytdlp: opts.withYtdlp ?? true,
+    devopsInstall: current.devopsInstall ?? false,
+    devopsInstallChosen: current.devopsInstall !== undefined,
   };
 }
 
@@ -221,6 +238,7 @@ export function editableKeys(c: Choices): string[] {
     '4',
     ...c.repos.map((r) => r.key),
     '6',
+    '7',
   ];
 }
 
@@ -243,8 +261,26 @@ export function applyEdit(c: Choices, key: string, value: boolean | string): Cho
     next.docker = value as DockerMode;
   else if (key === '4' && (value === 'ask' || value === 'off')) next.deploy = value;
   else if (key === '6' && typeof value === 'boolean') next.ytdlp = value;
-  else throw new SetupError(`not an item on this screen: ${key}`);
+  else if (key === '7' && typeof value === 'boolean') {
+    next.devopsInstall = value;
+    next.devopsInstallChosen = true;
+  } else throw new SetupError(`not an item on this screen: ${key}`);
   return next;
+}
+
+/** The grants the choices move from a stale agent id to the current one (for the log and the summary). */
+export function replacedGrants(
+  c: Choices,
+): Array<{ orgId: string; orgName: string; from: string; to: string; agentName?: string }> {
+  return c.orgs
+    .filter((o) => o.allow && o.agentId && o.replaces)
+    .map((o) => ({
+      orgId: o.orgId,
+      orgName: o.orgName,
+      from: o.replaces as string,
+      to: o.agentId as string,
+      ...(o.agentName ? { agentName: o.agentName } : {}),
+    }));
 }
 
 /** Writes items 1, 2, 4 and 5 into the next policy (item 3 goes through the Docker step, item 6 runs the install). */
@@ -254,6 +290,7 @@ export function applyChoices(c: Choices, next: Policy): void {
   next.devops = { ...next.devops, agents };
   next.devopsRequests = c.devopsRequests;
   next.deploy = c.deploy;
+  if (c.devopsInstallChosen) next.devopsInstall = c.devopsInstall;
   const scripts = { ...next.installScripts };
   for (const r of c.repos) {
     if (r.allow) scripts[r.id] = true;

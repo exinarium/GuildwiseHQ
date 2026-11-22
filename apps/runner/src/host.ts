@@ -266,6 +266,11 @@ export class RunnerHost {
     } else {
       this.opts.log.error(`pairing ${entry.id} (${entry.label}) ended with code ${code}`);
       this.worst = Math.max(this.worst, code);
+      // a stalled connection (75): the whole process exits non-zero so the service manager starts a fresh one
+      if (code === 75) {
+        this.fatalResolve(75);
+        return;
+      }
     }
     this.unpaired = runner.unpaired && this.worst === 0;
     this.maybeFinish();

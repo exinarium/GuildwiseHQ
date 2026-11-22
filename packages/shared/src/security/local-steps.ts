@@ -74,6 +74,7 @@ const VERBS: ReadonlyArray<{ verb: readonly string[]; args: readonly ArgCheck[] 
   { verb: ['passkey', 'trust'], args: [re(B64URL_RE)] },
   { verb: ['approvals', 'pair'], args: [re(PAIR_CODE_RE)] },
   { verb: ['extras', 'install'], args: [lit('yt-dlp')] },
+  { verb: ['devops', 'install'], args: [re(/^(?:on|off)$/)] },
   {
     verb: ['signing', 'add-key'],
     args: [lit('--key-id'), re(/^[0-9A-F]{16}$/), lit('--key-file'), lit(KEY_FILE_PLACEHOLDER)],
@@ -141,6 +142,7 @@ export const LOCAL_STEP_KINDS = [
   'setup',
   'signing.key',
   'extras.ytdlp',
+  'devops.install',
 ] as const;
 export type LocalStepKind = (typeof LOCAL_STEP_KINDS)[number];
 
@@ -161,6 +163,8 @@ export const LOCAL_STEP_TEXT: Readonly<Record<LocalStepKind | 'held', string>> =
   'signing.key':
     'This registers your release signing key on the workstation. Replace <key-file> with the path of the key file.',
   'extras.ytdlp': 'This installs the video transcript tool (yt-dlp) in the runner’s own folder.',
+  'devops.install':
+    'This lets the DevOps helpers install the tools your projects need, in the runner’s own folder. It turns on “Install packages and tools” for this workstation.',
 };
 
 /** The sentence for a held item or a step kind (unknown kinds get the held sentence). */

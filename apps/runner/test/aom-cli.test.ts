@@ -402,6 +402,26 @@ describe('aom CLI', () => {
     expect(await t.run('devops-done')).toBe(1);
   });
 
+  it('devops-approval --blocked-by names the switch that is off (UAT 1.10.0 finding 3)', async () => {
+    const t = await setup();
+    expect(
+      await t.run(
+        'devops-approval',
+        '--action',
+        'install pnpm',
+        '--reason',
+        'Install is off',
+        '--blocked-by',
+        'install',
+      ),
+    ).toBe(0);
+    expect(t.reports.at(-1)).toMatchObject({
+      outcomeId: 'devops_approval',
+      data: { action: 'install pnpm', reason: 'Install is off', commands: [], blockedBy: 'allowInstall' },
+    });
+    expect(await t.run('devops-approval', '--action', 'a', '--reason', 'b', '--blocked-by', 'sudo')).toBe(1);
+  });
+
   it('devops-question reports a "Question:" approval', async () => {
     const t = await setup();
     expect(await t.run('devops-question', '--text', 'which branch?', '--reason', 'A) dev B) main')).toBe(0);

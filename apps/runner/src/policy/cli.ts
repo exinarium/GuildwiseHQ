@@ -222,6 +222,18 @@ export function devopsRevoke(d: PolicyCliDeps, orgId: string): Policy {
   return p;
 }
 
+/** `devops install on|off` (UAT 1.10.0 finding 3): the local choice the runner sends to the server's Install switch. */
+export function devopsInstallCli(d: PolicyCliDeps, value: string): Policy {
+  if (value !== 'on' && value !== 'off') throw new Error('use: devops install on|off');
+  const p = d.store.update((p) => grants.devopsInstall(p, value === 'on'));
+  d.out(
+    value === 'on'
+      ? 'DevOps helpers may now install the tools your projects need (in the runner\'s own folder). The running runner turns on "Install packages and tools" for this workstation within a few seconds; DevOps requests that waited for it continue.'
+      : 'DevOps helpers may no longer install tools here. The running runner turns off "Install packages and tools" for this workstation.',
+  );
+  return p;
+}
+
 export function devopsRequests(d: PolicyCliDeps, mode: string): Policy {
   if (mode !== 'ask' && mode !== 'auto') throw new Error('use: devops requests ask|auto');
   const p = d.store.update((p) => grants.devopsRequests(p, mode));
@@ -422,6 +434,12 @@ export function registerPolicyCommands(
     .description('let that DevOps agent work outside the sandbox on this workstation')
     .action(run((org: string, o: { agent?: string }) => devopsGrant(make(), org, o.agent)));
   devops.command('revoke <organization-id>').action(run((org: string) => devopsRevoke(make(), org)));
+  devops
+    .command('install <on|off>')
+    .description(
+      "whether DevOps helpers may install the tools your projects need (sets the workstation's Install switch)",
+    )
+    .action(run((v: string) => devopsInstallCli(make(), v)));
   devops
     .command('requests <ask|auto>')
     .description('whether DevOps tasks not started here wait for a local yes (default ask)')

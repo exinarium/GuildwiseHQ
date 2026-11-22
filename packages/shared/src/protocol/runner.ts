@@ -1934,6 +1934,11 @@ export const ShiftRejectedSchema = msg('shift.rejected', {
   shiftId: z.uuid(),
   reason: ShiftRejectReasonSchema,
   detail: z.string().optional(),
+  /**
+   * Rework 1 (REVIEW S1): the person at the workstation said no to this held DevOps shift, or did not answer within
+   * 24 hours. The server ends the request instead of re-queueing it (a re-queue held it again every minute).
+   */
+  refusedLocally: z.boolean().optional(),
   /** Set with `reason: 'usage_limited'`: when the usage limit resets (ISO); `detail` is that time as the workstation reads it. */
   limitedUntil: z.iso.datetime().optional(),
   /** With reason usage_limited | auth_expired | runtime_unavailable (account_missing): the account concerned. */
@@ -2301,6 +2306,13 @@ export const DeployProgressSchema = msg('deploy.progress', {
 export const VaultConflictSchema = msg('vault.conflict', { vaultId: z.string(), files: z.array(z.string()) });
 /** 1.10.0 (R18-S, R22): the items held for a local approval right now (replaces the previous list; not acked). */
 export const ApprovalsHeldSchema = msg('approvals.held', ApprovalsHeldPayloadSchema.shape);
+/**
+ * UAT 1.10.0 finding 3: the person at the workstation chose whether its DevOps helpers may install tools (the installer's
+ * screen, `guildwise-runner devops install on|off`, or Approvals on this computer). The runner sends its local choice on
+ * every welcome and whenever it changes; the server sets the workstation's "Install packages and tools" switch to it and
+ * resumes DevOps requests that waited for it. Not acked: the next welcome sends it again.
+ */
+export const DevopsInstallLocalSchema = msg('devops.install.local', { on: z.boolean() });
 /** 1.10.0 (R30): a deploy's package step produced the artefact to sign for a target (acked). */
 export const ReleaseArtefactPreparedSchema = msg(
   'release.artefact.prepared',
@@ -2799,6 +2811,7 @@ export const RunnerToServerSchema = z.discriminatedUnion('type', [
   StorageGrantVerifiedSchema,
   StorageDirectReportSchema,
   ApprovalsHeldSchema,
+  DevopsInstallLocalSchema,
   ReleaseArtefactPreparedSchema,
   AckSchema,
 ]);

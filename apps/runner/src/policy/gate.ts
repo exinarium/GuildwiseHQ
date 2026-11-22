@@ -83,12 +83,32 @@ function describeGeneric(command: string, payload: Record<string, unknown>): str
 }
 
 /**
+ * Rework 1 (REVIEW S3): text from the server shown in the log, the CLI and the approvals page, without control
+ * characters (ANSI escapes) or bidi overrides (the set `PlainNameSchema` refuses), so a name cannot reorder or recolour
+ * what the person reads before saying yes.
+ */
+export function plainText(s: string): string {
+  return s.replace(/[\p{Cc}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, '');
+}
+
+/**
+ * Rework 2: the same for the multi-line approval text (`detail`, shown in `<pre>` and by `approve`): line breaks and tabs
+ * stay, every other control character and every bidi override goes.
+ */
+export function plainDetail(s: string): string {
+  return s.replace(/[\p{Cc}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, (c) =>
+    c === '\n' || c === '\t' ? c : '',
+  );
+}
+
+/**
  * What a held command is about, for its one-line summary (the log line and `guildwise-runner approvals`). Each command
  * names its own target; nothing secret (a sealed value is never named). Never empty: `vault.configure` carries a list of
  * vaults, not one id, and showed "vault.configure for  (...)" (UAT 1.10.0 bug 4).
  */
 export function heldTarget(command: string, payload: Record<string, unknown>): string {
-  const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+  const str = (v: unknown): string | undefined =>
+    typeof v === 'string' && plainText(v).trim() ? plainText(v).trim() : undefined;
   if (command === 'vault.configure') {
     const vaults = Array.isArray(payload.vaults) ? (payload.vaults as Array<Record<string, unknown>>) : [];
     const names = vaults.map((v) => str(v?.name) ?? str(v?.vaultId) ?? '?');

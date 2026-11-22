@@ -261,7 +261,42 @@
     );
   }
 
-  function renderWaiting(items) {
+  /** UAT 1.10.0 finding 3: a DevOps request waiting for a switch of this computer, one card per request. */
+  function blockedCard(b) {
+    return h(
+      'div',
+      { class: 'card', 'data-blocked': b.requestId },
+      h('div', { class: 'card-head' }, h('strong', { text: 'A DevOps request waits for a setting' })),
+      h('p', {
+        text: `${b.agentName} needs "${b.switchLabel}" for: ${b.summary}. That setting is off for this computer, so the request waits. It continues by itself once the setting is on; nothing is retried meanwhile.`,
+      }),
+      b.switch === 'allowInstall'
+        ? h(
+            'div',
+            null,
+            h('button', {
+              class: 'btn primary',
+              type: 'button',
+              text: 'Let DevOps helpers install tools',
+              onclick: () =>
+                ask(
+                  'Let the DevOps helpers install the tools your projects need, in the runner’s own folder?',
+                  null,
+                  'Yes, allow',
+                  async () => send({ action: 'devops.install', on: true }),
+                ),
+            }),
+            h('p', { class: 'muted', text: 'Or paste this on this computer:' }),
+            commandBox(b.command),
+          )
+        : h('p', {
+            text: `Turn on "${b.switchLabel}" on the website: Workstations page, this computer, DevOps engineer.`,
+          }),
+    );
+  }
+
+  function renderWaiting(items, blocked) {
+    const waits = (blocked || []).map(blockedCard);
     const list = items.map((it) =>
       h(
         'div',
@@ -299,7 +334,10 @@
       'section',
       { class: 'panel' },
       h('h2', { text: 'Waiting for your yes' }),
-      list.length ? list : h('p', { class: 'muted', text: 'Nothing is waiting for your yes.' }),
+      waits,
+      list.length || waits.length
+        ? list
+        : h('p', { class: 'muted', text: 'Nothing is waiting for your yes.' }),
     );
   }
 
@@ -320,22 +358,49 @@
     ask(question(want), null, want ? 'Yes, allow' : 'Yes, turn off', async () => send(change(want)));
   };
 
+  /** UAT 1.10.0 finding 2: a grant that names an old helper, with the one-click fix. */
+  function staleGrant(o, helper) {
+    return h(
+      'div',
+      { class: 'notice', 'data-stale-grant': o.orgId },
+      h('p', {
+        text: `The permission for ${o.orgName} still names an old DevOps helper (agent ${String(o.grantedAgentId || '').slice(0, 8)}), so ${helper} cannot work here. This happens after a reinstall or when a new helper was hired.`,
+      }),
+      h('button', {
+        class: 'btn primary',
+        type: 'button',
+        text: 'Use the current helper',
+        onclick: () =>
+          ask(
+            `Give the permission to ${o.orgName}'s current ${helper} instead of the old one?`,
+            null,
+            'Yes, use the current helper',
+            async () => send({ action: 'devops.grant', orgId: o.orgId }),
+          ),
+      }),
+    );
+  }
+
   function renderAllows(a) {
-    const devops = a.devops.map((o) => {
+    const devops = a.devops.flatMap((o) => {
       const helper = o.agentName ? `DevOps helper "${o.agentName}"` : 'its DevOps helper';
-      return check(
-        `${o.orgName}: let ${helper} work outside the safety box`,
-        o.agentId ? `The server says you are ${o.role} there.` : 'No DevOps helper on this computer yet.',
-        o.granted,
-        toggle(
-          (on) =>
-            on
-              ? `Let ${o.orgName}'s ${helper} install tools and run commands on this computer outside the safety box?`
-              : `Stop ${o.orgName}'s ${helper} from working outside the safety box here?`,
-          (on) => ({ action: on ? 'devops.grant' : 'devops.revoke', orgId: o.orgId }),
+      const stale = o.grantedOther && o.agentId ? [staleGrant(o, helper)] : [];
+      return [
+        ...stale,
+        check(
+          `${o.orgName}: let ${helper} work outside the safety box`,
+          o.agentId ? `The server says you are ${o.role} there.` : 'No DevOps helper on this computer yet.',
+          o.granted,
+          toggle(
+            (on) =>
+              on
+                ? `Let ${o.orgName}'s ${helper} install tools and run commands on this computer outside the safety box?`
+                : `Stop ${o.orgName}'s ${helper} from working outside the safety box here?`,
+            (on) => ({ action: on ? 'devops.grant' : 'devops.revoke', orgId: o.orgId }),
+          ),
+          !o.agentId,
         ),
-        !o.agentId,
-      );
+      ];
     });
     const repos = a.repos.map((r) =>
       check(
@@ -360,6 +425,18 @@
       devops.length
         ? devops
         : h('p', { class: 'muted', text: 'No organization offers a DevOps helper to this computer yet.' }),
+      check(
+        'Let DevOps helpers install the tools your projects need',
+        'In the runner’s own folder, never system-wide. Safe choice: off, then a request that needs a tool waits for you.',
+        a.devopsInstall,
+        toggle(
+          (on) =>
+            on
+              ? 'Let the DevOps helpers install the tools your projects need?'
+              : 'Stop the DevOps helpers from installing tools here?',
+          (on) => ({ action: 'devops.install', on }),
+        ),
+      ),
       check(
         'Let DevOps tasks from the website start without asking me',
         'Safe choice: off, so each task waits for your yes.',
@@ -517,7 +594,11 @@
   }
 
   function renderState(state) {
-    return [renderStatus(state.status), renderWaiting(state.waiting), renderAllows(state.allows)];
+    return [
+      renderStatus(state.status),
+      renderWaiting(state.waiting, state.blocked),
+      renderAllows(state.allows),
+    ];
   }
 
   // ------------------------------------------------------------ confirm dialog

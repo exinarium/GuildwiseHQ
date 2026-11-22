@@ -33,7 +33,7 @@ export function renderScreen(c: Choices): string[] {
     out.push(' 1  DevOps helpers that may work outside the safety box here');
     for (const o of c.orgs) {
       const who = o.notOffered ? `${o.orgName} (no longer offered)` : `${o.orgName} (you are ${o.role})`;
-      const label = o.agentName ? `${who}, helper "${o.agentName}"` : who;
+      const label = `${o.agentName ? `${who}, helper "${o.agentName}"` : who}${o.replaces ? ' (replaces an old helper)' : ''}`;
       out.push(row('      ', o.key, label, o.agentId ? (o.allow ? 'Yes' : 'No') : 'no helper yet'));
     }
   }
@@ -54,6 +54,15 @@ export function renderScreen(c: Choices): string[] {
     for (const r of c.repos) out.push(row('      ', r.key, `${r.name} (${r.id})`, r.allow ? 'Yes' : 'No'));
   }
   out.push(row(' ', '6', "Video transcripts (yt-dlp, in the runner's own folder)", c.ytdlp ? 'Yes' : 'No'));
+  out.push(
+    row(
+      ' ',
+      '7',
+      "DevOps helpers may install the tools projects need (runner's own folder)",
+      // REVIEW S4: never chosen here, the website's switch decides; say so instead of a "No" that may not be true
+      c.devopsInstallChosen ? (c.devopsInstall ? 'Yes' : 'No') : 'As set on the website',
+    ),
+  );
   out.push('');
   return out;
 }
@@ -126,6 +135,15 @@ export async function editItem(
         c,
         '6',
         await p.confirm('Install yt-dlp so agents can read video transcripts?', c.ytdlp),
+      );
+    case '7':
+      return applyEdit(
+        c,
+        '7',
+        await p.confirm(
+          "May the DevOps helpers install the tools your projects need (Node, Python and the like), in the runner's own folder and never system-wide? With No, a request that needs a tool waits until you allow it.",
+          c.devopsInstall,
+        ),
       );
     default:
       say(`There is no item ${key} on this screen.`);

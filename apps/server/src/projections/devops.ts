@@ -102,6 +102,7 @@ export const devopsProjectors: Record<string, Projector> = {
           reason: p.reason,
           commands: p.commands,
           ...(p.question ? { question: true } : {}),
+          ...(p.blockedBy ? { blockedBy: p.blockedBy } : {}),
           resolution: null,
         }),
       ],

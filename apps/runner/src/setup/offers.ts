@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { PlainNameSchema, type SetupOffersWire, urlHasPassword } from '@aom/shared';
 import { z } from 'zod';
@@ -70,16 +70,35 @@ function readFile(dir: string): SetupOffersFile | null {
   }
 }
 
-/** The offers of every pairing, one per organization (the first pairing that names it wins). Bad files are ignored. */
+/**
+ * The pairing directories ordered by how fresh their offers are (newest `setup-offers.json` first). Every `welcome`
+ * rewrites a live pairing's offers, so after a reinstall that added a pairing (UAT 1.10.0 finding 2) the live one wins
+ * over an old pairing whose file still names the old DevOps engineer.
+ */
+export function freshestFirst(pairingDirs: readonly string[]): string[] {
+  const at = (d: string): number => {
+    try {
+      return statSync(join(d, SETUP_OFFERS_FILE)).mtimeMs;
+    } catch {
+      return 0;
+    }
+  };
+  return pairingDirs
+    .map((d, i) => ({ d, i, t: at(d) }))
+    .sort((a, b) => b.t - a.t || a.i - b.i)
+    .map((x) => x.d);
+}
+
+/** The offers of every pairing, one per organization (the freshest pairing that names it wins). Bad files are ignored. */
 export function readOffers(pairingDirs: readonly string[]): SetupOffer[] {
   return readAllOffers(pairingDirs).orgs;
 }
 
-/** Organisations and repositories of every pairing (the first pairing that names one wins). */
+/** Organisations and repositories of every pairing (the freshest pairing that names one wins). */
 export function readAllOffers(pairingDirs: readonly string[]): SetupOffersFile {
   const orgs = new Map<string, SetupOffer>();
   const repos = new Map<string, RepoOffer>();
-  for (const dir of pairingDirs) {
+  for (const dir of freshestFirst(pairingDirs)) {
     const f = readFile(dir);
     if (!f) continue;
     for (const o of f.orgs) if (!orgs.has(o.orgId)) orgs.set(o.orgId, o);

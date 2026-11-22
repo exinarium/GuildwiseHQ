@@ -23,6 +23,10 @@ export function devopsRevoke(p: Policy, orgId: string): Policy {
   return { ...p, devops: { ...p.devops, agents } };
 }
 
+export function devopsInstall(p: Policy, on: boolean): Policy {
+  return { ...p, devopsInstall: on };
+}
+
 export function devopsRequests(p: Policy, mode: 'ask' | 'auto'): Policy {
   return { ...p, devopsRequests: mode };
 }

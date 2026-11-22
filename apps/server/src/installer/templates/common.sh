@@ -128,6 +128,15 @@ ask_yn() {
   case "${ans}" in y|Y|yes|YES|Yes) return 0 ;; *) return 1 ;; esac
 }
 
+# ask_typed_yes <question>: true only when a person at the keyboard types "yes". Never answered by --yes, GUILDWISE_YES or a
+# missing terminal (those all mean no): for choices that must not happen unattended.
+ask_typed_yes() {
+  local ans=""
+  { [ -r /dev/tty ] && (: </dev/tty) 2>/dev/null; } || return 1
+  read -r -p "    $1 " ans </dev/tty || return 1
+  [ "${ans}" = yes ]
+}
+
 # ask_text <question> <default> -> prints the answer
 ask_text() {
   local q="$1" def="$2" ans=""
@@ -171,9 +180,12 @@ OPT_DEVOPS_REQUESTS="${GUILDWISE_DEVOPS_REQUESTS:-}"
 OPT_ALLOW_SCRIPTS="${GUILDWISE_ALLOW_SCRIPTS:-}"
 OPT_WITH_YTDLP="${GUILDWISE_WITH_YTDLP:-}"
 OPT_WSL_DISTRO_NAME="${GUILDWISE_WSL_DISTRO_NAME:-}"
+# --new-workstation: the person's yes, given up front, to a NEW workstation when the link cannot re-link the one this
+# computer is paired as (another account, or it was unlinked). --yes never gives it (UAT 1.10.0 finding 5).
+OPT_NEW_WORKSTATION="${GUILDWISE_NEW_WORKSTATION:-0}"
 
 bad_flag() {
-  die "$1" "Options: --yes, --runner-user dedicated|current, --legacy quarantine|remove, --accept-root-equivalent, --devops-orgs none|<name-or-id,...>, --devops-requests ask|auto, --allow-scripts <repo,...>, --with-ytdlp, --no-ytdlp, --wsl-distro-name <name>, --docker rootless|host|shared|none, --accept-shared-daemon, --docker-socket <path>, --skip-baseline, --deploy ask|off, --deploy-pin-commit, --allow-unsigned-from <origin>, --from-file <folder>, --ca-file <pem file>, --instance <name>, --choose-folders."
+  die "$1" "Options: --yes, --runner-user dedicated|current, --legacy quarantine|remove, --accept-root-equivalent, --devops-orgs none|<name-or-id,...>, --devops-requests ask|auto, --allow-scripts <repo,...>, --with-ytdlp, --no-ytdlp, --wsl-distro-name <name>, --docker rootless|host|shared|none, --accept-shared-daemon, --docker-socket <path>, --skip-baseline, --deploy ask|off, --deploy-pin-commit, --allow-unsigned-from <origin>, --from-file <folder>, --ca-file <pem file>, --instance <name>, --new-workstation, --choose-folders."
 }
 
 set_flag() {
@@ -209,6 +221,7 @@ parse_flags() {
       --deploy-pin-commit) OPT_DEPLOY_PIN_COMMIT=1 ;;
       --accept-shared-daemon) OPT_ACCEPT_SHARED=1 ;;
       --skip-baseline) OPT_SKIP_BASELINE=1 ;;
+      --new-workstation) OPT_NEW_WORKSTATION=1 ;;
       --with-ytdlp) OPT_WITH_YTDLP=1 ;;
       --no-ytdlp) OPT_WITH_YTDLP=0 ;;
       --runner-user|--legacy|--devops-orgs|--docker|--docker-socket|--deploy|--allow-unsigned-from|--from-file|--ca-file|--instance|--devops-requests|--allow-scripts|--wsl-distro-name)
@@ -228,6 +241,7 @@ validate_flags() {
   case "${OPT_RUNNER_USER}" in ''|dedicated|current) ;; *) bad_flag "--runner-user is dedicated or current (got ${OPT_RUNNER_USER})." ;; esac
   case "${OPT_LEGACY}" in ''|quarantine|remove) ;; *) bad_flag "--legacy is quarantine or remove (got ${OPT_LEGACY})." ;; esac
   case "${OPT_ACCEPT_SHARED}" in 1|y|yes|true) OPT_ACCEPT_SHARED=1 ;; *) OPT_ACCEPT_SHARED=0 ;; esac
+  case "${OPT_NEW_WORKSTATION}" in 1|y|yes|true) OPT_NEW_WORKSTATION=1 ;; *) OPT_NEW_WORKSTATION=0 ;; esac
   case "${OPT_SKIP_BASELINE}" in 1|y|yes|true) OPT_SKIP_BASELINE=1; export GUILDWISE_SKIP_BASELINE=1 ;; *) OPT_SKIP_BASELINE=0 ;; esac
   case "${OPT_DOCKER}" in ''|rootless|host|shared|none) ;; *) bad_flag "--docker is rootless, host, shared or none (got ${OPT_DOCKER})." ;; esac
   case "${OPT_DEPLOY}" in ''|ask|off) ;; *) bad_flag "--deploy is ask or off (got ${OPT_DEPLOY})." ;; esac
@@ -910,38 +924,58 @@ paired_server() {
   as_runner sed -n 's/.*"serverUrl": *"\([^"]*\)".*/\1/p' "${DATA_DIR}/config.json" 2>/dev/null | head -n1
 }
 
-# Pairs this computer's runner with the workstation the one-time code belongs to. A runner that is already paired
-# (to this server or another organization's) is kept: the code adds the new workstation instead of failing or
-# installing a second runner. Running the same command twice is fine: a used code is reported, not treated as an error.
+# Pairs this computer's runner with the workstation the one-time code belongs to (UAT 1.10.0 finding 5). A runner that is
+# already paired with this server proves its workstation, so a fresh link from the SAME account re-links that same
+# workstation: its agents, DevOps engineer, DevOps switches and the local DevOps grant stay. A link from another account
+# (or for a workstation that was unlinked) would make a NEW workstation: the installer says what that means and asks;
+# --yes never answers that question (only --new-workstation, or a yes typed at the keyboard). Running the same command
+# twice is fine: a used code is reported, not treated as an error.
 pair_runner() {
   local name="${GUILDWISE_NAME:-${DEFAULT_NAME}}"
   [ -n "${name}" ] || name="$(hostname 2>/dev/null || echo 'My workstation')"
   local already=0
   if is_paired; then
     already=1
-    note "This computer's runner is already paired with $(paired_server). Keeping it and pairing it with this workstation as well."
+    note "This computer's runner is already paired with $(paired_server). A link from the same account keeps that workstation."
   fi
-  local mock=()
-  [ "${GUILDWISE_MOCK:-}" = 1 ] && mock=(--mock)
+  local extra=()
+  [ "${GUILDWISE_MOCK:-}" = 1 ] && extra+=(--mock)
+  [ "${OPT_NEW_WORKSTATION}" = 1 ] && extra+=(--new-workstation)
   local out
-  if out="$(runner pair --server "${SERVER_URL}" --code "${PAIRING_CODE}" --name "${name}" ${mock[@]+"${mock[@]}"} 2>&1)"; then
-    step_ok "Paired as \"${name}\""
-    report "Paired" ok "${name}"
-  else
+  out="$(runner pair --server "${SERVER_URL}" --code "${PAIRING_CODE}" --name "${name}" ${extra[@]+"${extra[@]}"} 2>&1)"
+  local rc=$?
+  if [ "${rc}" = 0 ]; then
     case "${out}" in
-      *signed_runner_required*)
-        die "This server accepts only signed runners and refused this one." "Create a new install command on the Add a workstation page and run it; if it repeats, tell your administrator." ;;
-      *401*|*invalid*|*expired*)
-        if [ "${already}" = 1 ]; then
-          # The same command was run again: its single-use code is spent, and the pairing it made is still in place.
-          step_ok "The one-time pairing code was already used; keeping the existing pairing"
-          report "Pairing" info "code already used; kept existing pairing"
-          return
-        fi
-        die "The one-time pairing code was refused (it is single-use and expires after 30 minutes)." "Go back to the Add a workstation page, choose your system again and copy the new command." ;;
-      *) die "Pairing failed: ${out}" "Check that this computer can reach ${SERVER_URL}, then run the command again." ;;
+      *Re-linked*) step_ok "Re-linked the same workstation \"${name}\": its agents, DevOps engineer and switches stay"; report "Paired" ok "re-linked ${name}" ;;
+      *) step_ok "Paired as \"${name}\""; report "Paired" ok "${name}" ;;
     esac
+    return
   fi
+  case "${out}" in
+    *relink_refused*)
+      warn "$(printf '%s\n' "${out}" | sed -n 's/^relink_refused ([a-z_]*): //p' | head -n1)"
+      warn "A NEW workstation would be created: it gets its own new DevOps engineer with every DevOps switch off, and the DevOps grant on this computer has to be given again. The old workstation stops working on this computer; when you unlink it on the Workstations page, its DevOps engineer is retired."
+      # asked even under --yes: only a person at the keyboard (or --new-workstation) may say yes to this
+      ask_typed_yes "Create a NEW workstation? Type yes to continue, anything else stops:" || die "Stopped: nothing was changed and this computer keeps its workstation." "To keep it, make the link while signed in to the same account. To create a new workstation anyway, run the command again with --new-workstation."
+      if out="$(runner pair --server "${SERVER_URL}" --code "${PAIRING_CODE}" --name "${name}" ${extra[@]+"${extra[@]}"} --new-workstation 2>&1)"; then
+        step_ok "Paired as a new workstation \"${name}\""
+        report "Paired" ok "new workstation ${name}"
+        return
+      fi ;;
+  esac
+  case "${out}" in
+    *signed_runner_required*)
+      die "This server accepts only signed runners and refused this one." "Create a new install command on the Add a workstation page and run it; if it repeats, tell your administrator." ;;
+    *401*|*invalid*|*expired*)
+      if [ "${already}" = 1 ]; then
+        # The same command was run again: its single-use code is spent, and the pairing it made is still in place.
+        step_ok "The one-time pairing code was already used; keeping the existing pairing"
+        report "Pairing" info "code already used; kept existing pairing"
+        return
+      fi
+      die "The one-time pairing code was refused (it is single-use and expires after 30 minutes)." "Go back to the Add a workstation page, choose your system again and copy the new command." ;;
+    *) die "Pairing failed: ${out}" "Check that this computer can reach ${SERVER_URL}, then run the command again." ;;
+  esac
 }
 
 # Simple mode (the default) does not ask where your code lives: it is ~/src. Expert mode (turned on in your Settings),

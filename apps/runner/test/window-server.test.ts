@@ -487,6 +487,44 @@ describe('what the page may change [S1]', () => {
     expect(e.policy.get().devops.agents).toEqual({});
   });
 
+  it('a stale grant (an old agent id) shows as such, and "Use the current helper" replaces it (UAT 1.10.0 finding 2)', async () => {
+    const { e, token } = await signedIn();
+    const OLD_AGENT = '45236b3a-0000-7000-8000-000000000000';
+    e.policy.update((p) => {
+      p.devops.agents[ORG_A] = OLD_AGENT;
+      return p;
+    });
+    const st = (await authed(e.port, token, '/api/state')).json() as {
+      allows: { devops: Array<Record<string, unknown>> };
+    };
+    expect(st.allows.devops.find((o) => o.orgId === ORG_A)).toMatchObject({
+      granted: false,
+      grantedOther: true,
+      grantedAgentId: OLD_AGENT,
+      agentId: AGENT_A,
+    });
+    expect((await change(e.port, token, { action: 'devops.grant', orgId: ORG_A })).status).toBe(200);
+    expect(e.policy.get().devops.agents).toEqual({ [ORG_A]: AGENT_A });
+    expect(readAudit(e.dir).find((l) => l.action === 'devops.grant')).toMatchObject({
+      before: OLD_AGENT,
+      after: AGENT_A,
+    });
+  });
+
+  it('the Install choice is one click on the page and writes what `devops install on|off` writes (UAT 1.10.0 finding 3)', async () => {
+    const { e, token } = await signedIn();
+    expect((await change(e.port, token, { action: 'devops.install', on: true })).status).toBe(200);
+    expect(e.policy.get().devopsInstall).toBe(true);
+    expect(readAudit(e.dir).find((l) => l.action === 'devops.install')).toMatchObject({
+      before: null,
+      after: true,
+    });
+    const st = (await authed(e.port, token, '/api/state')).json() as { allows: Record<string, unknown> };
+    expect(st.allows.devopsInstall).toBe(true);
+    expect(String(st.allows.devopsInstallCommand)).toMatch(/guildwise-runner devops install on$/);
+    expect((await change(e.port, token, { action: 'devops.install', on: 'yes' })).status).toBe(403);
+  });
+
   it('the other writable settings write what the CLI writes, each with an audit line', async () => {
     const { e, b, token } = await signedIn();
     const ok = async (body: unknown) => expect((await change(e.port, token, body)).status).toBe(200);

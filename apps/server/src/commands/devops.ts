@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import {
+  blockedSwitch,
   type CreateDevOpsRequest,
   DEFAULT_AVATAR_STYLE,
   DEVOPS_OUTCOME_APPROVAL,
   DEVOPS_OUTCOME_DONE,
   DEVOPS_ROLE_KEY,
+  DEVOPS_SWITCH_LABEL,
   type DevOpsAccess,
   DevOpsAccessSchema,
   type DevOpsRequestContext,
@@ -14,9 +16,12 @@ import {
   type DevOpsRequestOrigin,
   DevopsApprovalDataSchema,
   DevopsDoneDataSchema,
+  type DevopsSwitch,
+  devopsSwitchOn,
   type HygieneSpec,
   isDevopsQuestion,
   isOrgManager,
+  localCommandOk,
   type PatchDevOpsAccessRequest,
   type RunnerToServerOf,
   randomAvatarSeed,
@@ -565,11 +570,125 @@ export async function patchDevOpsAccess(
     );
     // Check that the ticked rights are real on the machine, and retry environments that waited for them.
     await afterAccessChangedIn(ctx, tx, workstationId, access);
+    await resumeBlockedDevopsIn(ctx, tx, workstationId, access);
     return access;
   }).then((access) => {
     deliver(ctx, [workstationId]);
+    ctx.services.dispatcher.trigger();
     return access;
   });
+}
+
+/**
+ * UAT 1.10.0 finding 3: the workstation's own runner reports the local "may install tools" choice (the installer's
+ * screen, `guildwise-runner devops install on|off`, Approvals on this computer). The person at the machine decided it,
+ * so the workstation's "Install packages and tools" switch follows; requests that waited for it resume.
+ */
+export async function applyLocalInstallChoice(
+  ctx: Ctx,
+  workstationId: string,
+  on: boolean,
+): Promise<boolean> {
+  const changed = await withAppendTx(ctx.pool, async (tx) => {
+    const ws = await one(
+      tx,
+      `SELECT user_id, devops_access FROM workstations WHERE id=$1 AND status='active' FOR UPDATE`,
+      [workstationId],
+    );
+    if (!ws) return false;
+    const before = DevOpsAccessSchema.parse(ws.devops_access ?? {});
+    if (before.allowInstall === on) return false;
+    const access = DevOpsAccessSchema.parse({ ...before, allowInstall: on, sudo: false });
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.workstation(workstationId),
+          event: {
+            type: 'DevOpsAccessChanged',
+            payload: { workstationId, access, changedBy: ws.user_id as string },
+          },
+          actor: { kind: 'runner', id: workstationId },
+          scope: userScope(ws.user_id as string),
+        },
+      ],
+      { tx },
+    );
+    await afterAccessChangedIn(ctx, tx, workstationId, access);
+    await resumeBlockedDevopsIn(ctx, tx, workstationId, access);
+    return true;
+  });
+  if (changed) {
+    deliver(ctx, [workstationId]);
+    ctx.services.dispatcher.trigger();
+  }
+  return changed;
+}
+
+/**
+ * Requests of this workstation that wait for a switch (UAT 1.10.0 finding 3) resume once that switch is on: the request
+ * goes back to the queue (never as an approval: REVIEW B1), its Desk item is closed, and the thread says why.
+ */
+export async function resumeBlockedDevopsIn(
+  ctx: Ctx,
+  tx: Tx,
+  workstationId: string,
+  access: DevOpsAccess,
+): Promise<void> {
+  const waiting = await rows(
+    tx,
+    `SELECT r.id, r.org_id, r.thread_id, r.approval, w.user_id AS ws_user_id
+       FROM devops_requests r JOIN workstations w ON w.id = r.workstation_id
+      WHERE r.workstation_id=$1 AND r.status='needs_approval' AND r.approval->>'blockedBy' IS NOT NULL
+        AND r.approval->>'resolution' IS NULL
+      FOR UPDATE OF r`,
+    [workstationId],
+  );
+  for (const r of waiting) {
+    const ap = r.approval as { deskItemId: string; blockedBy: DevopsSwitch };
+    if (!devopsSwitchOn(access, ap.blockedBy)) continue;
+    // Rework 1 (REVIEW B1): a re-queue, NOT an approval. Nobody saw the action or the commands the agent named, so the
+    // next shift gets no "the manager approved" text; it works within its now wider access and asks again if needed.
+    const note = `"${DEVOPS_SWITCH_LABEL[ap.blockedBy]}" was turned on for this workstation; the request is back in the queue. Nothing it asked for was approved: anything outside the access still needs your yes.`;
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.thread(r.id as string),
+          event: {
+            type: 'DevOpsRequestRequeued',
+            payload: { requestId: r.id as string, reason: 'switch_on' },
+          },
+          actor: SYSTEM_ACTOR,
+          scope: orgScope(r.org_id as string),
+        },
+        threadMessage(r.thread_id as string, r.org_id as string, { kind: 'system' }, 'system', note),
+      ],
+      { tx },
+    );
+    await closeDeskItemIn(ctx, tx, ap.deskItemId, { userId: r.ws_user_id as string }, 'acknowledged', note);
+  }
+}
+
+/** The Desk text of a request blocked by a switch: which switch, where to turn it on, and the local route. */
+export function blockedText(
+  sw: DevopsSwitch,
+  workstationName: string,
+  agentName: string,
+  command: string | null,
+): { title: string; body: string } {
+  const label = DEVOPS_SWITCH_LABEL[sw];
+  return {
+    title: `DevOps is waiting: "${label}" is off on ${workstationName}`,
+    body: [
+      `${agentName} needs "${label}" for this request, and that switch is off for the workstation ${workstationName}. The request waits (nothing is retried) and continues by itself once the switch is on.`,
+      `Turn it on: Workstations page, ${workstationName}, DevOps engineer, tick "${label}".`,
+      ...(command && sw === 'allowInstall'
+        ? [
+            'Or on the computer itself: paste the command shown with this item, or use Approvals on this computer.',
+          ]
+        : []),
+      'If you do not want this, reject the request here.',
+    ].join('\n\n'),
+  };
 }
 
 // ---------------------------------------------------------------------------------------- approval
@@ -628,6 +747,18 @@ export async function resolveDevOpsApprovalIn(
     throw conflict('not_awaiting_approval', 'this request is not waiting for approval');
   if ((ap as { question?: boolean }).question)
     throw conflict('is_question', 'the DevOps engineer asked a question: answer it on the desk');
+  // UAT 1.10.0 finding 3: approving while the switch is still off would only start the same request and stop again
+  const blockedBy = (ap as { blockedBy?: DevopsSwitch }).blockedBy;
+  if (resolution === 'approved' && blockedBy) {
+    const wsRow = await one(tx, 'SELECT name, devops_access FROM workstations WHERE id=$1', [
+      r.workstation_id,
+    ]);
+    if (!devopsSwitchOn(DevOpsAccessSchema.parse(wsRow?.devops_access ?? {}), blockedBy))
+      throw conflict(
+        'switch_off',
+        `"${DEVOPS_SWITCH_LABEL[blockedBy]}" is still off for ${String(wsRow?.name ?? 'this workstation')}. Turn it on (Workstations page, DevOps engineer); the request then continues by itself.`,
+      );
+  }
 
   const message = (text: string, data?: Record<string, unknown>) =>
     threadMessage(r.thread_id, r.org_id, { kind: 'user', userId: user.id }, 'answer', text, data);
@@ -818,6 +949,75 @@ export async function applyDevopsReport(
         return { accepted: true };
       }
     }
+    // UAT 1.10.0 finding 3: blocked by a workstation switch (Install off, ...): ONE item that names the switch and where to
+    // turn it on; the request waits for the switch (an approval cannot help while it is off) instead of looping.
+    const wsRow = await one(tx, 'SELECT name, devops_access FROM workstations WHERE id=$1', [ws.id]);
+    const access = DevOpsAccessSchema.parse(wsRow?.devops_access ?? {});
+    const sw = blockedSwitch(access, data.data);
+    if (sw) {
+      const agentRow = await one(tx, 'SELECT name FROM agents WHERE id=$1', [shift.agent_id]);
+      const cli = ctx.services.runners.get(ws.id)?.local?.cli;
+      const command = cli && localCommandOk(`${cli} devops install on`) ? `${cli} devops install on` : null;
+      const text = blockedText(
+        sw,
+        String(wsRow?.name ?? 'this workstation'),
+        String(agentRow?.name ?? 'The DevOps engineer'),
+        command,
+      );
+      const { deskItemId } = await raiseDeskItem(ctx, tx, {
+        kind: 'approval',
+        subkind: 'devops',
+        title: text.title,
+        body: text.body,
+        pinned: true,
+        blocking: true,
+        orgId: req.org_id,
+        projectId: project?.project_id ?? null,
+        cardId: req.card_id,
+        routeToUserId: ws.userId,
+        context: { requestId: req.id, workstationId: ws.id, blockedBy: sw },
+        data: {
+          devopsSwitch: sw,
+          switchLabel: DEVOPS_SWITCH_LABEL[sw],
+          workstationId: ws.id,
+          workstationName: String(wsRow?.name ?? ''),
+          ...(command && sw === 'allowInstall' ? { command, stepKind: 'devops.install' } : {}),
+        },
+      });
+      await ctx.store.append(
+        [
+          {
+            streamId: streamId.thread(req.id),
+            event: {
+              type: 'DevOpsApprovalNeeded',
+              payload: {
+                requestId: req.id,
+                deskItemId,
+                action: data.data.action,
+                reason: data.data.reason,
+                commands: data.data.commands,
+                blockedBy: sw,
+              },
+            },
+            actor: agentActor(shift.agent_id),
+            scope,
+          },
+          threadMessage(
+            req.thread_id,
+            req.org_id,
+            agent,
+            'question',
+            `${text.title}\n\n${data.data.reason}`,
+            {
+              deskItemId,
+              blockedBy: sw,
+            },
+          ),
+        ],
+        { tx },
+      );
+      return { accepted: true };
+    }
     const { deskItemId } = await raiseDeskItem(ctx, tx, {
       kind: 'approval',
       subkind: 'devops',
@@ -877,12 +1077,16 @@ export function devopsShiftEndEvents(
   outcome: 'rejected' | 'lost' | 'stopped' | 'no_report' | 'crashed' | 'timeout' | 'reported',
   orgId: string,
   finalText?: string,
+  refusedLocally = false,
 ): AppendInput[] {
   if (req.status !== 'running') return [];
-  const requeue = outcome === 'rejected' || outcome === 'lost' || outcome === 'stopped';
-  const text = requeue
-    ? `The DevOps shift did not complete (${outcome}); the request is back in the queue.`
-    : `The DevOps shift ended without a report (${outcome}).${finalText ? `\n\n${finalText}` : ''}`;
+  // REVIEW S1: refused at the workstation (a local no, or no answer in 24 h) ends the request; a re-queue held it again
+  const requeue = !refusedLocally && (outcome === 'rejected' || outcome === 'lost' || outcome === 'stopped');
+  const text = refusedLocally
+    ? `Refused on the workstation: ${finalText || 'the person at the computer said no'}. The request is closed; ask again if it is still needed.`
+    : requeue
+      ? `The DevOps shift did not complete (${outcome}); the request is back in the queue.`
+      : `The DevOps shift ended without a report (${outcome}).${finalText ? `\n\n${finalText}` : ''}`;
   return [
     {
       streamId: streamId.thread(req.id),
@@ -910,6 +1114,8 @@ export async function endDevopsShift(
     exitCode?: number | null;
     finalText?: string;
     guardViolations?: { rule: string; detail: string }[];
+    /** REVIEW S1: the person at the workstation refused the held shift (the request ends, it is not re-queued). */
+    refusedLocally?: boolean;
   } = {},
 ): Promise<AppendInput[]> {
   const req = await runningRequestOfShift(tx, shift.id);
@@ -932,7 +1138,8 @@ export async function endDevopsShift(
       scope: orgScope(shift.org_id),
     },
   ];
-  if (req) events.push(...devopsShiftEndEvents(req, outcome, shift.org_id, extra.finalText));
+  if (req)
+    events.push(...devopsShiftEndEvents(req, outcome, shift.org_id, extra.finalText, extra.refusedLocally));
   return events;
 }
 

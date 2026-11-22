@@ -12,7 +12,6 @@ import {
   FORGE_LABELS,
   INTEGRATION_STATE_LABELS,
   RunnerPairRequestSchema,
-  RunnerPairResponseSchema,
 } from '@aom/shared';
 import { Command } from 'commander';
 import { execa } from 'execa';
@@ -50,6 +49,7 @@ import {
 import { FileStatusTokenStore } from './forge/status-tokens.ts';
 import { gitVersion } from './git/git.ts';
 import { scanRepos } from './git/repo-scan.ts';
+import { connectionLine } from './health/connection.ts';
 import { installErrorHandlers } from './health/runner-error.ts';
 import { RunnerHost } from './host.ts';
 import { AutomatedAppIntegration } from './integrations/automated-app.ts';
@@ -59,8 +59,8 @@ import { JiraIntegration } from './integrations/jira.ts';
 import { isFailure, type Outcome } from './integrations/types.ts';
 import { createLogger } from './log.ts';
 import { changeOrgFolder, ORG_ID_RE } from './org-folder.ts';
+import { NEW_WORKSTATION_CONSEQUENCES, pairWithServer, RelinkRefusedError } from './pair-request.ts';
 import {
-  addPairing,
   entryConfigPath,
   entryDir,
   findPairing,
@@ -152,6 +152,7 @@ async function pair(opts: {
   name?: string;
   dataDir?: string;
   mock?: boolean;
+  newWorkstation?: boolean;
 }): Promise<void> {
   const root = resolveDataDir(opts.dataDir);
   const name = opts.name ?? hostname();
@@ -167,21 +168,31 @@ async function pair(opts: {
       return release ? { release } : {};
     })(),
   });
-  const url = new URL('/api/runner/pair', opts.server).toString();
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`pairing failed (HTTP ${res.status}): ${(await res.text()).slice(0, 300)}`);
-  const paired = RunnerPairResponseSchema.parse(await res.json());
-  const r = addPairing(root, {
-    serverUrl: opts.server,
-    label: name,
-    workstationId: paired.workstationId,
-    runnerToken: paired.runnerToken,
-    mock: mockEnabled(opts.mock),
-  });
+  let out: Awaited<ReturnType<typeof pairWithServer>>;
+  try {
+    out = await pairWithServer({
+      root,
+      server: opts.server,
+      code: opts.code,
+      name,
+      body,
+      mock: mockEnabled(opts.mock),
+      ...(opts.newWorkstation ? { newWorkstation: true } : {}),
+    });
+  } catch (err) {
+    if (err instanceof RelinkRefusedError) {
+      // UAT 1.10.0 finding 5: nothing changed here and the code is not spent; the installer asks, the CLI says how
+      console.error(`relink_refused (${err.reason}): ${err.message}`);
+      console.error(NEW_WORKSTATION_CONSEQUENCES);
+      console.error(
+        "Nothing was changed. To keep this computer's workstation, use a link made while signed in to the same account. To create a new workstation anyway, run the same command again with --new-workstation.",
+      );
+      process.exitCode = 4;
+      return;
+    }
+    throw err;
+  }
+  const { paired, added: r } = out;
   // easy-runner-setup: the names `guildwise-runner setup` shows (organisations, DevOps helpers, repositories)
   if (paired.setupOffers)
     try {
@@ -190,9 +201,11 @@ async function pair(opts: {
       // the next welcome brings them again
     }
   console.log(
-    `Paired as workstation ${paired.workstationId}. Config written to ${r.configPath} (mode 0600).`,
+    paired.relinked
+      ? `Re-linked the same workstation ${paired.workstationId}: its agents, DevOps engineer and switches stay. Config written to ${r.configPath} (mode 0600).`
+      : `Paired as workstation ${paired.workstationId}. Config written to ${r.configPath} (mode 0600).`,
   );
-  if (r.count > 1)
+  if (r.count > 1 && !paired.relinked)
     console.log(
       `${r.replaced ? 'Replaced the earlier pairing for' : 'Added next to the existing pairings:'} ${r.entry.id} (${r.count} pairing${r.count === 1 ? '' : 's'} on this machine; the others are untouched). A running runner starts it within a few seconds.`,
     );
@@ -367,6 +380,7 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
           policy: policyStore,
           passkeys: new PasskeyStore(policyDir()),
           offers: () => localWindowOffers(paths.root),
+          blocked: () => [...(hostRef?.running.values() ?? [])].flatMap((r) => r.runner.blockedDevops()),
           log,
           decide: (id, state, extra) => new HeldStore(policyDir()).decide(id, state, 'local', extra),
         }).catch((err: unknown) => {
@@ -607,6 +621,10 @@ async function doctor(opts: { dataDir?: string; pairing?: string }): Promise<voi
         ? 'ready (Chrome Headless Shell)'
         : 'missing — run guildwise-runner pdf-renderer install (PDF copies of form answers stay off until then)',
     );
+  }
+  {
+    const conn = connectionLine(paths.status);
+    if (conn) line(conn.ok, 'server connection', conn.detail);
   }
   const claudeBin = config?.runtimes['claude-code'].bin ?? 'claude';
   const c = await execa(claudeBin, ['--version'], { reject: false, stdin: 'ignore', timeout: 10_000 }).catch(
@@ -1684,6 +1702,10 @@ export function buildProgram(): Command {
     .requiredOption('--code <code>', 'pairing code XXXX-XXXX')
     .option('--name <name>', 'workstation name (default: hostname)')
     .option('--mock', 'enable the mock runtime (CI and development)')
+    .option(
+      '--new-workstation',
+      'pair as a NEW workstation even when the link cannot re-link the one this computer is paired as (another account, or it was unlinked)',
+    )
     .option(...dataDirOpt)
     .action(pair);
   program

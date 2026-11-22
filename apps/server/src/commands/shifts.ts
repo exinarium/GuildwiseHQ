@@ -1456,7 +1456,13 @@ export async function applyShiftRejected(
   )
     await markAccountOut(tx, ws.id, accountKey, { login: 'none' }, s.runtime);
   if (s.kind === 'devops') {
-    await ctx.store.append(await endDevopsShift(tx, s, 'rejected', { finalText: msg.detail }), { tx });
+    await ctx.store.append(
+      await endDevopsShift(tx, s, 'rejected', {
+        finalText: msg.detail,
+        ...(msg.refusedLocally ? { refusedLocally: true } : {}),
+      }),
+      { tx },
+    );
     return;
   }
   if (s.kind === 'question') {

@@ -22,10 +22,25 @@ export const DevopsDoneDataSchema = z.object({
 });
 export type DevopsDoneData = z.infer<typeof DevopsDoneDataSchema>;
 
+/** The workstation's DevOps switches a request can be blocked by (`workstations.devops_access`). */
+export const DEVOPS_SWITCHES = ['allowInstall', 'allowDocker', 'allowedPaths'] as const;
+export type DevopsSwitch = (typeof DEVOPS_SWITCHES)[number];
+/** The switch names exactly as the Workstations page shows them. */
+export const DEVOPS_SWITCH_LABEL: Readonly<Record<DevopsSwitch, string>> = {
+  allowInstall: 'Install packages and tools',
+  allowDocker: 'Docker',
+  allowedPaths: 'Writable paths outside the agent sandbox',
+};
+
 export const DevopsApprovalDataSchema = z.object({
   action: z.string().min(1).max(2000),
   reason: z.string().min(1).max(20000),
   commands: z.array(z.string()).default([]),
+  /**
+   * UAT 1.10.0 finding 3: the workstation switch that is off and blocks the request (`aom devops-approval --blocked-by
+   * install|docker|paths`). The request then waits for that switch instead of an approval.
+   */
+  blockedBy: z.enum(DEVOPS_SWITCHES).optional(),
 });
 /** A DevOps "approval" whose action starts with "Question:" is a question for the escalation chain, not an approval. */
 export const DEVOPS_QUESTION_PREFIX = 'Question:';
@@ -233,6 +248,32 @@ export function devopsBriefOutcomes() {
       data: 'devopsApproval',
     },
   ];
+}
+
+/** Is this switch on in `access`? */
+export function devopsSwitchOn(access: z.infer<typeof DevOpsAccessSchema>, sw: DevopsSwitch): boolean {
+  return sw === 'allowedPaths' ? access.allowedPaths.length > 0 : access[sw] === true;
+}
+
+/**
+ * The switch that is off and blocks a DevOps approval request (UAT 1.10.0 finding 3): the one the agent named
+ * (`blockedBy`), else Install or Docker when the request is about installing or about Docker and that switch is off.
+ * Null when nothing switched off explains it (then it is a real approval).
+ */
+export function blockedSwitch(
+  access: z.infer<typeof DevOpsAccessSchema>,
+  data: Pick<DevopsApprovalData, 'action' | 'reason' | 'commands' | 'blockedBy'>,
+): DevopsSwitch | null {
+  const t = `${data.action}\n${data.reason}\n${data.commands.join('\n')}`.toLowerCase();
+  // something destructive or that runs downloaded code is an approval whatever the switches say, also when the agent
+  // names a switch itself (REVIEW B1)
+  if (/\b(sudo|delete|destroy|wipe|format|rm|uninstall|drop|force|curl|wget)\b|\|\s*(sh|bash)\b/.test(t))
+    return null;
+  if (data.blockedBy) return devopsSwitchOn(access, data.blockedBy) ? null : data.blockedBy;
+  if (/\bdocker\b/.test(t) && !access.allowDocker) return 'allowDocker';
+  if (/\b(install|installing|npm i|apt|brew|pip install|toolchain)\b/.test(t) && !access.allowInstall)
+    return 'allowInstall';
+  return null;
 }
 
 /** True when `summary` asks for something the granted `access` does not cover (used by the mock DevOps agent). */

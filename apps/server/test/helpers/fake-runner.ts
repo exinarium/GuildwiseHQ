@@ -12,6 +12,8 @@ import WebSocket from 'ws';
 export type Frame = ServerToRunner;
 
 export interface HelloOptions {
+  /** easy-runner-setup `hello.local` (the runner's copy-paste CLI part, the approvals page port). */
+  local?: { cli?: string; windowPort?: number };
   repos?: Array<{ remoteUrl: string; localPath: string; headBranch: string | null }>;
   runtimes?: Array<{ id: string; version: string; available: boolean; capabilities: string[] }>;
   activeShifts?: Array<{ shiftId: string; cardId?: string; agentId: string; startedAt: string }>;
@@ -168,6 +170,7 @@ export class FakeRunner {
       ...(o.integrationsVersion ? { integrationsVersion: o.integrationsVersion } : {}),
       ...(o.release ? { release: o.release } : {}),
       ...(o.startupRefused ? { startupRefused: o.startupRefused } : {}),
+      ...(o.local ? { local: o.local } : {}),
     });
   }
 

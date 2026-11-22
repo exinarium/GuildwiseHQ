@@ -1,6 +1,6 @@
 import type { WorkstationDto } from '@aom/shared';
 import { ChevronRight, Server, TriangleAlert } from 'lucide-react';
-import { useCallback, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { useAgentHomes } from '../api/queries/agent-move.ts';
 import { useMe } from '../api/queries/auth.ts';
@@ -92,6 +92,28 @@ function useOpenRows(userId: string | undefined): [Set<string>, (id: string, ope
   return [open, set];
 }
 
+/** Offline this long and the card says so plainly (UAT 1.10.0 finding 4: a runner offline all day looked like a grey dot). */
+export const OFFLINE_NOTICE_MS = 5 * 60_000;
+
+/** The plain offline line of a workstation card, or null while connected or only briefly offline. */
+export function offlineNotice(
+  w: Pick<WorkstationDto, 'connected' | 'lastSeenAt'>,
+  now: number = Date.now(),
+): string | null {
+  if (w.connected) return null;
+  if (!w.lastSeenAt) return null;
+  const ms = now - Date.parse(w.lastSeenAt);
+  if (!(ms >= OFFLINE_NOTICE_MS)) return null;
+  const mins = Math.floor(ms / 60_000);
+  const span =
+    mins < 120
+      ? `${mins} minutes`
+      : mins < 48 * 60
+        ? `${Math.floor(mins / 60)} hours`
+        : `${Math.floor(mins / 1440)} days`;
+  return `Not connected for ${span}. The runner on this computer is not reaching the server, so nothing runs here. On the computer, run \`guildwise-runner doctor\` to see why; restarting the computer also restarts the runner.`;
+}
+
 export function pairCommand(code: string, origin: string = location.origin): string {
   return `guildwise-runner pair --server ${origin} --code ${code} --name "My workstation"`;
 }
@@ -104,6 +126,14 @@ export function Workstations() {
   const [pairOpen, setPairOpen] = useState(false);
   const [params] = useSearchParams();
   const [addOpen, setAddOpen] = useState(() => params.get('add') === '1');
+  // `?open=<id>` (the Desk's "Turn on ..." link for a DevOps switch) opens that workstation's card
+  const openParam = params.get('open');
+  const openedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!openParam || openedFor.current === openParam) return;
+    openedFor.current = openParam;
+    setOpen(openParam, true);
+  }, [openParam, setOpen]);
   return (
     <div className="mx-auto max-w-4xl">
       <PageHeader
@@ -408,6 +438,11 @@ export function WorkstationCard({
                 Approvals on this computer could not start: {w.localAuthority.windowError}
               </span>
             ) : null}
+            {offlineNotice(w) && (
+              <span role="status" className="text-sm text-warning" data-testid="workstation-offline-notice">
+                {offlineNotice(w)}
+              </span>
+            )}
             {!w.connected && holdsAgents && (
               <Button
                 size="sm"

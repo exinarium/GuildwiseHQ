@@ -7,7 +7,15 @@ import {
   type PasskeyOfferPayload,
 } from '@aom/shared';
 import type { Logger } from '../log.ts';
-import { type GateDecision, SETUP_PENDING_NOTE, setupPending } from './gate.ts';
+import {
+  type GateDecision,
+  gateCommand,
+  heldTarget,
+  plainDetail,
+  plainText,
+  SETUP_PENDING_NOTE,
+  setupPending,
+} from './gate.ts';
 import { capDetail, HELD_TTL_MS, type HeldRecord, type HeldStore, newHeldId } from './held.ts';
 import { localCommand } from './local-command.ts';
 import { checkPasskeyAssertion, newPasskeyChallenge } from './passkey.ts';
@@ -44,6 +52,8 @@ export interface ApprovalsDeps {
    */
   cli?: string;
   windowPort?: () => number | undefined;
+  /** Called on each poll (the runner sends its local install choice when it changed). */
+  onTick?: () => void;
 }
 
 /** A local step that is not a held item (a DevOps grant, install scripts, setup, ...), kept in memory with a TTL. */
@@ -81,7 +91,19 @@ export interface HoldInput {
   decision: Extract<GateDecision, { action: 'hold' }>;
   commandId?: string;
   replay: HeldRecord['replay'];
+  /**
+   * UAT 1.10.0 finding 3: one held item per DevOps request (`devops:<requestId>`). A new shift of a request already held
+   * updates that item's replay (same id, no new log line or Desk item) instead of holding a second one.
+   */
+  requestKey?: string;
 }
+
+/** The DevOps request a held shift start belongs to. */
+const requestKeyOf = (r: HeldRecord): string | undefined => {
+  if (r.replay?.type !== 'shift.start') return undefined;
+  const id = (r.replay.body as { devops?: { requestId?: unknown } } | null)?.devops?.requestId;
+  return typeof id === 'string' ? `devops:${id}` : undefined;
+};
 
 export class Approvals {
   private timer?: NodeJS.Timeout;
@@ -96,6 +118,7 @@ export class Approvals {
 
   start(): void {
     if (this.timer) return;
+    this.refreshSummaries();
     const t = setInterval(() => void this.tick(), this.deps.pollMs ?? 2000);
     t.unref?.();
     this.timer = t;
@@ -110,21 +133,96 @@ export class Approvals {
     return this.deps.held.list(this.deps.pairing);
   }
 
+  /**
+   * UAT 1.10.0 finding 1: a held item keeps the one-line summary it was written with, and held items survive a reinstall
+   * (`<policy dir>/held/`). An item held by an older runner ("vault.configure for " with an empty target) was shown that
+   * way on the log, the approvals page and the Desk forever, and a repeat of its command returned it unchanged. At start
+   * every command item is summarised again by this runner's gate, so every item names its target.
+   */
+  refreshSummaries(): void {
+    let changed = false;
+    for (const r of this.list()) {
+      if (r.state !== 'held' || r.replay?.type !== 'command') continue;
+      const raw = this.summaryOf(r);
+      const summary = raw === null ? null : plainText(raw);
+      if (summary && summary !== r.summary) {
+        this.deps.held.put({ ...r, summary: summary.slice(0, 500) });
+        this.deps.log.info(`held ${r.kind} ${r.id} now reads: ${summary}`);
+        changed = true;
+      }
+    }
+    if (changed) this.publish(true);
+  }
+
+  /** The summary this runner's gate gives a held command item (null when it cannot say). */
+  private summaryOf(r: HeldRecord): string | null {
+    const b = r.replay.body as { command?: unknown; payload?: unknown } | null;
+    if (!b || typeof b.command !== 'string' || !b.payload || typeof b.payload !== 'object') return null;
+    const payload = b.payload as Record<string, unknown>;
+    try {
+      const d = gateCommand(this.deps.policy.get(), b.command, payload);
+      if (d.action === 'hold') return d.summary;
+    } catch {
+      // a payload this runner cannot read keeps its summary unless that one names nothing
+    }
+    return /\bfor\s*$|\bfor {2}/.test(r.summary)
+      ? `${b.command} for ${heldTarget(b.command, payload)}`
+      : null;
+  }
+
   /** Holds an item (a repeat of a command already held is not added twice). Returns the record. */
   hold(input: HoldInput): HeldRecord {
     const d = input.decision;
     if (input.commandId) {
       const dup = this.list().find((r) => r.commandId === input.commandId);
-      if (dup) return dup;
+      if (dup) {
+        if (dup.state !== 'held' || dup.summary === plainText(d.summary).slice(0, 500)) return dup;
+        // the same command again: the item reads as this runner says it (never the text of an older runner)
+        const fresh = {
+          ...dup,
+          summary: plainText(d.summary).slice(0, 500),
+          detail: capDetail(plainDetail(d.detail)),
+        };
+        this.deps.held.put(fresh);
+        this.deps.log.info(this.holdLine(fresh));
+        this.publish(true);
+        return fresh;
+      }
     }
+    if (input.requestKey) {
+      const same = this.list().find((r) => r.state === 'held' && requestKeyOf(r) === input.requestKey);
+      if (same) {
+        // REVIEW S2: the item reads as the shift it will now run (its request text and access), not as the older one
+        const next = {
+          ...same,
+          replay: input.replay,
+          commandHash: d.commandHash,
+          summary: plainText(d.summary).slice(0, 500),
+          detail: capDetail(plainDetail(d.detail)),
+        };
+        this.deps.held.put(next);
+        this.deps.log.info(
+          `held ${same.kind} ${same.id} still waits for your yes (the same request, a new shift)`,
+        );
+        this.publish(true);
+        return next;
+      }
+    }
+    // vault.configure is the full set (replace semantics): a newer one makes every older held one obsolete
+    if (d.kind === 'vault.configure')
+      for (const r of this.list())
+        if (r.state === 'held' && r.kind === 'vault.configure') {
+          this.deps.held.remove(r.id);
+          this.deps.log.info(`held ${r.kind} ${r.id} replaced by a newer vault set-up from the server`);
+        }
     const at = this.now();
     const r: HeldRecord = {
       id: newHeldId(),
       kind: d.kind,
       pairing: this.deps.pairing,
       ...(input.commandId ? { commandId: input.commandId } : {}),
-      summary: d.summary.slice(0, 500),
-      detail: capDetail(d.detail),
+      summary: plainText(d.summary).slice(0, 500),
+      detail: capDetail(plainDetail(d.detail)),
       commandHash: d.commandHash,
       createdAt: new Date(at).toISOString(),
       expiresAt: new Date(at + HELD_TTL_MS).toISOString(),
@@ -206,7 +304,7 @@ export class Approvals {
   annotate(id: string, extra: string): void {
     const r = this.deps.held.get(id);
     if (!r || r.state !== 'held') return;
-    this.deps.held.put({ ...r, detail: capDetail(`${r.detail}\n\n${extra}`) });
+    this.deps.held.put({ ...r, detail: capDetail(plainDetail(`${r.detail}\n\n${extra}`)) });
   }
 
   /** Drops held items the server withdrew (a stopped shift, a cancelled command). */
@@ -266,6 +364,11 @@ export class Approvals {
 
   /** One pass: run what was approved, refuse what was denied or expired, publish the list when it changed. */
   async tick(): Promise<void> {
+    try {
+      this.deps.onTick?.();
+    } catch {
+      // advisory
+    }
     const now = this.now();
     for (const r of this.list()) {
       if (this.running.has(r.id)) continue;

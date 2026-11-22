@@ -294,6 +294,16 @@ export const RunnerPairRequestSchema = z.object({
   runnerVersion: z.string(),
   /** 1.10.0 (R18-U, R27): the signed-release proof; required while "Only signed runners" is on (403 `signed_runner_required`). */
   release: SignedReleaseProofSchema.optional(),
+  /**
+   * UAT 1.10.0 finding 5: a runner that is already paired with this server proves its current workstation (id and runner
+   * token). A code from the same account then re-links that SAME workstation (agents, DevOps engineer, switches and the
+   * local grant stay) instead of creating a new one. A code from another account, or a workstation that is gone, gets
+   * 409 `relink_refused` and the code is not spent; `newWorkstation: true` is the person's explicit yes to a new one.
+   */
+  previous: z
+    .object({ workstationId: z.uuid(), runnerToken: z.string().startsWith('aomr_').max(200) })
+    .optional(),
+  newWorkstation: z.boolean().optional(),
 });
 export type RunnerPairRequest = z.infer<typeof RunnerPairRequestSchema>;
 export const RunnerPairResponseSchema = z.object({
@@ -302,6 +312,8 @@ export const RunnerPairResponseSchema = z.object({
   runnerToken: z.string().startsWith('aomr_'),
   /** easy-runner-setup: the names the installer's one screen shows (organisations, DevOps helpers, repositories). */
   setupOffers: SetupOffersWireSchema.optional().catch(undefined),
+  /** The code re-linked the workstation the runner proved (`previous`): nothing new was created or retired. */
+  relinked: z.boolean().optional(),
 });
 export type RunnerPairResponse = z.infer<typeof RunnerPairResponseSchema>;
 

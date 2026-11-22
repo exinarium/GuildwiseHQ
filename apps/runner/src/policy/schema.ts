@@ -153,6 +153,12 @@ export const PolicySchema = z
     formatterPins: z.array(Sha256Hex).max(1000).default([]),
     /** `aom devops` requests from agents: wait for a local approval (`ask`) or are refused (`deny`) (R18-D). */
     devopsAgentRequests: z.enum(['ask', 'deny']).default('ask'),
+    /**
+     * UAT 1.10.0 finding 3: may the DevOps helpers install the tools projects need (the installer's screen, `devops install
+     * on|off`, Approvals on this computer)? The runner sends this choice to the server, which sets the workstation's
+     * "Install packages and tools" switch to it. Absent: never chosen here (the website's switch stays as it is).
+     */
+    devopsInstall: z.boolean().optional(),
     /** Containers for shifts (local only; privileged containers and host mounts are refused anyway) (R18-L). */
     allowDocker: z.boolean().default(false),
     /** CEO owner turns with full power start only from this machine (R18-S). */

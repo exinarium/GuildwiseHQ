@@ -17,14 +17,17 @@ import { cleanupTmp, makeConfig, tmp, waitUntil } from './helpers.ts';
 cleanupTmp();
 
 describe('backoff', () => {
-  it('is full jitter, doubling from 1 s and capped at 30 s', () => {
+  it('is equal jitter (half fixed, half random), doubling from 1 s and capped at 30 s', () => {
     const max = () => 0.999999;
     expect(backoffDelay(0, DEFAULT_BACKOFF, max)).toBeLessThanOrEqual(1000);
     expect(backoffDelay(3, DEFAULT_BACKOFF, max)).toBeLessThanOrEqual(8000);
     expect(backoffDelay(3, DEFAULT_BACKOFF, max)).toBeGreaterThan(7000);
     expect(backoffDelay(10, DEFAULT_BACKOFF, max)).toBeLessThanOrEqual(30_000);
     expect(backoffDelay(10, DEFAULT_BACKOFF, max)).toBeGreaterThan(29_000);
-    expect(backoffDelay(5, DEFAULT_BACKOFF, () => 0)).toBe(0);
+    // the fixed half: the interval never drops below half the ceiling, so the logged waits grow
+    expect(backoffDelay(4, DEFAULT_BACKOFF, () => 0)).toBe(8_000);
+    expect(backoffDelay(10, DEFAULT_BACKOFF, () => 0)).toBe(15_000);
+    expect(backoffDelay(1000, DEFAULT_BACKOFF, max)).toBeLessThanOrEqual(30_000);
     // jittered: different random values give different delays
     expect(backoffDelay(4, DEFAULT_BACKOFF, () => 0.2)).not.toBe(backoffDelay(4, DEFAULT_BACKOFF, () => 0.8));
   });
@@ -235,6 +238,94 @@ describe('connection', () => {
       server.drop(WS_CLOSE.forbidden, 'account deactivated');
       expect(await runner.fatal).toBe(2);
       expect(runner.unpaired).toBe(false);
+    } finally {
+      await runner.stop();
+      await server.close();
+    }
+  });
+});
+
+describe('reconnect after a server redeploy (UAT 1.10.0 finding 4)', () => {
+  const logged = () => {
+    const lines: string[] = [];
+    const rec = (l: string) => lines.push(l);
+    return { lines, log: { info: rec, warn: rec, error: rec } };
+  };
+
+  it('a reverse proxy answering 502 while the server restarts: every attempt is logged with a growing wait, then it connects', async () => {
+    const server = await FakeServer.start({ badGatewayUpgrades: 4 });
+    const l = logged();
+    const client = newClient(server, new Outbox(join(tmp(), 'o')), server.token, { log: l.log });
+    const states: import('../src/connection/client.ts').ConnectionState[] = [];
+    client.on('retry', (s) => states.push(s));
+    client.start();
+    try {
+      await waitUntil(() => client.isReady, 10_000, 'connected after the 502s');
+      expect(server.badGateways).toBe(4);
+      const failures = l.lines.filter((x) => /^connection attempt \d+ failed/.test(x));
+      expect(failures).toHaveLength(4);
+      expect(failures[0]).toMatch(/HTTP 502/);
+      const waits = failures.map((x) => Number(/retrying in (\d+) ms/.exec(x)?.[1]));
+      // capped at 100 ms in this client: 10-20, 20-40, 40-80, 50-100
+      for (let i = 1; i < 3; i++) expect(waits[i]).toBeGreaterThanOrEqual((waits[i - 1] ?? 0) / 2);
+      expect(states.at(-1)).toMatchObject({ connected: false, failedAttempts: 4 });
+      expect(states.at(-1)?.lastError).toMatch(/HTTP 502/);
+      expect(client.state()).toMatchObject({ connected: true, failedAttempts: 0 });
+    } finally {
+      await client.stop();
+      await server.close();
+    }
+  });
+
+  it('the server goes away (connection refused) and comes back on the same port: the runner reconnects', async () => {
+    const first = await FakeServer.start();
+    const port = first.port;
+    const l = logged();
+    const client = newClient(first, new Outbox(join(tmp(), 'o')), first.token, { log: l.log });
+    client.start();
+    let second: FakeServer | undefined;
+    try {
+      await waitUntil(() => client.isReady, 5000, 'ready');
+      await first.close();
+      await waitUntil(
+        () => l.lines.some((x) => /attempt \d+ failed .*ECONNREFUSED/.test(x)),
+        5000,
+        'refused',
+      );
+      second = await FakeServer.start({ port });
+      await waitUntil(() => client.isReady && (second?.helloCount ?? 0) > 0, 5000, 'reconnected');
+    } finally {
+      await client.stop();
+      await second?.close();
+    }
+  });
+
+  it('a hard stall (an attempt that never ends) emits `stalled`; the Runner then exits non-zero', async () => {
+    const server = await FakeServer.start({ stallUpgrade: true });
+    const client = newClient(server, new Outbox(join(tmp(), 'o')), server.token, {
+      handshakeTimeoutMs: 60_000,
+      stallMs: 300,
+    });
+    const stalled = new Promise<string>((resolve) => client.once('stalled', resolve));
+    client.start();
+    try {
+      expect(await stalled).toMatch(/no connection attempt progressed/);
+    } finally {
+      await client.stop();
+      await server.close();
+    }
+  });
+
+  it('the Runner exits with 75 on a stall (Restart=always starts a fresh process; 78 would stop it)', async () => {
+    const server = await FakeServer.start({ stallUpgrade: true });
+    const runner = new Runner({
+      config: makeConfig(server.url),
+      dataDir: tmp(),
+      connection: { handshakeTimeoutMs: 60_000, stallMs: 300 },
+    });
+    await runner.start();
+    try {
+      expect(await runner.fatal).toBe(75);
     } finally {
       await runner.stop();
       await server.close();

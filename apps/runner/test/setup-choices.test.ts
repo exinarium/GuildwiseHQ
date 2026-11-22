@@ -148,7 +148,7 @@ describe('the one screen: choices model', () => {
     const text = renderScreen(c).join('\n');
     expect(text).not.toContain('DevOps helpers that may work');
     expect(text).not.toContain('Install scripts');
-    expect(editableKeys(c)).toEqual(['2', '3', '4', '6']);
+    expect(editableKeys(c)).toEqual(['2', '3', '4', '6', '7']);
   });
 });
 
@@ -168,7 +168,7 @@ describe('the one screen: text and edits', () => {
   });
 
   it('Enter accepts; a typed number asks that item and loops back', async () => {
-    const typed = ['1a', '7', '6', ''];
+    const typed = ['1a', '9', '6', ''];
     const asked: string[] = [];
     const p: Prompter = {
       async text(q) {
@@ -192,7 +192,7 @@ describe('the one screen: text and edits', () => {
     const c = await runScreen(init(), p, (l) => said.push(l));
     expect(c.orgs[0]?.allow).toBe(true);
     expect(c.ytdlp).toBe(false);
-    expect(said.join('\n')).toContain('There is no item 7 to change');
+    expect(said.join('\n')).toContain('There is no item 9 to change');
     expect(asked[0]).toContain('Each task still asks you first unless you change item 2.');
   });
 });

@@ -242,17 +242,17 @@ describe('DevOps request queue', () => {
 
   it('a request outside the granted access ends in DevOpsApprovalNeeded and resumes after approval', async () => {
     const from = r.received.length;
-    const created = await request('install docker');
+    const created = await request('open the database port');
     const start = await nextDevopsShift(from);
     await accept(start);
     const ask = await report(start.shiftId, {
       kind: 'outcome',
       outcomeId: 'devops_approval',
-      note: 'needs docker',
+      note: 'needs the firewall',
       data: {
-        action: 'install docker engine',
-        reason: 'the tester needs Docker',
-        commands: ['apt install docker.io'],
+        action: 'open port 5432 in the firewall',
+        reason: 'the tester needs Postgres',
+        commands: ['ufw allow 5432'],
       },
     });
     expect(ask.accepted).toBe(true);
@@ -260,9 +260,9 @@ describe('DevOps request queue', () => {
     await until(async () => (await statusOf(created.request.id)) === 'needs_approval');
     const d = await get(`/api/devops/requests/${created.request.id}`);
     expect(d.request.approval).toMatchObject({
-      action: 'install docker engine',
-      reason: 'the tester needs Docker',
-      commands: ['apt install docker.io'],
+      action: 'open port 5432 in the firewall',
+      reason: 'the tester needs Postgres',
+      commands: ['ufw allow 5432'],
       resolution: null,
     });
     const events = await q(
@@ -320,9 +320,12 @@ describe('DevOps request queue', () => {
 
     const resumed = await nextDevopsShift(mark);
     expect(resumed.devops?.requestId).toBe(created.request.id);
-    expect(resumed.devops?.approval).toMatchObject({ action: 'install docker engine', note: 'go ahead' });
+    expect(resumed.devops?.approval).toMatchObject({
+      action: 'open port 5432 in the firewall',
+      note: 'go ahead',
+    });
     await accept(resumed);
-    await report(resumed.shiftId, done('docker installed', ['apt install docker.io']));
+    await report(resumed.shiftId, done('port opened', ['ufw allow 5432']));
     r.ended(resumed.shiftId, 'reported');
     await until(async () => (await statusOf(created.request.id)) === 'done');
   });

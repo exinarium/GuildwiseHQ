@@ -212,6 +212,19 @@ export function toDeskDto(
                   ...(typeof r.data.stepKind === 'string' ? { stepKind: r.data.stepKind } : {}),
                 }
               : {}),
+            // UAT 1.10.0 finding 3: a DevOps request waiting for a workstation switch (and the local Install command)
+            ...(r.subkind === 'devops' && typeof r.data.devopsSwitch === 'string'
+              ? {
+                  devopsSwitch: r.data.devopsSwitch,
+                  ...(typeof r.data.switchLabel === 'string' ? { switchLabel: r.data.switchLabel } : {}),
+                  ...(typeof r.data.workstationName === 'string'
+                    ? { workstationName: r.data.workstationName }
+                    : {}),
+                  ...(typeof r.data.command === 'string' && localCommandOk(r.data.command)
+                    ? { command: r.data.command, stepKind: 'devops.install' }
+                    : {}),
+                }
+              : {}),
             ...(r.subkind === 'playbook_input_needed' && typeof r.data.threadId === 'string'
               ? { threadId: r.data.threadId }
               : {}),

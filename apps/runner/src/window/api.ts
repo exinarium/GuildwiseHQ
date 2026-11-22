@@ -9,7 +9,7 @@ import * as grants from '../policy/grants.ts';
 import type { HeldRecord } from '../policy/held.ts';
 import { localCommand } from '../policy/local-command.ts';
 import type { Policy } from '../policy/schema.ts';
-import { SETUP_OFFERS_FILE, SetupOfferSchema } from '../setup/offers.ts';
+import { freshestFirst, SETUP_OFFERS_FILE, SetupOfferSchema } from '../setup/offers.ts';
 import { audit } from './audit.ts';
 import type { ApprovalsWindowDeps } from './server.ts';
 
@@ -53,13 +53,13 @@ const RepoSchema = z.object({
 });
 
 /**
- * The offers of every pairing under the data dir (the first pairing that names an organization or repository wins).
+ * The offers of every pairing under the data dir (the freshest pairing that names an organization or repository wins).
  * Read defensively: `repos` and `devopsAgentName` are optional newer fields, and a bad entry is skipped, never fatal.
  */
 export function readWindowOffers(pairingDirs: readonly string[]): WindowOffers {
   const orgs = new Map<string, WindowOrg>();
   const repos = new Map<string, WindowRepo>();
-  for (const dir of pairingDirs) {
+  for (const dir of freshestFirst(pairingDirs)) {
     const file = join(dir, SETUP_OFFERS_FILE);
     if (!existsSync(file)) continue;
     let raw: unknown;
@@ -208,6 +208,11 @@ export function buildState(ctx: WindowContext): Record<string, unknown> {
       ...(read.error ? { policyError: read.error } : {}),
     },
     waiting,
+    // UAT 1.10.0 finding 3: DevOps requests that wait for a switch of this workstation (one per request)
+    blocked: (deps.blocked?.() ?? []).map((b) => ({
+      ...b,
+      ...(b.switch === 'allowInstall' ? { command: cmd(ctx, 'devops install', ['on']) } : {}),
+    })),
     allows: {
       devops: offers.orgs.map((o) => ({
         orgId: o.orgId,
@@ -216,9 +221,15 @@ export function buildState(ctx: WindowContext): Record<string, unknown> {
         ...(o.devopsAgentId ? { agentId: o.devopsAgentId } : {}),
         ...(o.devopsAgentName ? { agentName: o.devopsAgentName } : {}),
         granted: !!o.devopsAgentId && granted[o.orgId] === o.devopsAgentId,
-        ...(granted[o.orgId] && granted[o.orgId] !== o.devopsAgentId ? { grantedOther: true } : {}),
+        // UAT 1.10.0 finding 2: a grant for an agent the server no longer reports here (stale after a reinstall or a
+        // new hire); the page shows it with "Use the current helper" (`devops.grant` takes the offered agent)
+        ...(granted[o.orgId] && granted[o.orgId] !== o.devopsAgentId
+          ? { grantedOther: true, grantedAgentId: granted[o.orgId] }
+          : {}),
       })),
       devopsRequests: p.devopsRequests,
+      devopsInstall: p.devopsInstall === true,
+      devopsInstallCommand: cmd(ctx, 'devops install', ['on']),
       repos: offers.repos.map((r) => ({
         url: r.url,
         name: r.name,
@@ -304,6 +315,7 @@ export const ChangeSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('devops.grant'), orgId: Uuid }).strict(),
   z.object({ action: z.literal('devops.revoke'), orgId: Uuid }).strict(),
   z.object({ action: z.literal('devops.requests'), mode: z.enum(['ask', 'auto']) }).strict(),
+  z.object({ action: z.literal('devops.install'), on: z.boolean() }).strict(),
   z.object({ action: z.literal('repo.scripts'), url: z.string().max(500), allow: z.boolean() }).strict(),
   z.object({ action: z.literal('deploy.mode'), mode: z.enum(['ask', 'off']) }).strict(),
   z.object({ action: z.literal('deploy.pinCommit'), on: z.boolean() }).strict(),
@@ -403,6 +415,12 @@ export async function applyChange(ctx: WindowContext, device: string, body: unkn
           (p) => p.devops.agents[o.orgId] ?? null,
         );
       }
+      case 'devops.install':
+        return policyChange(
+          'devopsInstall',
+          (p) => grants.devopsInstall(p, c.on),
+          (p) => p.devopsInstall ?? null,
+        );
       case 'devops.requests':
         return policyChange(
           'devopsRequests',

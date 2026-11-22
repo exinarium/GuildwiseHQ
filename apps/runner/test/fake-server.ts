@@ -40,7 +40,15 @@ export interface FakeServerOptions {
   noWelcome?: boolean;
   /** Accept TCP but never complete the HTTP upgrade. */
   stallUpgrade?: boolean;
+  /** Answer this many upgrade requests with an HTTP status instead of 101 (a reverse proxy while the app restarts). */
+  badGatewayUpgrades?: number;
+  /** The status those upgrades get (default 502). */
+  badGatewayStatus?: number;
   worktreesLive?: (paths: string[]) => string[];
+  /** Custom answer to `POST /api/runner/pair` (default: 200 with a fixed workstation id and the token). */
+  pairResponse?: (req: RunnerPairRequest) => { status: number; body: unknown };
+  /** Listen on this port (a server that restarts comes back on the same one). */
+  port?: number;
 }
 
 /**
@@ -55,6 +63,8 @@ export class FakeServer {
   connections = 0;
   /** Upgrade requests left hanging by `stallUpgrade`. */
   stalled = 0;
+  /** Upgrade requests answered with `badGatewayStatus`. */
+  badGateways = 0;
   private stalledSockets: import('node:stream').Duplex[] = [];
   helloCount = 0;
   autoAck: boolean;
@@ -94,10 +104,16 @@ export class FakeServer {
         this.stalledSockets.push(sock);
         return;
       }
+      if ((this.opts.badGatewayUpgrades ?? 0) > this.badGateways) {
+        this.badGateways++;
+        const status = this.opts.badGatewayStatus ?? 502;
+        sock.end(`HTTP/1.1 ${status} Bad Gateway\r\ncontent-length: 0\r\nconnection: close\r\n\r\n`);
+        return;
+      }
       if (req.url !== '/api/runner/ws') return sock.destroy();
       this.wss.handleUpgrade(req, sock, head, (ws) => this.onSocket(ws, req));
     });
-    await new Promise<void>((r) => this.http.listen(0, '127.0.0.1', r));
+    await new Promise<void>((r) => this.http.listen(this.opts.port ?? 0, '127.0.0.1', r));
     this.port = (this.http.address() as AddressInfo).port;
   }
 
@@ -123,6 +139,11 @@ export class FakeServer {
         return;
       }
       this.pairRequests.push(parsed.data);
+      const custom = this.opts.pairResponse?.(parsed.data);
+      if (custom) {
+        res.writeHead(custom.status, { 'content-type': 'application/json' }).end(JSON.stringify(custom.body));
+        return;
+      }
       res
         .writeHead(200, { 'content-type': 'application/json' })
         .end(

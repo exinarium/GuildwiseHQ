@@ -192,6 +192,59 @@ describe('rendering [S2]', () => {
     expect(text).toContain('What this computer allows');
   });
 
+  it('a stale DevOps grant shows plainly, with a one-click "Use the current helper" (UAT 1.10.0 finding 2)', () => {
+    const page = loadPage();
+    const state = structuredClone(stateFixture);
+    state.allows.devops = [
+      {
+        orgId: 'o1',
+        orgName: 'Acme Law',
+        role: 'Owner',
+        agentId: 'a-new',
+        agentName: 'Forge',
+        granted: false,
+        grantedOther: true,
+        grantedAgentId: '45236b3a-0000-7000-8000-000000000000',
+      } as never,
+    ];
+    const out = { tags: [] as string[], texts: [] as string[] };
+    for (const el of page.renderState(state)) walk(el, out);
+    const text = out.texts.join('\n');
+    expect(text).toContain('The permission for Acme Law still names an old DevOps helper (agent 45236b3a)');
+    expect(text).toContain('Use the current helper');
+    // without a stale grant there is no such notice
+    const clean = { tags: [] as string[], texts: [] as string[] };
+    for (const el of page.renderState(stateFixture)) walk(el, clean);
+    expect(clean.texts.join('\n')).not.toContain('Use the current helper');
+  });
+
+  it('a DevOps request blocked by Install off is one card with the switch, a button and the command (UAT 1.10.0 finding 3)', () => {
+    const page = loadPage();
+    const state = structuredClone(stateFixture) as Record<string, any>;
+    state.waiting = [];
+    state.blocked = [
+      {
+        requestId: 'r1',
+        switch: 'allowInstall',
+        switchLabel: 'Install packages and tools',
+        agentName: 'Forge',
+        summary: 'install Node 22',
+        at: '2026-11-22T10:00:00Z',
+        command: '/home/guildwise-runner/.local/bin/guildwise-runner devops install on',
+      },
+    ];
+    state.allows.devopsInstall = false;
+    const out = { tags: [] as string[], texts: [] as string[] };
+    for (const el of page.renderState(state)) walk(el, out);
+    const text = out.texts.join('\n');
+    expect(text).toContain('A DevOps request waits for a setting');
+    expect(text).toContain('Forge needs "Install packages and tools" for: install Node 22');
+    expect(text).toContain('Let DevOps helpers install tools');
+    expect(text).toContain('guildwise-runner devops install on');
+    expect(text).not.toContain('Nothing is waiting for your yes.');
+    expect(text).toContain('Let DevOps helpers install the tools your projects need');
+  });
+
   it('the header names the instance and the server host', () => {
     const page = loadPage();
     expect(page.headerText({ instance: 'uat', serverHost: 'uat.example.com' })).toBe(

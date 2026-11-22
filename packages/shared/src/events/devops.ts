@@ -112,6 +112,8 @@ export const devopsEvents = [
       commands: z.array(z.string()).default([]),
       /** The DevOps engineer asked a question (answered through the escalation chain), not for an approval. */
       question: z.boolean().optional(),
+      /** UAT 1.10.0 finding 3: blocked by this workstation switch; the request waits for it, not for an approval. */
+      blockedBy: z.enum(['allowInstall', 'allowDocker', 'allowedPaths']).optional(),
     }),
   ),
   /** G-Q2: DevOps tries to resolve a card's rebase/merge conflict on a branch; the card waits on the request. */

@@ -30,6 +30,8 @@ export interface DeskItemRequest {
   routeToUserId: string;
   /** Domain ids the resolve endpoint needs (requestId, vaultId, workstationId, ...). */
   context: Record<string, unknown>;
+  /** What the Desk renders besides the text (a blocked DevOps request: the switch, the workstation, the command). */
+  data?: Record<string, unknown>;
 }
 
 /** Appends `DeskItemCreated` in `tx` (an append transaction) and returns the new item id. */
@@ -54,6 +56,7 @@ export async function raiseDeskItem(ctx: Ctx, tx: Tx, req: DeskItemRequest): Pro
             affectedCardIds: [],
             askedBy: { kind: 'system' },
             addresseeUserId: req.routeToUserId,
+            ...(req.data ? { data: req.data } : {}),
           },
         },
         actor: SYSTEM_ACTOR,
