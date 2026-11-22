@@ -27,6 +27,7 @@ import { pairingRelease } from '../runner-gateway/signed-sweep.ts';
 import { cardMessage, orgScope, runnerActor, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
 import { devopsHireEvents as devopsHireEventsNew } from './devops.ts';
 import { devopsRetireEvents, failDevopsRequestEvents } from './devops-retire.ts';
+import { setupOffersFor } from './setup-offers.ts';
 import { ownedOrgIds, servingEvent } from './workstation-serving.ts';
 
 const CODE_TTL_MS = 10 * 60_000;
@@ -162,7 +163,14 @@ export async function pairRunner(
       { tx },
     );
   });
-  return { workstationId, runnerToken };
+  // easy-runner-setup: the names the installer's one screen shows; a failure here never fails the pairing
+  const setupOffers = input.simulationOrgId
+    ? undefined
+    : await setupOffersFor(ctx.pool, workstationId).catch((err) => {
+        ctx.log.warn({ err }, 'setup offers not built');
+        return undefined;
+      });
+  return { workstationId, runnerToken, ...(setupOffers ? { setupOffers } : {}) };
 }
 
 export async function renameWorkstation(ctx: Ctx, user: AuthSession['user'], id: string, name: string) {

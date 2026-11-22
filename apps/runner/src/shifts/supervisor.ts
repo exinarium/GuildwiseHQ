@@ -315,6 +315,8 @@ export interface SupervisorDeps {
   config: RunnerConfig;
   adapters: Map<string, RuntimeAdapter>;
   ipc: IpcServer;
+  /** easy-runner-setup [B3]: this process's approvals page port, never opened to a sandbox. */
+  windowPort?: () => number | undefined;
   transport: ShiftTransport;
   outbox: Outbox;
   log?: Logger;
@@ -1083,6 +1085,8 @@ export class ShiftSupervisor {
     }
     const runnerPorts = new Set<number>(this.deps.runs?.ownedPorts() ?? []);
     if (ipcPort) runnerPorts.add(ipcPort);
+    const wp = this.deps.windowPort?.();
+    if (wp) runnerPorts.add(wp);
     return runnerPorts;
   }
 

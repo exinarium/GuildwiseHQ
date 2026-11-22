@@ -111,20 +111,20 @@ export function whatItDoes(os: InstallerOs): string[] {
     return [
       'Turns on WSL2 and installs Ubuntu if they are missing (may restart Windows once).',
       'Sets systemd=true in Ubuntu, vmIdleTimeout=-1 in .wslconfig and adds a "Guildwise HQ runner" task so Ubuntu stays running (and removes the older "WSL Boot" task).',
-      'Then runs the Linux installer inside Ubuntu: Node 22, git, Claude Code, bubblewrap and socat, optional yt-dlp and Docker (it asks first).',
+      'Then runs the Linux installer inside Ubuntu: Node 22, git, Claude Code, bubblewrap and socat, and (if you accept it on the one screen of choices) yt-dlp in the runner’s own folder; Docker only if you choose it.',
       ...common,
     ];
   if (os === 'macos')
     return [
       'Installs Homebrew if missing (it asks first), then Node 22 and git.',
-      'Installs Claude Code, and optionally yt-dlp and Docker Desktop (it asks first).',
+      'Installs Claude Code. The one screen of choices then offers yt-dlp (in the runner’s own folder) and Docker.',
       ...common.slice(0, -2),
       'Installs a launchd agent so the runner starts at login and restarts if it stops.',
       common[4] as string,
     ];
   return [
     'Installs git, bubblewrap and socat with your package manager (asks for your password).',
-    'Installs Node 22 (with nvm) and Claude Code, and optionally yt-dlp and Docker (it asks first).',
+    'Installs Node 22 (with nvm) and Claude Code. The one screen of choices then offers yt-dlp (in the runner’s own folder) and Docker.',
     ...common.slice(0, -2),
     'Installs a systemd user service and turns on lingering so it keeps running when you log out.',
     common[4] as string,

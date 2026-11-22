@@ -267,3 +267,24 @@ describe('command names', () => {
     }
   });
 });
+
+describe('yt-dlp is not installed by the installer', () => {
+  it('the Linux and macOS installers have no yt-dlp step (setup installs it as the runner user) and count their steps right', () => {
+    for (const os of ['linux', 'macos'] as const) {
+      const script = renderBash(os, base);
+      for (const gone of [
+        'install_ytdlp',
+        'install_extras',
+        'Optional extras',
+        'brew install yt-dlp',
+        'yt-dlp/releases',
+      ])
+        expect(script, `${os}: ${gone}`).not.toContain(gone);
+      // the steps of main(): from its STEP_TOTAL to the end of the function
+      const main = script.slice(script.lastIndexOf('  STEP_TOTAL='));
+      const body = main.slice(0, main.indexOf('\n}\n'));
+      const steps = body.split('\n').filter((l) => /^ {2}step "/.test(l)).length;
+      expect(body, os).toMatch(new RegExp(`^ {2}STEP_TOTAL=${steps}\n`));
+    }
+  });
+});

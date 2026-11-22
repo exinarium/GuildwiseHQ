@@ -25,6 +25,10 @@ export const CHAPTERS: NarratedChapter[] = [
         id: 'c1-c',
         text: 'The link works once, for fifteen minutes, and only for you. Every use is on the audit log.',
       },
+      {
+        id: 'c1-d',
+        text: 'Some yeses cannot be given from the website at all. They wait on the workstation, and the Desk shows the exact command to paste there, with one plain sentence about what it allows.',
+      },
     ],
   },
   {

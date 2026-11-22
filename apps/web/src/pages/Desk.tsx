@@ -2,6 +2,7 @@ import {
   DESK_SUBKIND,
   type DeskItemDto,
   isPhaseDeskSubkind,
+  localCommandOk,
   NEEDS_SPLIT_DESK_SUBKIND,
   SIZE_EXCEPTION_SUBKIND,
   WORKING_BRANCH_SUBKIND,
@@ -42,6 +43,7 @@ import { EscalationTrail } from '../components/EscalationTrail.tsx';
 import { AgentAvatar, UserAvatar } from '../components/Face.tsx';
 import { isJourneyDeskSubkind, JourneyDeskItem } from '../components/JourneyDeskItem.tsx';
 import { LedgerForm } from '../components/LedgerForm.tsx';
+import { LocalCommand } from '../components/LocalCommand.tsx';
 import { MappingForm } from '../components/MappingForm.tsx';
 import { NeedsSplitSummary } from '../components/NeedsSplitPanel.tsx';
 import { OutboundApproval } from '../components/OutboundApproval.tsx';
@@ -519,7 +521,7 @@ export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?:
         </p>
       )}
       <h2 className="mt-3 text-lg font-semibold whitespace-pre-wrap text-fg">{item.title}</h2>
-      {item.body && item.kind !== 'rating' && (
+      {item.body && item.kind !== 'rating' && !localStepBlock(item) && (
         <p className="mt-1.5 text-base whitespace-pre-wrap text-muted">{item.body}</p>
       )}
       {item.subkind === 'ceo_report' && <CeoReportBlock item={item} />}
@@ -563,6 +565,15 @@ export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?:
         item.subkind === DESK_SUBKIND.mcpNeedsSignIn ||
         item.subkind === 'claude_account_login' ||
         item.subkind === 'provider_account_login') && <SignInFromWeb item={item} />}
+      {item.subkind === DESK_SUBKIND.workstationLocalStep && typeof item.data?.command === 'string' && (
+        <div className="mt-3" data-testid="desk-local-step">
+          <LocalCommand
+            command={item.data.command}
+            kind={typeof item.data.stepKind === 'string' ? item.data.stepKind : 'held'}
+            testId="desk-local-command"
+          />
+        </div>
+      )}
       {item.kind === 'rating' && item.interest && (
         <p className="mt-1 text-sm text-muted">
           From the interest{' '}
@@ -1164,5 +1175,14 @@ export function AgentAnsweredBy({ item }: { item: DeskItemDto }) {
       <Badge tone={item.answeredByAgentRole === 'ceo' ? 'violet' : 'neutral'}>{label}</Badge>
       <span>(without reaching the desk)</span>
     </span>
+  );
+}
+
+/** A step waiting on the workstation shows its sentence and command in the copy box, so its text body is not repeated. */
+function localStepBlock(item: { subkind?: string | null; data?: { command?: string } | null }): boolean {
+  return (
+    item.subkind === DESK_SUBKIND.workstationLocalStep &&
+    typeof item.data?.command === 'string' &&
+    localCommandOk(item.data.command)
   );
 }

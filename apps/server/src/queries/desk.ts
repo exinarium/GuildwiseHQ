@@ -8,6 +8,7 @@ import {
   isPhaseDeskSubkind,
   isProjectMember,
   isProjectOwner,
+  localCommandOk,
   type OrgRole,
   type ProjectRole,
 } from '@aom/shared';
@@ -200,6 +201,15 @@ export function toDeskDto(
                     commit: typeof r.data.design.commit === 'string' ? r.data.design.commit : null,
                     summary: String(r.data.design.summary ?? ''),
                   },
+                }
+              : {}),
+            // easy-runner-setup: the copy-paste command of a step waiting on the workstation (checked by the grammar)
+            ...(r.subkind === 'workstation_local_step' &&
+            typeof r.data.command === 'string' &&
+            localCommandOk(r.data.command)
+              ? {
+                  command: r.data.command,
+                  ...(typeof r.data.stepKind === 'string' ? { stepKind: r.data.stepKind } : {}),
                 }
               : {}),
             ...(r.subkind === 'playbook_input_needed' && typeof r.data.threadId === 'string'

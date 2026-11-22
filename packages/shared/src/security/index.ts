@@ -297,3 +297,4 @@ export function parseMinisignPublicKey(line: string): { keyId: string; publicKey
     .toUpperCase();
   return { keyId: id, publicKey: bytes.slice(10) };
 }
+export * from './local-steps.ts';

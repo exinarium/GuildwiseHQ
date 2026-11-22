@@ -122,7 +122,15 @@ export const PolicySchema = z
       .optional(),
     /** The account the runner runs as (R20): the dedicated `guildwise-runner` user, or the installing user. */
     runnerUser: z
-      .object({ mode: z.enum(['dedicated', 'current']), name: z.string().min(1).max(64) })
+      .object({
+        mode: z.enum(['dedicated', 'current']),
+        name: z.string().min(1).max(64),
+        /** Windows: the WSL distro the runner lives in (copy-paste commands start with `wsl -d <distro> --`). */
+        wslDistro: z
+          .string()
+          .regex(/^[A-Za-z0-9._-]{1,64}$/)
+          .optional(),
+      })
       .optional(),
     /** `guildwise-runner setup` finished; until then unsandboxed paths are held ("setup pending") [R20, Q13]. */
     setupDone: z.boolean().default(false),
@@ -132,6 +140,15 @@ export const PolicySchema = z
     installRegistries: z.array(z.string().min(1).max(253)).max(50).default([]),
     /** Proxy and TLS keys (proxy, https-proxy, strict-ssl, ca, cafile, ...) in a project's .npmrc/.yarnrc/bunfig may apply. */
     installNetworkConfig: z.boolean().default(false),
+    /**
+     * easy-runner-setup (Overnight decision 4, narrows R18-S): git vault remotes approved on this machine. A
+     * `vault.configure` runs unattended when every git vault's (vaultId, remote) is listed here; otherwise it is held, and
+     * approving it adds the pairs shown.
+     */
+    vaultRemotes: z
+      .array(z.object({ vaultId: z.string().min(1).max(200), remote: z.string().min(1).max(500) }))
+      .max(1000)
+      .default([]),
     /** Hashes of release formatter configs approved locally [rv3-2]. */
     formatterPins: z.array(Sha256Hex).max(1000).default([]),
     /** `aom devops` requests from agents: wait for a local approval (`ask`) or are refused (`deny`) (R18-D). */

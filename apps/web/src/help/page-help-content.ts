@@ -1097,6 +1097,14 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         text: 'Opens what this workstation holds until you say yes on the machine, and its passkeys.',
       },
       {
+        name: 'Open Approvals on this computer',
+        text: 'A link to the small private page of that computer, where you see and change what it allows. It opens only in a browser on that computer. The first time you pair the browser by typing one command the page shows.',
+      },
+      {
+        name: 'Copy-paste box',
+        text: "For something that waits for your yes: one sentence, the exact command and a Copy button. Paste it in a terminal on the workstation. The website never approves for you. A Guildwise command always starts with sudo -u guildwise-runner or the runner's own path.",
+      },
+      {
         name: 'Works for',
         text: 'Which organizations this workstation may work for. Only the organizations you own are on when you pair it; switch another one on here. Switching one off sends its agents there to be re-homed and is refused while one of its shifts runs.',
       },
@@ -1114,7 +1122,11 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     controls: [
       {
         name: 'Waiting for your yes',
-        text: 'Each item the workstation holds: what it is, since when, and how to approve it. Most need guildwise-runner approve <id> on the workstation itself.',
+        text: 'Each item the workstation holds: what it is, since when, and the copy-paste box with the exact command to run on the workstation itself.',
+      },
+      {
+        name: 'Open Approvals on this computer',
+        text: "The workstation's own page, where you approve one item at a time and change what it allows. It opens only on that computer.",
       },
       {
         name: 'Approve with passkey',

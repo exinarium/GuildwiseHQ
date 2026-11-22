@@ -1,4 +1,5 @@
 import { slugify, type TranscriptRef } from '@aom/shared';
+import { YTDLP_INSTALL_COMMAND, ytDlpPath } from '../toolchain/extras.ts';
 import {
   fetchTranscript,
   MAX_TRANSCRIPT_CHARS,
@@ -8,7 +9,11 @@ import {
   transcriptHeader,
 } from './fetch.ts';
 
-export const defaultTranscriptDeps = (): TranscriptDeps => ({ exec: spawnExec, fetch });
+export const defaultTranscriptDeps = (): TranscriptDeps => ({
+  exec: spawnExec,
+  fetch,
+  ytDlp: () => ytDlpPath(),
+});
 
 /** Deterministic stand-in for the mock runtime: a fake transcript, or none when the URL says `no-transcript`. */
 export function mockTranscript(url: string): TranscriptResult {
@@ -72,7 +77,7 @@ export const PRINT_CHARS = 30_000;
 /** What `aom transcript` prints. */
 export function renderTranscriptMessage(r: TranscriptResult, path?: string): string {
   if (r.status === 'tool_missing')
-    return `transcript tool missing: yt-dlp\nStatus: tool_missing\nAsk the DevOps engineer: aom devops "install yt-dlp"`;
+    return `transcript tool missing: yt-dlp\nStatus: tool_missing\nThe person who runs this workstation installs it with: ${YTDLP_INSTALL_COMMAND}`;
   if (r.status === 'none')
     return `no transcript available\nStatus: none\nURL: ${r.url}${r.message ? `\nReason: ${r.message}` : ''}`;
   if (r.status === 'error')

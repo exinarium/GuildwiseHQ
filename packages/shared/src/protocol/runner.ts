@@ -183,11 +183,13 @@ import { LedgerMatchSchema, RpcMethodSchema, ShiftReportSchema } from './ipc.ts'
 import {
   ApprovalPasskeyPayloadSchema,
   ApprovalsHeldPayloadSchema,
+  HelloLocalSchema,
   PasskeyOfferPayloadSchema,
   PasskeyWithdrawPayloadSchema,
   ReleaseArtefactPreparedPayloadSchema,
   ReleasePreparePayloadSchema,
   ReleaseSignPayloadSchema,
+  SetupOffersWireSchema,
 } from './security.ts';
 
 /**
@@ -1787,6 +1789,8 @@ export const HelloSchema = msg('hello', {
   startupRefused: z.string().min(1).max(300).optional(),
   /** 1.10.0 (R20): no local `guildwise-runner setup` yet, so unsandboxed steps are held ("setup pending"). */
   setupPending: z.boolean().optional(),
+  /** easy-runner-setup: the CLI prefix of this runner's copy-paste commands and its approvals page (or why it did not start). */
+  local: HelloLocalSchema.optional().catch(undefined),
 });
 export const OutboxFlushedSchema = msg('outbox.flushed', {});
 export const HeartbeatSchema = msg('heartbeat', {
@@ -2332,6 +2336,8 @@ export const WelcomeSchema = msg('welcome', {
    * root-equivalent, whatever its local `startupRefusal` says (the server may narrow, never widen).
    */
   requireSignedRunners: z.boolean().optional(),
+  /** easy-runner-setup: names for the installer's one screen (organisations, DevOps helpers, repositories); never a grant. */
+  setupOffers: SetupOffersWireSchema.optional().catch(undefined),
 });
 export const ShiftStartSchema = msg('shift.start', {
   shiftId: z.uuid(),

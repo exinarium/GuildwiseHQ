@@ -332,10 +332,15 @@ export async function workstationApprovals(
       ORDER BY created_at DESC, id LIMIT 20`,
     [workstationId, new Date(now.getTime() - RELAY_HISTORY_MS)],
   );
+  const conn = ctx.services.runners.isOnline(workstationId)
+    ? ctx.services.runners.get(workstationId)
+    : undefined;
   return {
     online: held.online,
     reportedAt: held.reportedAt?.toISOString() ?? null,
     items,
+    steps: conn?.localSteps ?? [],
+    windowPort: conn?.local && !conn.local.windowError ? (conn.local.windowPort ?? null) : null,
     relays: relays.map(
       (r): PasskeyRelayDto => ({
         commandId: r.id,

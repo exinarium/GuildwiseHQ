@@ -166,9 +166,14 @@ OPT_FROM_FILE="${GUILDWISE_FROM_FILE:-}"
 OPT_CA_FILE="${GUILDWISE_CA_FILE:-}"
 RUNNER_CA=""
 OPT_INSTANCE="${GUILDWISE_INSTANCE:-}"
+# The one screen of guildwise-runner setup (easy-runner-setup): item 2, item 5 and item 6, and the WSL distro (Windows).
+OPT_DEVOPS_REQUESTS="${GUILDWISE_DEVOPS_REQUESTS:-}"
+OPT_ALLOW_SCRIPTS="${GUILDWISE_ALLOW_SCRIPTS:-}"
+OPT_WITH_YTDLP="${GUILDWISE_WITH_YTDLP:-}"
+OPT_WSL_DISTRO_NAME="${GUILDWISE_WSL_DISTRO_NAME:-}"
 
 bad_flag() {
-  die "$1" "Options: --yes, --runner-user dedicated|current, --legacy quarantine|remove, --accept-root-equivalent, --devops-orgs none|<id,...>, --docker rootless|host|shared|none, --accept-shared-daemon, --docker-socket <path>, --skip-baseline, --deploy ask|off, --deploy-pin-commit, --allow-unsigned-from <origin>, --from-file <folder>, --ca-file <pem file>, --instance <name>, --choose-folders."
+  die "$1" "Options: --yes, --runner-user dedicated|current, --legacy quarantine|remove, --accept-root-equivalent, --devops-orgs none|<name-or-id,...>, --devops-requests ask|auto, --allow-scripts <repo,...>, --with-ytdlp, --no-ytdlp, --wsl-distro-name <name>, --docker rootless|host|shared|none, --accept-shared-daemon, --docker-socket <path>, --skip-baseline, --deploy ask|off, --deploy-pin-commit, --allow-unsigned-from <origin>, --from-file <folder>, --ca-file <pem file>, --instance <name>, --choose-folders."
 }
 
 set_flag() {
@@ -183,6 +188,9 @@ set_flag() {
     --from-file) OPT_FROM_FILE="$2" ;;
     --ca-file) OPT_CA_FILE="$2" ;;
     --instance) OPT_INSTANCE="$2" ;;
+    --devops-requests) OPT_DEVOPS_REQUESTS="$2" ;;
+    --allow-scripts) OPT_ALLOW_SCRIPTS="$2" ;;
+    --wsl-distro-name) OPT_WSL_DISTRO_NAME="$2" ;;
     *) bad_flag "Unknown option: $1" ;;
   esac
 }
@@ -201,7 +209,9 @@ parse_flags() {
       --deploy-pin-commit) OPT_DEPLOY_PIN_COMMIT=1 ;;
       --accept-shared-daemon) OPT_ACCEPT_SHARED=1 ;;
       --skip-baseline) OPT_SKIP_BASELINE=1 ;;
-      --runner-user|--legacy|--devops-orgs|--docker|--docker-socket|--deploy|--allow-unsigned-from|--from-file|--ca-file|--instance)
+      --with-ytdlp) OPT_WITH_YTDLP=1 ;;
+      --no-ytdlp) OPT_WITH_YTDLP=0 ;;
+      --runner-user|--legacy|--devops-orgs|--docker|--docker-socket|--deploy|--allow-unsigned-from|--from-file|--ca-file|--instance|--devops-requests|--allow-scripts|--wsl-distro-name)
         [ "$#" -gt 0 ] || bad_flag "${a} needs a value."
         set_flag "${a}" "$1"; shift ;;
       --*=*) set_flag "${a%%=*}" "${a#*=}" ;;
@@ -232,8 +242,16 @@ validate_flags() {
     local id ids
     IFS=, read -r -a ids <<<"${OPT_DEVOPS_ORGS}"
     for id in "${ids[@]}"; do
-      is_uuid "${id}" || bad_flag "--devops-orgs is none or organization ids separated by commas (got ${id})."
+      # names or ids; guildwise-runner setup checks each against the server's offers (no shortcuts such as "owned")
+      case "${id}" in ''|owned|all|any|'*') bad_flag "--devops-orgs is none or organization names or ids separated by commas (got ${id:-an empty name})." ;; esac
+      [[ "${id}" =~ [[:cntrl:]] ]] && bad_flag "--devops-orgs holds a control character."
     done
+  fi
+  case "${OPT_DEVOPS_REQUESTS}" in ''|ask|auto) ;; *) bad_flag "--devops-requests is ask or auto (got ${OPT_DEVOPS_REQUESTS})." ;; esac
+  case "${OPT_WITH_YTDLP}" in ''|1|y|Y|yes|true) [ -n "${OPT_WITH_YTDLP}" ] && OPT_WITH_YTDLP=1 ;; 0|n|N|no|false) OPT_WITH_YTDLP=0 ;; *) bad_flag "GUILDWISE_WITH_YTDLP is 1 or 0 (got ${OPT_WITH_YTDLP})." ;; esac
+  [[ "${OPT_ALLOW_SCRIPTS}" =~ [[:cntrl:][:space:]] ]] && bad_flag "--allow-scripts is repository URLs or names separated by commas, without spaces."
+  if [ -n "${OPT_WSL_DISTRO_NAME}" ] && ! [[ "${OPT_WSL_DISTRO_NAME}" =~ ^[A-Za-z0-9._-]{1,64}$ ]]; then
+    bad_flag "--wsl-distro-name takes letters, digits, dots, dashes and underscores (got ${OPT_WSL_DISTRO_NAME})."
   fi
   if [ -n "${OPT_ALLOW_UNSIGNED_FROM}" ] && ! [[ "${OPT_ALLOW_UNSIGNED_FROM}" =~ ^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]]; then
     bad_flag "--allow-unsigned-from is an exact origin such as https://hq.example.com (got ${OPT_ALLOW_UNSIGNED_FROM})."
@@ -993,9 +1011,53 @@ save_api_key() {
   '
 }
 
+# The dedicated runner user signs in during this same run (easy-runner-setup): your own sign-in is never shared.
+sign_in_runner_user() {
+  if [ "${GUILDWISE_SKIP_CLAUDE:-}" = 1 ]; then
+    step_warn "Skipped the Claude sign-in (GUILDWISE_SKIP_CLAUDE=1). Agents cannot run until ${RUNNER_NAME} signs in."
+    return
+  fi
+  if as_runner test -s "${RUNNER_HOME}/.claude/.credentials.json" 2>/dev/null; then
+    step_ok "Claude is already signed in for ${RUNNER_NAME}"
+    return
+  fi
+  if ! interactive; then
+    step_warn "No keyboard to ask on. Sign in later as ${RUNNER_NAME}: sudo -u ${RUNNER_NAME} -H ${RUNNER_HOME}/.local/bin/claude"
+    return
+  fi
+  say ""
+  say "    Your agents run on Claude. The runner has its own account on this computer (${RUNNER_NAME}), so it signs in once:"
+  say "      1) Claude subscription (Pro, Max, Team or Enterprise): you sign in with your Claude account in a browser."
+  say "      2) Anthropic API key: you pay for exactly what the agents use."
+  say ""
+  local choice key token
+  choice="$(ask_text "Which one? Type 1, 2, or s to do this later" "1")"
+  case "${choice}" in
+    2)
+      key="$(ask_secret "Paste the API key (it is stored only on this computer, readable only by ${RUNNER_NAME}):")" || key=""
+      if [ -n "${key}" ] && printf '%s' "${key}" | runner auth api-key >/dev/null 2>&1; then step_ok "API key saved for ${RUNNER_NAME}"
+      else step_warn "No key saved. Later: sudo -u ${RUNNER_NAME} -H ${RUNNER_HOME}/.local/bin/guildwise-runner auth api-key"; fi ;;
+    s|S) step_warn "Sign-in skipped. Later: sudo -u ${RUNNER_NAME} -H ${RUNNER_HOME}/.local/bin/claude" ;;
+    *)
+      if [ "$(uname -s)" = Darwin ]; then
+        # a daemon user has no login keychain: a subscription token, typed once and stored in the runner's config
+        say "    Claude prints a sign-in link; finish in the browser and copy the token it shows."
+        as_runner "${RUNNER_HOME}/.local/bin/claude" setup-token </dev/tty || true
+        token="$(ask_secret "Paste the token Claude showed:")" || token=""
+        if [ -n "${token}" ] && printf '%s' "${token}" | runner auth oauth-token >/dev/null 2>&1; then step_ok "Signed in to Claude for ${RUNNER_NAME}"
+        else step_warn "Could not save the token. Later: claude setup-token, then guildwise-runner auth oauth-token (as ${RUNNER_NAME})"; fi
+      else
+        say "    Claude opens now. Choose \"Claude account with subscription\", finish in the browser, then type /exit."
+        as_runner "${RUNNER_HOME}/.local/bin/claude" </dev/tty || true
+        if as_runner test -s "${RUNNER_HOME}/.claude/.credentials.json" 2>/dev/null; then step_ok "Signed in to Claude for ${RUNNER_NAME}"
+        else step_warn "Could not confirm the sign-in. Later: sudo -u ${RUNNER_NAME} -H ${RUNNER_HOME}/.local/bin/claude"; fi
+      fi ;;
+  esac
+}
+
 sign_in_to_claude() {
   if [ -n "${RUNNER_AS}" ]; then
-    step_ok "Claude is signed in as ${RUNNER_NAME} in the next step (guildwise-runner setup); your own sign-in is not shared"
+    sign_in_runner_user
     return
   fi
   if [ "${GUILDWISE_SKIP_CLAUDE:-}" = 1 ]; then
@@ -1215,7 +1277,7 @@ set_local_permissions() {
     return
   fi
   local explicit=0 args rc=0
-  if [ -n "${OPT_DEVOPS_ORGS}${OPT_DOCKER}${OPT_DEPLOY}${OPT_ALLOW_UNSIGNED_FROM}" ] || [ "${OPT_ACCEPT_ROOT_EQ}" = 1 ] ||
+  if [ -n "${OPT_DEVOPS_ORGS}${OPT_DOCKER}${OPT_DEPLOY}${OPT_ALLOW_UNSIGNED_FROM}${OPT_DEVOPS_REQUESTS}${OPT_ALLOW_SCRIPTS}" ] || [ "${OPT_ACCEPT_ROOT_EQ}" = 1 ] ||
     [ "${OPT_DEPLOY_PIN_COMMIT}" = 1 ]; then explicit=1; fi
   # An upgrade of a runner kept for your user, with no keyboard and no flags: nothing is decided for you. The runner keeps
   # working (sandboxed work runs; steps outside the sandbox wait for setup).
@@ -1240,7 +1302,12 @@ set_local_permissions() {
   [ -n "${OPT_DEPLOY}" ] && args+=(--deploy "${OPT_DEPLOY}")
   [ "${OPT_DEPLOY_PIN_COMMIT}" = 1 ] && args+=(--deploy-pin-commit)
   [ -n "${OPT_ALLOW_UNSIGNED_FROM}" ] && args+=(--allow-unsigned-from "${OPT_ALLOW_UNSIGNED_FROM}")
-  note "guildwise-runner setup asks you here, on this computer: which organizations DevOps may serve (each defaults to no), Docker for the runner and the deploy approvals."
+  [ -n "${OPT_DEVOPS_REQUESTS}" ] && args+=(--devops-requests "${OPT_DEVOPS_REQUESTS}")
+  [ -n "${OPT_ALLOW_SCRIPTS}" ] && args+=(--allow-scripts "${OPT_ALLOW_SCRIPTS}")
+  [ "${OPT_WITH_YTDLP}" = 1 ] && args+=(--with-ytdlp)
+  [ "${OPT_WITH_YTDLP}" = 0 ] && args+=(--no-ytdlp)
+  [ -n "${OPT_WSL_DISTRO_NAME}" ] && args+=(--wsl-distro-name "${OPT_WSL_DISTRO_NAME}")
+  note "One screen of choices follows, by name, with the safe choice filled in: which DevOps helpers may work here, Docker, publishing, install scripts and video transcripts. Press Enter to accept."
   if interactive; then
     runner "${args[@]}" </dev/tty || rc=$?
   else
@@ -1280,6 +1347,45 @@ wait_until_connected() {
   return 1
 }
 
+# ---- approvals on this computer (easy-runner-setup) ---------------------------------------------------------------------
+# The runner's local approvals page: a plain link (no secret in it). Each browser is paired once: the page shows a code,
+# and `guildwise-runner approvals pair <code>` (typed here, on the terminal) pairs it. Under --yes nothing is opened.
+approvals_port() {
+  local p
+  p="$(as_runner cat "${RUNNER_HOME}/.config/aom-runner/window/port" 2>/dev/null || true)"
+  [[ "${p}" =~ ^[0-9]{4,5}$ ]] && printf '%s' "${p}"
+}
+
+# The CLI asks "Pair this browser with <instance>?" on the terminal (it refuses without one).
+pair_browser() { runner approvals pair "$1" </dev/tty; }
+
+open_approvals_page() {
+  local port url code tries=0
+  for _ in $(seq 1 10); do port="$(approvals_port)"; [ -n "${port}" ] && break; sleep 1; done
+  if [ -z "${port}" ]; then
+    note "The approvals page is not running yet; the Workstations page links to it once it is."
+    return
+  fi
+  url="http://127.0.0.1:${port}/"
+  APPROVALS_URL="${url}"
+  if [ "${OPT_YES}" = 1 ] || ! interactive; then
+    note "Approvals on this computer: open ${url} in a browser on this computer, then type the command the page shows here."
+    return
+  fi
+  if have xdg-open; then (xdg-open "${url}" >/dev/null 2>&1 &)
+  elif have open; then (open "${url}" >/dev/null 2>&1 &)
+  else note "Open ${url} in a browser on this computer."; fi
+  say "    Approvals on this computer opened in your browser (${url}). It shows a short pairing code for this browser."
+  while [ "${tries}" -lt 3 ]; do
+    tries=$((tries + 1))
+    code="$(ask_text "Type the pairing code the page shows (or press Enter to skip):" "")"
+    [ -z "${code}" ] && { note "Skipped. Open ${url} any time; the page shows the command to pair."; return; }
+    code="$(printf '%s' "${code}" | tr '[:lower:]' '[:upper:]')"
+    if ! [[ "${code}" =~ ^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{2}$ ]]; then note "That is not a pairing code (like K7M2-Q9)."; continue; fi
+    if pair_browser "${code}"; then good "This browser can now open Approvals on this computer"; return; fi
+  done
+}
+
 summary() {
   say ""
   if [ "${FAILED}" = 0 ] && [ "${DOCTOR_FAILED:-0}" = 0 ]; then
@@ -1289,6 +1395,7 @@ summary() {
     else
       say "  This computer now appears on the Workstations page and will start again by itself after a restart."
     fi
+    [ -n "${APPROVALS_URL:-}" ] && say "  Approvals on this computer: ${APPROVALS_URL} (open it in a browser on this computer)."
     [ -n "${RUNNER_AS}" ] && say "  The runner runs as ${RUNNER_NAME} and works in its own clones; change its permissions with: sudo -u ${RUNNER_NAME} -H ${BIN_DIR}/guildwise-runner setup"
     [ -n "${OPT_INSTANCE}" ] && say "  This is runner instance ${OPT_INSTANCE}, paired with ${SERVER_URL}; manage its root part with: sudo ${ADMIN_HINT} <command>"
     [ -n "${QUARANTINE_DIR}" ] && say "  The old runner is in ${QUARANTINE_DIR}; delete it after you have looked at it."

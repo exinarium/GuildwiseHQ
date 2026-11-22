@@ -30,6 +30,7 @@ describe('policy.json schema', () => {
       installScripts: {},
       installRegistries: [],
       installNetworkConfig: false,
+      vaultRemotes: [],
       formatterPins: [],
       devopsAgentRequests: 'ask',
       allowDocker: false,

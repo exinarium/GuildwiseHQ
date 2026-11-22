@@ -211,21 +211,6 @@ install_claude_code() {
   step_ok "Claude Code installed"
 }
 
-install_ytdlp() {
-  if have yt-dlp; then good "yt-dlp is already installed"; return; fi
-  if ! ask_yn "Install yt-dlp? It lets agents read transcripts of YouTube and other videos. Optional." y GUILDWISE_WITH_YTDLP; then
-    note "Skipped. You can add it later."; report "yt-dlp" info "skipped"; return
-  fi
-  local asset=yt-dlp_linux
-  [ "$(uname -m)" = x86_64 ] || asset=yt-dlp_linux_aarch64
-  mkdir -p "${BIN_DIR}"
-  if curl -fsSL --retry 2 -o "${BIN_DIR}/yt-dlp" "https://github.com/yt-dlp/yt-dlp/releases/latest/download/${asset}"; then
-    chmod +x "${BIN_DIR}/yt-dlp"; good "yt-dlp installed in ${BIN_DIR}"
-  else
-    rm -f "${BIN_DIR}/yt-dlp"; step_warn "Could not download yt-dlp; video transcripts will not work until it is installed."
-  fi
-}
-
 # The browser that makes the PDF copy of a form's answers. Never fatal: the copies stay off until it works.
 install_pdf_renderer() {
   note "Installing the browser for PDF copies of form answers (a download of roughly 100 MB) ..."
@@ -362,7 +347,7 @@ install_service() {
 main() {
   parse_flags "$@"
   if [ "${OPT_LEGACY_ONLY}" = 1 ]; then legacy_only; return 0; fi
-  STEP_TOTAL=16
+  STEP_TOTAL=15
   say "${C_BOLD}${APP_NAME}: set up this computer as a workstation${C_RESET}"
   say "${C_DIM}Safe to run again at any time: it upgrades or repairs what is already here.${C_RESET}"
   report "installer" start "linux"
@@ -372,7 +357,6 @@ main() {
   step "Administrator rights (once)"; authorize_once; [ "$(id -u)" -eq 0 ] || SUDO="sudo -n"
   step "Installing the baseline"; install_baseline
   step "Installing Node 22"; install_node
-  step "Optional extras"; install_ytdlp
   step "Downloading the runner"; stage_runner_release
   step "Runner user"; setup_runner_user
   step "Installing the runner"; place_runner_release
@@ -384,7 +368,7 @@ main() {
   step "Setting local permissions"; set_local_permissions
   step "Starting the runner and checking everything"
   install_service
-  if wait_until_connected; then good "The runner is connected to ${SERVER_URL}"; report "Connected" ok "runner connected"
+  if wait_until_connected; then good "The runner is connected to ${SERVER_URL}"; report "Connected" ok "runner connected"; open_approvals_page
   else step_warn "The runner has not connected yet. Give it a minute; the checks below say more."; fi
   DOCTOR_FAILED=0
   run_doctor || DOCTOR_FAILED=1

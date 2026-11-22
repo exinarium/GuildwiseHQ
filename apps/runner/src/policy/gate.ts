@@ -4,9 +4,11 @@ import {
   type DevOpsAccess,
   type EnvEnsurePayload,
   EnvEnsurePayloadSchema,
+  normalizeRemoteUrl,
   ReleasePreparePayloadSchema,
   type ReleaseSignPayload,
   ReleaseSignPayloadSchema,
+  redactUrlPassword,
 } from '@aom/shared';
 import { canonicalJson, deployPinHashes, sha256Hex } from './deploy-pin.ts';
 import type { Policy } from './schema.ts';
@@ -32,7 +34,6 @@ export type GateDecision =
 /** Commands that always wait for a local yes (R18-S "Held until a local approval"). */
 export const ALWAYS_HELD: Readonly<Record<string, string>> = {
   'recipe.write': 'recipe.write',
-  'vault.configure': 'vault.configure',
   'env.secret.set': 'env.secret',
   'deploy.secret.set': 'env.secret',
   'provider.key.reseal': 'provider.reseal',
@@ -77,7 +78,8 @@ function describeGeneric(command: string, payload: Record<string, unknown>): str
         : v,
     ),
   );
-  return `${command}\n${JSON.stringify(masked, null, 2)}`;
+  // an address that carries a password is shown with *** in its place
+  return redactUrlPassword(`${command}\n${JSON.stringify(masked, null, 2)}`);
 }
 
 /**
@@ -314,6 +316,7 @@ export function gateCommand(
   if (command === 'deploy.exec') return gateDeploy(policy, payload);
   if (command === 'release.sign') return gateReleaseSign(policy, payload);
   if (command === 'env.ensure') return gateEnvEnsure(policy, payload);
+  if (command === 'vault.configure') return gateVaultConfigure(policy, payload);
   const kind = ALWAYS_HELD[command];
   if (!kind) return { action: 'run' };
   return {
@@ -330,6 +333,67 @@ export function gateCommand(
     commandHash: commandHashOf(command, payload),
     ...(setupPending(policy) ? { note: SETUP_PENDING_NOTE } : {}),
   };
+}
+
+// ---------------------------------------------------------------- vault.configure (easy-runner-setup, Overnight decision 4)
+
+/** The git vaults of a `vault.configure` as (vaultId, normalized remote) pairs; local vaults have none. */
+export function vaultRemotePairs(
+  payload: Record<string, unknown>,
+): Array<{ vaultId: string; remote: string }> {
+  const vaults = Array.isArray(payload.vaults) ? (payload.vaults as Array<Record<string, unknown>>) : [];
+  const out: Array<{ vaultId: string; remote: string }> = [];
+  for (const v of vaults) {
+    const remote = typeof v?.remoteUrl === 'string' ? v.remoteUrl.trim() : '';
+    if (v?.storage === 'local' || !remote) continue;
+    let norm: string;
+    try {
+      norm = normalizeRemoteUrl(remote);
+    } catch {
+      norm = remote;
+    }
+    out.push({ vaultId: String(v.vaultId ?? ''), remote: norm });
+  }
+  return out;
+}
+
+/**
+ * Narrows R18-S: vault set-up runs without a local yes when it only uses local storage or repeats git remotes approved
+ * here before (`policy.vaultRemotes`); a new or changed online location still waits for the owner's yes. The server
+ * re-sends vault.configure on every welcome, so without this every reconnect held it again.
+ */
+export function gateVaultConfigure(policy: Policy, payload: Record<string, unknown>): GateDecision {
+  const pairs = vaultRemotePairs(payload);
+  const known = (p: { vaultId: string; remote: string }) =>
+    policy.vaultRemotes.some((k) => k.vaultId === p.vaultId && k.remote === p.remote);
+  const fresh = pairs.filter((p) => !known(p));
+  if (fresh.length === 0) return { action: 'run' };
+  const shown = fresh
+    .slice(0, 3)
+    .map((p) => p.remote)
+    .join(', ');
+  return {
+    action: 'hold',
+    kind: 'vault.configure',
+    summary:
+      `vault.configure for ${heldTarget('vault.configure', payload)}: new online location ${shown}${fresh.length > 3 ? ` and ${fresh.length - 3} more` : ''}`.slice(
+        0,
+        300,
+      ),
+    detail: `${describeGeneric('vault.configure', payload)}\n\nApproving also remembers these online locations, so the same set-up runs without asking next time:\n${fresh.map((p) => `  ${p.vaultId}  ${p.remote}`).join('\n')}`,
+    commandHash: commandHashOf('vault.configure', payload),
+    ...(setupPending(policy) ? { note: SETUP_PENDING_NOTE } : {}),
+  };
+}
+
+/** After a local yes: the pairs a held vault.configure showed become known (idempotent). */
+export function rememberVaultRemotes(policy: Policy, payload: Record<string, unknown>): Policy {
+  const next = structuredClone(policy);
+  for (const p of vaultRemotePairs(payload))
+    if (!next.vaultRemotes.some((k) => k.vaultId === p.vaultId && k.remote === p.remote))
+      next.vaultRemotes.push(p);
+  next.vaultRemotes = next.vaultRemotes.slice(-1000);
+  return next;
 }
 
 // ---------------------------------------------------------------- DevOps shifts (R18-S [rv4-2])

@@ -1,8 +1,10 @@
 import { entryDir, loadIndex } from '../pairings.ts';
+import { localCli } from '../policy/local-command.ts';
 import type { Policy } from '../policy/schema.ts';
 import type { Executor } from '../toolchain/exec.ts';
 import { adminCommand, dedicatedUserOf, instanceOfUser, isDedicatedUser } from './admin-command.ts';
-import { readOffers } from './offers.ts';
+import { applyChoices, initialChoices } from './choices.ts';
+import { readAllOffers } from './offers.ts';
 import {
   DESKTOP_SOCKET_RE,
   type DockerMode,
@@ -12,6 +14,7 @@ import {
 } from './options.ts';
 import { policyPath, readPolicy, writePolicy } from './policy-file.ts';
 import type { Prompter } from './prompt.ts';
+import { runScreen } from './screen.ts';
 import { clonesDir, ensureClonesDir, gitVersionAtLeast, MIN_FETCH_GIT } from './workspace.ts';
 
 /**
@@ -34,6 +37,11 @@ export interface SetupDeps {
   prompter: Prompter | null;
   out: (line: string) => void;
   exec: Executor;
+  /**
+   * Item 6 of the screen: installs a helper into the runner user's own folder with checksum verification
+   * (`toolchain/extras.ts`). Absent: nothing is installed and the command is printed instead.
+   */
+  installExtra?: (name: 'yt-dlp') => Promise<{ ok: boolean; detail: string }>;
 }
 
 export interface SetupResult {
@@ -80,10 +88,20 @@ function pairingDirsOf(dataRoot: string): string[] {
   }
 }
 
+/**
+ * The command that runs setup as the dedicated user. sudo's `secure_path` never finds a bare `guildwise-runner`, so it is
+ * the absolute path in that user's home (Linux `/home/<user>`, macOS `/var/<user>`, as guildwise-admin creates them).
+ */
+export function dedicatedSetupCommand(platform: NodeJS.Platform, instance: string | null): string {
+  const user = dedicatedUserOf(instance);
+  const home = platform === 'darwin' ? `/var/${user}` : `/home/${user}`;
+  return `${localCli({ username: user, home })} setup`;
+}
+
 export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<SetupResult> {
   if (deps.uid === 0)
     throw new SetupError(
-      `\`guildwise-runner setup\` refuses to run as root. Run it as the runner user (\`sudo -u ${dedicatedUserOf(opts.instance)} -H guildwise-runner setup\`); the root steps it needs are printed for \`guildwise-admin\`.`,
+      `\`guildwise-runner setup\` refuses to run as root. Run it as the runner user (\`${dedicatedSetupCommand(deps.platform, opts.instance ?? null)}\`); the root steps it needs are printed for \`guildwise-admin\`.`,
     );
   // a named instance is the user it runs as (guildwise-runner-<name>); --instance may only confirm it
   const ownInstance = instanceOfUser(deps.username);
@@ -126,9 +144,7 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
       say(
         `(migrate-user only if this user already has a 1.10.0 runner to move.) Then run setup as that user:`,
       );
-      say(
-        `  sudo -u ${DEDICATED_USER} -H guildwise-runner setup${instance ? ` --instance ${instance}` : ''}`,
-      );
+      say(`  ${dedicatedSetupCommand(deps.platform, instance)}${instance ? ` --instance ${instance}` : ''}`);
       return { policy: null, adminCommands: cmds, exitCode: 3, wrote: false };
     }
     if (instance)
@@ -140,7 +156,15 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
       `The runner keeps running as ${deps.username}. It refuses to start while ${deps.username} is root-equivalent (passwordless sudo, the docker group, a writable socket of another Docker daemon) unless you accept that below.`,
     );
   }
-  next.runnerUser = { mode, name: deps.username };
+  next.runnerUser = {
+    mode,
+    name: deps.username,
+    ...(opts.wslDistroName
+      ? { wslDistro: opts.wslDistroName }
+      : current.runnerUser?.wslDistro
+        ? { wslDistro: current.runnerUser.wslDistro }
+        : {}),
+  };
 
   // ---- 2. own clones [rv6-3, rv7-13]
   const clones = clonesDir(deps.home, mode);
@@ -166,39 +190,21 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
     }
   }
 
-  // ---- 3. DevOps organizations [rv6-6]: the server only offers; every one defaults to no
-  const offers = readOffers(dirs);
-  const agents: Record<string, string> = {};
-  if (opts.devopsOrgs !== undefined) {
-    if (opts.devopsOrgs !== 'none')
-      for (const id of opts.devopsOrgs) {
-        const o = offers.find((x) => x.orgId.toLowerCase() === id);
-        if (!o) throw new SetupError(`organization ${id} is not one the server offers for this workstation`);
-        if (!o.devopsAgentId)
-          throw new SetupError(
-            `${o.orgName} (${id}) has no DevOps engineer on this workstation yet: hire one, then run setup again (or \`guildwise-runner devops grant ${id}\`)`,
-          );
-        agents[o.orgId] = o.devopsAgentId;
-      }
-  } else if (p) {
-    for (const [org, agent] of Object.entries(current.devops.agents)) {
-      const name = offers.find((o) => o.orgId === org)?.orgName ?? org;
-      if (await p.confirm(`Keep the local DevOps grant for ${name} (${org})?`, true)) agents[org] = agent;
-    }
-    for (const o of offers) {
-      if (agents[o.orgId]) continue;
-      say(`${o.orgName} (${o.orgId}): the server says you are ${o.role}.`);
-      if (!o.devopsAgentId) {
-        say(
-          `  No DevOps engineer on this workstation yet; grant later with \`guildwise-runner devops grant ${o.orgId}\`.`,
-        );
-        continue;
-      }
-      if (await p.confirm(`  May its DevOps engineer work outside the sandbox on this machine?`, false))
-        agents[o.orgId] = o.devopsAgentId;
-    }
-  }
-  next.devops = { ...next.devops, agents };
+  // ---- 3. the one screen (easy-runner-setup): names from the server, safe defaults, starts from the current policy [S4]
+  const offered = readAllOffers(dirs);
+  const offers = offered.orgs;
+  const found0 = opts.dockerFound ?? (current.docker === 'rootless' ? 'own' : 'none');
+  if (found0 === 'rootful' && !opts.docker && posix && deps.platform !== 'darwin') say(ROOTFUL_WARNING);
+  let choices = initialChoices({
+    current,
+    orgs: offers,
+    repos: offered.repos,
+    opts,
+    platform: deps.platform,
+    interactive: p !== null,
+  });
+  if (p) choices = await runScreen(choices, p, say);
+  applyChoices(choices, next);
 
   // ---- 4. Docker for the runner [R20 step 4, DESIGN deps-without-sudo §3]
   const userArg = mode === 'current' ? ['--user', deps.username] : [];
@@ -209,38 +215,16 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
     p
       ? (await p.text(`${why} Type "${phrase}" to accept (anything else declines):`)).trim() === phrase
       : false;
-  let docker: DockerMode | undefined = opts.docker;
+  // item 3 of the screen; the checks and typed acceptances below are unchanged
+  let docker: DockerMode = choices.docker;
   const socket = opts.dockerSocket;
   let acceptShared = opts.acceptSharedDaemon;
-  if (!docker) {
-    if (!posix) docker = 'none';
-    else if (mac) {
-      if (found === 'desktop' && p) {
-        say(MAC_DOCKER_WARNING);
-        docker = 'host';
-      } else docker = 'none';
-    } else if (found === 'rootful' && p) {
-      say(ROOTFUL_WARNING);
-      docker =
-        (await p.choose(
-          '1) a separate rootless Docker for the runner (recommended), 2) the installed Docker (root-equivalent)',
-          ['1', '2'] as const,
-          '1',
-        )) === '2'
-          ? 'host'
-          : 'rootless';
-    } else if (found === 'shared' && p && socket) {
-      say(`A rootless Docker daemon of another user is running (${socket}).`);
-      docker =
-        (await p.choose(
-          '1) a separate rootless Docker for the runner (recommended), 2) that shared daemon',
-          ['1', '2'] as const,
-          '1',
-        )) === '2'
-          ? 'shared'
-          : 'rootless';
-    } else docker = 'rootless';
-  }
+  // [S4] a re-run that keeps the same root-equivalent Docker keeps its recorded acceptance
+  if (!accept && docker === current.docker && current.acceptRootEquivalent && docker === 'host')
+    accept = true;
+  if (found === 'shared' && socket && docker === 'shared')
+    say(`A rootless Docker daemon of another user is running (${socket}).`);
+  if (docker === 'host' && mac) say(MAC_DOCKER_WARNING);
   if (docker === 'rootless' && (mac || !posix))
     throw new SetupError(
       'rootless Docker is a Linux set-up: on a Mac use Docker Desktop (--docker host), or none',
@@ -295,7 +279,7 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
         const cmds = [adminCmd(['user', 'create']), adminCmd(['service', 'install'])];
         say('As an administrator, run:');
         for (const c of cmds) say(`  ${c}`);
-        say(`Then run setup as that user:  sudo -u ${DEDICATED_USER} -H guildwise-runner setup`);
+        say(`Then run setup as that user:  ${dedicatedSetupCommand(deps.platform, instance)}`);
         return { policy: null, adminCommands: cmds, exitCode: 3, wrote: false };
       }
       accept = await typed(
@@ -334,35 +318,8 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
     );
   } else if (current.docker !== 'none') admin.push(adminCmd(['docker', 'none', ...userArg]));
 
-  // ---- 5. deploy defaults [R20 step 5]
-  next.deploy =
-    opts.deploy ?? (p ? await p.choose('Deploys', ['ask', 'off'] as const, current.deploy) : 'ask');
-  next.deployPinCommit =
-    opts.deployPinCommit ??
-    (p
-      ? await p.confirm(
-          'Bind approved redeploys to the commit too, so every new commit asks again (otherwise anyone who can push to the deployed branch gets code run at the next redeploy)?',
-          current.deployPinCommit,
-        )
-      : current.deployPinCommit);
-  if (p) {
-    const known = Object.keys(current.installScripts);
-    if (known.length > 0) say(`Repositories whose installs may run their scripts: ${known.join(', ')}`);
-    const t = (
-      await p.text(
-        'Repositories whose installs may run their scripts (URLs separated by commas; empty keeps the list, "none" clears it):',
-      )
-    ).trim();
-    if (t === 'none') next.installScripts = {};
-    else if (t)
-      next.installScripts = Object.fromEntries(
-        t
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean)
-          .map((u) => [u, true as const]),
-      );
-  }
+  // ---- 5. deploy defaults [R20 step 5]: the mode is item 4 of the screen; pinning to the commit keeps its flag
+  next.deployPinCommit = opts.deployPinCommit ?? current.deployPinCommit;
   if (opts.allowUnsignedFrom) next.allowUnsignedUpdatesFrom = opts.allowUnsignedFrom;
   else if (p && current.allowUnsignedUpdatesFrom.length > 0) {
     const keep: string[] = [];
@@ -393,6 +350,7 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
   say(
     `  DevOps for       ${Object.keys(written.devops.agents).map(orgName).join(', ') || 'no organization'}`,
   );
+  say(`  website tasks    ${written.devopsRequests === 'ask' ? 'ask me first' : 'start without asking'}`);
   say(
     `  Docker           ${written.docker}${written.acceptRootEquivalent ? ' (root-equivalence accepted)' : ''}`,
   );
@@ -403,6 +361,23 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
   if (written.allowUnsignedUpdatesFrom.length > 0)
     say(`  unsigned updates from ${written.allowUnsignedUpdatesFrom.join(', ')}`);
   say('  start-up refusal on (a root-equivalent runner user refuses to start unless accepted)');
+  // item 6: yt-dlp in the runner's own folder (never system-wide) [S5]
+  if (choices.ytdlp) {
+    if (deps.installExtra) {
+      const r = await deps.installExtra('yt-dlp').catch((err: unknown) => ({
+        ok: false,
+        detail: err instanceof Error ? err.message : String(err),
+      }));
+      say(
+        r.ok
+          ? `  video transcripts yt-dlp installed in the runner's own folder (${r.detail})`
+          : `  video transcripts yt-dlp not installed: ${r.detail}. Later: ${localCli({ username: deps.username, home: deps.home })} extras install yt-dlp`,
+      );
+    } else
+      say(
+        `  video transcripts run later: ${localCli({ username: deps.username, home: deps.home })} extras install yt-dlp`,
+      );
+  } else say('  video transcripts off (yt-dlp not installed)');
   if (admin.length > 0) {
     say('');
     say('Finish the root part as an administrator:');

@@ -3,11 +3,13 @@ import {
   RunnerEnrollRequestSchema,
   RunnerPairRequestSchema,
   RunnerPairResponseSchema,
+  type SetupOffersWire,
   type SignedReleaseProof,
 } from '@aom/shared';
 import { loadConfig, saveConfig } from './config.ts';
-import { addPairing, entryConfigPath, loadIndex, normalizeServerUrl } from './pairings.ts';
+import { addPairing, entryConfigPath, entryDir, loadIndex, normalizeServerUrl } from './pairings.ts';
 import { resolveDataDir } from './paths.ts';
+import { writeOffers } from './setup/offers.ts';
 import { currentReleaseProof } from './update/proof.ts';
 import { RUNNER_VERSION } from './version.ts';
 
@@ -66,7 +68,7 @@ export async function preparePairing(opts: UpOptions): Promise<UpResult> {
       throw new Error(
         'Not paired yet: give the server with --server or GUILDWISE_SERVER (and a pairing code).',
       );
-    let paired: { workstationId: string; runnerToken: string };
+    let paired: { workstationId: string; runnerToken: string; setupOffers?: SetupOffersWire };
     if (code) {
       const body = RunnerPairRequestSchema.parse({
         code,
@@ -103,6 +105,12 @@ export async function preparePairing(opts: UpOptions): Promise<UpResult> {
     });
     index = loadIndex(root);
     entry = index.pairings.find((p) => p.serverUrl === server && p.workstationId === paired.workstationId);
+    if (entry && paired.setupOffers)
+      try {
+        writeOffers(entryDir(root, entry), paired.setupOffers);
+      } catch {
+        // the next welcome brings them again
+      }
   }
   if (!entry) throw new Error('pairing was written but could not be found again');
 
@@ -131,7 +139,7 @@ async function post(
   f: typeof fetch,
   url: string,
   body: unknown,
-): Promise<{ workstationId: string; runnerToken: string }> {
+): Promise<{ workstationId: string; runnerToken: string; setupOffers?: SetupOffersWire }> {
   const res = await f(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

@@ -135,6 +135,9 @@ describe('DevOps request queue', () => {
     });
     const start = await nextDevopsShift(from);
     expect(start.agent.isDevops).toBe(true);
+    // the runner matches its local DevOps grant by organization: the shift must name it (found recording the videos)
+    const org = (await q('SELECT org_id FROM agents WHERE id=$1', [start.agent.agentId]))[0]?.org_id;
+    expect(start.orgId).toBe(org);
     expect(start.worktree).toBeNull();
     expect(start.devops).toMatchObject({
       requestId: created.request.id,

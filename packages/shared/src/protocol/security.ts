@@ -1,5 +1,12 @@
 import { z } from 'zod';
-import { PASSKEY_APPROVABLE_KINDS, PasskeyAlgSchema } from '../security/index.ts';
+import {
+  LOCAL_STEP_KINDS,
+  localCliOk,
+  localCommandOk,
+  PASSKEY_APPROVABLE_KINDS,
+  PasskeyAlgSchema,
+  urlHasPassword,
+} from '../security/index.ts';
 
 /**
  * Runner protocol pieces of the 1.10.0 hardening (R18-S, R22, R30). Fixed here so the runner (W8) and the server (W12,
@@ -9,6 +16,8 @@ import { PASSKEY_APPROVABLE_KINDS, PasskeyAlgSchema } from '../security/index.ts
 const B64Url = z.string().regex(/^[A-Za-z0-9_-]+$/);
 const Sha256Hex = z.string().regex(/^[0-9a-f]{64}$/);
 const KeyId = z.string().regex(/^[0-9A-F]{16}$/);
+/** A copy-paste command; anything outside the shared grammar is dropped to undefined [S3]. */
+const LocalCommandField = z.string().max(900).refine(localCommandOk).optional().catch(undefined);
 
 // ---------------------------------------------------------------- held items (runner -> server)
 
@@ -42,11 +51,97 @@ export const HeldItemSchema = z.object({
       credentialIds: z.array(B64Url.max(1024)).max(20),
     })
     .optional(),
+  /**
+   * easy-runner-setup: the exact copy-paste command that approves it on the machine (`<cli> approve <id>`), rendered by
+   * the runner. Dropped (not refused) when it fails the shared grammar, so the item itself still arrives.
+   */
+  command: LocalCommandField,
+  /** The shift this item belongs to, so the card that waits can show the command. */
+  shiftId: z.uuid().optional().catch(undefined),
 });
 export type HeldItem = z.infer<typeof HeldItemSchema>;
 
-/** Runner -> server: the full list of items held right now (replaces the previous list; not acked). */
-export const ApprovalsHeldPayloadSchema = z.object({ items: z.array(HeldItemSchema).max(200) });
+/** A local step that is not a held item (a DevOps grant, install scripts, setup, ...): what to paste on the machine. */
+export const LocalStepSchema = z.object({
+  /** Stable per step (`devops.grant:<org>`), so the notice is replaced, not duplicated. */
+  key: z.string().min(1).max(200),
+  kind: z.enum(LOCAL_STEP_KINDS),
+  summary: z.string().max(300),
+  command: z.string().max(900).refine(localCommandOk, 'not a local command'),
+  shiftId: z.uuid().optional().catch(undefined),
+});
+export type LocalStep = z.infer<typeof LocalStepSchema>;
+
+/**
+ * Runner -> server: the full list of items held right now (replaces the previous list; not acked). `steps` (additive):
+ * the local steps waiting on the machine; an invalid step is dropped, never the whole message.
+ */
+export const ApprovalsHeldPayloadSchema = z.object({
+  items: z.array(HeldItemSchema).max(200),
+  steps: z
+    .array(z.unknown())
+    .max(100)
+    .optional()
+    .transform((v) =>
+      v === undefined
+        ? undefined
+        : v.flatMap((s) => {
+            const r = LocalStepSchema.safeParse(s);
+            return r.success ? [r.data] : [];
+          }),
+    ),
+});
+export type ApprovalsHeldPayload = z.infer<typeof ApprovalsHeldPayloadSchema>;
+
+// ---------------------------------------------------------------- setup offers (server -> runner, easy-runner-setup)
+
+/** A name from the server shown in a terminal or page: plain text, no control characters (ANSI escapes included) [S2]. */
+export const PlainNameSchema = z
+  .string()
+  .regex(/^[^\p{Cc}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]{1,200}$/u, 'no control characters');
+
+/**
+ * What the server offers for the installer's one screen (`guildwise-runner setup`): the organisations this workstation
+ * works for, the role the server says the user has, its DevOps helper here, and the repositories of their projects. The
+ * runner writes it to `setup-offers.json`; nothing in it is granted without a local yes (every item defaults to No).
+ */
+export const SetupOffersWireSchema = z.object({
+  orgs: z
+    .array(
+      z.object({
+        orgId: z.uuid(),
+        orgName: PlainNameSchema,
+        role: z.string().regex(/^[^\p{Cc}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]{1,40}$/u),
+        devopsAgentId: z.uuid().optional(),
+        devopsAgentName: PlainNameSchema.optional(),
+      }),
+    )
+    .max(500),
+  repos: z
+    .array(
+      z.object({
+        url: z
+          .string()
+          .min(1)
+          .max(500)
+          .regex(/^[^\p{Cc}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069\s]+$/u)
+          // never a password in an address the runner stores or shows (zero known vulnerabilities)
+          .refine((u) => !urlHasPassword(u), 'an address with a password'),
+        name: PlainNameSchema,
+      }),
+    )
+    .max(500)
+    .default([]),
+});
+export type SetupOffersWire = z.infer<typeof SetupOffersWireSchema>;
+
+/** `hello.local` (additive): how this runner's local commands start, and its approvals page port or why it did not start. */
+export const HelloLocalSchema = z.object({
+  cli: z.string().max(400).refine(localCliOk, 'not a local CLI'),
+  windowPort: z.number().int().min(1024).max(65535).optional(),
+  windowError: z.string().max(200).optional(),
+});
+export type HelloLocal = z.infer<typeof HelloLocalSchema>;
 
 // ---------------------------------------------------------------- passkeys (server -> runner commands, R22)
 

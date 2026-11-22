@@ -27,7 +27,7 @@ The link works for 30 minutes. The script embeds the server URL, a fresh **singl
 2. asks for administrator rights once ("Administrator rights (once)") and installs the baseline with the package manager (see "Installer flags" under Local permissions); git older than 2.40 (Ubuntu 22.04, Debian 12) is replaced by the git-core PPA build or, on Debian, a pinned and checksummed git compiled into `~/.local`;
 3. uses Node 22 if present, otherwise installs it with nvm;
 4. installs Claude Code (`npm install -g @anthropic-ai/claude-code`);
-5. optionally installs yt-dlp (asks, default yes); Docker for the runner is set up later, rootless by default ("Docker for the runner");
+5. yt-dlp is installed later by `guildwise-runner setup` (item 6 of the one screen, default yes), as the runner user in the runner's own folder; Docker for the runner is set up later, rootless by default ("Docker for the runner");
 6. downloads `aom-runner-<version>.tgz` from the app, verifies its sha256 against the value embedded in the script and unpacks it to `~/.local/share/guildwise/runner/<version>` (`current` points at the active version; `~/.local/bin/aom-runner` and `aom` link to it);
 7. pairs (`guildwise-runner pair`) with the workstation the one-time code belongs to. A machine that already has a runner (any server or organization) keeps it: the installer upgrades it only if the server offers a newer version, and the new code pairs it with the new workstation instead of failing or installing a second copy; a code that was already used (the same command run again) is reported and the existing pairing stays;
 8. asks which folders hold your code (suggests `~/src`) and runs `guildwise-runner repos add` for each;
@@ -37,7 +37,7 @@ The link works for 30 minutes. The script embeds the server URL, a fresh **singl
 **1.10.0 changes to the install** (the numbering above is the older flow; the installer now adds these steps).
 
 - **First: "Looking for an older runner".** The installer detects a runner from before Guildwise 1.10.0: `~/.local/share/guildwise/runner`, `~/.aom-runner` (or `AOM_RUNNER_HOME`), `~/.config/aom-runner`, `~/.local/bin/guildwise-runner` and `aom-runner`, the systemd user unit `aom-runner`, the macOS LaunchAgent `com.guildwisehq.runner`, Windows scheduled tasks, the same inside the default WSL distribution, and running processes. It stops them and **quarantines** them (the default) into one tar under `~/.guildwise-quarantine/<UTC timestamp>/` (folder mode 700, files 600, execute bits stripped, with a `MANIFEST.txt` of paths, sizes and sha256), or deletes them with `--legacy remove`. Nothing is read, copied or reused: no token, key, sealed sudo password, policy or clone. It prints where the quarantine is and that it may be deleted after review. If sudo was granted to an old runner, change that user's password: the old runner's sealed sudo password may be known (1.10.0 has no sudo for the runner at all).
-- **Then: "Setting local permissions".** After the package is installed and verified, the installer runs `guildwise-runner setup` (below), then pairs. Scripted installs pass flags through: `--runner-user dedicated|current`, `--devops-orgs`, `--docker rootless|host|shared|none`, `--skip-baseline`, `--yes`, `--accept-root-equivalent`, `--legacy quarantine|remove`, `--instance <name>` (a named runner; see "Two runners on one machine"). Answers never come from the server.
+- **Then: the one screen of choices.** After the package is installed and verified, the installer runs `guildwise-runner setup` (below), then pairs. Scripted installs pass flags through: `--runner-user dedicated|current`, `--devops-orgs none|<names or ids>`, `--devops-requests ask|auto`, `--allow-scripts <repos>`, `--with-ytdlp|--no-ytdlp`, `--docker rootless|host|shared|none`, `--skip-baseline`, `--yes`, `--accept-root-equivalent`, `--legacy quarantine|remove`, `--instance <name>` (a named runner; see "Two runners on one machine"). Answers never come from the server.
 - **Offline: `--from-file`.** Install from a package you downloaded and verified yourself. The installer script is otherwise served by the server (trust on first use).
 - The installer keeps `manifest.json` and `manifest.json.minisig` beside the runner; the runner sends that proof at pairing and hello.
 - The macOS dedicated user and the Windows dedicated WSL distribution are not yet tested on hardware.
@@ -858,11 +858,65 @@ The DevOps engineer installs stack tools as the runner user, in the runner's own
 | `--accept-root-equivalent` | with `--docker host` |
 | `--docker-socket <path>`, `--accept-shared-daemon` | with `--docker shared` |
 | `--skip-baseline` | install no packages (hosts that manage their own); missing core tools stop the install, the rest warn |
-| `--devops-orgs`, `--deploy`, `--deploy-pin-commit`, `--allow-unsigned-from`, `--from-file`, `--ca-file`, `--instance`, `--legacy`, `--choose-folders` | as before |
+| `--devops-orgs none\|<name-or-id,...>` | organizations whose DevOps helper may work here. Names are checked against the server's offers; `owned`, `all` and `any` are refused |
+| `--devops-requests ask\|auto` | item 2: `ask` (default) holds website-started DevOps tasks for a local yes; `auto` lets them start |
+| `--allow-scripts <repo,...>` | item 5: repositories (URL or name) whose install scripts may run outside the sandbox |
+| `--with-ytdlp`, `--no-ytdlp` | item 6: install yt-dlp (default yes) or not. Env: `GUILDWISE_WITH_YTDLP=1\|0` |
+| `--wsl-distro-name <name>` | Windows: the WSL distribution the Linux installer runs in (letters, digits, `.`, `_`, `-`) |
+| `--deploy`, `--deploy-pin-commit`, `--allow-unsigned-from`, `--from-file`, `--ca-file`, `--instance`, `--legacy`, `--choose-folders` | as before |
 
 Each also reads a `GUILDWISE_*` variable (`GUILDWISE_DOCKER`, `GUILDWISE_SKIP_BASELINE`, ...). Removed in 1.10.0, and refused: `--sudo`, `--sudo-password-stdin`, `--approve-app`, `--docker narrow|group`.
 
 The installer asks for administrator rights once ("Administrator rights (once)": one `sudo -v`, kept alive until it exits, then only `sudo -n`; on a host whose sudo keeps no timestamp it asks you to run it as root) and installs a baseline in that authorization: build tools (build-essential or gcc/make), git, curl, unzip, zip, xz, bzip2, jq, socat, bubblewrap, python3, openssh client, the Chromium libraries Playwright needs, fonts, and the rootless Docker prerequisites (`uidmap`, `dbus-user-session`, `iptables`, `slirp4netns`) for apt, dnf or pacman; on a Mac the Xcode Command Line Tools. Headless Chromium is downloaded by the runner itself (`guildwise-runner pdf-renderer install`). Only missing packages are installed, so a re-run is quick. The macOS and WSL paths are unit-tested but not yet tested on hardware.
+
+### The one screen of choices
+
+`guildwise-runner setup` shows one screen, by name, and writes `policy.json` in the same run. The safe answer is filled in; Enter accepts, a typed number (`1a`, `2`..`6`) changes one line.
+
+| Item | Question | Safe default |
+|---|---|---|
+| 1a, 1b... | DevOps helper of each offered organization may work outside the sandbox | No (an organization with no helper shows `no helper yet`) |
+| 2 | website-started DevOps tasks | Ask me first |
+| 3 | Docker | Its own private Docker (`host` needs `root-equivalent`, `shared` needs `shared-daemon`) |
+| 4 | publishing | Ask me first (or never) |
+| 5a... | install scripts per offered repository | No |
+| 6 | yt-dlp | Yes |
+
+Items 1 and 5 are left out when nothing is offered. Names come from the server as plain text; control characters are refused. `--yes` alone gives the defaults.
+
+### yt-dlp
+
+yt-dlp is installed as the runner user, in the runner's own toolchains folder (`<runner home>/.local/share/guildwise/toolchains/`, linked as `bin/yt-dlp`), from a pinned release checked against a pinned sha256. The runner and `doctor` use only that copy, never one found on `PATH`. Install or update it later:
+
+```sh
+guildwise-runner extras install yt-dlp
+```
+
+### Copy-paste commands
+
+Every held item and local step arrives with the exact command, rendered by the runner. The website and the Desk show one sentence, the command and a Copy button, and the runner log prints the same. The command starts with `sudo -u guildwise-runner[-<instance>] -H <path>/guildwise-runner` (on Windows `wsl -d <distro> -u <runner user> -- <path>/guildwise-runner`, or without `-u` when the runner runs as your own Linux user), or the bare path. The web checks every command against a strict grammar before showing it and never approves anything itself. Steps are raised for a DevOps grant, setup not run yet, a passkey to trust and an unapproved release formatter. Install scripts have none: an install without the grant runs without its scripts rather than stopping, so there is nothing waiting; allow them on the installer screen (item 5) or the Approvals page.
+
+### Approvals on this computer
+
+Each runner serves a local page for its instance (`guildwise-runner approvals ...` manages it). See the user guide, section 3.4c, for the page.
+
+```sh
+guildwise-runner approvals pair <code>           # pair the browser that shows <code> (needs a terminal; asks "yes")
+guildwise-runner approvals devices               # the page address and the paired browsers (fingerprints)
+guildwise-runner approvals forget <fingerprint>  # or --all: unpair a browser
+guildwise-runner approvals port <new>            # move the page (1024-65535); forgets every browser
+```
+
+Security in brief:
+
+- It listens on `127.0.0.1` (and `[::1]`) only. The first start picks a free port in 47600-47699 and stores it in `~/.config/aom-runner/window/port`; it is never re-picked.
+- Fail closed: if the port is taken the page does not start, the runner log says `approvals page not started: another program uses port N`, the Desk shows a notice and the commands keep working. `approvals port <new>` forgets all paired browsers first, then pair again.
+- Every request must have `Host: 127.0.0.1:<port>`; changes also need a matching `Origin`, same-origin and JSON. No CORS headers, no inline script, no external files.
+- Pairing: the browser makes a key that cannot be exported (stored in the browser), the page shows a code and fingerprint, and `approvals pair <code>` on a terminal as the runner user moves the public key into `window/devices.json`. The code is not secret.
+- Each visit signs a single-use challenge. The session token lives in runner memory only, lasts 30 minutes idle and ends when the runner restarts.
+- The page may change only a fixed allowlist (held approve/deny one at a time, DevOps grants, `devopsRequests`, install scripts, deploy mode and pins, formatter pin, passkey trust, vault remotes). Docker mode, root-equivalent, unsigned updates, signing keys, CEO full power, registries and the runner user stay terminal-only and are shown with their command.
+- Every change is a JSON line in `window/audit.log` (mode 600).
+- The header shows the instance and server; a named instance other than `prod` gets a warning-coloured band.
 
 ### Held items
 

@@ -170,7 +170,17 @@ describe('the runner with the real local authority', () => {
     h.server.send('command', {
       commandId: 'c-nohold',
       command: 'vault.configure',
-      payload: { vaultId: 'v' },
+      payload: {
+        vaults: [
+          {
+            vaultId: 'v',
+            kind: 'org_knowledge',
+            name: 'V',
+            remoteUrl: 'https://git.example/v.git',
+            syncIntervalSec: 60,
+          },
+        ],
+      },
     });
     const res = await h.server.waitFor('command.result', (m) => m.commandId === 'c-nohold');
     expect(res).toMatchObject({ ok: false, error: expect.stringMatching(/could not hold the command/) });
@@ -262,5 +272,49 @@ describe('the runner with the real local authority', () => {
     const hello = server.of('hello')[0];
     expect(hello?.startupRefused).toMatch(/docker group/);
     expect(hello?.repos).toEqual([]);
+  });
+});
+
+describe('easy-runner-setup: hello.local and the copy-paste commands', () => {
+  it('hello names the CLI and the approvals page; held items carry their command; setup pending is a step', async () => {
+    const a = realAuthority(false);
+    h = await startHarness(
+      {},
+      { authority: a.authority, policyDir: a.dir, approvalsPollMs: 50, windowState: () => ({ port: 47613 }) },
+    );
+    const hello = h.server.of('hello')[0];
+    expect(hello?.local?.windowPort).toBe(47613);
+    expect(hello?.local?.cli).toMatch(/guildwise-runner$/);
+    const held = await h.server.waitFor('approvals.held', (m) =>
+      (m.steps ?? []).some((s) => s.kind === 'setup'),
+    );
+    expect(held.steps?.find((s) => s.kind === 'setup')?.command).toBe(`${hello?.local?.cli} setup`);
+  });
+
+  it('WSL: the distro setup stored (runnerUser.wslDistro) starts every command with wsl -d [B3]', async () => {
+    const a = realAuthority();
+    a.store.write({
+      ...a.store.get(),
+      runnerUser: { mode: 'current', name: 'x', wslDistro: 'guildwise-runner' },
+    });
+    h = await startHarness({}, { authority: a.authority, policyDir: a.dir });
+    expect(h.server.of('hello')[0]?.local?.cli).toMatch(
+      /^wsl -d guildwise-runner (-u guildwise-runner(-[a-z0-9-]+)? )?-- \//,
+    );
+  });
+
+  it('a taken port is reported as windowError, never as a port', async () => {
+    const a = realAuthority();
+    h = await startHarness(
+      {},
+      {
+        authority: a.authority,
+        policyDir: a.dir,
+        windowState: () => ({ port: 47613, error: 'another program uses port 47613' }),
+      },
+    );
+    const hello = h.server.of('hello')[0];
+    expect(hello?.local?.windowPort).toBeUndefined();
+    expect(hello?.local?.windowError).toBe('another program uses port 47613');
   });
 });

@@ -19,6 +19,18 @@ import { PasskeyStore } from '../src/policy/passkey-store.ts';
 import { PolicyStore } from '../src/policy/store.ts';
 import { FIXTURES } from './minisign-helper.ts';
 
+/** A vault set-up with a new online location: still held (easy-runner-setup narrows only known and local ones). */
+const GIT_VAULT = {
+  vaults: [
+    {
+      vaultId: 'v',
+      kind: 'org_knowledge',
+      name: 'V',
+      remoteUrl: 'https://git.example/v.git',
+      syncIntervalSec: 60,
+    },
+  ],
+};
 const quiet = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 const ORG = '0190a000-0000-7000-8000-000000000001';
 const AGENT = '0190a000-0000-7000-8000-000000000002';
@@ -89,7 +101,7 @@ describe('held items and `guildwise-runner approve|deny` (R18-S)', () => {
 
   it('held files are mode 600 and only the CLI decision makes them run', async () => {
     const t = env();
-    const d = gateCommand(t.store.get(), 'vault.configure', { vaultId: 'v' });
+    const d = gateCommand(t.store.get(), 'vault.configure', GIT_VAULT);
     if (d.action !== 'hold') throw new Error('expected hold');
     const r = t.approvals.hold({ decision: d, replay: { type: 'command', body: {} } });
     expect(statSync(join(t.held.dir, `${r.id}.json`)).mode & 0o777).toBe(0o600);
@@ -97,7 +109,7 @@ describe('held items and `guildwise-runner approve|deny` (R18-S)', () => {
 
   it('deny and expiry tell the server it will not run', async () => {
     const t = env();
-    const d = gateCommand(t.store.get(), 'vault.configure', { vaultId: 'v' });
+    const d = gateCommand(t.store.get(), 'vault.configure', GIT_VAULT);
     if (d.action !== 'hold') throw new Error('expected hold');
     const a = t.approvals.hold({ decision: d, commandId: 'a', replay: { type: 'command', body: {} } });
     deny(t.cli, a.id);
@@ -115,7 +127,7 @@ describe('held items and `guildwise-runner approve|deny` (R18-S)', () => {
 
   it('approve refuses without a terminal, on a typed "no", and while setup is pending', async () => {
     const t = env();
-    const d = gateCommand(t.store.get(), 'vault.configure', { vaultId: 'v' });
+    const d = gateCommand(t.store.get(), 'vault.configure', GIT_VAULT);
     if (d.action !== 'hold') throw new Error('expected hold');
     const r = t.approvals.hold({ decision: d, replay: { type: 'command', body: {} } });
     const { ask: _ask, ...noTty } = t.cli;

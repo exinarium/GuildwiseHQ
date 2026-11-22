@@ -211,12 +211,20 @@ import { type RunnerPaths, runnerPaths } from './paths.ts';
 import { Approvals } from './policy/approvals.ts';
 import { defaultAuthority, type LocalAuthority } from './policy/authority.ts';
 import { ApprovedBundles, describeBundle } from './policy/deploy-detail.ts';
-import { gateCommand, gateDevopsShift, localEnvEnsure, narrowAccess, setupPending } from './policy/gate.ts';
+import {
+  gateCommand,
+  gateDevopsShift,
+  localEnvEnsure,
+  narrowAccess,
+  rememberVaultRemotes,
+  setupPending,
+} from './policy/gate.ts';
 import { type HeldRecord, HeldStore } from './policy/held.ts';
+import { runnerCli } from './policy/local-command.ts';
 import { PasskeyStore } from './policy/passkey-store.ts';
-import { recordSetupOffer } from './policy/setup-offers.ts';
+import { readSetupOffers, recordSetupOffer, writeOffers } from './policy/setup-offers.ts';
 import type { StartupDecision } from './policy/startup.ts';
-import { NarrowingStore, policyDir } from './policy/store.ts';
+import { NarrowingStore, PolicyStore, policyDir } from './policy/store.ts';
 import { forbiddenReadPath } from './read-repos.ts';
 import { RelayDispatcher } from './relay/dispatch.ts';
 import { FileRelaySink, genericHandler } from './relay/generic.ts';
@@ -259,6 +267,8 @@ import { VaultManager } from './vaults/manager.ts';
 import { RUNNER_VERSION } from './version.ts';
 
 export interface RunnerOptions {
+  /** easy-runner-setup: the approvals page of this process (its port, or why it did not start). */
+  windowState?: () => { port?: number; error?: string } | undefined;
   config: RunnerConfig;
   dataDir: string;
   log?: Logger;
@@ -522,6 +532,21 @@ export class Runner {
   /** R18-S: policy.json and the local actions; held items and their approvals. */
   readonly authority: LocalAuthority;
   readonly approvals: Approvals;
+  /** easy-runner-setup: the approvals page on this computer (its port, or why it did not start). */
+  get windowState(): { port?: number; error?: string } | undefined {
+    return this.opts.windowState?.();
+  }
+  /** Shifts running now, for the approvals page (ids and start times only). */
+  runningShifts(): Array<{ shiftId: string; startedAt: string }> {
+    return this.supervisor.activeShifts().map((s) => ({ shiftId: s.shiftId, startedAt: s.startedAt }));
+  }
+  private cliText?: string;
+
+  /** The CLI part of every copy-paste command (`sudo -u <user> -H <home>/.local/bin/guildwise-runner`, ...). */
+  localCliText(): string {
+    if (this.cliText === undefined) this.cliText = runnerCli(this.authority?.policy());
+    return this.cliText;
+  }
   private readonly narrowing: NarrowingStore;
   private readonly artefacts: ArtefactIndex;
   private readonly approvedBundles: ApprovedBundles;
@@ -562,6 +587,9 @@ export class Runner {
       refuse: (r, reason) => this.refuseHeld(r, reason),
       log: this.log,
       ...(opts.approvalsPollMs ? { pollMs: opts.approvalsPollMs } : {}),
+      // easy-runner-setup: every held item and local step carries the exact copy-paste command
+      cli: this.localCliText(),
+      windowPort: () => (this.windowState?.error ? undefined : this.windowState?.port),
     });
     // the app repositories of this root survive a restart: a registry entry only ever refuses a push
     appRepos.persist(this.paths.root);
@@ -864,6 +892,7 @@ export class Runner {
       ...(opts.runTiming ? { timing: opts.runTiming } : {}),
     });
     this.supervisor = new ShiftSupervisor({
+      windowPort: () => this.windowState?.port,
       capabilities: this.capabilities,
       onProjectCapabilities: (projectId, r) => {
         if (this.serverFeatures.has(PACKS_CAPABILITY))
@@ -1097,6 +1126,21 @@ export class Runner {
         return;
       }
       if (this.onWelcomeSecurity(w.requireSignedRunners === true)) return;
+      // easy-runner-setup: a runner that never ran setup says so with the exact command
+      if (setupPending(this.authority.policy()))
+        this.approvals.needStep({
+          key: 'setup',
+          kind: 'setup',
+          summary: 'finish the first-time questions on this computer',
+          verb: 'setup',
+        });
+      // easy-runner-setup: refresh the names `guildwise-runner setup` and the approvals page show
+      if (w.setupOffers)
+        try {
+          writeOffers(this.paths.root, w.setupOffers);
+        } catch (err) {
+          this.log.warn(`could not keep the setup offers: ${String(err)}`);
+        }
       this.serverFeatures = new Set(w.features ?? []);
       // Also with nothing to serve: the server then drops whatever an earlier connection of this runner announced.
       this.announceRelay();
@@ -1868,6 +1912,12 @@ export class Runner {
       ...(proof ? { release: proof } : {}),
       // always sent (true or false): the server then knows grants are held locally (W7 `localAuthority`)
       setupPending: setupPending(this.authority.policy()),
+      // easy-runner-setup: how this runner's copy-paste commands start, and its approvals page (or why it did not start)
+      local: {
+        cli: this.localCliText(),
+        ...(this.windowState?.port && !this.windowState.error ? { windowPort: this.windowState.port } : {}),
+        ...(this.windowState?.error ? { windowError: this.windowState.error.slice(0, 200) } : {}),
+      },
       runnerVersion: RUNNER_VERSION,
       protocol: 1,
       platform: platform(),
@@ -2611,6 +2661,18 @@ export class Runner {
     );
     if (d.action === 'refuse') {
       // what the server offers becomes a suggestion for `guildwise-runner setup` (W9), never a grant
+      // easy-runner-setup: the exact command that gives this grant, by name in the summary
+      if (orgId && msg.agent.agentId && /^[0-9a-f-]{36}$/i.test(orgId)) {
+        const offer = readSetupOffers(this.paths.root).find((o) => o.orgId === orgId);
+        this.approvals.needStep({
+          key: `devops.grant:${orgId}`,
+          kind: 'devops.grant',
+          summary: `let ${offer?.orgName ?? 'this organisation'}'s DevOps helper "${msg.agent.name}" work on this computer`,
+          verb: 'devops grant',
+          args: [orgId, '--agent', msg.agent.agentId],
+          shiftId: msg.shiftId,
+        });
+      }
       if (orgId)
         try {
           recordSetupOffer(this.paths.root, {
@@ -2696,6 +2758,13 @@ export class Runner {
       payload: Record<string, unknown>;
       artefactPath?: string | null;
     };
+    // easy-runner-setup: an approved vault set-up remembers its online locations (the same set-up then runs unattended)
+    if (b.command === 'vault.configure' && r.decidedBy === 'local')
+      try {
+        new PolicyStore(this.opts.policyDir ?? policyDir()).update((p) => rememberVaultRemotes(p, b.payload));
+      } catch (err) {
+        this.log.warn(`could not remember the approved vault locations: ${String(err)}`);
+      }
     if (b.command === 'release.sign' && r.signature) {
       // signed at the keyboard by `guildwise-runner approve` (a passphrase key signs only there)
       const p = ReleaseSignPayloadSchema.parse(b.payload);
@@ -2868,10 +2937,20 @@ export class Runner {
       } else if (command === 'release.sign') {
         done(true, await this.releaseSign(payload));
       } else if (command === 'passkey.offer') {
-        this.approvals.onPasskeyOffer(PasskeyOfferPayloadSchema.parse(payload));
+        const offer = PasskeyOfferPayloadSchema.parse(payload);
+        this.approvals.onPasskeyOffer(offer);
+        this.approvals.needStep({
+          key: `passkey.trust:${offer.credentialId.slice(0, 64)}`,
+          kind: 'passkey.trust',
+          summary: `trust your passkey "${offer.name}" for routine approvals`,
+          verb: 'passkey trust',
+          args: [offer.credentialId.slice(0, 64)],
+        });
         done(true, { pending: true });
       } else if (command === 'passkey.withdraw') {
-        this.approvals.onPasskeyWithdraw(PasskeyWithdrawPayloadSchema.parse(payload).credentialId);
+        const withdrawn = PasskeyWithdrawPayloadSchema.parse(payload).credentialId;
+        this.approvals.onPasskeyWithdraw(withdrawn);
+        this.approvals.clearStep(`passkey.trust:${withdrawn.slice(0, 64)}`);
         done(true, {});
       } else if (command === 'approval.passkey') {
         const r = await this.approvals.onPasskeyAssertion(ApprovalPasskeyPayloadSchema.parse(payload));
@@ -3163,6 +3242,15 @@ export class Runner {
               },
               toolPathDirs: toolchainPathDirs(this.toolchains.resolve().pathDirs, process.env.PATH),
               formatterPinned: (hash) => this.authority.policy().formatterPins.includes(hash),
+              // easy-runner-setup: the unapproved formatter becomes a local step with its copy-paste command
+              onUnpinnedFormatter: (hash) =>
+                this.approvals.needStep({
+                  key: `formatter.pin:${hash}`,
+                  kind: 'formatter.pin',
+                  summary: `approve the release formatting settings of ${p.projectName}`,
+                  verb: 'formatter pin',
+                  args: [hash],
+                }),
             })
           : {
               ok: false,

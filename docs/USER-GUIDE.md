@@ -31,6 +31,7 @@ This guide is for people who have never worked with AI agents before. You do not
   - [3.4 Add a workstation (5 minutes)](#34-add-a-workstation-5-minutes)
   - [3.4a Connect your integrations](#34a-connect-your-integrations)
   - [3.4b Add a GitHub App for your organization](#34b-add-a-github-app-for-your-organization)
+  - [3.4c Approvals on this computer](#34c-approvals-on-this-computer)
   - [3.5 Hire your first agents (2 minutes)](#35-hire-your-first-agents-2-minutes)
   - [3.6 Create your first project (1 minute)](#36-create-your-first-project-1-minute)
   - [3.7 Create your first card (2 minutes)](#37-create-your-first-card-2-minutes)
@@ -317,7 +318,7 @@ A workstation is the computer where your agents will work. The guided installer 
 3. **Copy the command** with the copy button, or choose **Download the script** if you would like to read it first. The command contains a link that is valid for 30 minutes and a one-time pairing code. It never contains a password.
 4. **Run it on that computer.** Open a terminal (on Windows, PowerShell), paste the command and press Enter. Say yes when it asks for permission. Windows may ask you to restart, possibly more than once (up to twice to turn on WSL2 and once more for Ubuntu). After each restart, sign in: the installer opens again by itself; if it does not, run the command again. WSL2 needs virtualization (Intel VT-x, AMD-V or SVM) turned on in the PC's BIOS/UEFI settings: if it is off, the installer says so at step 2; turn it on, restart and run the installer again. If WSL2 is still not working after that, the installer stops and says what is still off.
 5. **Let it deal with an older runner.** The first thing the installer does is **Looking for an older runner**. If it finds a runner from before Guildwise 1.10.0 (running or not), it stops it and moves its files into a quarantine folder, `~/.guildwise-quarantine/<date and time>/`, with a `MANIFEST.txt` listing what was moved. It never reads or reuses the old token, keys, sudo password, settings or clones. You may delete the folder after a look. If you had given sudo to the old runner, change this user's password now. Use `--legacy remove` to delete the old install instead of quarantining it.
-6. **Answer "Setting local permissions".** The installer then runs `guildwise-runner setup` for you. It asks, in plain words, what this runner may do on this machine (below). Your answers are stored on the computer and never come from the server.
+6. **Look at the one screen of choices.** The installer then runs `guildwise-runner setup` for you. It shows one screen with every choice, named in plain words, and the safe answer is already filled in. Press **Enter** to accept it as it is, or type the number of a line (like `1a`) to change that one line. Your answers are stored on the computer and never come from the server. The text below explains each line.
 7. **Watch the page.** It shows "Waiting for you to run the command", then the installer starting, the computer pairing, and then health checks one by one (Node, git, Claude, the sandbox, Docker, yt-dlp, your repositories, the server), ending with **Ready**.
 
 **Pair with a code.** If you would rather not paste the long command, use **Pair with a code** at the top of the Workstations page (or **Pair with a code** on an empty page, or **Pair it with a code instead** at the bottom of the wizard). Press **Generate pairing code**, then run the command it shows on the machine that will host your agents; the page updates when the runner connects.
@@ -328,20 +329,32 @@ A workstation is the computer where your agents will work. The guided installer 
 
 ![The installer wizard while it works: pairing and health checks](guide/assets/installer-progress.jpg)
 
-The installer asks only what it must: your password once to install system tools, whether you want the optional extras (yt-dlp for transcripts of videos and podcasts; Docker only if your tests run containers), and how Claude should sign in. Your code lives in `~/src`; the installer asks about the folder only in expert mode (Settings) or with `--choose-folders`. It explains the two ways in plain words. Choose **Claude subscription** if you have one: you sign in with your Claude account in a browser. Choose **API key** if you would rather pay for exactly what the agents use.
+The installer asks only what it must: your password once to install system tools, whether you want the optional extras (Docker only if your tests run containers), and how Claude should sign in. The installer also installs yt-dlp, a small tool that lets agents read the transcripts of videos and podcasts. It is one line on the screen of choices (line 6, Yes by default) and goes into the runner's own folder, never into the rest of your computer. Your code lives in `~/src`; the installer asks about the folder only in expert mode (Settings) or with `--choose-folders`. It explains the two ways in plain words. Choose **Claude subscription** if you have one: you sign in with your Claude account in a browser. Choose **API key** if you would rather pay for exactly what the agents use.
 
-**Setting local permissions.** `guildwise-runner setup` can be run again at any time, as your normal user (it refuses to run as root). It asks about:
+**The one screen of choices.** `guildwise-runner setup` can be run again at any time, as the runner's own account: the command, with the right `sudo -u` part, is shown in the app (it refuses to run as root). This is what you will see. The names are your own organizations and projects:
+
+![The installer's one screen of choices, with the safe answers filled in](guide/assets/installer-choices.jpg)
+
+Each line, in plain words. Everything here can be changed later on the Approvals page (section 3.4c), except the Docker line, which needs a terminal.
+
+- **Line 1, DevOps helpers.** A DevOps helper is an agent that installs tools and runs commands on your computer. This line lists each organization of yours that has one, with your role and the helper's name. The answer starts at **No**. Type `1a` and then `y` to let that helper work on this computer, outside the safety box (the protected area where agents normally work). An organization without a helper shows `no helper yet` and cannot be chosen.
+- **Line 2, when the website asks a helper for something.** **Ask me first** (safe) means each task waits for your yes on this computer. The other answer lets them start without asking.
+- **Line 3, Docker.** Docker runs your apps in small isolated boxes for testing. The default is **Its own private Docker**, one for the runner. You can choose **No Docker**. The Docker that is already on the computer gives the runner full control of the computer, so you must type `root-equivalent` to choose it. A rootless Docker of another user can be shared after you type `shared-daemon`; runners that share one can each control the other's containers. On a Mac, when Docker Desktop is found, the line starts at Docker Desktop: pressing Enter shows a warning about the folders it shares and asks you to type `root-equivalent`; anything else gives No Docker.
+- **Line 4, publishing your apps.** **Ask me first**, or **Never from this computer**.
+- **Line 5, install scripts.** Some code projects come with scripts that run when you install them. Each project is listed by name and starts at **No**. They run outside the safety box, so say yes only for projects you trust.
+- **Line 6, video transcripts.** Installs yt-dlp in the runner's own folder (**Yes** by default). If you said No, or it failed, run `guildwise-runner extras install yt-dlp` later on the computer. It downloads one pinned, checked version. It never uses a copy found elsewhere on the computer.
+
+Lines 1 and 5 are left out when the server offers nothing for them. After you press Enter you see a short summary, then the Claude sign-in. `--yes` alone picks the safe answers above.
+
+Other things setup settles for you:
 
 - **The runner's user.** A dedicated `guildwise-runner` user (Linux and macOS) or a dedicated WSL distribution (Windows) is the default, or your own user.
 - **Its own clones.** The runner works only in its own clones of your repositories, under its own home folder, never in your folders. Work reaches you through git.
-- **DevOps.** Which organizations the DevOps engineer may serve on this machine. Each one starts at No; the server's suggestions are only suggestions.
-- **Docker.** By default the runner gets its own **rootless Docker**, one per runner. If Docker is already installed and not rootless, you see "Docker detected, not running in rootless mode" and choose: a separate rootless Docker for the runner (recommended), or the installed Docker, which is the same as root, so you type `root-equivalent`. A rootless Docker of another user that is already running can be shared after you type `shared-daemon`; runners that share a daemon can each control the other's containers. On a Mac it uses Docker Desktop (after a warning about the folders it shares) and waits for you to install it if it is missing.
 - **No sudo.** The runner never gets sudo. The installer asks for your password once and installs a baseline of packages in that one go; the DevOps engineer installs stack tools only in the runner's home, and other system packages are yours to install. Nothing asks for GitHub.
-- **Deploy approval defaults.**
 
-Then it shows a summary. `--yes` picks the safest answers. Some steps need root; setup prints them as `sudo /usr/local/lib/guildwise/guildwise-admin ...` for you to run. Scripted installs use flags such as `--runner-user dedicated|current`, `--docker rootless|host|shared|none`, `--skip-baseline`, `--yes` and `--legacy quarantine|remove` (`docs/RUNNER.md`).
+Some steps need root; setup prints them as `sudo /usr/local/lib/guildwise/guildwise-admin ...` for you to run. Scripted installs use flags such as `--runner-user dedicated|current`, `--devops-orgs none|<names>`, `--devops-requests ask|auto`, `--allow-scripts <projects>`, `--with-ytdlp` or `--no-ytdlp`, `--docker rootless|host|shared|none`, `--skip-baseline`, `--yes` and `--legacy quarantine|remove` (`docs/RUNNER.md`).
 
-<!-- figure needed: installer-local-permissions.jpg - the terminal during "Setting local permissions" showing the questions and the summary -->
+**Your own sign-in stays yours.** The installer asks how the runner's own account signs in to Claude, in the same run. Type `1` for a Claude subscription (you finish in a browser), `2` for an API key, or `s` to do it later.
 
 **Offline install.** If you want to check the package yourself, download it and run the installer with `--from-file`. The installer script itself still comes from your server, so you trust the server the first time.
 
@@ -349,17 +362,21 @@ Then it shows a summary. `--yes` picks the safest answers. Some steps need root;
 
 **The runner refuses to start.** If the runner's user is root-equivalent (root, passwordless sudo, the docker group or the socket of another Docker daemon it can write) or its files can be written by others, and the server requires signed runners, it stops with exit code 78 and the Workstations page shows the reason and the fix. On a server that does not require signed runners it only warns.
 
-**Held items and approvals.** The runner no longer believes everything the server sends. Some things wait for a yes on the workstation itself: new deploy scripts, recipe changes, vault setup, secret and provider-key changes, release signing and DevOps tasks not started on that machine. Run `guildwise-runner pending` to list them, then `guildwise-runner approve <id>` or `guildwise-runner deny <id>`. The Workstations page shows "confirm on the workstation" states. Two kinds, a redeploy at a new commit and a recipe change, can also be approved with a passkey (see 4.15).
+**Held items and approvals.** The runner no longer believes everything the server sends. Some things wait for a yes on the workstation itself: new deploy scripts, recipe changes, vault setup, secret and provider-key changes, release signing and DevOps tasks not started on that machine. The website never approves them for you. Instead it shows a box with three parts:
 
-> **Good to know:** you can run the same command again at any time. It installs a fresh runner and repairs a broken installation: the older install is stopped and quarantined, and the workstation pairs again.
+1. **One sentence** saying what it would allow.
+2. **The command**, in a grey box.
+3. **A Copy button.**
 
-**The runner updates itself.** Once installed, the runner checks once a day (and a few minutes after it starts) whether the server offers a newer version. It downloads and checks it, then waits until no agent is working on that workstation before restarting into it, so a running job is never cut short (after about six hours of being busy it updates anyway). The Workstations page shows the runner version and, when there is something to know, a label: *Update pending*, *Updating*, *Update failed*, *Update rolled back* (the new version did not connect within a few minutes, so the runner went back to the previous one by itself), *Updates paused* (a platform administrator paused automatic updates) or *Updates by hand* (this runner was not started by the installer's service). Platform administrators pause and resume automatic updates under **Runners** in the platform area. To not wait for the daily check, press **Check for updates** next to the runner version: the runner looks right away and the page tells you the result (*Up to date*, *Update found: installs when idle*, *Updates are paused* ...). It still waits until no agent is working before it restarts. The button needs runner 0.1.34 or newer and a connected workstation; an older runner checks by itself once a day. You can still run the install command again at any time, and set `AOM_RUNNER_AUTO_UPDATE=0` for the runner to switch updating off on one computer. Updates from an official or own-key build are signed, and the runner checks the signature before it installs; it never goes to a version below its floor. Running the install command again replaces the runner: the older install is stopped and quarantined, and the workstation pairs again. That is how you reinstall when the platform requires signed runners (**Reinstall required**). On a server with that setting off you do not need to: the runner upgrades itself as before.
+Click **Copy**, open a terminal on the workstation, paste, and press Enter. The terminal shows exactly what will run and asks you once more. The same box shows on the Workstations page, on the Desk and on the card, and the runner's log prints the same command. Two kinds, a redeploy at a new commit and a recipe change, can also be approved with a passkey (see 4.15).
 
-If something goes wrong, the installer says what happened and links to the install help and to **Contact us**. Chapter 9.1 covers the usual problems.
+![A step waiting on the workstation: one sentence, the exact command and a Copy button](guide/assets/workstation-local-step.jpg)
 
-> **In the app:** Help, "Workstations and the installer" (`/help/workstations-and-installer`) and "Installing a workstation: if something goes wrong" (`/help/install-troubleshooting`).
+![The same step as a notice on the Desk](guide/assets/desk-local-step.jpg)
 
-> **In the app:** watch the video "Workstations" (Help, "Workstations and the installer", `/help/workstations-and-installer#add-a-workstation`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
+> **Watch out:** a Guildwise command always starts with `sudo -u guildwise-runner` or with the runner's own path (it ends in `guildwise-runner`). If a command asks you to do something else, such as run a link or a long script, do not paste it. Ask in **Contact us**.
+
+You can also list what waits with `guildwise-runner pending`, and then use `guildwise-runner approve <id>` or `guildwise-runner deny <id>`. Or use the Approvals page below.
 
 ### 3.4a Connect your integrations
 
@@ -402,6 +419,58 @@ Tokens are minted on the workstation when needed, refreshed before they expire a
 One integration is one installation: an app installed on two GitHub organizations is added twice. **Remove** deletes the key on every workstation, including workstations that are offline (they delete it when they next connect).
 
 On a workstation without a browser, connect it from a terminal instead: `guildwise-runner apps connect github --app-id <id> --installation <id> --key-file <path>` (or `--key-stdin`; without either it asks for the key without showing it). `guildwise-runner apps list`, `apps test <instance>` and `apps remove <instance>` do the rest.
+
+### 3.4c Approvals on this computer
+
+Every workstation runs a small private web page where you see what the computer allows and approve what waits. It is called **Approvals on this computer**. It works only on that computer: the address starts with `127.0.0.1`, which always means "this very computer". Nobody on the internet, and no agent, can open it.
+
+**How to open it**
+
+- The installer opens it for you at the end and asks for the pairing code (below). With `--yes` it only prints the address.
+- On the Workstations page, each workstation has a link **Open Approvals on this computer**. Click it on that computer. On another computer, it will not open.
+- Or type the address in a browser on that computer. The installer and `guildwise-runner approvals devices` print it.
+
+**Pair the browser once.** The first time, the page says **Pair this browser**. This is so that only you, on this computer, can change what it allows.
+
+1. Click **Pair this browser**. The page shows a short code (like `K7M2-Q9`) and a command.
+2. Click **Copy** and paste the command into a terminal on this computer. It looks like `guildwise-runner approvals pair K7M2-Q9`.
+3. The terminal shows a fingerprint, 8 letters and digits, and the name of your browser. Check it matches the one on the page, then type `yes`.
+4. The page opens by itself. The code works for 10 minutes. If it ran out, click the button again.
+
+The code is not a password, so it is fine that it shows in the terminal history. The real key never leaves your browser.
+
+![The page that asks you to pair this browser](guide/assets/approvals-signin.jpg)
+
+You pair once per browser and per instance. The page stays signed in while you use it, and signs in again quietly after 30 minutes of nothing or after the runner restarts. See which browsers are paired with `guildwise-runner approvals devices`, and remove one with `guildwise-runner approvals forget <fingerprint>` (or `--all`).
+
+**The top bar.** It always says **Approvals on this computer**, the **instance** and the Guildwise server. An instance is a separate runner on the same computer, for example one for testing. If the instance is anything other than `prod` (your real one), the bar is **yellow-orange**, so you never mix up a test window with the real one.
+
+**Each part of the page**
+
+![This computer: version, server, instance, account, Docker, what is running now, setup](guide/assets/approvals-status.jpg)
+
+- **This computer.** The runner's version, which Guildwise server it is paired with (and whether it is **Connected**), the instance, the account the runner uses, Docker, what is working now, and whether setup is **Finished**. If setup is **Not finished**, the page shows the command to run.
+- **Waiting for your yes.** Each held item, with what it is, who asked and until when it waits. Click **Look and approve** to see the full detail in a window, then **Yes, approve**, or click **Deny**. One item at a time: there is no "approve all". For a publish, you can tick **also allow unchanged re-publishes** (the "pin"). Items that can only be approved in a terminal show their command with a Copy button.
+
+![An item waiting for your yes, with its full detail](guide/assets/approvals-waiting.jpg)
+
+- **What this computer allows.** Tick boxes for the same choices as the installer screen: each DevOps helper, whether website tasks start without asking, install scripts per project, publishing (and pins, which you can forget), approved release formats and passkeys. A tick takes effect at once, and every change is written to a log on the computer.
+
+![What this computer allows: tick boxes, and what can only be changed in a terminal](guide/assets/approvals-allows.jpg)
+
+- **Changed only in a terminal.** Settings that are too important for a web page: the Docker mode, unsigned updates, release signing keys, CEO full power, package registries and the runner account. The page shows each current value and the exact command to run.
+
+> **Good to know:** a headless computer (no screen) has no browser. Use the copy-paste commands from the Workstations page or `guildwise-runner pending` instead. Everything the page does can be done in the terminal.
+
+> **Good to know:** you can run the same command again at any time. It installs a fresh runner and repairs a broken installation: the older install is stopped and quarantined, and the workstation pairs again.
+
+**The runner updates itself.** Once installed, the runner checks once a day (and a few minutes after it starts) whether the server offers a newer version. It downloads and checks it, then waits until no agent is working on that workstation before restarting into it, so a running job is never cut short (after about six hours of being busy it updates anyway). The Workstations page shows the runner version and, when there is something to know, a label: *Update pending*, *Updating*, *Update failed*, *Update rolled back* (the new version did not connect within a few minutes, so the runner went back to the previous one by itself), *Updates paused* (a platform administrator paused automatic updates) or *Updates by hand* (this runner was not started by the installer's service). Platform administrators pause and resume automatic updates under **Runners** in the platform area. To not wait for the daily check, press **Check for updates** next to the runner version: the runner looks right away and the page tells you the result (*Up to date*, *Update found: installs when idle*, *Updates are paused* ...). It still waits until no agent is working before it restarts. The button needs runner 0.1.34 or newer and a connected workstation; an older runner checks by itself once a day. You can still run the install command again at any time, and set `AOM_RUNNER_AUTO_UPDATE=0` for the runner to switch updating off on one computer. Updates from an official or own-key build are signed, and the runner checks the signature before it installs; it never goes to a version below its floor. Running the install command again replaces the runner: the older install is stopped and quarantined, and the workstation pairs again. That is how you reinstall when the platform requires signed runners (**Reinstall required**). On a server with that setting off you do not need to: the runner upgrades itself as before.
+
+If something goes wrong, the installer says what happened and links to the install help and to **Contact us**. Chapter 9.1 covers the usual problems.
+
+> **In the app:** Help, "Workstations and the installer" (`/help/workstations-and-installer`) and "Installing a workstation: if something goes wrong" (`/help/install-troubleshooting`).
+
+> **In the app:** watch the video "Workstations" (Help, "Workstations and the installer", `/help/workstations-and-installer#add-a-workstation`). The page's own help panel (**?** in the top bar) has it too, under **Watch the video**.
 
 ### 3.5 Hire your first agents (2 minutes)
 
@@ -1084,7 +1153,7 @@ On the interest's page, **Overview** shows both schedules and what is waiting fo
 
 **The daily quiet cap** (bottom of the Interests page) limits how many digest items reach your desk in a day across all interests. Items over the cap wait for the next delivery.
 
-**Transcripts.** Videos and podcasts come with a transcript so you can read instead of watch. Transcripts of video sites need **yt-dlp** on the workstation (the installer offers it).
+**Transcripts.** Videos and podcasts come with a transcript so you can read instead of watch. Transcripts of video sites need **yt-dlp** on the workstation. The installer sets it up in the runner's own folder (line 6 of the screen of choices); later, run `guildwise-runner extras install yt-dlp` on that computer.
 
 **Who sees an interest.** Owners and Admins see all interests. An interest made by a Member or Guest is private to them until an Owner or Admin shares it. Whoever made an interest, or someone with an equal or higher role, may change it.
 
@@ -2088,7 +2157,11 @@ If an interest cannot run (for example its workstation is offline), it shows a r
 | The wizard stays on "Waiting for you to run the command" | The command was not run, or was run on a different computer than you chose. Run it on the computer that will host the agents. Check you pasted all of it. |
 | The command link says it expired | The link works for 30 minutes. Choose your system again on the page to get a new command. |
 | "Paired" never appears | The computer cannot reach this website. Check its internet connection, proxy and clock. Run the command again, it is safe to repeat. |
-| A health check shows a warning (Claude, sandbox, Docker, yt-dlp, a repository) | Each row says what is wrong and how to fix it. Claude not signed in: run `claude` on the workstation and sign in. Sandbox missing on Linux: install `bubblewrap` and `socat`. Docker and yt-dlp are optional. |
+| A health check shows a warning (Claude, sandbox, Docker, yt-dlp, a repository) | Each row says what is wrong and how to fix it. Claude not signed in: run `claude` on the workstation and sign in. Sandbox missing on Linux: install `bubblewrap` and `socat`. Docker and yt-dlp are optional. For yt-dlp, run `guildwise-runner extras install yt-dlp` on the workstation. |
+| The Approvals page says it is not signed in, or asks you to pair | This browser is not paired with this runner (or it was forgotten, or the page moved to a new port). Click **Pair this browser**, copy the command, paste it into a terminal on that computer and type `yes` (section 3.4c). |
+| The command asks for a password | `sudo` asks for **your own password on that computer**, the one you use to sign in to it. Nothing is shown while you type. It is not a Guildwise password. |
+| The "Open Approvals on this computer" link does not open on Windows | The link only opens in a browser on the same computer as the runner, and on Windows the runner lives inside WSL. Use the copy-paste commands from the Workstations page instead (the runner lives inside WSL, so a Windows browser may not reach it). |
+| "Approvals page could not start: another program uses port N" | Another program uses the page's port. Stop it, or in a terminal on that computer run `guildwise-runner approvals port <new number>` (for example 47650) and pair the browser again. The copy-paste commands keep working meanwhile. |
 | Windows asked to restart | Restart. It can ask more than once (up to twice for WSL2 and once more for Ubuntu). After each restart the installer continues by itself when you sign in; if it does not, run the command again. If it stops with a message that names what is still off, fix that and run the command again. |
 | It says virtualization is off in the BIOS/UEFI | Open the BIOS/UEFI settings at start-up (often F2, F10, F12 or Del, or in Windows: Settings > System > Recovery > Advanced start-up > UEFI firmware settings). Turn on Intel VT-x / Virtualization Technology, or AMD SVM / AMD-V, save, restart and run the installer again. |
 | Anything else | Open **Contact us** from the installer's failure screen. It already knows what went wrong. |

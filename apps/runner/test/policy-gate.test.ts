@@ -9,6 +9,7 @@ import {
   gateReleaseSign,
   localEnvEnsure,
   narrowAccess,
+  rememberVaultRemotes,
 } from '../src/policy/gate.ts';
 import { DEFAULT_POLICY, type Policy, PolicySchema } from '../src/policy/schema.ts';
 
@@ -132,10 +133,14 @@ describe('the deploy gate', () => {
 });
 
 describe('other held commands', () => {
-  it('recipe writes, vault configuration and reseals always wait', () => {
+  it('recipe writes, vault configuration with a new online location and reseals wait', () => {
+    expect(
+      gateCommand(set({}), 'vault.configure', {
+        vaults: [{ vaultId: 'v', name: 'V', remoteUrl: 'https://git.example/v.git', syncIntervalSec: 60 }],
+      }),
+    ).toMatchObject({ action: 'hold', kind: 'vault.configure' });
     for (const [cmd, kind] of [
       ['recipe.write', 'recipe.write'],
-      ['vault.configure', 'vault.configure'],
       ['env.secret.set', 'env.secret'],
       ['deploy.secret.set', 'env.secret'],
       ['provider.key.reseal', 'provider.reseal'],
@@ -152,18 +157,21 @@ describe('other held commands', () => {
       return d.action === 'hold' ? d.summary : '';
     };
     const vaults = [
-      { vaultId: 'v1', kind: 'org_knowledge', name: 'Knowledge', remoteUrl: '', syncIntervalSec: 60 },
+      {
+        vaultId: 'v1',
+        kind: 'org_knowledge',
+        name: 'Knowledge',
+        remoteUrl: 'https://git.example/k.git',
+        syncIntervalSec: 60,
+      },
       { vaultId: 'v2', kind: 'project_design', name: 'Designs', remoteUrl: '', syncIntervalSec: 60 },
     ];
     expect(sum('vault.configure', { vaults, identity: { name: 'd', email: 'd@x' }, resume: [] })).toBe(
-      'vault.configure for 2 vaults (Knowledge, Designs)',
+      'vault.configure for 2 vaults (Knowledge, Designs): new online location git.example/k',
     );
-    expect(
-      sum('vault.configure', { vaults: [], identity: { name: 'd', email: 'd@x' }, resume: ['v1'] }),
-    ).toBe('vault.configure for no vaults (stop syncing every vault), resume 1');
     const many = Array.from({ length: 7 }, (_, i) => ({ ...vaults[0], vaultId: `v${i}`, name: `N${i}` }));
-    expect(sum('vault.configure', { vaults: many })).toBe(
-      'vault.configure for 7 vaults (N0, N1, N2, N3, N4 and 2 more)',
+    expect(sum('vault.configure', { vaults: many })).toMatch(
+      /^vault\.configure for 7 vaults \(N0, N1, N2, N3, N4 and 2 more\): new online location /,
     );
     expect(sum('provider.key.reseal', { provider: 'anthropic', orgId: 'o-1', targetKeyId: 'k9' })).toBe(
       'provider.key.reseal for the anthropic key of organization o-1 to runner key k9',
@@ -177,7 +185,7 @@ describe('other held commands', () => {
     expect(sum('deploy.secret.set', { projectId: 'p-1', name: 'API', keyId: 'k', ciphertext: 'CIPH' })).toBe(
       'deploy.secret.set for secret API of project p-1',
     );
-    for (const cmd of ['vault.configure', 'provider.key.reseal', 'provider.endpoints.set', 'env.secret.set'])
+    for (const cmd of ['provider.key.reseal', 'provider.endpoints.set', 'env.secret.set'])
       expect(sum(cmd, {}), cmd).not.toMatch(/ for $| for {2}/);
   });
 
@@ -343,5 +351,53 @@ describe('DevOps task prompt shows the grant (round-1 should-fix 4)', () => {
     expect(d.action === 'hold' && d.detail).toMatch(/docker\s+asked, NOT allowed here/);
     expect(d.action === 'hold' && d.detail).toMatch(/installs\s+yes/);
     expect(d.action === 'hold' && d.detail).toMatch(/paths\s+\/srv\/app/);
+  });
+});
+
+describe('vault.configure narrowed (easy-runner-setup, Overnight decision 4)', () => {
+  const vault = (id: string, remoteUrl: string, storage?: 'local') => ({
+    vaultId: id,
+    kind: 'org_knowledge',
+    name: id,
+    remoteUrl,
+    syncIntervalSec: 60,
+    ...(storage ? { storage } : {}),
+  });
+  it('runs for local vaults and for remotes approved before', () => {
+    expect(gateCommand(set({}), 'vault.configure', { vaults: [vault('l', '', 'local')] }).action).toBe('run');
+    expect(gateCommand(set({}), 'vault.configure', { vaults: [] }).action).toBe('run');
+    const known = set({ vaultRemotes: [{ vaultId: 'g', remote: 'git.example/acme/vault' }] });
+    expect(
+      gateCommand(known, 'vault.configure', {
+        vaults: [vault('g', 'git@git.example:acme/vault.git'), vault('l', '', 'local')],
+      }).action,
+    ).toBe('run');
+  });
+
+  it('holds for a new remote and for a changed remote of a known vault', () => {
+    const known = set({ vaultRemotes: [{ vaultId: 'g', remote: 'git.example/acme/vault' }] });
+    expect(
+      gateCommand(known, 'vault.configure', { vaults: [vault('g', 'https://evil.example/x.git')] }).action,
+    ).toBe('hold');
+    expect(
+      gateCommand(known, 'vault.configure', { vaults: [vault('h', 'https://git.example/acme/vault.git')] })
+        .action,
+    ).toBe('hold');
+  });
+
+  it('a remote with a password is shown with *** in the held detail, never the password', () => {
+    const d = gateCommand(set({}), 'vault.configure', {
+      vaults: [vault('g', 'https://bot:s3cret@git.example/v.git')],
+    });
+    expect(d.action === 'hold' && d.detail).not.toContain('s3cret');
+    expect(d.action === 'hold' && d.summary).not.toContain('s3cret');
+  });
+
+  it('approving records the pairs shown, so the same set-up then runs', () => {
+    const payload = { vaults: [vault('g', 'https://git.example/acme/vault.git')] };
+    const p = rememberVaultRemotes(set({}), payload);
+    expect(p.vaultRemotes).toEqual([{ vaultId: 'g', remote: 'git.example/acme/vault' }]);
+    expect(rememberVaultRemotes(p, payload).vaultRemotes).toHaveLength(1);
+    expect(gateCommand(p, 'vault.configure', payload).action).toBe('run');
   });
 });

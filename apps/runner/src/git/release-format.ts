@@ -29,6 +29,11 @@ export interface ReleaseFormatInput {
    * (policy.json `formatterPins`). Given: an unpinned config skips the formatter and the notice says so.
    */
   formatterPinned?: (configHash: string) => boolean;
+  /**
+   * easy-runner-setup: an unpinned config raises a `formatter.pin` local step and returns its exact copy-paste command
+   * (null: none could be rendered). The skip notice names that command instead of a bare one sudo would not find.
+   */
+  onUnpinnedFormatter?: (configHash: string) => string | null;
 }
 
 export type ReleaseFormatOutcome =
@@ -211,11 +216,13 @@ export async function formatReleaseFiles(input: ReleaseFormatInput): Promise<Rel
   if (input.formatterPinned) {
     // the pin covers the configuration and the very program resolved above (the binary that will run)
     const hash = formatterConfigHash(input.worktree, spec, { repoPath: input.repoPath, bin });
-    if (!input.formatterPinned(hash))
+    if (!input.formatterPinned(hash)) {
+      const command = input.onUnpinnedFormatter?.(hash) ?? `guildwise-runner formatter pin ${hash}`;
       return {
         state: 'skipped',
-        reason: `the ${spec.tool} configuration and program (${spec.config}, its package and lockfile, sha256 ${hash}) are not approved on this workstation, so the formatter did not run (approve it with \`guildwise-runner formatter pin ${hash}\`)`,
+        reason: `the ${spec.tool} configuration and program (${spec.config}, its package and lockfile, sha256 ${hash}) are not approved on this workstation, so the formatter did not run (approve it on that computer with \`${command}\`)`,
       };
+    }
   }
   // './' keeps a path from ever being read as an option
   const fileArgs = files.map((f) => `./${f}`);

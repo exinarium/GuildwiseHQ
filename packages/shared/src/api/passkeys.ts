@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ApprovalPasskeyPayloadSchema, HeldItemSchema } from '../protocol/security.ts';
+import { ApprovalPasskeyPayloadSchema, HeldItemSchema, LocalStepSchema } from '../protocol/security.ts';
 import { PasskeyAlgSchema } from '../security/index.ts';
 import { IsoTime } from './common.ts';
 
@@ -79,6 +79,10 @@ export const WorkstationApprovalsResponseSchema = z.object({
   reportedAt: IsoTime.nullable(),
   items: z.array(ApprovalItemDtoSchema),
   relays: z.array(PasskeyRelayDtoSchema),
+  /** easy-runner-setup: local steps waiting on the workstation, each with its copy-paste command. */
+  steps: z.array(LocalStepSchema).optional(),
+  /** The approvals page on the workstation, when it runs (`http://127.0.0.1:<port>/`). */
+  windowPort: z.number().int().nullable().optional(),
 });
 export type WorkstationApprovalsResponse = z.infer<typeof WorkstationApprovalsResponseSchema>;
 

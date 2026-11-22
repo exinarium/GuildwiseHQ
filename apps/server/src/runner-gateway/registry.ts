@@ -1,5 +1,7 @@
 import {
   type HeldItem,
+  type HelloLocal,
+  type LocalStep,
   makeEnvelope,
   type RepoReport,
   type ServerToRunner,
@@ -55,6 +57,9 @@ export interface RunnerConn {
   startupRefused?: string;
   /** What the runner holds until a local approval (`approvals.held`, the latest full list; in memory only). */
   heldItems?: HeldItem[];
+  /** easy-runner-setup: local steps waiting on the machine (`approvals.held` `steps`), and `hello.local`. */
+  localSteps?: LocalStep[];
+  local?: HelloLocal;
 }
 
 /** Live runner sockets by workstation. A second connection supersedes the first. */

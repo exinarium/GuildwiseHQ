@@ -126,6 +126,17 @@ describe('the Windows installer script', () => {
     );
   });
 
+  it('easy-runner-setup [B3]: both paths tell setup the distro, so the copy-paste commands start with wsl -d <distro>', () => {
+    const fn = ps.slice(ps.indexOf('function Install-DedicatedDistro'), ps.indexOf('trap {'));
+    expect(fn).toContain('GUILDWISE_RUNNER_USER=dedicated GUILDWISE_WSL_DISTRO_NAME=$DedicatedDistro;');
+    const shared = ps.slice(ps.indexOf('# ---- 7. the Linux installer'));
+    expect(shared).toContain('$env:GUILDWISE_WSL_DISTRO_NAME = $Distro');
+    expect(shared.indexOf('$env:GUILDWISE_WSL_DISTRO_NAME = $Distro')).toBeLessThan(
+      shared.indexOf('$env:WSLENV ='),
+    );
+    expect(ps).toMatch(/\$ForwardedVars = @\([^)]*'GUILDWISE_WSL_DISTRO_NAME'/);
+  });
+
   it('checks Docker Desktop before the Linux installer runs and again after (the distribution may have become the default)', () => {
     const fn = ps.slice(ps.indexOf('function Install-DedicatedDistro'), ps.indexOf('trap {'));
     const checks = [...fn.matchAll(/Assert-NoDockerIntegration \$DedicatedDistro/g)].map((m) => m.index ?? 0);

@@ -5,6 +5,7 @@ import {
   HEARTBEAT_SEC,
   isDelegateServerRpc,
   LOCAL_VAULT_CAPABILITY,
+  localStepText,
   type McpCall,
   normalizeRemoteUrl,
   PACK_AUTHORING_CAPABILITY,
@@ -93,6 +94,7 @@ import {
 } from '../commands/runs.ts';
 import { applyDeliverySendResult } from '../commands/schedule-delivery.ts';
 import { applyIntegrationResult } from '../commands/schedule-triggers.ts';
+import { setupOffersFor } from '../commands/setup-offers.ts';
 import { setupProposeRpc } from '../commands/setup-proposals.ts';
 import {
   applyShiftEnded,
@@ -124,7 +126,9 @@ import {
 import {
   syncClaudeAuthNotice,
   syncClaudeUsageNotice,
+  syncLocalStepNotices,
   syncMcpSignInNotices,
+  syncWindowErrorNotice,
 } from '../commands/workstation-notices.ts';
 import {
   applyEnvEnsureResult,
@@ -1119,6 +1123,8 @@ export class RunnerHandlers {
     conn.setupPending = msg.setupPending === true;
     conn.startupRefused = msg.startupRefused ?? undefined;
     conn.heldItems = [];
+    conn.localSteps = [];
+    conn.local = msg.local ?? undefined;
     conn.localPolicy = msg.setupPending !== undefined || msg.startupRefused !== undefined;
     conn.helloShiftIds = msg.activeShifts.map((s) => s.shiftId);
     conn.helloChatIds = msg.activeChats ?? [];
@@ -1189,6 +1195,12 @@ export class RunnerHandlers {
     await recordRepoCatalog(ctx.pool, conn.workstationId, msg.repoCatalog, now);
     await this.recordVaults(conn, msg.vaults);
     await alignDevopsRuntime(ctx, conn.workstationId, msg.runtimes);
+    // easy-runner-setup: the approvals page could not start (another program holds its port), or runs again
+    await syncWindowErrorNotice(
+      ctx,
+      { id: conn.workstationId, userId: conn.userId },
+      msg.local ?? undefined,
+    ).catch(() => {});
     await syncClaudeAuthNotice(ctx, { id: conn.workstationId, userId: conn.userId }, msg.runtimes).catch(
       () => {},
     );
@@ -1245,6 +1257,10 @@ export class RunnerHandlers {
       ],
       // R21, R27: the runner then refuses to start as a root-equivalent user, whatever its local policy says.
       ...((await securitySetting(ctx, 'requireSignedRunners')) ? { requireSignedRunners: true } : {}),
+      // easy-runner-setup: names for `guildwise-runner setup` (refreshed on every connect; never a grant)
+      ...(await setupOffersFor(ctx.pool, conn.workstationId)
+        .then((setupOffers) => ({ setupOffers }))
+        .catch(() => ({}))),
     });
     await sendStorageSync(ctx, conn.workstationId).catch((err) =>
       ctx.log.warn({ err }, 'storage sync not queued'),
@@ -1613,6 +1629,51 @@ export class RunnerHandlers {
   private approvalsHeld(conn: RunnerConn, msg: RunnerToServerOf<'approvals.held'>): void {
     conn.localPolicy = true;
     conn.heldItems = msg.items;
+    if (msg.steps !== undefined) conn.localSteps = msg.steps;
+    // easy-runner-setup: each step and each held item with a command becomes a desk notice (no mail); the card that
+    // waits gets it. Commands already passed the shared grammar in the schema; an invalid one was dropped there.
+    void this.syncLocalSteps(conn).catch((err) =>
+      this.ctx.log.warn({ err }, 'local step notices not synced'),
+    );
+  }
+
+  private async syncLocalSteps(conn: RunnerConn): Promise<void> {
+    const entries = [
+      ...(conn.localSteps ?? []).map((s) => ({
+        key: s.key,
+        kind: s.kind as string,
+        summary: s.summary,
+        command: s.command,
+        shiftId: s.shiftId,
+      })),
+      ...(conn.heldItems ?? [])
+        .filter((h) => h.command)
+        .map((h) => ({
+          key: `held:${h.id}`,
+          kind: 'held',
+          summary: h.summary.slice(0, 160),
+          command: h.command as string,
+          shiftId: h.shiftId,
+        })),
+    ];
+    const withCards = [];
+    for (const e of entries) {
+      let cardIds: string[] = [];
+      if (e.shiftId) {
+        const shift = await one(this.ctx.pool, 'SELECT card_id, desk_item_id FROM shifts WHERE id=$1', [
+          e.shiftId,
+        ]);
+        const card = shift ? (await cardOfShift(this.ctx, shift)).card_id : null;
+        if (card) cardIds = [String(card)];
+      }
+      withCards.push({ key: e.key, kind: e.kind, summary: e.summary, command: e.command, cardIds });
+    }
+    await syncLocalStepNotices(
+      this.ctx,
+      { id: conn.workstationId, userId: conn.userId },
+      withCards,
+      localStepText,
+    );
   }
 
   /** `aom devops "<text>"` from a running shift: a request for this workstation's DevOps engineer (non-terminal). */

@@ -24,6 +24,7 @@ import {
   versionAtLeast,
 } from '../src/sandbox/test-services.ts';
 import { writeShims } from '../src/shims.ts';
+import { startHarness } from './harness.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
 import { POLICY_PATHS, policyCtx } from './policy-fixtures.ts';
 
@@ -237,6 +238,40 @@ describe('sandbox settings', () => {
   it('a shift of another project (no list) is unchanged by a neighbour that declared one', () => {
     settings('builder', { testServiceDomains: ['127.0.0.1:5433'] });
     expect(domains(settings('builder'))).toEqual([...REGISTRY_DOMAINS]);
+  });
+});
+
+describe('the approvals page port (easy-runner-setup [B3], AC8)', () => {
+  it('is refused for every runner instance: the whole approvals range, whatever the runner ports say', () => {
+    const d = decideTestServices(
+      input({
+        services: [
+          { name: 'approvals', host: '127.0.0.1', port: 47613 },
+          { name: 'other-instance', host: 'localhost', port: 47699 },
+          { name: 'low', host: '127.0.0.1', port: 47600 },
+          { name: 'just-below', host: '127.0.0.1', port: 47599 },
+        ],
+      }),
+    );
+    expect(reason(d[0])).toMatch(/reserved for Approvals on this computer/);
+    expect(reason(d[1])).toMatch(/reserved for Approvals on this computer/);
+    expect(reason(d[2])).toMatch(/reserved for Approvals on this computer/);
+    expect(d[3]?.state).toBe('allowed');
+    expect(testServiceDomains(d)).toEqual(['127.0.0.1:47599']);
+  });
+
+  it("the supervisor counts this process's window port among the runner's own ports (also outside the range)", async () => {
+    const h = await startHarness({}, { windowState: () => ({ port: 51234 }) });
+    try {
+      const ports = (h.runner.supervisor as unknown as { runnerPorts(): Set<number> }).runnerPorts();
+      expect(ports.has(51234)).toBe(true);
+      const d = decideTestServices(
+        input({ services: [{ name: 'w', host: '127.0.0.1', port: 51234 }], runnerPorts: ports }),
+      );
+      expect(reason(d[0])).toMatch(/belongs to the runner/);
+    } finally {
+      await h.stop();
+    }
   });
 });
 

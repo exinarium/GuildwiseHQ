@@ -32,6 +32,10 @@ export interface Notice {
   orgIds: string[];
   /** Mail the workstation's owner when a notice is created. */
   mail?: Mail;
+  /** Cards that wait on it (their card page shows the notice). */
+  affectedCardIds?: string[];
+  /** Extra fields for the item's `data` (easy-runner-setup: `command`, the copy-paste command). */
+  data?: Record<string, unknown>;
 }
 
 /** Organizations that have an active agent on the workstation. */
@@ -89,10 +93,10 @@ export async function reconcile(
             options: [],
             blocking: false,
             pinned: false,
-            affectedCardIds: [],
+            affectedCardIds: n.affectedCardIds ?? [],
             askedBy: { kind: 'system' },
             addresseeUserId: ws.userId,
-            data: { key: n.key, workstationId: ws.id },
+            data: { ...(n.data ?? {}), key: n.key, workstationId: ws.id },
           },
         },
         actor: SYSTEM_ACTOR,
@@ -268,4 +272,106 @@ export async function syncMcpSignInNotices(ctx: Ctx, ws: WsRef, report: unknown)
     }
     await reconcile(ctx, tx, ws, DESK_SUBKIND.mcpNeedsSignIn, `mcp_signin:${ws.id}:`, wanted);
   });
+}
+
+// ---------------------------------------------------------------- local steps (easy-runner-setup)
+
+export interface LocalStepNoticeInput {
+  key: string;
+  kind: string;
+  summary: string;
+  command: string;
+  cardIds: string[];
+}
+
+/** One plain sentence and the command, for a step that waits on the workstation (no mail: Overnight decision 11). */
+export const localStepText = (
+  workstation: string,
+  step: { summary: string; command: string },
+  sentence: string,
+): { title: string; body: string } => ({
+  title: `Waiting on ${workstation}: ${step.summary}`.slice(0, 200),
+  body: `${sentence}\n\nOn ${workstation}, paste this into a terminal:\n\n${step.command}`,
+});
+
+/**
+ * After `approvals.held`: one desk notice per local step and per held item that carries a command, raised, replaced and
+ * closed with the list. The card that waits gets it through `affectedCardIds`. Never mailed.
+ */
+export async function syncLocalStepNotices(
+  ctx: Ctx,
+  ws: WsRef,
+  steps: LocalStepNoticeInput[],
+  sentenceOf: (kind: string) => string,
+): Promise<void> {
+  const w = await one<{ name: string }>(ctx.pool, 'SELECT name FROM workstations WHERE id=$1', [ws.id]);
+  if (!w) return;
+  const prefix = `local_step:${ws.id}:`;
+  await withAppendTx(ctx.pool, async (tx) => {
+    const orgIds = await agentOrgs(tx, ws.id);
+    const ownOrgs =
+      orgIds.length > 0
+        ? orgIds
+        : (
+            await rows<{ org_id: string }>(
+              tx,
+              `SELECT org_id FROM workstation_org_serving WHERE workstation_id=$1 AND serving`,
+              [ws.id],
+            )
+          ).map((r) => r.org_id);
+    return reconcile(
+      ctx,
+      tx,
+      ws,
+      DESK_SUBKIND.workstationLocalStep,
+      prefix,
+      steps.map((s) => ({
+        key: `${prefix}${s.key}`,
+        subkind: DESK_SUBKIND.workstationLocalStep,
+        ...localStepText(w.name, s, sentenceOf(s.kind)),
+        orgIds: ownOrgs,
+        affectedCardIds: s.cardIds,
+        data: { command: s.command, stepKind: s.kind },
+      })),
+    );
+  });
+}
+
+export const windowErrorText = (
+  workstation: string,
+  error: string,
+  cli: string | null,
+): { title: string; body: string } => ({
+  title: `Approvals page could not start on ${workstation}`,
+  body: `Approvals page could not start on ${workstation}: ${error}. Stop that program, or run \`${cli ?? 'guildwise-runner'} approvals port <new port>\` on that computer and pair your browser again. The copy-paste commands keep working.`,
+});
+
+/** After hello: raise the "Approvals page could not start" notice, or close it when the page runs again. */
+export async function syncWindowErrorNotice(
+  ctx: Ctx,
+  ws: WsRef,
+  local: { cli: string; windowError?: string | undefined } | undefined,
+): Promise<void> {
+  const w = await one<{ name: string }>(ctx.pool, 'SELECT name FROM workstations WHERE id=$1', [ws.id]);
+  if (!w) return;
+  const key = `window_error:${ws.id}`;
+  await withAppendTx(ctx.pool, async (tx) =>
+    reconcile(
+      ctx,
+      tx,
+      ws,
+      DESK_SUBKIND.workstationWindowError,
+      key,
+      local?.windowError
+        ? [
+            {
+              key,
+              subkind: DESK_SUBKIND.workstationWindowError,
+              ...windowErrorText(w.name, local.windowError, local.cli),
+              orgIds: await agentOrgs(tx, ws.id),
+            },
+          ]
+        : [],
+    ),
+  );
 }

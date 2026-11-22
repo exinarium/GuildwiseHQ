@@ -15,7 +15,7 @@ import {
   ShiftLimitSourceSchema,
   ToolchainInfoSchema,
 } from '../protocol/runner.ts';
-import { HeldItemSchema } from '../protocol/security.ts';
+import { HeldItemSchema, LocalStepSchema, SetupOffersWireSchema } from '../protocol/security.ts';
 import { SignedReleaseProofSchema } from '../security/index.ts';
 import { IsoTime } from './common.ts';
 
@@ -101,6 +101,14 @@ export const WorkstationDtoSchema = z.object({
       setupPending: z.boolean(),
       startupRefused: z.string().nullable(),
       held: z.array(HeldItemSchema),
+      /** easy-runner-setup: local steps waiting on the machine, each with its copy-paste command. */
+      steps: z.array(LocalStepSchema).optional(),
+      /** The CLI prefix of this runner's commands (`sudo -u guildwise-runner -H <path>`), when it reported one. */
+      cli: z.string().nullable().optional(),
+      /** The approvals page on the workstation (`http://127.0.0.1:<port>/`), when it runs. */
+      windowPort: z.number().int().nullable().optional(),
+      /** Why the approvals page did not start (another program uses its port). */
+      windowError: z.string().nullable().optional(),
     })
     .optional(),
   /** M3: what this workstation's DevOps engineer may do without asking, and who it is. */
@@ -292,6 +300,8 @@ export const RunnerPairResponseSchema = z.object({
   workstationId: z.uuid(),
   /** `aomr_` + 32 random bytes base64url. */
   runnerToken: z.string().startsWith('aomr_'),
+  /** easy-runner-setup: the names the installer's one screen shows (organisations, DevOps helpers, repositories). */
+  setupOffers: SetupOffersWireSchema.optional().catch(undefined),
 });
 export type RunnerPairResponse = z.infer<typeof RunnerPairResponseSchema>;
 

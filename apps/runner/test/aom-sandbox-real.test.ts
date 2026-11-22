@@ -11,9 +11,11 @@ import { IpcServer } from '../src/ipc/server.ts';
 import { runnerPaths } from '../src/paths.ts';
 import { ensureSandbox, sandboxEnv } from '../src/sandbox/sandbox.ts';
 import { issueShiftCredential, sessionEnvDirOf } from '../src/session/shift-credential.ts';
+import { startApprovalsWindow } from '../src/window/server.ts';
 import { fakeApi, fakeServers } from './fake-claude-api.ts';
 import { cleanupTmp } from './helpers.ts';
 import { policyCtx } from './policy-fixtures.ts';
+import { makeEnv } from './window-helpers.ts';
 
 cleanupTmp();
 
@@ -238,6 +240,25 @@ describe.skipIf(!enabled)(
       expect(r.output, r.stderr).toContain('PROBE-DONE');
       expect(r.output, r.stderr).toMatch(/blocked by network allowlist|403/);
       expect(r.calls).toEqual([]);
+    }, 120_000);
+
+    it('a sandboxed shift cannot reach the approvals page port (DESIGN "Reach versus use" [B3])', async () => {
+      const e = await makeEnv();
+      const w = await startApprovalsWindow(e.deps);
+      try {
+        expect(w.windowError).toBeUndefined();
+        const r = await runAomAs(
+          'builder',
+          `curl -sS -m 5 --noproxy "" -x "$HTTP_PROXY" http://127.0.0.1:${w.port}/api/hello ; curl -sS -m 5 http://127.0.0.1:${w.port}/api/hello ; echo PROBE-DONE`,
+        );
+        expect(r.output, r.stderr).toContain('PROBE-DONE');
+        expect(r.output, r.stderr).not.toContain('"instance"');
+        expect(r.output, r.stderr).toMatch(
+          /blocked by network allowlist|403|Failed to connect|Couldn't connect/,
+        );
+      } finally {
+        await w.close();
+      }
     }, 120_000);
   },
 );

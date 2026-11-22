@@ -317,6 +317,8 @@ describe('R18-T: what binds a DevOps shift', () => {
 describe('R18-S: the states the runner decides locally', () => {
   const localAuthority = async () =>
     (await get('/api/workstations')).workstations.find((x: any) => x.id === w.workstationId)?.localAuthority;
+  /** easy-runner-setup: no commands and no approvals page from a runner that reports none. */
+  const NO_LOCAL = { steps: [], cli: null, windowPort: null, windowError: null };
   const helloWith = (extra: Record<string, unknown>) =>
     ({
       runnerVersion: '0.0.0-test',
@@ -337,6 +339,7 @@ describe('R18-S: the states the runner decides locally', () => {
       setupPending: false,
       startupRefused: null,
       held: [],
+      ...NO_LOCAL,
     });
   });
 
@@ -361,6 +364,7 @@ describe('R18-S: the states the runner decides locally', () => {
       setupPending: true,
       startupRefused: null,
       held: [item],
+      ...NO_LOCAL,
     });
   });
 
@@ -377,6 +381,7 @@ describe('R18-S: the states the runner decides locally', () => {
       setupPending: false,
       startupRefused: 'root-equivalent: member of the docker group',
       held: [],
+      ...NO_LOCAL,
     });
     r = await FakeRunner.connect(w.baseUrl, w.runnerToken);
     r.send('hello', helloWith({ setupPending: false }));
@@ -386,6 +391,7 @@ describe('R18-S: the states the runner decides locally', () => {
       setupPending: false,
       startupRefused: null,
       held: [],
+      ...NO_LOCAL,
     });
     expect(
       (await q('SELECT startup_refused FROM workstations WHERE id=$1', [w.workstationId]))[0]

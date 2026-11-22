@@ -39,3 +39,27 @@ export const ANDROID_CMDLINE_TOOLS = {
     },
   },
 } as const;
+
+/**
+ * yt-dlp (video transcripts, `extras.ts`): the standalone builds, pinned with the sha256 from the vendor's own
+ * SHA2-256SUMS of that release (github.com/yt-dlp/yt-dlp/releases/tag/2026.10.26, read 2026-11-21; the same digests
+ * GitHub lists for the assets). `yt-dlp_macos` is a universal build (Intel and Apple silicon). Sites change, so runner
+ * releases bump this pin; the doctor names the update command when an installed copy is older.
+ */
+export const YTDLP = {
+  version: '2026.10.26',
+  files: {
+    linux: {
+      file: 'yt-dlp_linux',
+      sha256: '767ba9dce7052aa196f8b12652f433d76de128ba168966fa84b6394d5e6c6795',
+    },
+    'linux-arm64': {
+      file: 'yt-dlp_linux_aarch64',
+      sha256: 'e87e9533e89fe5889abaa21f5114dfe7756d6aa6219b83551add04d48b18e483',
+    },
+    darwin: {
+      file: 'yt-dlp_macos',
+      sha256: '0f922c15ccc0b83eefa1c8bc9104e434318c4bf16e408e1ee93b7745a6efe0aa',
+    },
+  },
+} as const;

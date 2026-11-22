@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { homedir, hostname, platform } from 'node:os';
+import { homedir, hostname, platform, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   APP_ERROR_TEXT,
@@ -74,6 +74,8 @@ import { resolveDataDir, runnerPaths } from './paths.ts';
 import { defaultAuthority } from './policy/authority.ts';
 import { ceoTurn, defaultCliDeps, registerPolicyCommands } from './policy/cli.ts';
 import { applyDockerEnv } from './policy/docker-env.ts';
+import { HeldStore } from './policy/held.ts';
+import { PasskeyStore } from './policy/passkey-store.ts';
 import {
   daemonIsRootless,
   decideStartup,
@@ -98,16 +100,21 @@ import {
   instanceStartupPaths,
 } from './setup/admin-command.ts';
 import { registerSetupCommand } from './setup/command.ts';
+import { writeOffers } from './setup/offers.ts';
 import { chromiumPdfRenderer } from './storage/pdf.ts';
 import { clamdClient } from './storage/scan.ts';
 import { detectStacks, viewOf } from './toolchain/detect.ts';
 import { realExecutor } from './toolchain/exec.ts';
+import { EXTRAS, installExtra, isExtraId, ytDlpDoctorLines } from './toolchain/extras.ts';
 import { preparePairing } from './up.ts';
 import { detectServiceMode, scheduleRestart } from './update/apply.ts';
 import { detectLayout, ensureGuildwiseAlias } from './update/layout.ts';
 import { currentReleaseProof } from './update/proof.ts';
 import { Updater } from './update/updater.ts';
 import { RUNNER_VERSION } from './version.ts';
+import { localWindowOffers } from './window/api.ts';
+import { registerApprovalsCommands } from './window/cli.ts';
+import { startApprovalsWindow } from './window/server.ts';
 
 const dataDirOpt = [
   '--data-dir <path>',
@@ -175,6 +182,13 @@ async function pair(opts: {
     runnerToken: paired.runnerToken,
     mock: mockEnabled(opts.mock),
   });
+  // easy-runner-setup: the names `guildwise-runner setup` shows (organisations, DevOps helpers, repositories)
+  if (paired.setupOffers)
+    try {
+      writeOffers(entryDir(root, r.entry), paired.setupOffers);
+    } catch {
+      // the next welcome brings them again
+    }
   console.log(
     `Paired as workstation ${paired.workstationId}. Config written to ${r.configPath} (mode 0600).`,
   );
@@ -318,6 +332,49 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
   const policyRead = policyStore.read();
   if (policyRead.error)
     log.error(`${policyStore.file} is invalid (${policyRead.error}): the safe defaults apply`);
+  // easy-runner-setup: Approvals on this computer, started before the first hello so it can name the page (never in
+  // mock mode, never after a start-up refusal). A taken port serves nothing; the commands keep working.
+  let windowState: { port?: number; error?: string } | undefined;
+  let hostRef: RunnerHost | undefined;
+  const window =
+    mock || first.action === 'refuse'
+      ? undefined
+      : await startApprovalsWindow({
+          instance: instanceOfUser(userInfo().username),
+          serverOrigins: (() => {
+            try {
+              return [...new Set(loadIndex(paths.root).pairings.map((e) => new URL(e.serverUrl).origin))];
+            } catch {
+              return [];
+            }
+          })(),
+          version: RUNNER_VERSION,
+          status: () => {
+            const running = [...(hostRef?.running.values() ?? [])];
+            return {
+              connected: Object.fromEntries(
+                running.map((r) => [new URL(r.serverUrl).origin, r.runner.client.isReady]),
+              ),
+              shifts: running.flatMap((r) =>
+                r.runner
+                  .runningShifts()
+                  .map((s) => ({ title: `shift ${s.shiftId.slice(0, 8)}`, startedAt: s.startedAt })),
+              ),
+              runnerUser: userInfo().username,
+            };
+          },
+          held: new HeldStore(policyDir()),
+          policy: policyStore,
+          passkeys: new PasskeyStore(policyDir()),
+          offers: () => localWindowOffers(paths.root),
+          log,
+          decide: (id, state, extra) => new HeldStore(policyDir()).decide(id, state, 'local', extra),
+        }).catch((err: unknown) => {
+          log.warn(`approvals page not started: ${err instanceof Error ? err.message : String(err)}`);
+          return undefined;
+        });
+  if (window)
+    windowState = { port: window.port, ...(window.windowError ? { error: window.windowError } : {}) };
   const host = new RunnerHost({
     root: paths.root,
     log,
@@ -345,6 +402,7 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
         ? updater.checkNow()
         : { outcome: 'disabled', version: null, detail: 'self-update is off in this process' },
     runnerOptions: {
+      windowState: () => windowState,
       authority: defaultAuthority(),
       releaseProof: () => currentReleaseProof(RUNNER_VERSION),
       ...(mock ? {} : { startupCheck }),
@@ -357,6 +415,7 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
     version: RUNNER_VERSION,
     log,
   });
+  hostRef = host;
   await host.start();
   log.info(
     `aom-runner ${RUNNER_VERSION} started (${host.running.size} pairing(s): ${[...host.running.keys()].join(', ')})`,
@@ -399,6 +458,7 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
   updater?.stop();
   removeErrorHandlers();
   await host.stop();
+  await Promise.resolve(window?.close()).catch(() => undefined);
   if (host.unpaired) console.log(`aom-runner: ${UNPAIRED_MESSAGE}`);
   process.exit(code);
 }
@@ -595,16 +655,8 @@ async function doctor(opts: { dataDir?: string; pairing?: string }): Promise<voi
     'docker',
     d && d.exitCode === 0 ? String(d.stdout).trim() : 'not found (optional)',
   );
-  const y = await execa('yt-dlp', ['--version'], { reject: false, stdin: 'ignore', timeout: 10_000 }).catch(
-    () => undefined,
-  );
-  line(
-    y && y.exitCode === 0 ? true : 'warn',
-    'yt-dlp',
-    y && y.exitCode === 0
-      ? String(y.stdout).trim()
-      : 'not found (optional: `aom transcript` needs it for YouTube and other video sites; ask DevOps to install it)',
-  );
+  // [S5] the toolchains yt-dlp only (never PATH); leftover copies on PATH are named as not used.
+  for (const l of await ytDlpDoctorLines()) line(l.ok, l.name, l.detail);
   // The runner's Docker (deps-without-sudo §4): its own rootless daemon, the accepted installed or shared one, or none.
   if (process.platform !== 'win32') {
     const pol = new PolicyStore().get();
@@ -1611,6 +1663,16 @@ function integrationsMachineAdmin(selector: string, opts: { dataDir?: string }):
   console.log(`${entry.id} may now change machine-wide logins (~/.claude, gh, MCP sign-ins) from the web.`);
 }
 
+/** `guildwise-runner extras install <name>`: as the runner user only, into its toolchains folder. */
+async function extrasInstall(name: string): Promise<void> {
+  if (!isExtraId(name)) throw new Error(`unknown extra ${name} (known: ${EXTRAS.join(', ')})`);
+  if (typeof process.getuid === 'function' && process.getuid() === 0)
+    throw new Error('refused: run this as the runner user, not as root');
+  const r = await installExtra(name, { log: (l) => console.log(l) });
+  if (!r.ok) throw new Error(r.detail);
+  console.log(r.detail);
+}
+
 export function buildProgram(): Command {
   const program = new Command('aom-runner').description('Guildwise HQ runner').version(RUNNER_VERSION);
   program
@@ -1897,6 +1959,7 @@ export function buildProgram(): Command {
       }
     });
   registerPolicyCommands(program);
+  registerApprovalsCommands(program);
   program
     .command('graph-check <repo>')
     .description(
@@ -1974,6 +2037,13 @@ export function buildProgram(): Command {
     .option(...pairingOpt)
     .option(...dataDirOpt)
     .action(orgFolderList);
+  const extras = program
+    .command('extras')
+    .description('optional tools the runner installs for itself, in its own home (never system-wide)');
+  extras
+    .command('install <name>')
+    .description(`install or update an extra as the runner user (name: ${EXTRAS.join(' | ')}); never as root`)
+    .action(extrasInstall);
   registerSetupCommand(program);
   return program;
 }

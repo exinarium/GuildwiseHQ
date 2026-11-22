@@ -129,6 +129,14 @@ function scripted(m: Machine, answers: Array<[RegExp, boolean | string]>): Promp
 
 const opts = (raw: RawSetupFlags = {}) => parseSetupOptions(raw, {});
 
+/** Types these keys at the one screen's prompt, then Enter. */
+function edits(p: Prompter, keys: string[]): Prompter {
+  const typed = [...keys, ''];
+  const base = p.text;
+  p.text = async (q, def) => (/Press Enter to accept/.test(q) ? (typed.shift() ?? '') : base(q, def));
+  return p;
+}
+
 describe('guildwise-runner setup [R20]', () => {
   it('refuses to run as root, and writes nothing', async () => {
     const m = machine();
@@ -169,7 +177,10 @@ describe('guildwise-runner setup [R20]', () => {
       `sudo ${ADMIN_TOOL} service install`,
       `sudo ${ADMIN_TOOL} migrate-user --from alice`,
     ]);
-    expect(m.out.join('\n')).toContain('sudo -u guildwise-runner -H guildwise-runner setup');
+    // sudo's secure_path never finds a bare guildwise-runner: the hint uses the absolute path
+    expect(m.out.join('\n')).toContain(
+      'sudo -u guildwise-runner -H /home/guildwise-runner/.local/bin/guildwise-runner setup',
+    );
     expect(existsSync(policyPath(m.home))).toBe(false);
   });
 
@@ -204,17 +215,19 @@ describe('guildwise-runner setup [R20]', () => {
     await runSetup(m.deps({ prompter: scripted(m, []) }), opts());
     expect(m.policy().devops.agents).toEqual({});
     const out = m.out.join('\n');
-    expect(out).toContain(`Acme (${ORG_A}): the server says you are Owner.`);
-    expect(out).toContain(`Beta (${ORG_B}): the server says you are Member.`);
-    expect(out).toContain(`guildwise-runner devops grant ${ORG_C}`);
+    // the one screen shows names, never ids
+    expect(out).toMatch(/1a {2}Acme \(you are Owner\) \.+ No/);
+    expect(out).toMatch(/1b {2}Beta \(you are Member\) \.+ No/);
+    expect(out).toMatch(/1c {2}Gamma \(you are Admin\) \.+ no helper yet/);
+    expect(out).not.toContain(ORG_A);
   });
 
   it('a local yes per organization grants exactly that one', async () => {
     const m = machine();
-    let n = 0;
-    const p = scripted(m, []);
-    const base = p.confirm;
-    p.confirm = async (q, def) => (/outside the sandbox/.test(q) && n++ === 0 ? true : base(q, def));
+    const typed = ['1a', ''];
+    const p = scripted(m, [[/May Acme's DevOps helper/, true]]);
+    const base = p.text;
+    p.text = async (q, def) => (/Press Enter to accept/.test(q) ? (typed.shift() ?? '') : base(q, def));
     await runSetup(m.deps({ prompter: p }), opts());
     expect(m.policy().devops.agents).toEqual({ [ORG_A]: AGENT_A });
   });
@@ -275,10 +288,14 @@ describe('guildwise-runner setup [R20]', () => {
       devops: { agents: { [ORG_A]: AGENT_A, [ORG_B]: AGENT_B } },
       legacyUpdateOrigin: 'https://hq.example.com',
     });
-    await runSetup(
-      m.deps({ prompter: scripted(m, [[/Keep the local DevOps grant for Beta/, false]]) }),
-      opts(),
-    );
+    // [S4] the screen starts from the policy: both stay Yes until edited, and --yes revokes nothing
+    await runSetup(m.deps(), opts({ yes: true }));
+    expect(m.policy().devops.agents).toEqual({ [ORG_A]: AGENT_A, [ORG_B]: AGENT_B });
+    const typed = ['1b', ''];
+    const p = scripted(m, [[/May Beta's DevOps helper/, false]]);
+    const base = p.text;
+    p.text = async (q, def) => (/Press Enter to accept/.test(q) ? (typed.shift() ?? '') : base(q, def));
+    await runSetup(m.deps({ prompter: p }), opts());
     expect(m.policy().devops.agents).toEqual({ [ORG_A]: AGENT_A });
     expect(m.policy().legacyUpdateOrigin).toBe('https://hq.example.com');
     await runSetup(m.deps({ prompter: scripted(m, [[/old self-update/, false]]) }), opts());
@@ -384,7 +401,7 @@ describe('guildwise-runner setup for a named runner instance', () => {
       `sudo /usr/local/lib/guildwise/prod/guildwise-admin --instance prod migrate-user --from alice`,
     ]);
     expect(m.out.join('\n')).toContain(
-      'sudo -u guildwise-runner-prod -H guildwise-runner setup --instance prod',
+      'sudo -u guildwise-runner-prod -H /home/guildwise-runner-prod/.local/bin/guildwise-runner setup --instance prod',
     );
     await expect(
       runSetup(m.deps(), opts({ yes: true, instance: 'prod', runnerUser: 'current' })),
@@ -403,20 +420,22 @@ describe('setup step 4: Docker for the runner (deps-without-sudo §3)', () => {
     }
   });
 
-  it("found rootful: the owner's warning, then 1) separate rootless (default) or 2) the installed Docker with the typed phrase", async () => {
+  it("found rootful: the owner's warning, then item 3 offers 1) its own (default) or 3) the installed Docker with the typed phrase", async () => {
     const m = machine();
     await runSetup(m.deps({ prompter: scripted(m, []) }), opts({ dockerFound: 'rootful' }));
     expect(m.out.join('\n')).toContain('Docker detected, not running in rootless mode');
-    expect(m.out.join('\n')).toBe(m.out.join('\n'));
     expect(ROOTFUL_WARNING).toBe('Docker detected, not running in rootless mode');
     expect(m.policy().docker).toBe('rootless');
     const m2 = machine();
     await runSetup(
       m2.deps({
-        prompter: scripted(m2, [
-          [/separate rootless/, '2'],
-          [/Type "root-equivalent"/, 'yes'],
-        ]),
+        prompter: edits(
+          scripted(m2, [
+            [/Its own private Docker \(safe\)/, '3'],
+            [/Type "root-equivalent"/, 'yes'],
+          ]),
+          ['3'],
+        ),
       }),
       opts({ dockerFound: 'rootful' }),
     );
@@ -424,10 +443,13 @@ describe('setup step 4: Docker for the runner (deps-without-sudo §3)', () => {
     const m3 = machine();
     const r = await runSetup(
       m3.deps({
-        prompter: scripted(m3, [
-          [/separate rootless/, '2'],
-          [/Type "root-equivalent"/, 'root-equivalent'],
-        ]),
+        prompter: edits(
+          scripted(m3, [
+            [/Its own private Docker \(safe\)/, '3'],
+            [/Type "root-equivalent"/, 'root-equivalent'],
+          ]),
+          ['3'],
+        ),
       }),
       opts({ dockerFound: 'rootful' }),
     );
@@ -446,7 +468,7 @@ describe('setup step 4: Docker for the runner (deps-without-sudo §3)', () => {
     expect(y.policy().docker).toBe('rootless');
   });
 
-  it('macOS with Docker Desktop: the /Users warning and the typed phrase give host with the socket; declined gives none', async () => {
+  it('macOS with Docker Desktop (owner: "we detect docker on mac then we use that docker setup"): item 3 defaults to it; Enter, the /Users warning and the typed phrase give host with the socket; declined gives none; --yes gives none', async () => {
     const sock = '/Users/alice/.docker/run/docker.sock';
     const m = machine();
     const r = await runSetup(
@@ -455,6 +477,9 @@ describe('setup step 4: Docker for the runner (deps-without-sudo §3)', () => {
         prompter: scripted(m, [[/Type "root-equivalent"/, 'root-equivalent']]),
       }),
       opts({ dockerFound: 'desktop', dockerSocket: sock }),
+    );
+    expect(m.out.join('\n')).toMatch(
+      /3 {2}Docker, for apps your agents build and test \.+ The Docker already on this computer/,
     );
     expect(m.out.join('\n')).toContain(MAC_DOCKER_WARNING);
     expect(MAC_DOCKER_WARNING).toContain('by default all of /Users');
@@ -478,6 +503,10 @@ describe('setup step 4: Docker for the runner (deps-without-sudo §3)', () => {
       opts({ yes: true, dockerFound: 'desktop', dockerSocket: sock }),
     );
     expect(y.policy().docker).toBe('none');
+    // no Docker Desktop found: nothing to use, no question
+    const n = machine();
+    await runSetup(n.deps({ platform: 'darwin', prompter: scripted(n, []) }), opts({ dockerFound: 'none' }));
+    expect(n.policy().docker).toBe('none');
     expect(() => opts({ dockerSocket: '/tmp/docker.sock' })).toThrow(/--docker-socket/);
   });
 
@@ -489,10 +518,13 @@ describe('setup step 4: Docker for the runner (deps-without-sudo §3)', () => {
     const m = machine({ username: 'guildwise-runner-uat' });
     const r = await runSetup(
       m.deps({
-        prompter: scripted(m, [
-          [/that shared daemon/, '2'],
-          [/Type "shared-daemon"/, 'shared-daemon'],
-        ]),
+        prompter: edits(
+          scripted(m, [
+            [/Its own private Docker/, '4'],
+            [/Type "shared-daemon"/, 'shared-daemon'],
+          ]),
+          ['3'],
+        ),
       }),
       opts({ dockerFound: 'shared', dockerSocket: sock }),
     );
@@ -513,7 +545,7 @@ describe('setup step 4: Docker for the runner (deps-without-sudo §3)', () => {
     // declined: its own rootless daemon
     const d = machine();
     await runSetup(
-      d.deps({ prompter: scripted(d, [[/that shared daemon/, '2']]) }),
+      d.deps({ prompter: edits(scripted(d, [[/Its own private Docker/, '4']]), ['3']) }),
       opts({ dockerFound: 'shared', dockerSocket: sock }),
     );
     expect(d.policy().docker).toBe('rootless');

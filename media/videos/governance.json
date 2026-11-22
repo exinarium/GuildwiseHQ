@@ -14,22 +14,22 @@
   ],
   "captions": "/videos/governance.vtt",
   "voice": "Kokoro af_heart",
-  "duration": 119.6,
+  "duration": 130.7,
   "chapters": [
     {
-      "t": 13.2,
+      "t": 13,
       "title": "Approve from a notification"
     },
     {
-      "t": 40.2,
+      "t": 51.3,
       "title": "What it may do"
     },
     {
-      "t": 73.2,
+      "t": 84.2,
       "title": "Audit export"
     },
     {
-      "t": 93.6,
+      "t": 104.6,
       "title": "Offboarding"
     }
   ]

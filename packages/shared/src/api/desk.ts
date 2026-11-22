@@ -121,6 +121,9 @@ export const DeskItemDtoSchema = z.object({
       instanceId: z.string().optional(),
       recordId: z.string().optional(),
       stepId: z.string().optional(),
+      /** easy-runner-setup (`workstation_local_step`): the copy-paste command and the step kind for its sentence. */
+      command: z.string().max(900).optional(),
+      stepKind: z.string().max(60).optional(),
       /** `gate` for an escalated gate (the desk hides "Continue the journey"). */
       waitKind: z.string().optional(),
       /** Runner-offline items (`form_offline_link`, `form_offline_hold_expired`): strings only, never an email address. */

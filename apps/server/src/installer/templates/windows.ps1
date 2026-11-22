@@ -28,7 +28,7 @@ $UbuntuRootfs = @{
   arm64 = @{ Url = 'https://cloud-images.ubuntu.com/wsl/releases/24.04/20240423/ubuntu-noble-wsl-arm64-24.04lts.rootfs.tar.gz'; Sha256 = 'e113b8c49af3ab49b992b8e29550fc921e689f211abc338176f8243786173a32' }
 }
 # Installer choices that may be set in Windows and are passed on to the Linux installer (never values from the server).
-$ForwardedVars = @('GUILDWISE_YES', 'GUILDWISE_LEGACY', 'GUILDWISE_DEVOPS_ORGS', 'GUILDWISE_DOCKER', 'GUILDWISE_DOCKER_SOCKET', 'GUILDWISE_ACCEPT_ROOT_EQUIVALENT', 'GUILDWISE_ACCEPT_SHARED_DAEMON', 'GUILDWISE_SKIP_BASELINE', 'GUILDWISE_DEPLOY', 'GUILDWISE_DEPLOY_PIN_COMMIT', 'GUILDWISE_ALLOW_UNSIGNED_FROM', 'GUILDWISE_WITH_YTDLP', 'GUILDWISE_SKIP_CLAUDE_INSTALL')
+$ForwardedVars = @('GUILDWISE_YES', 'GUILDWISE_LEGACY', 'GUILDWISE_DEVOPS_ORGS', 'GUILDWISE_DOCKER', 'GUILDWISE_DOCKER_SOCKET', 'GUILDWISE_ACCEPT_ROOT_EQUIVALENT', 'GUILDWISE_ACCEPT_SHARED_DAEMON', 'GUILDWISE_SKIP_BASELINE', 'GUILDWISE_DEPLOY', 'GUILDWISE_DEPLOY_PIN_COMMIT', 'GUILDWISE_ALLOW_UNSIGNED_FROM', 'GUILDWISE_WITH_YTDLP', 'GUILDWISE_SKIP_CLAUDE_INSTALL', 'GUILDWISE_DEVOPS_REQUESTS', 'GUILDWISE_ALLOW_SCRIPTS', 'GUILDWISE_WSL_DISTRO_NAME')
 
 function Write-Info([string]$Text) { Write-Host "    $Text" -ForegroundColor DarkGray }
 function Write-Good([string]$Text) { Write-Host "    [ok] $Text" -ForegroundColor Green }
@@ -379,7 +379,7 @@ function Install-DedicatedDistro {
   if (-not $copied) { Stop-Install "Could not copy the Linux installer into $DedicatedDistro." 'Run the command again.' }
   Write-Info "The next lines come from $DedicatedDistro. It installs the baseline, creates the runner user there (never with sudo) and its own rootless Docker."
   $name = if ($DefaultName) { $DefaultName } else { "$env:COMPUTERNAME (WSL2)" }
-  $line = "export GUILDWISE_NAME=`"`$(echo $(ConvertTo-Base64Unix $name) | base64 -d)`" GUILDWISE_ALLOW_ROOT=1 GUILDWISE_RUNNER_USER=dedicated; $(Get-ForwardedExports) exec bash /root/guildwise-install.sh"
+  $line = "export GUILDWISE_NAME=`"`$(echo $(ConvertTo-Base64Unix $name) | base64 -d)`" GUILDWISE_ALLOW_ROOT=1 GUILDWISE_RUNNER_USER=dedicated GUILDWISE_WSL_DISTRO_NAME=$DedicatedDistro; $(Get-ForwardedExports) exec bash /root/guildwise-install.sh"
   $runB64 = ConvertTo-Base64Unix $line
   & wsl.exe -d $DedicatedDistro -u root --cd '/root' -- bash -c "echo $runB64 | base64 -d | bash"
   $code = $LASTEXITCODE
@@ -658,6 +658,8 @@ Start-Step 'Running the Linux installer inside Ubuntu'
 Write-Info 'The next lines come from Ubuntu. It may ask for your Ubuntu password to install tools.'
 $env:GUILDWISE_NAME = if ($DefaultName) { $DefaultName } else { "$env:COMPUTERNAME (WSL2)" }
 $env:GUILDWISE_SCRIPT = $LinuxScriptPath
+# The copy-paste commands the app shows start with `wsl -d <this distro> --`, so they can be pasted into a Windows terminal.
+$env:GUILDWISE_WSL_DISTRO_NAME = $Distro
 # Your choices travel with it (WSLENV); GUILDWISE_RUNNER_USER too, since here the runner may run as you or as its own user.
 $env:WSLENV = (@('GUILDWISE_NAME/u', 'GUILDWISE_SCRIPT/p', 'GUILDWISE_RUNNER_USER/u') + @($ForwardedVars | ForEach-Object { "$_/u" })) -join ':'
 # The command carries no quote characters of its own (Windows PowerShell 5.1 strips embedded double quotes from native

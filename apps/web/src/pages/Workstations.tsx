@@ -17,6 +17,7 @@ import { MoveAllAgentsDialog } from '../components/agents/MoveAllAgentsDialog.ts
 import { DevOpsPanel } from '../components/DevOpsPanel.tsx';
 import { GitConnectionsPanel } from '../components/GitConnections.tsx';
 import { JiraStatusLine } from '../components/JiraStatusLine.tsx';
+import { ApprovalsLink } from '../components/LocalCommand.tsx';
 import { RepoSyncLine } from '../components/RepoSync.tsx';
 import { RunList } from '../components/runs/RunPanel.tsx';
 import { SandboxUnavailable, SandboxWarning } from '../components/SandboxWarning.tsx';
@@ -395,6 +396,18 @@ export function WorkstationCard({
                 Approvals
               </ButtonLink>
             )}
+            {!admin && w.localAuthority?.windowPort ? (
+              <ApprovalsLink port={w.localAuthority.windowPort} testId="workstation-approvals-window" />
+            ) : null}
+            {!admin && w.localAuthority?.windowError ? (
+              <span
+                role="status"
+                className="text-sm text-warning"
+                data-testid="workstation-approvals-window-error"
+              >
+                Approvals on this computer could not start: {w.localAuthority.windowError}
+              </span>
+            ) : null}
             {!w.connected && holdsAgents && (
               <Button
                 size="sm"

@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { YTDLP_INSTALL_COMMAND } from '../toolchain/extras.ts';
 import { decodeEntities, transcriptToText } from './convert.ts';
 
 export const MAX_TRANSCRIPT_CHARS = 200_000;
@@ -44,7 +45,16 @@ export type Exec = (
 export interface TranscriptDeps {
   exec: Exec;
   fetch: typeof fetch;
+  /** The yt-dlp to run: the toolchains copy (`ytDlpPath()`), never one from PATH; `null` when it is not installed. */
+  ytDlp: () => string | null;
 }
+
+/** The `tool_missing` result: names the install command (run as the runner user). */
+const ytDlpMissing = (url: string): TranscriptResult => ({
+  status: 'tool_missing',
+  url,
+  message: `transcript tool missing: yt-dlp (install it as the runner user: ${YTDLP_INSTALL_COMMAND})`,
+});
 
 /** Spawns a process with a timeout; a missing binary is reported, not thrown. */
 export const spawnExec: Exec = (cmd, args, opts) =>
@@ -231,10 +241,12 @@ async function publishedTranscript(deps: TranscriptDeps, url: string): Promise<T
 
 /** Captions through yt-dlp (`--skip-download`): manual subtitles are preferred over auto-generated ones. */
 async function viaYtDlp(deps: TranscriptDeps, url: string): Promise<TranscriptResult> {
+  const bin = deps.ytDlp();
+  if (!bin) return ytDlpMissing(url);
   const dir = await mkdtemp(join(tmpdir(), 'aom-transcript-'));
   try {
     const r = await deps.exec(
-      'yt-dlp',
+      bin,
       [
         '--skip-download',
         '--no-simulate',
@@ -258,7 +270,7 @@ async function viaYtDlp(deps: TranscriptDeps, url: string): Promise<TranscriptRe
       ],
       { timeoutMs: YTDLP_TIMEOUT_MS },
     );
-    if (r.missing) return { status: 'tool_missing', url, message: 'transcript tool missing: yt-dlp' };
+    if (r.missing) return ytDlpMissing(url);
     if (r.timedOut)
       return { status: 'error', url, message: `yt-dlp timed out after ${YTDLP_TIMEOUT_MS / 1000}s` };
     const files = (await readdir(dir)).filter((f) => f.endsWith('.vtt')).sort();

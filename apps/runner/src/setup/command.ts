@@ -2,6 +2,7 @@ import { homedir, userInfo } from 'node:os';
 import type { Command } from 'commander';
 import { resolveDataDir } from '../paths.ts';
 import { realExecutor } from '../toolchain/exec.ts';
+import { installExtra } from '../toolchain/extras.ts';
 import { parseSetupOptions, type RawSetupFlags, SetupError } from './options.ts';
 import { terminalPrompter } from './prompt.ts';
 import { runSetup } from './setup.ts';
@@ -24,9 +25,20 @@ export function registerSetupCommand(program: Command): void {
       'let a root-equivalent runner user start, with a warning (needed by --docker host)',
     )
     .option(
-      '--devops-orgs <ids>',
-      'none, or organization ids separated by commas (each must be offered by the server)',
+      '--devops-orgs <names>',
+      'none, or organization names (exact) or ids separated by commas (each must be offered by the server)',
     )
+    .option(
+      '--devops-requests <mode>',
+      'ask|auto: DevOps tasks from the website wait for your yes (default ask)',
+    )
+    .option(
+      '--allow-scripts <repos>',
+      'repository URLs or names, separated by commas, whose installs may run their scripts (each must be offered)',
+    )
+    .option('--with-ytdlp', "install yt-dlp (video transcripts) into the runner's own folder (the default)")
+    .option('--no-ytdlp', 'do not install yt-dlp')
+    .option('--wsl-distro-name <name>', 'Windows: the WSL distro the runner lives in (installer only)')
     .option(
       '--docker <mode>',
       "rootless|host|shared|none (default: the runner's own rootless Docker; host needs --accept-root-equivalent, shared needs --accept-shared-daemon)",
@@ -62,6 +74,7 @@ export function registerSetupCommand(program: Command): void {
             prompter: process.stdin.isTTY && !opts.yes ? terminalPrompter : null,
             out: (line) => console.log(line),
             exec: realExecutor,
+            installExtra: (name) => installExtra(name, { log: (l) => console.log(`    ${l}`) }),
           },
           opts,
         );

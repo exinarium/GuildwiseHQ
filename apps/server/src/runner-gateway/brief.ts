@@ -1238,6 +1238,8 @@ export async function buildDevopsShiftStart(
     brief,
     worktree: null,
     prepare: { rebase: false },
+    // the runner checks its local DevOps grant per organization (R18-S): without this it refused every DevOps shift
+    orgId: agent.org_id,
     maxShiftMinutes: DEVOPS_MAX_SHIFT_MINUTES,
     devops: {
       requestId,

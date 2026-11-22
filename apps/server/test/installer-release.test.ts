@@ -751,7 +751,7 @@ describe('installer flags', () => {
       ['--docker', 'shared', '--accept-shared-daemon', '--docker-socket', '/run/./docker.sock'],
       '--docker-socket /run/<name>/docker.sock',
     ],
-    [['--devops-orgs', 'owned'], '--devops-orgs is none or organization ids'],
+    [['--devops-orgs', 'owned'], '--devops-orgs is none or organization names or ids'],
     [['--approve-app', 'web=/srv/web'], 'Unknown option: --approve-app'],
     [['--allow-unsigned-from', 'https://x.example/path'], 'an exact origin'],
     [['--deploy', 'auto'], '--deploy is ask or off'],

@@ -182,7 +182,10 @@
       ]
     },
     "governance": {
-      "screens": [{ "name": "Governance", "files": ["apps/web/src/components/governance/**"] }]
+      "screens": [
+        { "name": "Governance", "files": ["apps/web/src/components/governance/**"] },
+        { "name": "Desk: waiting on the workstation", "files": ["apps/web/src/components/LocalCommand.tsx"] }
+      ]
     },
     "help": {
       "screens": [
@@ -333,7 +336,10 @@
           "name": "Workstations",
           "files": ["apps/web/src/pages/Workstations.tsx", "apps/web/src/components/workstations/**"]
         },
-        { "name": "Approvals", "files": ["apps/web/src/pages/WorkstationApprovals.tsx"] }
+        {
+          "name": "Approvals",
+          "files": ["apps/web/src/pages/WorkstationApprovals.tsx", "apps/web/src/components/LocalCommand.tsx"]
+        }
       ]
     }
   },

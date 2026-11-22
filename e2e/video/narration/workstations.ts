@@ -52,6 +52,20 @@ export const CHAPTERS: NarratedChapter[] = [
     ],
   },
   {
+    title: 'Approvals on the workstation',
+    banner: 'Approve on the computer',
+    cues: [
+      {
+        id: 'c4-local-a',
+        text: 'Some yeses can only be given on the computer itself. Open Approvals on the workstation card: everything that waits is listed here.',
+      },
+      {
+        id: 'c4-local-b',
+        text: 'Each one comes with one plain sentence and the exact command. Copy it, paste it into a terminal on that computer, and it asks you once more. The website never approves for you.',
+      },
+    ],
+  },
+  {
     title: 'Check for updates',
     banner: 'Check for updates',
     cues: [

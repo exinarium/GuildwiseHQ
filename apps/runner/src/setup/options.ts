@@ -31,6 +31,13 @@ export interface RawSetupFlags {
   allowUnsignedFrom?: string[];
   dataDir?: string;
   instance?: string;
+  devopsRequests?: string;
+  allowScripts?: string;
+  withYtdlp?: boolean;
+  noYtdlp?: boolean;
+  /** commander's `--no-ytdlp` sets `ytdlp: false`. */
+  ytdlp?: boolean;
+  wslDistroName?: string;
 }
 
 export type DockerMode = 'rootless' | 'host' | 'shared' | 'none';
@@ -48,8 +55,19 @@ export interface SetupOptions {
   /** Installer only (the old-install quarantine, R21); accepted so the flags map one to one. */
   legacy?: 'quarantine' | 'remove';
   acceptRootEquivalent: boolean;
-  /** `none`, or the organization ids to grant (each must be offered by the server; no `owned` shortcut [rv6-6]). */
+  /**
+   * `none`, or the organizations to grant by exact name (case-insensitive) or id; each must be offered by the server
+   * (no `owned` shortcut [rv6-6]). Resolved against the offers in `choices.ts`.
+   */
   devopsOrgs?: 'none' | string[];
+  /** Item 2: DevOps tasks from the website wait for a local yes (`ask`) or start (`auto`). */
+  devopsRequests?: 'ask' | 'auto';
+  /** Item 5: offered repositories (URL or name) whose installs may run their scripts. */
+  allowScripts?: string[];
+  /** Item 6: install yt-dlp into the runner's own folder (default yes). */
+  withYtdlp?: boolean;
+  /** Windows: the WSL distro the runner lives in (stored as runnerUser.wslDistro, used by the copy-paste commands). */
+  wslDistroName?: string;
   docker?: DockerMode;
   /** What the installer's `detect_docker` saw (a suggestion for the question, never a grant). */
   dockerFound?: DockerFound;
@@ -65,6 +83,8 @@ export interface SetupOptions {
   instance?: string;
 }
 
+/** Words that would grant more than one named organization: refused [rv6-6]. */
+const SHORTCUTS = ['owned', 'all', 'any', '*'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function oneOf<T extends string>(
@@ -126,15 +146,33 @@ export function parseSetupOptions(raw: RawSetupFlags, env: NodeJS.ProcessEnv = p
   if (devopsRaw !== undefined) {
     if (devopsRaw.trim() === 'none') devopsOrgs = 'none';
     else {
-      const ids = list(devopsRaw);
-      const bad = ids.filter((id) => !UUID_RE.test(id));
-      if (ids.length === 0 || bad.length > 0)
+      const names = list(devopsRaw);
+      const bad = names.filter(
+        (n) => SHORTCUTS.includes(n.toLowerCase()) || /\p{Cc}/u.test(n) || n.length > 200,
+      );
+      if (names.length === 0 || bad.length > 0)
         throw new SetupError(
-          `--devops-orgs takes none or organization ids separated by commas (no shortcuts such as "owned"); not an id: ${bad.join(', ') || '(empty)'}`,
+          `--devops-orgs takes none or organization names or ids separated by commas (no shortcuts such as "owned"); not accepted: ${bad.join(', ') || '(empty)'}`,
         );
-      devopsOrgs = [...new Set(ids.map((id) => id.toLowerCase()))];
+      devopsOrgs = [...new Set(names.map((n) => (UUID_RE.test(n) ? n.toLowerCase() : n)))];
     }
   }
+  const ytdlpRaw =
+    raw.ytdlp === false || raw.noYtdlp === true
+      ? false
+      : raw.withYtdlp === true
+        ? true
+        : /^(1|true|yes|y)$/i.test(e('WITH_YTDLP') ?? '')
+          ? true
+          : /^(0|false|no|n)$/i.test(e('WITH_YTDLP') ?? '')
+            ? false
+            : undefined;
+  const scriptsRaw = list(raw.allowScripts ?? e('ALLOW_SCRIPTS'));
+  const distro = raw.wslDistroName ?? e('WSL_DISTRO_NAME');
+  if (distro !== undefined && !/^[A-Za-z0-9._-]{1,64}$/.test(distro))
+    throw new SetupError(
+      `--wsl-distro-name takes letters, digits, dots, dashes and underscores (got ${JSON.stringify(distro)})`,
+    );
   const unsignedRaw = raw.allowUnsignedFrom?.length ? raw.allowUnsignedFrom : list(e('ALLOW_UNSIGNED_FROM'));
   const opts: SetupOptions = {
     yes: raw.yes === true || truthy(e('YES')),
@@ -158,6 +196,13 @@ export function parseSetupOptions(raw: RawSetupFlags, env: NodeJS.ProcessEnv = p
     allowUnsignedFrom: unsignedRaw.length > 0 ? [...new Set(unsignedRaw.map(exactOrigin))] : undefined,
     dataDir: raw.dataDir,
     instance: parseInstance(raw.instance ?? e('INSTANCE')),
+    devopsRequests: oneOf('devops-requests', raw.devopsRequests ?? e('DEVOPS_REQUESTS'), [
+      'ask',
+      'auto',
+    ] as const),
+    ...(scriptsRaw.length > 0 ? { allowScripts: [...new Set(scriptsRaw)] } : {}),
+    ...(ytdlpRaw !== undefined ? { withYtdlp: ytdlpRaw } : {}),
+    ...(distro !== undefined ? { wslDistroName: distro } : {}),
   };
   if (opts.docker === 'host' && !opts.acceptRootEquivalent)
     throw new SetupError('--docker host makes the runner root-equivalent: it needs --accept-root-equivalent');

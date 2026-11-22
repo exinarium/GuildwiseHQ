@@ -1,7 +1,9 @@
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { type APIRequestContext, expect, request, test } from '@playwright/test';
 import { pool, q, waitFor } from '../support/db.ts';
-import { BASE_URL } from '../support/env.ts';
+import { BASE_URL, paths, ROOT } from '../support/env.ts';
 import { deleteMailFor, waitForMail } from '../support/mail.ts';
 import { click } from './captions.ts';
 import { pause, prepareVideo, startRecording } from './harness.ts';
@@ -17,6 +19,7 @@ import { createProject, demoApi, hireAgent, pairWorkstation } from './seed.ts';
  *   e2e/video/record.sh governance
  */
 const SLUG = 'governance';
+const GUIDE_ASSETS = join(ROOT, 'docs', 'guide', 'assets');
 const PASSWORD = 'demo-password-12345';
 
 test.afterAll(async () => {
@@ -89,13 +92,37 @@ test('record the governance video', async ({ browser }) => {
     user: { id: string };
     activeOrg: { id: string };
   };
-  const ws = await pairWorkstation(api, "Alex's laptop", undefined, { AOM_MOCK_STEP_MS: '300' });
+  // Each runner has its own policy dir (never the recording user's ~/.config). The laptop is set up as the installer
+  // leaves it: setup done, its DevOps engineer granted, website tasks start without asking (1.10.0 local authority).
+  const laptopPolicy = join(paths.runnerHome('video'), 'policy');
+  const ws = await pairWorkstation(api, "Alex's laptop", undefined, {
+    AOM_MOCK_STEP_MS: '300',
+    AOM_RUNNER_POLICY_DIR: laptopPolicy,
+    AOM_MOCK_RUNNER_USER: 'guildwise-runner',
+  });
   const agents = (await (await api.get('/api/agents')).json()).agents as Array<{
     id: string;
     isDevops?: boolean;
+    workstationId?: string | null;
   }>;
-  const devops = agents.find((a) => a.isDevops);
+  const devops = agents.find((a) => a.isDevops && (a.workstationId ?? ws) === ws);
   if (devops) await api.patch(`/api/agents/${devops.id}`, { data: { runtime: 'mock', model: 'mock' } });
+  mkdirSync(laptopPolicy, { recursive: true });
+  writeFileSync(
+    join(laptopPolicy, 'policy.json'),
+    `${JSON.stringify({
+      version: 1,
+      setupDone: true,
+      devops: { agents: devops ? { [me.activeOrg.id]: devops.id } : {} },
+      devopsRequests: 'auto',
+    })}\n`,
+    { mode: 0o600 },
+  );
+  // a second computer that has not finished its first-time questions: the Desk shows the command to paste there
+  await pairWorkstation(api, 'Studio Mac mini', paths.runnerHome('video-studio'), {
+    AOM_RUNNER_POLICY_DIR: join(paths.runnerHome('video-studio'), 'policy'),
+    AOM_MOCK_RUNNER_USER: 'guildwise-runner',
+  });
   const { projectId, repoId } = await createProject(api, 'SHOP', 'Web shop');
   expect((await api.put(`/api/projects/${projectId}/manual-qa`, { data: { enabled: false } })).ok()).toBe(
     true,
@@ -168,6 +195,30 @@ test('record the governance video', async ({ browser }) => {
     await click(page, page.getByTestId('desk-action-confirm').getByRole('button', { name: 'Approve' }));
     await expect(page.getByText(/done\. It is on the record/)).toBeVisible({ timeout: 30_000 });
     await pause(2500);
+  });
+
+  // easy-runner-setup: what can only be approved on the computer shows on the Desk as the exact command
+  await narrate('c1-d', async () => {
+    await page.goto('/desk');
+    const local = page
+      .getByTestId('desk-list')
+      .getByText(/^Waiting on /)
+      .first();
+    await expect(local).toBeVisible({ timeout: 30_000 });
+    await click(page, local);
+    const block = page.getByTestId('desk-local-step');
+    await expect(block).toBeVisible();
+    await block.scrollIntoViewIfNeeded();
+    await pause(2500);
+    // the user guide's figure of this notice (docs/guide/assets), from this same real page
+    mkdirSync(GUIDE_ASSETS, { recursive: true });
+    const item = page.getByTestId('desk-detail').or(block.locator('xpath=..'));
+    await item.first().screenshot({
+      path: join(GUIDE_ASSETS, 'desk-local-step.jpg'),
+      type: 'jpeg',
+      quality: 85,
+      style: '#gw-cursor, #gw-caption { display: none !important; }',
+    });
   });
 
   await chapter(2);

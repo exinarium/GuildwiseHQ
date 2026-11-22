@@ -62,6 +62,12 @@ export const ROUTING_EXEMPT_SUBKINDS: readonly string[] = [
   'order_escalation',
   /** Needs split, second time: after one return to the BA the owner decides, never held for triage. */
   'needs_split_decision',
+  /**
+   * easy-runner-setup: a step only the person at the workstation can take (the copy-paste command), and the approvals
+   * page that could not start. No agent can act on them, so the CEO never holds them for triage.
+   */
+  'workstation_local_step',
+  'workstation_window_error',
 ];
 
 // ----------------------------------------------------------------------------------------------- prefs

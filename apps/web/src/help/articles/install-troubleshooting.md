@@ -49,7 +49,23 @@ A Claude subscription (Pro, Max, Team or Enterprise): you sign in with your Clau
 
 ## Docker or yt-dlp show a warning {#optional-tools}
 
-Both are optional. Docker is only needed if your testers run containers; yt-dlp lets agents read video transcripts. Run the command again and say yes when it asks, or ignore the warning.
+Both are optional. Docker is only needed if your testers run containers; yt-dlp lets agents read video transcripts. For yt-dlp, run `guildwise-runner extras install yt-dlp` on the workstation (the installer's line 6 does the same). For Docker, run `guildwise-runner setup` again and change line 3, or ignore the warning.
+
+## The Approvals page says it is not signed in, or asks me to pair {#approvals-pair}
+
+This browser is not paired with this runner, was forgotten, or the page moved to a new port. Click **Pair this browser**, copy the command, paste it in a terminal on that computer and type `yes`.
+
+## The command asks for a password {#command-password}
+
+`sudo` asks for your own password on that computer, the one you use to sign in to it. Nothing shows while you type. It is not a Guildwise password.
+
+## The Approvals link does not open on Windows {#approvals-windows}
+
+The link opens only in a browser on the same computer as the runner, and on Windows the runner lives inside WSL. Use the copy-paste commands from the Workstations page instead.
+
+## Approvals page could not start: another program uses port N {#approvals-port}
+
+Stop the other program, or run `guildwise-runner approvals port <new number>` on that computer and pair the browser again. The copy-paste commands keep working meanwhile.
 
 ## I still need help {#still-need-help}
 

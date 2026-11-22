@@ -49,6 +49,8 @@ export interface ReleaseShipInput {
   toolPathDirs?: string[];
   /** R18-S: the formatter runs only for a configuration approved locally (policy.json `formatterPins`). */
   formatterPinned?: (configHash: string) => boolean;
+  /** easy-runner-setup: raises the `formatter.pin` step and returns its copy-paste command. */
+  onUnpinnedFormatter?: (configHash: string) => string | null;
 }
 
 type Bumps = ReleaseShipResult['components'];
@@ -284,6 +286,7 @@ async function commitRelease(
     pathDirs: input.toolPathDirs ?? [],
     ...(input.exec ? { exec: input.exec } : {}),
     ...(input.formatterPinned ? { formatterPinned: input.formatterPinned } : {}),
+    ...(input.onUnpinnedFormatter ? { onUnpinnedFormatter: input.onUnpinnedFormatter } : {}),
   });
   if (fmt.state === 'failed')
     return fail(

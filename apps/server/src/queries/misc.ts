@@ -618,6 +618,11 @@ export function localAuthorityDto(ctx: Ctx, w: Row): NonNullable<WorkstationDto[
     setupPending: conn?.setupPending ?? false,
     startupRefused: conn ? (conn.startupRefused ?? null) : ((w.startup_refused as string | null) ?? null),
     held: conn?.heldItems ?? [],
+    // easy-runner-setup: the copy-paste commands and the approvals page on the workstation
+    steps: conn?.localSteps ?? [],
+    cli: conn?.local?.cli ?? null,
+    windowPort: conn?.local && !conn.local.windowError ? (conn.local.windowPort ?? null) : null,
+    windowError: conn?.local?.windowError ?? null,
   };
 }
 

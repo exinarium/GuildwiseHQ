@@ -78,6 +78,10 @@ export function versionAtLeast(version: string | undefined, min: string): boolea
 }
 
 /** Which declared services this shift gets, and why not for the rest. Empty: nothing at all is added to the shift. */
+/** The port range of the approvals pages (`window/pairing.ts` PORT_MIN..PORT_MAX), refused for every runner instance. */
+export const APPROVALS_PORT_MIN = 47600;
+export const APPROVALS_PORT_MAX = 47699;
+
 export function decideTestServices(i: TestServiceInput): TestServiceDecision[] {
   const services = i.services ?? [];
   if (services.length === 0) return [];
@@ -111,6 +115,9 @@ export function decideTestServices(i: TestServiceInput): TestServiceDecision[] {
     if (i.envForwardPorts.has(s.port))
       return refuse(s, `port ${s.port} is already forwarded to the test environment`);
     if (RESERVED_RUN_PORTS.includes(s.port)) return refuse(s, `port ${s.port} is used by the sandbox proxy`);
+    // easy-runner-setup [B3]: the approvals pages of every runner instance on this machine are never opened to a shift
+    if (s.port >= APPROVALS_PORT_MIN && s.port <= APPROVALS_PORT_MAX)
+      return refuse(s, `port ${s.port} is reserved for Approvals on this computer`);
     return { ...s, state: 'allowed' };
   });
 }

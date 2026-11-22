@@ -17,6 +17,7 @@ import {
   useWorkstationPasskeys,
 } from '../api/queries/passkeys.ts';
 import { useWorkstations } from '../api/queries/workstations.ts';
+import { LocalCommand } from '../components/LocalCommand.tsx';
 import {
   Badge,
   Button,
@@ -174,10 +175,24 @@ function HeldPanel({
               busy={busy === item.id}
               error={error?.itemId === item.id ? error.message : null}
               support={support}
+              windowPort={data.windowPort ?? null}
               onApprove={() => void approve(item)}
             />
           ))}
         </ul>
+      )}
+      {data?.online && (data.steps?.length ?? 0) > 0 && (
+        <div className="mt-4 flex flex-col gap-3 border-t border-line pt-4" data-testid="local-steps">
+          <h3 className="text-sm font-semibold text-fg">Also waiting on this computer</h3>
+          <ul className="flex flex-col gap-4">
+            {data.steps?.map((s) => (
+              <li key={s.key} className="flex flex-col gap-1" data-testid={`local-step-${s.key}`}>
+                <p className="text-sm break-words text-fg">{s.summary}</p>
+                <LocalCommand command={s.command} kind={s.kind} testId={`local-step-command-${s.key}`} />
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </Panel>
   );
@@ -191,6 +206,7 @@ function HeldRow({
   busy,
   error,
   support,
+  windowPort,
   onApprove,
 }: {
   item: ApprovalItemDto;
@@ -198,6 +214,7 @@ function HeldRow({
   busy: boolean;
   error: string | null;
   support: string | null;
+  windowPort: number | null;
   onApprove: () => void;
 }) {
   return (
@@ -222,9 +239,17 @@ function HeldRow({
           {support && <span className="text-xs text-subtle">{support}</span>}
         </div>
       ) : (
-        <p className="text-sm text-muted" data-testid={`local-only-${item.id}`}>
-          Confirm on the workstation: <code>guildwise-runner approve {item.id}</code>
-        </p>
+        <LocalCommand
+          command={item.command}
+          kind="held"
+          windowPort={windowPort}
+          testId={`local-command-${item.id}`}
+          fallback={
+            <p className="text-sm text-muted" data-testid={`local-only-${item.id}`}>
+              Confirm on the workstation: <code>guildwise-runner approve {item.id}</code>
+            </p>
+          }
+        />
       )}
       {relay && <RelayStatus relay={relay} />}
       {error && (

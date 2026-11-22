@@ -1,6 +1,8 @@
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { pool } from '../support/db.ts';
-import { paths } from '../support/env.ts';
+import { paths, ROOT } from '../support/env.ts';
 import { killRunner } from '../support/runner.ts';
 import { click } from './captions.ts';
 import { pause, prepareVideo, startRecording } from './harness.ts';
@@ -14,6 +16,7 @@ import { createProject, demoApi, hireAgent, pairWorkstation } from './seed.ts';
  *   e2e/video/record.sh workstations
  */
 const SLUG = 'workstations';
+const GUIDE_ASSETS = join(ROOT, 'docs', 'guide', 'assets');
 
 test.afterAll(async () => {
   await pool.end();
@@ -26,7 +29,11 @@ test('record the workstations video', async ({ browser }) => {
   const studioHome = paths.runnerHome('video-studio');
   await pairWorkstation(api, 'Studio Mac mini', studioHome);
   killRunner('SIGKILL', studioHome); // the second machine is switched off: it stays paired but offline
-  const laptopId = await pairWorkstation(api, "Alex's laptop");
+  // its own policy dir (never the recording user's ~/.config): a fresh runner, so "finish setup" waits on it
+  const laptopId = await pairWorkstation(api, "Alex's laptop", undefined, {
+    AOM_RUNNER_POLICY_DIR: join(paths.runnerHome('video'), 'policy'),
+    AOM_MOCK_RUNNER_USER: 'guildwise-runner',
+  });
   await hireAgent(api, { name: 'Max', roleKey: 'builder', workstationId: laptopId });
   await hireAgent(api, { name: 'Ben', roleKey: 'builder', workstationId: laptopId });
 
@@ -118,7 +125,38 @@ test('record the workstations video', async ({ browser }) => {
     await pause(1500);
   });
 
+  // easy-runner-setup: what still waits on the computer itself, as the exact command to paste
   await chapter(4);
+  await narrate('c4-local-a', async () => {
+    await laptop.scrollIntoViewIfNeeded();
+    await click(page, laptop.getByTestId('workstation-approvals'));
+    const steps = page.getByTestId('local-steps');
+    await expect(steps).toBeVisible({ timeout: 30_000 });
+    await steps.scrollIntoViewIfNeeded();
+    await pause(1500);
+  });
+  await narrate('c4-local-b', async () => {
+    // the user guide's figure of this box (docs/guide/assets), from this same real page
+    mkdirSync(GUIDE_ASSETS, { recursive: true });
+    await page.getByTestId('held-items').screenshot({
+      path: join(GUIDE_ASSETS, 'workstation-local-step.jpg'),
+      type: 'jpeg',
+      quality: 85,
+      style: '#gw-cursor, #gw-caption { display: none !important; }',
+    });
+    const box = page.getByTestId('local-steps').locator('[data-testid$="-text"]').first();
+    const bb = await box.boundingBox();
+    if (bb) await page.mouse.move(bb.x + 60, bb.y + bb.height / 2, { steps: 25 });
+    await pause(1200);
+    const copy = page.getByTestId('local-steps').locator('[data-testid$="-copy"]').first();
+    const cb = await copy.boundingBox();
+    if (cb) await page.mouse.move(cb.x + cb.width / 2, cb.y + cb.height / 2, { steps: 20 });
+    await pause(1500);
+    await click(page, nav);
+    await expect(laptop).toBeVisible();
+  });
+
+  await chapter(5);
   await narrate('c4-a', async () => {
     await laptop.scrollIntoViewIfNeeded();
     await page.evaluate('window.scrollTo(0, 0)');
@@ -128,7 +166,7 @@ test('record the workstations video', async ({ browser }) => {
     await pause(1500);
   });
 
-  await chapter(5);
+  await chapter(6);
   await narrate('c5-a', async () => {
     await laptop.scrollIntoViewIfNeeded();
     await click(page, laptop.getByRole('button', { name: "Retire Alex's laptop", exact: true }));

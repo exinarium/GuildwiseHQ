@@ -67,6 +67,27 @@ describe('formatter pins', () => {
     expect(t.exec).not.toHaveBeenCalled();
   });
 
+  it('easy-runner-setup: an unpinned formatter raises the step and the notice names its exact copy-paste command', async () => {
+    const r = repo();
+    const raised: string[] = [];
+    const CLI = 'sudo -u guildwise-runner -H /home/guildwise-runner/.local/bin/guildwise-runner';
+    const out = await formatReleaseFiles({
+      worktree: r.wt,
+      files: ['CHANGELOG.md'],
+      repoPath: r.repoPath,
+      pathDirs: [],
+      exec: vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '', timedOut: false })),
+      platform: 'linux',
+      formatterPinned: () => false,
+      onUnpinnedFormatter: (h) => {
+        raised.push(h);
+        return `${CLI} formatter pin ${h}`;
+      },
+    });
+    expect(raised).toHaveLength(1);
+    expect(out.state === 'skipped' && out.reason).toContain(`\`${CLI} formatter pin ${raised[0]}\``);
+  });
+
   it('a changed formatter program is unpinned: package.json, lockfile, installed package or binary', async () => {
     const changes: Array<(r: ReturnType<typeof repo>) => void> = [
       (r) => writeFileSync(join(r.wt, 'package.json'), '{"devDependencies":{"@biomejs/biome":"npm:evil@1"}}'),

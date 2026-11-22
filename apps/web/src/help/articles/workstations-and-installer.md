@@ -154,7 +154,18 @@ When it is required:
 
 ## Setting local permissions {#local-permissions}
 
-The installer has a step **Setting local permissions**; it runs `guildwise-runner setup`, which you can run again at any time (it refuses to run as root). Your answers stay on the machine and never come from the server. `--yes` picks the safest values.
+At the end of the installer, `guildwise-runner setup` shows **one screen** with every choice, named in plain words, with the safe answer already filled in. Press **Enter** to accept, or type the number of a line (like `1a`) to change it. You can run setup again at any time (it refuses to run as root). Your answers stay on the machine and never come from the server. `--yes` alone picks the safe answers.
+
+1. **DevOps helpers** (agents that install tools and run commands here), one line per organization. Starts at No.
+2. **When the website asks a helper**: Ask me first (safe), or start without asking.
+3. **Docker**: its own private Docker (safe), none, or the computer's Docker (full control: type `root-equivalent`).
+4. **Publishing your apps**: Ask me first, or never.
+5. **Install scripts** of each code project. Starts at No.
+6. **Video transcripts**: yt-dlp in the runner's own folder (Yes). Later: `guildwise-runner extras install yt-dlp`.
+
+Lines 1 and 5 are left out when the server offers nothing. You can change all of this later on the [Approvals page of the computer](#approvals-page), except Docker, which needs a terminal. Scripted installs use `--devops-orgs`, `--devops-requests ask|auto`, `--allow-scripts`, `--with-ytdlp` or `--no-ytdlp`.
+
+The rest of what setup settles:
 
 - **Runner user**: a dedicated `guildwise-runner` user (Linux, macOS) or a dedicated WSL distribution (Windows), or your own user.
 - **Own clones**: the runner works only in its own clones under its home folder, never in your folders. You get its work through git.
@@ -178,6 +189,17 @@ Held: new deploy scripts (unless a pin matches the exact script, environment, fo
 **Install scripts per repository.** Only package installs known to run no project code run by themselves (npm, pnpm, Yarn, Composer with scripts off, `go mod download`, `cargo fetch`). Others (Bundler, `dotnet restore`, Gradle, Maven, pip) need `guildwise-runner repo allow-scripts` for that repository on this machine.
 
 The workstation page shows what is waiting: setup pending, a start-up refusal with its fix, held items.
+
+**Copy-paste commands.** Each held item shows one plain sentence, the exact command in a grey box and a **Copy** button. Copy it, paste it in a terminal on the workstation and press Enter; the terminal shows what will run and asks again. The website never approves for you. A Guildwise command always starts with `sudo -u guildwise-runner` or with the runner's own path (ending in `guildwise-runner`). If a command looks different, do not paste it.
+
+### Approvals on this computer {#approvals-page}
+
+Each workstation runs a small private page, **Approvals on this computer**, at an address starting with `127.0.0.1` (always "this very computer"). It opens only on that computer. The installer opens it at the end; the **Open Approvals on this computer** link on the Workstations page does too.
+
+- **Pair the browser once.** Click **Pair this browser**, copy the command (like `guildwise-runner approvals pair K7M2-Q9`), paste it in a terminal on that computer, check the fingerprint matches, and type `yes`. The code works for 10 minutes. `guildwise-runner approvals devices` lists paired browsers; `approvals forget <fingerprint>` removes one.
+- **The top bar** names the instance and the server. It is yellow-orange for any instance other than prod, so a test window is never mistaken for the real one.
+- **The page** shows this computer's status, **Waiting for your yes** (one item at a time, with full detail; no approve-all), **What this computer allows** (tick boxes) and **Changed only in a terminal** (Docker mode, signing keys and the like, each with its command).
+- If another program uses the page's port, the Desk says so. Run `guildwise-runner approvals port <new number>` and pair again.
 
 ## Passkey approvals {#passkeys}
 

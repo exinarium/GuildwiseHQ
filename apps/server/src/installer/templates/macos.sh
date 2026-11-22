@@ -58,13 +58,6 @@ install_claude_code() {
   step_ok "Claude Code installed"
 }
 
-install_extras() {
-  if have yt-dlp; then good "yt-dlp is already installed"
-  elif ask_yn "Install yt-dlp? It lets agents read transcripts of YouTube and other videos. Optional." y GUILDWISE_WITH_YTDLP; then
-    if brew install yt-dlp >/dev/null 2>&1; then good "yt-dlp installed"; else step_warn "Could not install yt-dlp."; fi
-  else note "Skipped yt-dlp. You can add it later."; fi
-}
-
 # macOS baseline (DESIGN deps-without-sudo §1): the Xcode Command Line Tools (compilers, git, make), with the same
 # wait-and-recheck as Docker Desktop below. Not yet tested on hardware.
 install_xcode_clt() {
@@ -186,7 +179,7 @@ PLIST
 main() {
   parse_flags "$@"
   if [ "${OPT_LEGACY_ONLY}" = 1 ]; then legacy_only; return 0; fi
-  STEP_TOTAL=18
+  STEP_TOTAL=17
   say "${C_BOLD}${APP_NAME}: set up this Mac as a workstation${C_RESET}"
   say "${C_DIM}Safe to run again at any time: it upgrades or repairs what is already here.${C_RESET}"
   report "installer" start "macos"
@@ -197,7 +190,6 @@ main() {
   step "Xcode Command Line Tools"; install_xcode_clt
   step "Homebrew"; install_homebrew
   step "Installing Node 22 and git"; install_tools
-  step "Optional extras"; install_extras
   step "Checking Docker"; wait_for_docker_desktop
   step "Downloading the runner"; stage_runner_release
   step "Runner user"; setup_runner_user
@@ -210,7 +202,7 @@ main() {
   step "Setting local permissions"; set_local_permissions
   step "Starting the runner and checking everything"
   install_service
-  if wait_until_connected; then good "The runner is connected to ${SERVER_URL}"; report "Connected" ok "runner connected"
+  if wait_until_connected; then good "The runner is connected to ${SERVER_URL}"; report "Connected" ok "runner connected"; open_approvals_page
   else step_warn "The runner has not connected yet. Give it a minute; the checks below say more."; fi
   DOCTOR_FAILED=0
   run_doctor || DOCTOR_FAILED=1

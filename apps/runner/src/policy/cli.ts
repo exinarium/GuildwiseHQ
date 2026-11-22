@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { normalizeRemoteUrl, ReleaseSignPayloadSchema } from '@aom/shared';
+import { ReleaseSignPayloadSchema, urlHasPassword } from '@aom/shared';
 import type { Command } from 'commander';
 import { entryDir, loadIndex } from '../pairings.ts';
 import { resolveDataDir } from '../paths.ts';
@@ -11,6 +11,7 @@ import { RELEASE_PREP_DIR } from '../signing/release-prepare.ts';
 import { type MinisignRunner, runMinisign, secretKeyKind, signArtefact } from '../signing/release-sign.ts';
 import { openOwnerTurn } from './authority.ts';
 import { setupPending } from './gate.ts';
+import * as grants from './grants.ts';
 import { type HeldRecord, HeldStore } from './held.ts';
 import { PasskeyStore } from './passkey-store.ts';
 import type { Policy } from './schema.ts';
@@ -139,11 +140,7 @@ export async function approve(
   }
   if (opts.pin && r.pin) {
     const pin = r.pin;
-    d.store.update((p) => {
-      const add = [pin.base, ...(p.deployPinCommit && pin.bound ? [pin.bound] : [])];
-      p.deployPins = [...new Set([...p.deployPins, ...add])];
-      return p;
-    });
+    d.store.update((p) => grants.deployPinHeld(p, pin));
   }
   const done = d.held.decide(r.id, 'approved', 'local', {
     ...(opts.pin ? { pinned: true } : {}),
@@ -210,10 +207,7 @@ export function devopsGrant(d: PolicyCliDeps, orgId: string, agentIdArg?: string
     throw new Error(
       `no DevOps engineer is known for organization ${orgId} on this workstation: pass --agent <agent-id> (\`guildwise-runner devops list\` shows the ids)`,
     );
-  const p = d.store.update((p) => {
-    p.devops.agents[orgId] = agentId;
-    return p;
-  });
+  const p = d.store.update((p) => grants.devopsGrant(p, orgId, agentId));
   d.out(
     `DevOps agent ${agentId} may now serve organization ${orgId} on this workstation (outside the sandbox).`,
   );
@@ -223,20 +217,14 @@ export function devopsGrant(d: PolicyCliDeps, orgId: string, agentIdArg?: string
 }
 
 export function devopsRevoke(d: PolicyCliDeps, orgId: string): Policy {
-  const p = d.store.update((p) => {
-    delete p.devops.agents[orgId];
-    return p;
-  });
+  const p = d.store.update((p) => grants.devopsRevoke(p, orgId));
   d.out(`DevOps grant for organization ${orgId} removed.`);
   return p;
 }
 
 export function devopsRequests(d: PolicyCliDeps, mode: string): Policy {
   if (mode !== 'ask' && mode !== 'auto') throw new Error('use: devops requests ask|auto');
-  const p = d.store.update((p) => {
-    p.devopsRequests = mode;
-    return p;
-  });
+  const p = d.store.update((p) => grants.devopsRequests(p, mode));
   d.out(
     mode === 'auto'
       ? 'DevOps tasks for granted agents now start without asking. This is an explicit opt-out: the server then decides what they do.'
@@ -247,21 +235,16 @@ export function devopsRequests(d: PolicyCliDeps, mode: string): Policy {
 
 export function devopsAgentRequests(d: PolicyCliDeps, mode: string): Policy {
   if (mode !== 'ask' && mode !== 'deny') throw new Error('use: devops agent-requests ask|deny');
-  return d.store.update((p) => {
-    p.devopsAgentRequests = mode;
-    return p;
-  });
+  return d.store.update((p) => grants.devopsAgentRequests(p, mode));
 }
 
 export function repoScripts(d: PolicyCliDeps, url: string, allow: boolean): Policy {
   if (!url.trim()) throw new Error('use: repo allow-scripts <repository url>');
+  if (urlHasPassword(url))
+    throw new Error('a repository address with a password is refused: give it without the password');
   // the same normalized form the server and env.ensure use (github.com/owner/repo)
-  const key = normalizeRemoteUrl(url.trim());
-  const p = d.store.update((p) => {
-    if (allow) p.installScripts[key] = true;
-    else delete p.installScripts[key];
-    return p;
-  });
+  const key = grants.repoScriptsKey(url);
+  const p = d.store.update((p) => grants.repoScripts(p, url, allow));
   d.out(
     allow
       ? `Installs of ${key} may run their scripts on this workstation (environment set-up: outside the sandbox; "aom devops install": inside it).`
@@ -273,30 +256,22 @@ export function repoScripts(d: PolicyCliDeps, url: string, allow: boolean): Poli
 export function formatterPin(d: PolicyCliDeps, hash: string, add: boolean): Policy {
   if (!/^[0-9a-f]{64}$/.test(hash))
     throw new Error('a formatter pin is the sha256 shown in the release notes');
-  return d.store.update((p) => {
-    p.formatterPins = add
-      ? [...new Set([...p.formatterPins, hash])]
-      : p.formatterPins.filter((h) => h !== hash);
-    return p;
-  });
+  return d.store.update((p) => grants.formatterPin(p, hash, add));
 }
 
 export function deploySettings(d: PolicyCliDeps, what: 'mode' | 'pin-commit', value: string): Policy {
   if (what === 'mode' && value !== 'ask' && value !== 'off') throw new Error('use: deploy mode ask|off');
   if (what === 'pin-commit' && value !== 'on' && value !== 'off')
     throw new Error('use: deploy pin-commit on|off');
-  return d.store.update((p) => {
-    if (what === 'mode') p.deploy = value as 'ask' | 'off';
-    else p.deployPinCommit = value === 'on';
-    return p;
-  });
+  return d.store.update((p) =>
+    what === 'mode'
+      ? grants.deployMode(p, value as 'ask' | 'off')
+      : grants.deployPinCommit(p, value === 'on'),
+  );
 }
 
 export function deployUnpin(d: PolicyCliDeps, hashOrAll: string): Policy {
-  return d.store.update((p) => {
-    p.deployPins = hashOrAll === 'all' ? [] : p.deployPins.filter((h) => h !== hashOrAll);
-    return p;
-  });
+  return d.store.update((p) => grants.deployUnpin(p, hashOrAll));
 }
 
 export async function unsignedOrigin(d: PolicyCliDeps, origin: string, allow: boolean): Promise<Policy> {
@@ -308,12 +283,7 @@ export async function unsignedOrigin(d: PolicyCliDeps, origin: string, allow: bo
     ))
   )
     throw new Error('not changed');
-  return d.store.update((p) => {
-    p.allowUnsignedUpdatesFrom = allow
-      ? [...new Set([...p.allowUnsignedUpdatesFrom, origin])]
-      : p.allowUnsignedUpdatesFrom.filter((o) => o !== origin);
-    return p;
-  });
+  return d.store.update((p) => grants.unsignedOrigin(p, origin, allow));
 }
 
 // ---------------------------------------------------------------- passkeys (R22)
@@ -348,32 +318,14 @@ export async function passkeyTrust(d: PolicyCliDeps, prefix?: string): Promise<P
     `For ${o.rpId} (${o.origin}). It will be able to approve a pinned redeploy at a new commit and a recipe write.`,
   );
   if (!(await confirm(d, 'Trust this passkey on this workstation?'))) throw new Error('not trusted');
-  const p = d.store.update((p) => {
-    p.passkeys = [
-      ...p.passkeys.filter((k) => k.credentialId !== o.credentialId),
-      {
-        credentialId: o.credentialId,
-        publicKey: o.publicKey,
-        alg: o.alg,
-        rpId: o.rpId,
-        origin: new URL(o.origin).origin,
-        name: o.name,
-        trustedAt: new Date(d.now?.() ?? Date.now()).toISOString(),
-        signCount: 0,
-      },
-    ];
-    return p;
-  });
+  const p = d.store.update((p) => grants.passkeyTrust(p, o, d.now?.() ?? Date.now()));
   d.passkeys.removeOffer(o.credentialId);
   d.out('Trusted.');
   return p;
 }
 
 export function passkeyRemove(d: PolicyCliDeps, prefix: string): Policy {
-  const p = d.store.update((p) => {
-    p.passkeys = p.passkeys.filter((k) => !k.credentialId.startsWith(prefix));
-    return p;
-  });
+  const p = d.store.update((p) => grants.passkeyRemove(p, prefix));
   d.out('Removed.');
   return p;
 }
@@ -409,13 +361,9 @@ export async function signingAddKey(
     )
       throw new Error('not changed');
   }
-  const p = d.store.update((p) => {
-    p.signingKeys = [
-      ...p.signingKeys.filter((k) => k.keyId !== keyId),
-      { keyId, keyFile: o.keyFile, autoSign: !!o.autoSign },
-    ];
-    return p;
-  });
+  const p = d.store.update((p) =>
+    grants.signingAddKey(p, { keyId, keyFile: o.keyFile, autoSign: !!o.autoSign }),
+  );
   d.out(
     `Signing key ${keyId} registered (only its path is stored)${o.autoSign ? ', signing unattended' : '; every signing asks'}.`,
   );
@@ -423,10 +371,7 @@ export async function signingAddKey(
 }
 
 export function signingRemoveKey(d: PolicyCliDeps, keyId: string): Policy {
-  return d.store.update((p) => {
-    p.signingKeys = p.signingKeys.filter((k) => k.keyId !== keyId.toUpperCase());
-    return p;
-  });
+  return d.store.update((p) => grants.signingRemoveKey(p, keyId));
 }
 
 // ---------------------------------------------------------------- commander wiring
