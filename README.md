@@ -149,6 +149,7 @@ AOM_TWO_FACTOR_KEY=<third value from step 2>
 
 - `AOM_SECRET_KEY` is required. It encrypts stored account tokens at rest. Keep it with your backups.
 - `AOM_TWO_FACTOR_KEY` is recommended. It encrypts the two-factor seeds with a key of their own (at least 32 characters, never the same value as `AOM_SECRET_KEY`). Without it the server derives one from `AOM_SECRET_KEY` and warns at startup. Keep it with your backups: losing the key that sealed the seeds means users recover their two-factor login by email.
+- Either key can come from a file instead: `AOM_SECRET_KEY_FILE` / `AOM_TWO_FACTOR_KEY_FILE` (for example a compose secret), so the two keys do not share one `.env`. Set the value or the file, not both.
 - Keep `.env` private. It is in `.gitignore`; never commit it.
 
 ### 4. Start the stack

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -561,8 +562,43 @@ export function relayBodyLimits(global: number, overrides: string): Record<Relay
   return out;
 }
 
+/** The keys that may come from a file instead (`<NAME>_FILE`, a Docker/compose secret): release-readiness O5. */
+export const KEY_FILE_VARS = ['AOM_SECRET_KEY', 'AOM_TWO_FACTOR_KEY'] as const;
+
+/**
+ * Reads `AOM_SECRET_KEY_FILE` and `AOM_TWO_FACTOR_KEY_FILE` (trimmed) into a copy of the environment for the schema. Refuses
+ * a key set both ways, and an unreadable or empty file; the error names the variable, the path and the errno, never the
+ * content. The values never reach `process.env` or `config.env`.
+ */
+export function resolveKeyFiles(
+  env: Record<string, string | undefined>,
+  readFile: (path: string) => string = (p) => readFileSync(p, 'utf8'),
+): Record<string, string | undefined> {
+  const out = { ...env };
+  for (const name of KEY_FILE_VARS) {
+    const file = env[`${name}_FILE`];
+    if (file === undefined || file === '') continue;
+    if (env[name])
+      throw new Error(
+        `${name} and ${name}_FILE are both set: keep only the file (remove ${name} from the environment and the .env file).`,
+      );
+    let text: string;
+    try {
+      text = readFile(file);
+    } catch (err) {
+      throw new Error(
+        `${name}_FILE ${file} cannot be read: ${(err as NodeJS.ErrnoException).code ?? 'error'}`,
+      );
+    }
+    const value = text.trim();
+    if (!value) throw new Error(`${name}_FILE ${file} is empty.`);
+    out[name] = value;
+  }
+  return out;
+}
+
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
-  const e = EnvSchema.parse(env);
+  const e = EnvSchema.parse(resolveKeyFiles(env));
   // Production must not run on the fallback key kept in the database: a dump of the database alone would then hold the
   // key next to the data it protects (two-factor seeds, connected-account tokens, signed links).
   if (e.NODE_ENV === 'production' && !e.AOM_SECRET_KEY)

@@ -385,6 +385,8 @@ describe('GitHub Codespaces', () => {
 
 describe('a Codespace only world', () => {
   it('has no Docker-capable workstation when only Codespaces are paired', async () => {
+    // pairing needs a fresh step-up (O3) and the clock moved past the window above (R5)
+    await ok(w.t.req('POST', '/api/auth/step-up', { cookie: cookie(), body: { password: PASSWORD } }));
     const ws = await pairWorkstation(w.t, w.owner, 'OnlyCloud');
     await q(`UPDATE workstations SET status='unlinked' WHERE id <> $1`, [ws.workstationId]);
     await q(

@@ -16,6 +16,7 @@ import { computerRemovedEvents } from '../delivery/computer-removed.ts';
 import { placesOfComputer } from '../delivery/environments.ts';
 import { conflict, HttpError, notFound } from '../errors.ts';
 import type { AppendInput } from '../eventstore/types.ts';
+import { newWorkstationMail } from '../mail/security-notices.ts';
 import { enqueueRunnerCommand } from '../runner-gateway/commands-queue.ts';
 import {
   dropStaleShiftLimitCommands,
@@ -27,6 +28,7 @@ import { pairingRelease } from '../runner-gateway/signed-sweep.ts';
 import { cardMessage, orgScope, runnerActor, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
 import { devopsHireEvents as devopsHireEventsNew } from './devops.ts';
 import { devopsRetireEvents, failDevopsRequestEvents } from './devops-retire.ts';
+import { sendQuietly } from './platform-settings.ts';
 import { setupOffersFor } from './setup-offers.ts';
 import { ownedOrgIds, servingEvent } from './workstation-serving.ts';
 
@@ -95,6 +97,7 @@ export async function pairRunner(
     /** The person's explicit yes to a new workstation although `previous` could not be re-linked. */
     newWorkstation?: boolean | undefined;
   },
+  meta: { ip?: string | undefined } = {},
 ) {
   // Refused with 403 `signed_runner_required` before the code is spent, while "Only signed runners" is on (R21).
   const release = await pairingRelease(ctx, input);
@@ -102,6 +105,7 @@ export async function pairRunner(
   const runnerToken = `aomr_${randomToken(32)}`;
   let workstationId: string = randomUUID();
   let relinked = false;
+  let ownerId: string | undefined;
   const hash = sha256Hex(normalizePairingCode(input.code));
   // The attempt counter is bumped in its own committed statement so a failure cannot roll it back.
   const bumped = await one(
@@ -118,6 +122,7 @@ export async function pairRunner(
     );
     if (!c || c.used_at || new Date(c.expires_at) <= now || c.attempts > MAX_CODE_ATTEMPTS)
       throw new PairingError();
+    ownerId = c.user_id as string;
     if (input.previous && !input.newWorkstation && !input.simulationOrgId) {
       const prev = await relinkTarget(tx, input.previous, c.user_id as string);
       workstationId = prev.id;
@@ -195,6 +200,12 @@ export async function pairRunner(
       { tx },
     );
   });
+  // Release-readiness O3: a new real workstation (not a re-link, not a simulated one) mails the account's owner. After
+  // the commit and never awaited: a slow or failing mail relay never delays or fails the pairing; a failure is logged.
+  if (!relinked && !input.simulationOrgId && ownerId)
+    void mailNewWorkstation(ctx, ownerId, input, now, meta.ip).catch((err) =>
+      ctx.log.warn({ err, workstationId }, 'new-workstation mail was not sent'),
+    );
   // easy-runner-setup: the names the installer's one screen shows; a failure here never fails the pairing
   const setupOffers = input.simulationOrgId
     ? undefined
@@ -208,6 +219,30 @@ export async function pairRunner(
     ...(setupOffers ? { setupOffers } : {}),
     ...(relinked ? { relinked: true } : {}),
   };
+}
+
+async function mailNewWorkstation(
+  ctx: Ctx,
+  userId: string,
+  ws: { name: string; platform: string; hostname: string },
+  when: Date,
+  ip: string | undefined,
+): Promise<void> {
+  const u = await one(ctx.pool, `SELECT email, display_name FROM users WHERE id=$1 AND status='active'`, [
+    userId,
+  ]);
+  if (!u) return;
+  await sendQuietly(
+    ctx,
+    newWorkstationMail({
+      to: u.email,
+      name: u.display_name,
+      workstation: ws,
+      when,
+      ip: ip ?? null,
+      origin: ctx.config.publicOrigin,
+    }),
+  );
 }
 
 /**

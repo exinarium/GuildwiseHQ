@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createTestApp, type TestApp, uniqueEmail } from './helpers/app.ts';
+import { createTestApp, PASSWORD, type TestApp, uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import { ok } from './helpers/world.ts';
 
@@ -210,6 +210,8 @@ describe('an install session', () => {
     expect((await t.app.inject({ method: 'GET', url: '/install/short/install.sh' })).statusCode).toBe(400);
     const st = await ok<any>(t.req('GET', `/api/workstations/installers/${s.id}`, { cookie: user.cookie }));
     expect(st.state).toBe('expired');
+    // the clock moved past the step-up window: confirm it is the user again for the next installer links (O3)
+    await ok(t.req('POST', '/api/auth/step-up', { cookie: user.cookie, body: { password: PASSWORD } }));
   });
 
   it('starting over retires earlier unused codes, so the wizard never runs into the code limit', async () => {

@@ -16,6 +16,7 @@ import {
   setWeekday,
 } from './helpers/delivery.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
+import { resealSessions } from './helpers/sessions.ts';
 import { ok, until } from './helpers/world.ts';
 
 /**
@@ -84,8 +85,10 @@ const call = (method: string, url: string, body?: unknown, cookie = d.w.owner.co
     ...(body === undefined ? {} : { body }),
   });
 /** The owner's session proved its password just now (as after "Confirm it's you"). */
-const freshStepUp = () =>
-  q('UPDATE auth_sessions SET second_factor_at=$2 WHERE user_id=$1', [d.w.owner.id, d.w.t.clock.now()]);
+const freshStepUp = async () => {
+  await q('UPDATE auth_sessions SET second_factor_at=$2 WHERE user_id=$1', [d.w.owner.id, d.w.t.clock.now()]);
+  await resealSessions(d.w.t.app.ctx, d.w.owner.id);
+};
 const base = () => `/api/projects/${d.w.projectId}/release-signing`;
 const target = () => d.targets.local; // p5-local, the target of the `local` environment
 const status = async (commit: string) =>

@@ -4,6 +4,7 @@ import { PROJECTION_TABLES } from '../src/projections/index.ts';
 import { ORIGIN, uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
+import { resealSessions } from './helpers/sessions.ts';
 import { SoftAuthenticator } from './helpers/webauthn.ts';
 import { createWorld, ok, pairWorkstation, until, type World } from './helpers/world.ts';
 
@@ -200,6 +201,7 @@ describe('registration', () => {
     await q(`UPDATE auth_sessions SET second_factor_at = now() - interval '2 days' WHERE user_id=$1`, [
       stale.id,
     ]);
+    await resealSessions(w.t.app.ctx, stale.id);
     await q(`UPDATE workstations SET user_id=$2 WHERE id=$1`, [w.workstationId, stale.id]);
     try {
       const res = await w.t.req('POST', `${base()}/passkeys/options`, as(stale.cookie));

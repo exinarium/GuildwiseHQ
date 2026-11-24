@@ -379,6 +379,10 @@ export async function createCodespace(
 ): Promise<CloudWorkstation> {
   await assertSlotFree(ctx, orgId, input.projectId);
   const token = await tokenOf(ctx, user.id);
+  // O3: the GitHub login that creates the codespace is the only one that may enrol it later (a connection swapped
+  // after this point never re-points it).
+  const conn = await one(ctx.pool, 'SELECT login FROM cloud_github_connections WHERE user_id=$1', [user.id]);
+  if (!conn?.login) throw conflict('github_not_connected', 'connect your GitHub account first');
   const gh = ctx.services.cloud.github;
   let info: Awaited<ReturnType<typeof gh.create>>;
   try {
@@ -415,6 +419,7 @@ export async function createCodespace(
         ref: input.ref ?? null,
         devcontainerPath: input.devcontainerPath,
         codespaceName: info.name,
+        ghLogin: conn.login,
       }),
       input.authMode,
       now,
@@ -425,14 +430,14 @@ export async function createCodespace(
 
 /**
  * `aom-runner up` inside a codespace we created. The proof is the codespace's name plus the codespace's own GitHub
- * token, which must belong to the GitHub account that created it. Nothing secret is in the devcontainer file.
+ * token, which must belong to the GitHub account that created it (`config.ghLogin`, pinned at creation; a codespace
+ * from before that has none and is refused: recreate it). Nothing secret is in the devcontainer file.
  */
 export async function enrollCodespace(ctx: Ctx, input: RunnerEnrollRequest) {
   const deny = () => new HttpError(401, 'invalid_enrollment', 'this codespace is not known here');
   const cw = await one(
     ctx.pool,
-    `SELECT cw.*, g.login AS gh_login FROM cloud_workstations cw
-       LEFT JOIN cloud_github_connections g ON g.user_id = cw.user_id
+    `SELECT cw.*, cw.config->>'ghLogin' AS gh_login FROM cloud_workstations cw
       WHERE cw.provider='codespaces' AND cw.removed_at IS NULL AND cw.config->>'codespaceName' = $1`,
     [input.codespaceName],
   );

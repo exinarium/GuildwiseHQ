@@ -88,7 +88,10 @@ describe('migration 3020 security hardening', () => {
     const dir = await mkdtemp(join(tmpdir(), 'aom-mig-3020-'));
     try {
       await cp(defaultMigrationsDir(), dir, { recursive: true });
-      await rm(join(dir, FILE));
+      // the schema as it was before 3020: this file and every later one (a later one may build on 3020's tables)
+      const { readdir } = await import('node:fs/promises');
+      const fromFile = (await readdir(dir)).filter((f) => /^\d{4}_.+\.sql$/.test(f) && f >= FILE).sort();
+      for (const f of fromFile) await rm(join(dir, f));
       await migrate(TEST_DB_URL, { schema: SCHEMA, dir });
 
       await client.query(`SET search_path TO ${SCHEMA}`);
@@ -123,7 +126,7 @@ describe('migration 3020 security hardening', () => {
       await client.query('SET session_replication_role = DEFAULT');
       await client.query('SET search_path TO public');
 
-      expect(await migrate(TEST_DB_URL, { schema: SCHEMA })).toEqual([FILE]);
+      expect(await migrate(TEST_DB_URL, { schema: SCHEMA })).toEqual(fromFile);
       await expectSchema();
       await client.query(`SET search_path TO ${SCHEMA}`);
       const sessions = await client.query(

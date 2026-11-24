@@ -5,6 +5,7 @@ import { withConfig } from '../src/config.ts';
 import { syncPlatformTeamDesignation } from '../src/platform-team/settings.ts';
 import { PASSWORD, uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
+import { resealSessions } from './helpers/sessions.ts';
 import { singleOrgUser } from './helpers/single-org.ts';
 import { createWorld, ok, type World } from './helpers/world.ts';
 
@@ -38,11 +39,13 @@ afterAll(async () => {
 });
 
 /** Makes every session of the user stale: its last proof lies just outside the window. */
-const stale = (userId: string) =>
-  q('UPDATE auth_sessions SET second_factor_at=$2 WHERE user_id=$1', [
+const stale = async (userId: string) => {
+  await q('UPDATE auth_sessions SET second_factor_at=$2 WHERE user_id=$1', [
     userId,
     new Date(w.t.clock.now().getTime() - (w.t.app.ctx.config.stepUpWindowSec + 1) * 1000),
   ]);
+  await resealSessions(w.t.app.ctx, userId);
+};
 
 type Route = [method: string, url: () => string, body?: () => unknown];
 const ws = () => w.workstationId;

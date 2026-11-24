@@ -15,6 +15,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireOrgRole } from '../auth/guards.ts';
+import { requireStepUp } from '../auth/step-up.ts';
 import { codespacesBootstrapScript } from '../cloud/bootstrap.ts';
 import {
   codespaceMachines,
@@ -57,6 +58,8 @@ export function cloudRoutes(ctx: Ctx) {
       },
       async (req, reply) => {
         const a = await admin(req);
+        // release-readiness O3: adding a machine needs "Confirm it's you" (a fresh step-up)
+        requireStepUp(ctx, a.session);
         reply.code(201);
         return CloudWorkstationSchema.parse(await createVps(ctx, a.session.user, a.orgId, req.body));
       },
@@ -106,6 +109,8 @@ export function cloudRoutes(ctx: Ctx) {
       },
       async (req) => {
         const a = await admin(req);
+        // O3: the connected GitHub login decides which codespace may enrol as this user's workstation
+        requireStepUp(ctx, a.session);
         const { login } = await connectGithub(ctx, a.session.user, req.body.token);
         return GithubConnectionSchema.parse({ connected: true, login });
       },
@@ -134,6 +139,8 @@ export function cloudRoutes(ctx: Ctx) {
       },
       async (req, reply) => {
         const a = await admin(req);
+        // release-readiness O3: adding a machine needs "Confirm it's you" (a fresh step-up)
+        requireStepUp(ctx, a.session);
         reply.code(201);
         return CloudWorkstationSchema.parse(await createCodespace(ctx, a.session.user, a.orgId, req.body));
       },

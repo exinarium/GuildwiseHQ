@@ -14,6 +14,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireOrg, requireUser } from '../auth/guards.ts';
 import { whoOf } from '../auth/org-context.ts';
+import { requireStepUp } from '../auth/step-up.ts';
 import { readRepoList, requestGitRecheck, requestRepoList } from '../commands/forges.ts';
 import { requestOrgFolder } from '../commands/org-folders.ts';
 import { requestGitSsh } from '../commands/repo-access.ts';
@@ -53,6 +54,8 @@ export function workstationRoutes(ctx: Ctx) {
 
     app.post('/api/workstations/pairing-codes', async (req, reply) => {
       const s = await requireUser(ctx, req);
+      // release-readiness O3: adding a machine needs "Confirm it's you" (a fresh step-up)
+      requireStepUp(ctx, s);
       reply.code(201);
       const { code, expiresAt } = await createPairingCode(ctx, s.user);
       return PairingCodeResponseSchema.parse({ code, expiresAt });
@@ -201,7 +204,7 @@ export function workstationRoutes(ctx: Ctx) {
         schema: { body: RunnerPairRequestSchema },
         config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
       },
-      async (req) => pairRunner(ctx, req.body),
+      async (req) => pairRunner(ctx, req.body, { ip: req.ip }),
     );
   };
 }

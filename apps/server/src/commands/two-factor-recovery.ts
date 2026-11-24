@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { TOO_MANY_ATTEMPTS, type TwoFactorRecoveryStatus } from '@aom/shared';
 import { checkLoginGuard, recordLoginFailure } from '../auth/login-guard.ts';
 import { disableTwoFactorIn, MAX_CHALLENGE_ATTEMPTS } from '../auth/two-factor.ts';
+import { hasOtherAccess } from '../authz/other-access.ts';
 import type { Ctx } from '../context.ts';
 import { randomToken, sha256Hex } from '../crypto.ts';
 import { exec, one, type Queryable, type Row, rows } from '../db/sql.ts';
@@ -311,7 +312,7 @@ export async function twoFactorRecoveryTick(ctx: Ctx): Promise<string[]> {
   );
   const done: string[] = [];
   for (const d of due) {
-    const userId = await withAppendTx(ctx.pool, async (tx) => {
+    const outcome = await withAppendTx(ctx.pool, async (tx): Promise<TickOutcome | null> => {
       const r = await one(
         tx,
         `SELECT * FROM two_factor_recoveries WHERE id=$1 AND cancelled_at IS NULL AND done_at IS NULL
@@ -319,16 +320,40 @@ export async function twoFactorRecoveryTick(ctx: Ctx): Promise<string[]> {
         [d.id],
       );
       if (!r) return null;
-      await exec(tx, 'UPDATE two_factor_recoveries SET done_at=$2 WHERE id=$1', [r.id, now]);
       const u = await one(tx, 'SELECT two_factor_enabled, kind FROM users WHERE id=$1 FOR UPDATE', [
         r.user_id,
       ]);
-      if (!u?.two_factor_enabled || u.kind === 'super_admin') return null;
+      if (!u?.two_factor_enabled || u.kind === 'super_admin') {
+        // nothing to remove: done, silently (no mails)
+        await exec(tx, 'UPDATE two_factor_recoveries SET done_at=$2 WHERE id=$1', [r.id, now]);
+        return null;
+      }
+      // Release-readiness O2: an Owner's reset re-checks the immediate path's rule now, inside the append lock (every
+      // membership or project grant appends under the same lock, so nothing can join in between).
+      if (r.org_id) {
+        const refused = await ownerResetRefusal(tx, r);
+        if (refused) {
+          await exec(tx, 'UPDATE two_factor_recoveries SET cancelled_at=$2 WHERE id=$1', [r.id, now]);
+          return {
+            kind: 'cancelled',
+            userId: r.user_id,
+            requestedBy: r.requested_by,
+            orgId: r.org_id,
+            refused,
+          };
+        }
+      }
+      await exec(tx, 'UPDATE two_factor_recoveries SET done_at=$2 WHERE id=$1', [r.id, now]);
       await disableTwoFactorIn(ctx, tx, r.user_id, r.user_id, 'reset', SYSTEM_ACTOR);
       await exec(tx, 'DELETE FROM auth_sessions WHERE user_id=$1', [r.user_id]);
-      return r.user_id as string;
+      return { kind: 'done', userId: r.user_id as string };
     });
-    if (!userId) continue;
+    if (!outcome) continue;
+    if (outcome.kind === 'cancelled') {
+      await mailOwnerResetCancelled(ctx, outcome);
+      continue;
+    }
+    const userId = outcome.userId;
     done.push(userId);
     ctx.services.browser.closeUser(userId);
     const user = await one(ctx.pool, 'SELECT id, email, display_name FROM users WHERE id=$1', [userId]);
@@ -353,6 +378,77 @@ export async function twoFactorRecoveryTick(ctx: Ctx): Promise<string[]> {
   return done;
 }
 
+type ResetRefusal = 'owner_changed' | 'not_member' | 'other_access';
+type TickOutcome =
+  | { kind: 'done'; userId: string }
+  | { kind: 'cancelled'; userId: string; requestedBy: string | null; orgId: string; refused: ResetRefusal };
+
+/** Why an Owner's scheduled reset may no longer happen (the rule of `resetMemberTwoFactor`), or null when it still may. */
+async function ownerResetRefusal(tx: Queryable, r: Row): Promise<ResetRefusal | null> {
+  const org = await one(tx, 'SELECT owner_user_id FROM organizations WHERE id=$1', [r.org_id]);
+  if (!org || !r.requested_by || org.owner_user_id !== r.requested_by) return 'owner_changed';
+  const member = await one(
+    tx,
+    `SELECT 1 FROM org_members WHERE org_id=$1 AND user_id=$2 AND status='active'`,
+    [r.org_id, r.user_id],
+  );
+  if (!member) return 'not_member';
+  if (await hasOtherAccess(tx, r.org_id, r.user_id)) return 'other_access';
+  return null;
+}
+
+const REFUSAL_TEXT: Record<ResetRefusal, string> = {
+  owner_changed: 'the organization has a different Owner now',
+  not_member: 'the person is no longer a member of the organization',
+  other_access: 'the person now also has access to another organization',
+};
+
+/** A cancelled Owner reset: the member keeps two-factor login, and the Owner who asked learns why (after commit). */
+async function mailOwnerResetCancelled(
+  ctx: Ctx,
+  o: { userId: string; requestedBy: string | null; orgId: string; refused: ResetRefusal },
+): Promise<void> {
+  const member = await one(ctx.pool, 'SELECT email, display_name FROM users WHERE id=$1', [o.userId]);
+  const org = await one(ctx.pool, 'SELECT name FROM organizations WHERE id=$1', [o.orgId]);
+  const orgName = org?.name ?? 'the organization';
+  if (member)
+    await sendQuietly(
+      ctx,
+      securityNoticeMail({
+        to: member.email,
+        subject: 'Your two-factor login stays on',
+        heading: 'Two-factor reset cancelled',
+        paragraphs: [
+          `Hello ${member.display_name},`,
+          `The reset of your two-factor login that the Owner of ${orgName} asked for was not done: ${REFUSAL_TEXT[o.refused]}. Your two-factor login stays on.`,
+          'If you lost your authenticator, use "Lost your authenticator?" on the sign-in page.',
+        ],
+        cta: { label: 'Sign in', url: `${ctx.config.publicOrigin}/login` },
+        origin: ctx.config.publicOrigin,
+      }),
+    );
+  if (!o.requestedBy) return;
+  const owner = await one(ctx.pool, `SELECT email, display_name FROM users WHERE id=$1 AND status='active'`, [
+    o.requestedBy,
+  ]);
+  if (!owner) return;
+  const name = member?.display_name ?? 'The member';
+  await sendQuietly(
+    ctx,
+    securityNoticeMail({
+      to: owner.email,
+      subject: 'A two-factor reset was not done',
+      heading: 'Two-factor reset not done',
+      paragraphs: [
+        `Hello ${owner.display_name},`,
+        `The two-factor reset you asked for in ${orgName} was not done: ${REFUSAL_TEXT[o.refused]}.`,
+        `${name} can use "Lost your authenticator?" on the sign-in page to recover their account.`,
+      ],
+      origin: ctx.config.publicOrigin,
+    }),
+  );
+}
+
 /**
  * The Owner's reset of a member's two-factor login (R6, R17-2) goes through the same wait: it counts as confirmed now
  * and removes two-factor login 24 h later, unless the member cancels it from the mail (they may still have their
@@ -363,6 +459,7 @@ export async function scheduleOwnerTwoFactorReset(
   ctx: Ctx,
   tx: Queryable,
   userId: string,
+  by: { orgId: string; by: string },
 ): Promise<{ effectiveAt: Date; token: string }> {
   const now = ctx.clock.now();
   const effectiveAt = new Date(now.getTime() + RECOVERY_WAIT_MS);
@@ -374,9 +471,9 @@ export async function scheduleOwnerTwoFactorReset(
   );
   await exec(
     tx,
-    `INSERT INTO two_factor_recoveries (id, user_id, token_hash, created_at, confirmed_at, effective_at)
-     VALUES ($1,$2,$3,$4,$4,$5)`,
-    [randomUUID(), userId, sha256Hex(token), now, effectiveAt],
+    `INSERT INTO two_factor_recoveries (id, user_id, token_hash, created_at, confirmed_at, effective_at, org_id, requested_by)
+     VALUES ($1,$2,$3,$4,$4,$5,$6,$7)`,
+    [randomUUID(), userId, sha256Hex(token), now, effectiveAt, by.orgId, by.by],
   );
   return { effectiveAt, token };
 }

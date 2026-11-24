@@ -44,7 +44,11 @@ describe('the signed-runner sweep (R21)', () => {
   it('unlinks unsigned and pre-floor runners on a populated DB and leaves nothing they could come back with', async () => {
     t = await createTestApp({ listen: true, env: env() });
     const mails: MailMessage[] = [];
-    t.app.ctx.mailer = { send: async (m) => void mails.push(m), close: () => {} };
+    // the reinstall notices only (every pairing also mails its owner: release-readiness O3)
+    t.app.ctx.mailer = {
+      send: async (m) => void (m.subject.startsWith('A new workstation') || mails.push(m)),
+      close: () => {},
+    };
     const admin = await t.superAdminSession();
     const alice = await t.userSession(uniqueEmail('alice'));
     const bob = await t.userSession(uniqueEmail('bob'));

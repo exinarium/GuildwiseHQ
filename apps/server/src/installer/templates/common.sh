@@ -184,8 +184,33 @@ OPT_WSL_DISTRO_NAME="${GUILDWISE_WSL_DISTRO_NAME:-}"
 # computer is paired as (another account, or it was unlinked). --yes never gives it (UAT 1.10.0 finding 5).
 OPT_NEW_WORKSTATION="${GUILDWISE_NEW_WORKSTATION:-0}"
 
+# The one list of options, one per line: printed by --help and named after an invalid flag.
+OPTIONS_HELP="--help, -h
+--yes
+--runner-user dedicated|current
+--legacy quarantine|remove
+--accept-root-equivalent
+--devops-orgs none|<name-or-id,...>
+--devops-requests ask|auto
+--allow-scripts <repo,...>
+--with-ytdlp
+--no-ytdlp
+--wsl-distro-name <name>
+--docker rootless|host|shared|none
+--accept-shared-daemon
+--docker-socket <path>
+--skip-baseline
+--deploy ask|off
+--deploy-pin-commit
+--allow-unsigned-from <origin>
+--from-file <folder>
+--ca-file <pem file>
+--instance <name>
+--new-workstation
+--choose-folders"
+
 bad_flag() {
-  die "$1" "Options: --yes, --runner-user dedicated|current, --legacy quarantine|remove, --accept-root-equivalent, --devops-orgs none|<name-or-id,...>, --devops-requests ask|auto, --allow-scripts <repo,...>, --with-ytdlp, --no-ytdlp, --wsl-distro-name <name>, --docker rootless|host|shared|none, --accept-shared-daemon, --docker-socket <path>, --skip-baseline, --deploy ask|off, --deploy-pin-commit, --allow-unsigned-from <origin>, --from-file <folder>, --ca-file <pem file>, --instance <name>, --new-workstation, --choose-folders."
+  die "$1" "Options: ${OPTIONS_HELP//$'\n'/, }."
 }
 
 set_flag() {
@@ -207,6 +232,13 @@ set_flag() {
   esac
 }
 
+# --help / -h: the options, then exit 0 before anything is installed (release-readiness O6).
+print_help() {
+  printf '%s installer. Usage: install.sh [options]\n\nOptions:\n' "${APP_NAME}"
+  printf '  %s\n' "${OPTIONS_HELP//$'\n'/$'\n'  }"
+  printf '\nRun without options to answer the questions one by one instead.\n'
+}
+
 is_uuid() { [[ "$1" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; }
 
 parse_flags() {
@@ -214,6 +246,7 @@ parse_flags() {
   while [ "$#" -gt 0 ]; do
     a="$1"; shift
     case "${a}" in
+      --help|-h) print_help; exit 0 ;;
       --yes|-y) OPT_YES=1 ;;
       --choose-folders) CHOOSE_FOLDERS=1 ;;
       --legacy-only) OPT_LEGACY_ONLY=1 ;;

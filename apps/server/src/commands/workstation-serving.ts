@@ -1,4 +1,4 @@
-import { CEO_ROLE_KEY, streamId, type WorkstationServingResponse } from '@aom/shared';
+import { CEO_ROLE_KEY, isLiveRunState, streamId, type WorkstationServingResponse } from '@aom/shared';
 import type { AuthSession } from '../auth/sessions.ts';
 import { ceoBindEvents } from '../ceo/provision.ts';
 import type { Ctx } from '../context.ts';
@@ -9,6 +9,8 @@ import type { AppendInput } from '../eventstore/types.ts';
 import { cardMessage, orgScope, projectScope, SYSTEM_ACTOR, userActor, userScope } from './common.ts';
 import { devopsHireEvent } from './devops.ts';
 import { devopsRetireEvents, releaseClaimsOfAgentEvents } from './devops-retire.ts';
+import { requestStopIn } from './runs.ts';
+import { deliver } from './workstation-setup.ts';
 
 /**
  * "Works for" (R9, audit F4): a real workstation runs work of an organization only when its user switched that
@@ -201,7 +203,8 @@ export async function setWorkstationServing(
   orgId: string,
   serving: boolean,
 ): Promise<{ changed: boolean }> {
-  return withAppendTx(ctx.pool, async (tx) => {
+  const stopped: string[] = [];
+  const result = await withAppendTx(ctx.pool, async (tx) => {
     const ws = await one(
       tx,
       `SELECT id, user_id, simulation_org_id FROM workstations WHERE id=$1 AND status='active' FOR UPDATE`,
@@ -246,6 +249,18 @@ export async function setWorkstationServing(
         'org_shift_running',
         'an agent of this organization is working on this workstation: wait until its shift ends or stop it, then switch it off',
       );
+    // Release-readiness O1: the organization's run environments still live on this workstation stop with it (manual,
+    // test and DevOps ones alike); restarting them here is refused while it is off (restartRun).
+    const live = await rows(
+      tx,
+      `SELECT * FROM run_environments WHERE workstation_id=$1 AND org_id=$2 AND stop_requested_at IS NULL
+        ORDER BY created_at, id FOR UPDATE`,
+      [workstationId, orgId],
+    );
+    for (const r of live.filter((x) => isLiveRunState(x.state))) {
+      await requestStopIn(ctx, tx, r, user.id, 'stopped');
+      stopped.push(r.id);
+    }
     const events: AppendInput[] = [
       servingEvent({ workstationId, orgId, serving: false, by: user.id, reason: 'works_for' }, user.id),
     ];
@@ -334,4 +349,9 @@ export async function setWorkstationServing(
     await ctx.store.append(events, { tx });
     return { changed: true };
   });
+  if (stopped.length) {
+    deliver(ctx, [workstationId]);
+    for (const id of stopped) ctx.services.browser.runChanged(id);
+  }
+  return result;
 }

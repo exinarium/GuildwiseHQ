@@ -95,13 +95,18 @@ export async function deployWorkstations(
       `${WS_SELECT} JOIN project_members pm ON pm.user_id = w.user_id AND pm.project_id = $1 AND pm.status = 'active'
         WHERE w.status='active' AND ${HAS_DEVOPS}
         ORDER BY (w.user_id = $2) DESC, w.paired_at, w.id`,
-      [project.id, project.org_id],
+      // the organization's owner (an organization's id is not its owner's user id since the 2026-10 split)
+      [project.id, await orgOwnerId(db, project.org_id)],
     )
   ).map((r) => toWs(r, now));
 }
 
 /** A custom follow-up for DevOps: the workstation of the phase's first remote target, else the owner's most recently seen one. */
-async function customWorkstation(db: Queryable, project: Row, phase: Row): Promise<Workstation | undefined> {
+export async function customWorkstation(
+  db: Queryable,
+  project: Row,
+  phase: Row,
+): Promise<Workstation | undefined> {
   const remote = await one(
     db,
     `SELECT t.workstation_id FROM phase_followups f JOIN deploy_targets t ON t.id = f.target_id
@@ -117,7 +122,7 @@ async function customWorkstation(db: Queryable, project: Row, phase: Row): Promi
   const mine = await one(
     db,
     `${WS_SELECT} WHERE w.user_id=$1 AND w.status='active' AND ${HAS_DEVOPS} ORDER BY w.last_seen_at DESC NULLS LAST LIMIT 1`,
-    [project.org_id],
+    [await orgOwnerId(db, project.org_id)],
   );
   return mine ? toWs(mine) : undefined;
 }

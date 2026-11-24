@@ -57,12 +57,12 @@ beforeAll(async () => {
       body: { mode: 'recipe' },
     }),
   );
-  doomed = await computer('Doomed');
-  fresh = await computer('Fresh');
-  // setWeekday moved the clock past the step-up window; deploy-target writes need a fresh proof (R5)
+  // setWeekday moved the clock past the step-up window; deploy-target writes (R5) and pairing (O3) need a fresh proof
   await ok(
     d.w.t.req('POST', '/api/auth/step-up', { cookie: d.w.owner.cookie, body: { password: PASSWORD } }),
   );
+  doomed = await computer('Doomed');
+  fresh = await computer('Fresh');
 });
 afterAll(async () => {
   await d.w.t.close();

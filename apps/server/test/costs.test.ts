@@ -9,6 +9,7 @@ import { uniqueEmail } from './helpers/app.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { createFeedInterest } from './helpers/feeds.ts';
+import { resealSessions } from './helpers/sessions.ts';
 import { shiftHelpers } from './helpers/shifts.ts';
 import { createWorld, markOnline, ok, until, type World } from './helpers/world.ts';
 
@@ -35,9 +36,10 @@ const owner = (method: string, url: string, body?: unknown) =>
   w.t.req(method, url, { cookie: w.owner.cookie, body });
 const hh = () => shiftHelpers(w);
 // Sessions are real-time facts: moving the clock keeps them alive by moving their last-seen time with it.
-const setNow = (at: Date) => {
+const setNow = async (at: Date) => {
   ctx().clock.setOffset(at.getTime() - Date.now());
-  return q(`UPDATE auth_sessions SET last_seen_at=$1, expires_at='2099-01-01'`, [at]);
+  await q(`UPDATE auth_sessions SET last_seen_at=$1, expires_at='2099-01-01'`, [at]);
+  await resealSessions(ctx());
 };
 const inOrg = async (u: { cookie: string }) => ({
   cookie: u.cookie,

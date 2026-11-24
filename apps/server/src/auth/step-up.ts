@@ -6,11 +6,11 @@ import {
   type StepUpResponse,
 } from '@aom/shared';
 import type { Ctx } from '../context.ts';
-import { exec, one } from '../db/sql.ts';
+import { one } from '../db/sql.ts';
 import { badRequest, HttpError } from '../errors.ts';
 import { recordLoginFailure } from './login-guard.ts';
 import { verifyPassword } from './password.ts';
-import { type AuthSession, deleteSession } from './sessions.ts';
+import { type AuthSession, deleteSession, markSecondFactor } from './sessions.ts';
 import { verifySecondFactor } from './two-factor.ts';
 
 /**
@@ -96,7 +96,7 @@ export async function answerStepUp(
   }
 
   const now = ctx.clock.now();
-  await exec(ctx.pool, 'UPDATE auth_sessions SET second_factor_at=$2 WHERE id=$1', [s.sessionId, now]);
+  await markSecondFactor(ctx, s, now);
   s.secondFactorAt = now;
   return { ok: true, freshUntil: new Date(now.getTime() + ctx.config.stepUpWindowSec * 1000).toISOString() };
 }

@@ -25,6 +25,7 @@ import {
 } from '@aom/shared';
 import { type OrgAccess, orgRoleOf } from '../auth/org-context.ts';
 import { hashPassword, verifyPassword } from '../auth/password.ts';
+import { hasOtherAccess } from '../authz/other-access.ts';
 import { ceoOwnerChangeEvents } from '../ceo/provision.ts';
 import { withdrawTopicsOfOrgs } from '../ceo/topics-handoff.ts';
 import type { Ctx } from '../context.ts';
@@ -584,22 +585,6 @@ interface ResetMeta {
   userAgent?: string | undefined;
 }
 
-/**
- * Whether the person has access anywhere but this organization (R6, audit F1): another active membership, or active
- * project access in another organization. Their account is global, so an Owner or Admin here may not reset it.
- */
-async function hasOtherAccess(db: Queryable, orgId: string, userId: string): Promise<boolean> {
-  return !!(await one(
-    db,
-    `SELECT 1 FROM org_members WHERE user_id=$1 AND org_id<>$2 AND status='active'
-     UNION ALL
-     SELECT 1 FROM project_members pm JOIN projects p ON p.id = pm.project_id
-      WHERE pm.user_id=$1 AND pm.status='active' AND p.org_id IS DISTINCT FROM $2
-     LIMIT 1`,
-    [userId, orgId],
-  ));
-}
-
 const OTHER_ACCESS_MESSAGE =
   'this person also has access to another organization, so their account cannot be reset from here: email them a reset link';
 
@@ -658,7 +643,7 @@ export async function resetMemberTwoFactor(ctx: Ctx, a: OrgAccess, userId: strin
     // R6 (F1): refused when the member has access in another organization.
     await refuseOtherAccess(tx, a.orgId, userId);
     // R17-2: never instantly; the member is mailed and can cancel during the 24-hour wait.
-    return scheduleOwnerTwoFactorReset(ctx, tx, userId);
+    return scheduleOwnerTwoFactorReset(ctx, tx, userId, { orgId: a.orgId, by: a.session.user.id });
   });
   await mailOwnerTwoFactorReset(ctx, userId, a.session.user.displayName, a.org.name, scheduled);
 }

@@ -101,7 +101,8 @@ Put these in `.env` next to `docker-compose.prod.yml`. Compose reads that file a
 | `AOM_MAIL_FROM` | `Guildwise HQ <noreply@aom.local>` | From address. Quote it if it has spaces: `"Guildwise HQ <noreply@example.com>"`. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. |
 | `AOM_HTTP_PORT`, `AOM_HTTPS_PORT` | `80`, `443` | Change only if another service uses those ports. |
-| `AOM_TWO_FACTOR_KEY` | unset | Encrypts the two-factor seeds with a key of their own (AES-256-GCM). At least 32 characters (`openssl rand -hex 32`), never the same value as `AOM_SECRET_KEY` (the server refuses to start if it is). Unset: a key derived from `AOM_SECRET_KEY`, with a warning at startup in production. Setting it later locks nobody out: seeds are re-sealed under the new key when they are read. Keep it with your backups. |
+| `AOM_TWO_FACTOR_KEY` | unset | Encrypts the two-factor seeds with a key of their own (AES-256-GCM). At least 32 characters (`openssl rand -hex 32`), never the same value as `AOM_SECRET_KEY` (the server refuses to start if it is). Unset: a key derived from `AOM_SECRET_KEY`, with a warning at startup in production. Setting it later locks nobody out: seeds are re-sealed under the new key when they are read. Keep it with your backups. It also keys the seal on every sign-in session (`auth_sessions.mac`), so setting it the first time, or changing it, signs everyone out once. Without it that seal key derives from `AOM_SECRET_KEY` or the database key, and then the seal adds nothing against someone who can write to the database. |
+| `AOM_SECRET_KEY_FILE`, `AOM_TWO_FACTOR_KEY_FILE` | unset | Read the key from a file instead (a Docker or compose secret), trimmed. Use one or the other per key: the server refuses to start when both `X` and `X_FILE` are set, or when the file is empty or unreadable. Two files keep the two keys out of one `.env`. |
 
 ### Security
 

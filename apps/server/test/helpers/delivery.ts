@@ -14,6 +14,7 @@ import { observeRecipe } from '../../src/delivery/recipes.ts';
 import { uniqueEmail } from './app.ts';
 import { appoint } from './ceo.ts';
 import { q } from './db.ts';
+import { resealSessions } from './sessions.ts';
 import { createWorld, ok, type Session, type World } from './world.ts';
 
 /** The P5-shaped recipe of the shared fixtures: a local Docker environment and a gated production one. */
@@ -183,12 +184,14 @@ export async function setWeekday(dw: DeliveryWorld, hour = 10): Promise<void> {
   while (t.getUTCDay() !== 3 || t.getTime() < now.getTime()) t.setUTCDate(t.getUTCDate() + 1);
   dw.w.t.clock.setOffset(t.getTime() - Date.now());
   await q(`UPDATE auth_sessions SET last_seen_at=$1, expires_at='2099-01-01'`, [dw.w.t.clock.now()]);
+  await resealSessions(dw.w.t.app.ctx);
 }
 
 /** Moves the server clock forward and keeps sessions alive. */
 export async function advance(dw: DeliveryWorld, ms: number): Promise<void> {
   dw.w.t.clock.advance(ms);
   await q(`UPDATE auth_sessions SET last_seen_at=$1, expires_at='2099-01-01'`, [dw.w.t.clock.now()]);
+  await resealSessions(dw.w.t.app.ctx);
 }
 
 /** A card of the project was merged at `commit` (a `CardFinalized` event, as the finalize flow leaves it). */

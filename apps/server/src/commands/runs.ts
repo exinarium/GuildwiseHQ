@@ -883,6 +883,12 @@ export async function restartRun(
           : 'only a running environment can be restarted',
       );
     const ws = await one(tx, 'SELECT connected, name FROM workstations WHERE id=$1', [r.workstation_id]);
+    // R9 / release-readiness O1: no restart or revive on a workstation that no longer works for the organization.
+    if (!(await workstationServesOrg(tx, r.workstation_id, r.org_id)))
+      throw conflict(
+        'workstation_not_serving',
+        `${ws?.name ?? 'that workstation'} does not work for this organization: its owner switches it on under Works for on the Workstations page`,
+      );
     if (!ws?.connected) throw conflict('workstation_offline', `${ws?.name ?? 'the workstation'} is offline`);
     if (how === 'revive') {
       const other = await one(

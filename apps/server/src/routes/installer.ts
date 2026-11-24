@@ -13,6 +13,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../auth/guards.ts';
 import { securitySetting } from '../auth/security-settings.ts';
+import { requireStepUp } from '../auth/step-up.ts';
 import {
   createInstallerSession,
   installerScript,
@@ -69,6 +70,8 @@ export function installerRoutes(ctx: Ctx) {
       },
       async (req, reply) => {
         const s = await requireUser(ctx, req);
+        // release-readiness O3: adding a machine needs "Confirm it's you" (a fresh step-up)
+        requireStepUp(ctx, s);
         reply.code(201);
         return InstallerSessionSchema.parse(await createInstallerSession(ctx, s.user, req.body));
       },

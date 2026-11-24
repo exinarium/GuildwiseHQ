@@ -113,7 +113,8 @@ export const userEvents = [
     z.object({
       userId: Id,
       sessionRef: z.string().regex(/^[0-9a-f]{64}$/),
-      reason: z.enum(['no_sign_in', 'user_mismatch']),
+      /** `bad_mac`: the row's seal does not match (release-readiness O5: a row inserted or edited with SQL). */
+      reason: z.enum(['no_sign_in', 'user_mismatch', 'bad_mac']),
       meta: EventMetaSchema,
     }),
   ),

@@ -1,0 +1,48 @@
+# Dependency updates (release-readiness O7, owner standing order: zero known vulnerabilities). Dependabot opens pull
+# requests against development; they run the normal pull_request CI, including the dependency audit. Minor and patch
+# updates come grouped per ecosystem, each new release only after a three-day cooldown.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    target-branch: development
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: development
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directories: [/, /media]
+    target-branch: development
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      docker-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker-compose
+    directory: /
+    target-branch: development
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      compose-minor-patch:
+        update-types: [minor, patch]

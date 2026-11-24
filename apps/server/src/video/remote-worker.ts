@@ -50,7 +50,13 @@ export function remoteWorkerConfig(
   env: Readonly<Record<string, string | undefined>> = process.env,
   readFile: (path: string) => string = (p) => readFileSync(p, 'utf8'),
 ): RemoteWorkerConfig {
-  for (const k of ['DATABASE_URL', 'AOM_SECRET_KEY'])
+  for (const k of [
+    'DATABASE_URL',
+    'AOM_SECRET_KEY',
+    'AOM_SECRET_KEY_FILE',
+    'AOM_TWO_FACTOR_KEY',
+    'AOM_TWO_FACTOR_KEY_FILE',
+  ])
     if (env[k])
       throw new Error(
         `${k} is set: a remote render worker never connects to the database or holds the server key. Remove it (the old tunnel mode is retired).`,

@@ -43,7 +43,8 @@ beforeAll(async () => {
   inbox = await ok(owner('POST', '/api/mail-inboxes', { label: 'Support' }), 201);
   w.t.app.ctx.mailer = {
     async send(m) {
-      sent.push(m);
+      // every pairing also mails its owner (release-readiness O3); this suite counts the drafted mails only
+      if (m.subject !== 'A new workstation was added to your account') sent.push(m);
     },
     close() {},
   };

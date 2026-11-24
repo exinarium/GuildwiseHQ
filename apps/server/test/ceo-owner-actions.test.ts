@@ -5,6 +5,7 @@ import { Browser } from './helpers/browser.ts';
 import { act, appoint, ceo, keepOnline, startCeoShift, wakeNow } from './helpers/ceo.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
+import { resealSessions } from './helpers/sessions.ts';
 import { createWorld, ok, until, type World } from './helpers/world.ts';
 
 /**
@@ -50,6 +51,7 @@ let current: any;
 const advance = async (ms: number) => {
   w.t.clock.advance(ms);
   await q(`UPDATE auth_sessions SET last_seen_at=$1, expires_at='2099-01-01'`, [w.t.clock.now()]);
+  await resealSessions(w.t.app.ctx);
 };
 /** An owner turn that stays open: the rpc calls of `aom ceo` run inside it. */
 async function openTurn(text = `turn ${++seq}`) {

@@ -20,7 +20,13 @@ import { requireSession, requireSuperAdmin } from '../auth/guards.ts';
 import { SlidingLimit } from '../auth/limits.ts';
 import { requestedOrgId } from '../auth/org-context.ts';
 import { verifyPassword } from '../auth/password.ts';
-import { createSession, deleteSession, SESSION_COOKIE, sessionOfUser } from '../auth/sessions.ts';
+import {
+  createSession,
+  deleteSession,
+  markSecondFactor,
+  SESSION_COOKIE,
+  sessionOfUser,
+} from '../auth/sessions.ts';
 import { failedSignIns, signIns } from '../auth/sign-in-log.ts';
 import {
   answerLoginChallenge,
@@ -39,7 +45,7 @@ import { avatarImageFor, setMyAvatar } from '../commands/avatar.ts';
 import { requestPasswordReset, resetLinkState, resetPassword } from '../commands/password-reset.ts';
 import { cancelRecoveriesOnSignIn } from '../commands/two-factor-recovery.ts';
 import type { Ctx } from '../context.ts';
-import { exec, one } from '../db/sql.ts';
+import { one } from '../db/sql.ts';
 import { withAppendTx } from '../db/tx.ts';
 import { badRequest, conflict, unauthorized } from '../errors.ts';
 import { buildMe } from '../queries/me.ts';
@@ -256,10 +262,7 @@ export function authRoutes(ctx: Ctx) {
       if (ctx.config.rateLimit) twoFactorLimit.hit(s.user.id);
       const recoveryCodes = await confirmEnrollment(ctx, s.user.id, req.body.code);
       // R28/R5: a confirmed enrolment proves the second factor, so the session is fresh for step-up.
-      await exec(ctx.pool, 'UPDATE auth_sessions SET second_factor_at=$2 WHERE id=$1', [
-        s.sessionId,
-        ctx.clock.now(),
-      ]);
+      await markSecondFactor(ctx, s, ctx.clock.now());
       return { recoveryCodes };
     });
 

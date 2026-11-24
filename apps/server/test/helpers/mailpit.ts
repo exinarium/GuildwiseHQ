@@ -33,14 +33,26 @@ export async function messageText(id: string): Promise<string> {
   return body.Text;
 }
 
-/** The invitation token from the newest mail to `email`. */
+/** The subject of the new-workstation notice (`newWorkstationMail`). */
+export const NEW_WORKSTATION_SUBJECT = 'A new workstation was added to your account';
+
+/** The invitation token from the newest mail to `email` (not counting new-workstation notices). */
 export async function latestInviteToken(email: string, origin: string, count = 1): Promise<string> {
-  const msgs = await waitForMessages(email, count);
-  const newest = [...msgs].sort((a, b) => b.Created.localeCompare(a.Created))[0] as MailpitMessage;
-  const text = await messageText(newest.ID);
-  const m = new RegExp(`${origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/invite/([A-Za-z0-9_-]+)`).exec(text);
-  if (!m) throw new Error(`no invite link in mail: ${text}`);
-  return m[1] as string;
+  const link = new RegExp(`${origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/invite/([A-Za-z0-9_-]+)`);
+  const start = Date.now();
+  for (;;) {
+    const msgs = await waitForMessages(email, count);
+    // every pairing mails the account too (release-readiness O3): that notice is never the invitation, and it may
+    // arrive before the invitation does
+    const newest = [...msgs]
+      .filter((m) => m.Subject !== NEW_WORKSTATION_SUBJECT)
+      .sort((a, b) => b.Created.localeCompare(a.Created))[0];
+    const text = newest ? await messageText(newest.ID) : '';
+    const m = link.exec(text);
+    if (m) return m[1] as string;
+    if (Date.now() - start > 30_000) throw new Error(`no invite link in mail: ${text}`);
+    await new Promise((r) => setTimeout(r, 100));
+  }
 }
 
 /** The Reply-To addresses of a stored message. */

@@ -35,7 +35,11 @@ describe('a self-hosted upgrade with the default settings', () => {
   it('keeps every runner connected and updating, and refuses nothing', async () => {
     t = await createTestApp({ listen: true, env: { AOM_RUNNER_RELEASE_DIR: devReleaseDir() } });
     const mails: MailMessage[] = [];
-    t.app.ctx.mailer = { send: async (m) => void mails.push(m), close: () => {} };
+    // every pairing also mails its owner (release-readiness O3); this test counts the refusal notices only
+    t.app.ctx.mailer = {
+      send: async (m) => void (m.subject === 'A new workstation was added to your account' || mails.push(m)),
+      close: () => {},
+    };
     const base = `http://127.0.0.1:${(t.app.server.address() as AddressInfo).port}`;
 
     // The DB as 1.9.x left it: two users with runners paired by old versions (no proof, no release on the event).
