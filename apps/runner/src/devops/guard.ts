@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { type DevopsAuditEntry, normalizeRemoteUrl } from '@aom/shared';
+import { CARD_BRANCH_PREFIXES, type DevopsAuditEntry, normalizeRemoteUrl } from '@aom/shared';
 import { redactSecrets } from '../redact.ts';
 
 /**
@@ -48,6 +48,15 @@ export interface GuardConfig {
   appRepos?: Array<{ remote: string; label: string; botEmail: string }>;
   /** The commit e-mail of the session's environment (the bot's on a card request for an app repository). */
   identityEmail?: string;
+  /**
+   * uat-runner-fixes-3 finding 2: the card worktrees folder (`<runner root>/worktrees`). The DevOps engineer never writes
+   * or commits there and never moves a card branch, whatever a request, a prompt or an approval says: a command that runs
+   * in a card worktree or names a path in it is refused unless it only reads (`card_worktree`). The runner also checks
+   * the card worktrees after the shift and reverts what changed (devops/card-fence.ts); this is the early refusal.
+   */
+  cardWorktreesRoot?: string;
+  /** A conflict request the server filed (G-Q2): this card branch may be fast-forwarded (`git merge --ff-only`) only. */
+  conflictBranch?: string;
 }
 
 /** Lookups the classifier needs from the machine, injected so `classifyCommand` stays pure. */
@@ -721,6 +730,160 @@ function frozenGit(words: string[], c: Ctx): GuardVerdict | null {
   return frozen.has(head) ? frozenRefusal(head) : null;
 }
 
+const CARD_FENCE_TEXT =
+  'The DevOps engineer never writes, installs or commits in a card worktree and never moves a card branch, whoever asks and whatever was approved (the runner reverts it after the shift). A builder that needs a package asks the runner with `aom devops install <npm|pnpm|yarn|bun> ...` from its own shift; tell the requester that, and report.';
+
+/** Commands that only read: allowed in a card worktree (with their read-only flags; `find` without -delete/-exec). */
+const READ_ONLY_CMDS = new Set([
+  'ls',
+  'cat',
+  'head',
+  'tail',
+  'less',
+  'more',
+  'grep',
+  'egrep',
+  'fgrep',
+  'rg',
+  'find',
+  'wc',
+  'stat',
+  'file',
+  'du',
+  'tree',
+  'pwd',
+  'echo',
+  'printf',
+  'test',
+  '[',
+  'diff',
+  'cmp',
+  'sha256sum',
+  'sha1sum',
+  'md5sum',
+  'realpath',
+  'readlink',
+  'basename',
+  'dirname',
+  'jq',
+  'true',
+  'false',
+  'aom',
+  'which',
+  'type',
+  'command',
+]);
+/** git subcommands that only read. */
+const GIT_READ_ONLY = new Set([
+  'status',
+  'log',
+  'diff',
+  'show',
+  'rev-parse',
+  'rev-list',
+  'cat-file',
+  'ls-files',
+  'ls-tree',
+  'merge-base',
+  'describe',
+  'for-each-ref',
+  'show-ref',
+  'blame',
+  'shortlog',
+  'grep',
+  'reflog',
+  'symbolic-ref',
+  'name-rev',
+]);
+
+const isCardBranch = (name: string): boolean => {
+  const n = name.replace(/^\+/, '').replace(/^refs\/heads\//, '');
+  return CARD_BRANCH_PREFIXES.some((p) => n.startsWith(p));
+};
+
+/**
+ * uat-runner-fixes-3 finding 2: refuses a DevOps command that writes in a card worktree or moves a card branch. The
+ * request text, a prompt or a manager's approval cannot change it (it is configuration of the runner, not of the agent).
+ */
+function cardFence(cmd: string, words: string[], seg: Segment, c: Ctx): GuardVerdict | null {
+  const root = c.cfg.cardWorktreesRoot;
+  if (!root) return null;
+  const r = resolve(root);
+  const inCard = (p: string | null): boolean => p !== null && (p === r || inside(p, r));
+  const refuseFence = (what: string) => refuse('card_worktree', `${what}. ${CARD_FENCE_TEXT}`);
+  for (const t of seg.redirects)
+    if (inCard(resolveArg(t, c.cwd, c.cfg.home))) return refuseFence(`Writing ${t} (a card worktree)`);
+  if (cmd === 'git') {
+    const { sub, args, dir } = gitSubcommand(words, c.cwd, c.cfg.home);
+    if (sub === undefined) return null;
+    const flags = args.filter((a) => a.startsWith('-'));
+    const positional = args.filter((a) => !a.startsWith('-'));
+    const head = dir === null ? 'unknown' : (c.deps.headBranch?.(dir) ?? 'unknown');
+    const conflictFf =
+      !!c.cfg.conflictBranch &&
+      sub === 'merge' &&
+      flags.includes('--ff-only') &&
+      head === c.cfg.conflictBranch;
+    if (conflictFf) return null;
+    // a card branch named anywhere (the clone too): pushed, moved, deleted or re-pointed
+    if (
+      sub === 'push' &&
+      positional.slice(1).some((spec) => isCardBranch(spec.slice(spec.lastIndexOf(':') + 1)))
+    )
+      return refuseFence('Pushing a card branch');
+    if (sub === 'update-ref' && args.some(isCardBranch)) return refuseFence('Moving a card branch');
+    if (
+      sub === 'branch' &&
+      flags.some((f) => /^--(delete|force|move|copy)$/.test(f) || /^-[a-zA-Z]*[dDfmMcC][a-zA-Z]*$/.test(f)) &&
+      positional.some(isCardBranch)
+    )
+      return refuseFence('Changing a card branch');
+    if (GIT_READ_ONLY.has(sub)) return null;
+    if (
+      sub === 'branch' &&
+      flags.every((f) =>
+        /^-(a|r|v|vv|l|-list|-all|-remotes|-show-current|-contains|-merged|-no-merged)$/.test(f),
+      )
+    )
+      return null;
+    if (
+      sub === 'config' &&
+      flags.some((f) => f === '--get' || f === '--get-all' || f === '--list' || f === '-l')
+    )
+      return null;
+    if (sub === 'worktree') {
+      // listing and scratch worktrees OUTSIDE the card folder (the conflict brief's step 1) are fine
+      if (positional[0] === 'list' || positional[0] === 'prune') return null;
+      if (positional[0] === 'add' || positional[0] === 'remove') {
+        const named = new Set<string>();
+        for (let i = 0; i < args.length; i++)
+          if (/^-(b|B)$/.test(args[i] as string)) named.add(args[++i] as string);
+        const target = args.slice(1).find((a) => !a.startsWith('-') && !named.has(a));
+        const abs = target === undefined ? null : resolveArg(target, dir ?? c.cwd, c.cfg.home);
+        if (abs !== null && !inCard(abs)) return null;
+        return refuseFence('A worktree in the card worktrees folder');
+      }
+    }
+    if (inCard(dir) || isCardBranch(head === null || head === 'unknown' ? '' : head))
+      return refuseFence(`\`git ${sub}\` in a card worktree`);
+    return null;
+  }
+  if (READ_ONLY_CMDS.has(cmd)) {
+    if (cmd === 'find' && words.some((w) => /^-(delete|exec|execdir|ok|okdir|fprint\w*|fls)$/.test(w)))
+      return words.slice(1).some((w) => inCard(resolveArg(w, c.cwd, c.cfg.home))) || inCard(c.cwd)
+        ? refuseFence('`find` that changes files in a card worktree')
+        : null;
+    return null;
+  }
+  if (inCard(c.cwd)) return refuseFence(`\`${cmd}\` in a card worktree`);
+  for (const w of words.slice(1)) {
+    const v = w.includes('=') && w.startsWith('-') ? w.slice(w.indexOf('=') + 1) : w;
+    if (!v.startsWith('-') && inCard(resolveArg(v, c.cwd, c.cfg.home)))
+      return refuseFence(`\`${cmd}\` on ${v} (a card worktree)`);
+  }
+  return null;
+}
+
 /** The verdict for one simple command. */
 function judgeSegment(seg: Segment, c: Ctx): GuardVerdict {
   const words = [...seg.words];
@@ -794,6 +957,9 @@ function judgeSegment(seg: Segment, c: Ctx): GuardVerdict {
     words.splice(0, words.length, ...rest);
     cmd = baseName(words[0] as string);
   }
+
+  const fenced = cardFence(cmd, words, seg, c);
+  if (fenced) return fenced;
 
   // `aom sudo` was removed in 1.10.0 (no standing root path): refused like raw sudo
   if (cmd === 'aom') {

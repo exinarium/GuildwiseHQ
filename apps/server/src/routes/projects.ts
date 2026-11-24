@@ -7,6 +7,7 @@ import {
   DeleteProjectRequestSchema,
   FullSuiteRequestSchema,
   IdParamsSchema,
+  InitialCommitRequestSchema,
   MarkFindingRequestSchema,
   PatchProjectRequestSchema,
   PatchRepoRequestSchema,
@@ -65,6 +66,7 @@ import { pauseProject, resumeProject } from '../commands/project-pause.ts';
 import {
   addRepo,
   archiveProject,
+  createInitialCommit,
   createProject,
   deleteProject,
   projectImpact,
@@ -730,6 +732,17 @@ export function projectRoutes(ctx: Ctx) {
         const s = await requireUser(ctx, req);
         await retryRepoClone(ctx, s.user, req.params.id, req.params.repoId);
         return getProjectDetail(ctx, s.user.id, req.params.id);
+      },
+    );
+
+    /** An empty repository: the first (empty) commit on its working branch, made by the workstation that reported it. */
+    app.post(
+      '/api/projects/:id/repos/:repoId/initial-commit',
+      { schema: { params: RepoParamsSchema, body: InitialCommitRequestSchema } },
+      async (req) => {
+        const s = await requireUser(ctx, req);
+        await createInitialCommit(ctx, s.user, req.params.id, req.params.repoId, req.body.workstationId);
+        return { queued: true };
       },
     );
 

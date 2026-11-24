@@ -27,6 +27,7 @@ import {
 import { LocalTestServicesSchema } from '../projects/test-services.ts';
 import { StopLossSettingsSchema } from '../questions/index.ts';
 import { ReleaseDocsPrepGateViewSchema } from '../release/docs-prep-dto.ts';
+import { CommitAsSchema } from '../repo/commit-identity.ts';
 import {
   ComponentRulesSchema,
   RepoDescriptionSchema,
@@ -477,8 +478,17 @@ export const CreateProjectRequestSchema = z.object({
   workingBranch: GitRefSchema.default('main'),
   subCategories: z.array(z.string()).default([]),
   vaultFolder: VaultFolderSchema.nullable().default(null),
+  /**
+   * uat-runner-fixes-3 finding 6: "Commit as", asked up front for a project with repositories, so the first shifts do not
+   * stop on `no_commit_identity`. Absent: the clone's or the workstation's git identity (Project settings > Commit as).
+   */
+  commitAs: CommitAsSchema.optional(),
 });
 export type CreateProjectRequest = z.infer<typeof CreateProjectRequestSchema>;
+
+/** `POST /api/projects/:id/repos/:repoId/initial-commit` (project owner): the first commit of an empty repository. */
+export const InitialCommitRequestSchema = z.object({ workstationId: z.uuid() });
+export type InitialCommitRequest = z.infer<typeof InitialCommitRequestSchema>;
 
 /** `PUT /api/projects/:id/merge-policy` (owner only). */
 /** `PUT /api/projects/:id/policy` (organization Owner, Admins and the project owner). At least one field. */

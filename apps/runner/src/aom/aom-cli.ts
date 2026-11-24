@@ -2134,9 +2134,11 @@ const VERBS: Record<string, Verb> = {
     const r = await runGuardHook({
       stdin: ctx.readFile('-'),
       cfg: guardCfg,
-      // only a session with frozen branches asks git which branch is checked out
+      // only a session with frozen branches or the card worktree fence asks git which branch is checked out
       deps: {
-        ...(guardCfg.frozenBranches?.length ? { headBranch: gitHeadBranch } : {}),
+        ...(guardCfg.frozenBranches?.length || guardCfg.cardWorktreesRoot
+          ? { headBranch: gitHeadBranch }
+          : {}),
         ...(guardCfg.appRepos?.length ? { originUrl: gitOriginUrl } : {}),
       },
       report: async (entries) => {

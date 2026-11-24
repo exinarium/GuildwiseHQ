@@ -1,5 +1,10 @@
 import type { DiffStats } from '@aom/shared';
 import picomatch from 'picomatch';
+import {
+  excludeStubs,
+  placeholderPathsBetween,
+  SANDBOX_STUB_NAMES,
+} from '../adapters/sandbox-placeholders.ts';
 import { git, gitOk, revParse } from './git.ts';
 
 const TEST_GLOBS = ['**/*.test.*', '**/*.spec.*', '**/test/**', '**/tests/**', '**/__tests__/**'];
@@ -58,9 +63,37 @@ export async function ownChangedPaths(
   return [...out];
 }
 
-/** `git diff` arguments limited to the card's own paths (literal pathspecs); the plain range when there is no limit. */
-export function scoped(args: string[], own: string[] | null): string[] {
-  return own === null ? args : [...args, '--', ...own.map((p) => `:(literal)${p}`)];
+/**
+ * `git diff` arguments limited to the card's own paths (literal pathspecs); the plain range when there is no limit.
+ * `hide`: sandbox placeholders the range adds or drops (`cardPlaceholders`), left out either way.
+ */
+export function scoped(
+  args: string[],
+  own: string[] | null,
+  hide: ReadonlySet<string> = new Set(),
+): string[] {
+  if (own === null) return hide.size ? [...args, '--', '.', ...excludeStubs(hide)] : args;
+  return [...args, '--', ...own.filter((p) => !hide.has(p)).map((p) => `:(literal)${p}`)];
+}
+
+/**
+ * The sandbox placeholders (empty `.idea`, `.bashrc`, ... at the root) that `<base>...HEAD` adds or drops: what a WIP
+ * commit or an agent's `git add -A` put on the branch is never shown to the reviewers or counted (uat-runner-fixes-3).
+ */
+export async function cardPlaceholders(worktree: string, base: string): Promise<Set<string>> {
+  const r = await git(worktree, [
+    'diff',
+    '--name-only',
+    '-z',
+    `${base}...HEAD`,
+    '--',
+    ...SANDBOX_STUB_NAMES.map((n) => `:(top,literal)${n}`),
+  ]);
+  const names = r.stdout.split('\0').filter(Boolean);
+  if (r.exitCode !== 0 || names.length === 0) return new Set();
+  const mb = await git(worktree, ['merge-base', base, 'HEAD']);
+  if (mb.exitCode !== 0 || !mb.stdout.trim()) return new Set();
+  return placeholderPathsBetween(worktree, mb.stdout.trim(), 'HEAD', names);
 }
 
 export interface DiffInput {
@@ -72,11 +105,12 @@ export interface DiffInput {
 /** `git diff --numstat <base>...HEAD` summarised, plus architectural path matches and the test file count. */
 export async function computeDiffStats(input: DiffInput): Promise<DiffStats> {
   const base = await baseRef(input.worktree, input.baseBranch);
-  const own = await ownChangedPaths(input.worktree, base);
+  const hide = await cardPlaceholders(input.worktree, base);
+  const own = (await ownChangedPaths(input.worktree, base))?.filter((p) => !hide.has(p)) ?? null;
   const out =
     own?.length === 0
       ? ''
-      : await gitOk(input.worktree, scoped(['diff', '--numstat', `${base}...HEAD`], own));
+      : await gitOk(input.worktree, scoped(['diff', '--numstat', `${base}...HEAD`], own, hide));
   let added = 0;
   let removed = 0;
   const paths: string[] = [];

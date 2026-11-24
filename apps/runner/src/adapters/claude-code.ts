@@ -675,6 +675,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       frozenBranches: guard.frozenBranches ?? [],
       ...(guard.appRepos?.length ? { appRepos: guard.appRepos } : {}),
       ...(guard.identityEmail ? { identityEmail: guard.identityEmail } : {}),
+      // uat-runner-fixes-3 finding 2: never a write or commit in a card worktree (runner configuration, not the prompt)
+      cardWorktreesRoot: this.paths.worktrees,
+      ...(guard.conflictBranch ? { conflictBranch: guard.conflictBranch } : {}),
       secretRoots: ['secrets', 'keys', 'config.json'].map((d) => join(this.paths?.root ?? '', d)),
       auditFile: join(this.paths.logs, 'devops-audit.jsonl'),
     };

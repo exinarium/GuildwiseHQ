@@ -1,4 +1,5 @@
 import { isSafeGitRef } from '@aom/shared';
+import { statusLinesWithoutStubs } from '../adapters/sandbox-placeholders.ts';
 import { git, hasRemote } from './git.ts';
 import { type BoundPostAs, identityErrorWire } from './identity.ts';
 import { mergeInProgress, mergeMainIntoCard } from './sync-main.ts';
@@ -63,7 +64,7 @@ export async function architectFetch(ctx: ArchitectGitContext): Promise<GitReply
 export async function architectMergeMain(ctx: ArchitectGitContext): Promise<GitReply> {
   if (await mergeInProgress(ctx.worktree))
     return { ok: false, error: 'a merge is already in progress: resolve it first' };
-  const dirty = (await git(ctx.worktree, ['status', '--porcelain', '--untracked-files=no'])).stdout.trim();
+  const dirty = (await statusLinesWithoutStubs(ctx.worktree, { untracked: false })).lines.join('\n').trim();
   if (dirty) return { ok: false, error: 'commit your changes first; the branch has uncommitted edits' };
   if (ctx.auth && (await hasRemote(ctx.worktree))) {
     const a = await ctx.auth(await remoteUrl(ctx.worktree));
@@ -107,7 +108,7 @@ export async function architectVerifyMerge(ctx: ArchitectGitContext): Promise<Gi
     .split('\n')
     .filter(Boolean);
   if (unmerged.length) return { ok: false, error: `unmerged files: ${unmerged.join(', ')}` };
-  const dirty = (await git(ctx.worktree, ['status', '--porcelain', '--untracked-files=no'])).stdout.trim();
+  const dirty = (await statusLinesWithoutStubs(ctx.worktree, { untracked: false })).lines.join('\n').trim();
   if (dirty) return { ok: false, error: `uncommitted changes remain:\n${dirty.slice(0, 400)}` };
   const markers = await git(ctx.worktree, ['grep', '-I', '-n', '-E', '^(<{7}|>{7}) ', 'HEAD', '--']);
   if (markers.exitCode === 0 && markers.stdout.trim())

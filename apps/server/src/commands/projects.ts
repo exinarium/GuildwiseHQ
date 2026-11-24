@@ -48,6 +48,7 @@ import { ensureProjectVaultIn } from './vaults.ts';
 import {
   deliver,
   projectWorkstations,
+  queueInitialCommit,
   recheckProjectEnvironment,
   repoSetupEvents,
   retryRepoSetup,
@@ -79,17 +80,32 @@ export async function createProject(
     if (await one(tx, 'SELECT 1 FROM projects WHERE org_id=$1 AND key=$2', [org.id, input.key])) {
       throw conflict('project_key_taken', `project key ${input.key} is already in use`);
     }
+    // "Commit as" asked up front (uat-runner-fixes-3 finding 6) is its own event, as when it is set in the settings.
+    const { commitAs, ...created } = input;
     await ctx.store.append(
       [
         {
           streamId: streamId.project(projectId),
           event: {
             type: 'ProjectCreated',
-            payload: { projectId, orgId: org.id, createdByUserId: user.id, ...input, workflowKey },
+            payload: { projectId, orgId: org.id, createdByUserId: user.id, ...created, workflowKey },
           },
           actor: userActor(user.id),
           scope: projectScope(org.id, projectId),
         },
+        ...(commitAs
+          ? [
+              {
+                streamId: streamId.project(projectId),
+                event: {
+                  type: 'ProjectCommitAsSet' as const,
+                  payload: { projectId, commitAs, setBy: user.id },
+                },
+                actor: userActor(user.id),
+                scope: projectScope(org.id, projectId),
+              },
+            ]
+          : []),
       ],
       { tx },
     );
@@ -1068,6 +1084,24 @@ export async function retryRepoClone(ctx: Ctx, user: AuthSession['user'], projec
     stations = await retryRepoSetup(ctx, tx, p, repoId, user.id);
   });
   deliver(ctx, stations);
+}
+
+/**
+ * uat-runner-fixes-3 finding 5: the owner's one click on an empty repository: the runner that reported it makes the first
+ * (empty) commit on the working branch and pushes it.
+ */
+export async function createInitialCommit(
+  ctx: Ctx,
+  user: AuthSession['user'],
+  projectId: string,
+  repoId: string,
+  workstationId: string,
+) {
+  await withAppendTx(ctx.pool, async (tx) => {
+    const p = await ownedProject(tx, user.id, projectId);
+    await queueInitialCommit(tx, p, repoId, workstationId);
+  });
+  deliver(ctx, [workstationId]);
 }
 
 /** The manager asks to check the project's development environment again (after fixing something by hand). */

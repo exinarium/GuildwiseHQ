@@ -58,6 +58,7 @@ import {
 import {
   EnvEnsurePayloadSchema,
   RepoClonePayloadSchema,
+  RepoInitialCommitPayloadSchema,
   RightsVerifyPayloadSchema,
   SudoKeySchema,
 } from '../devops/environment.ts';
@@ -1453,6 +1454,7 @@ export const RunnerCommandNameSchema = z.enum([
   'journey.webhook.call',
   'repo.clone',
   'env.ensure',
+  'repo.initial_commit',
   'rights.verify',
   'env.secret.set',
   'env.secret.clear',
@@ -1585,6 +1587,7 @@ export const CommandPayloadSchemas = {
   'journey.webhook.call': JourneyWebhookCallPayloadSchema,
   'repo.clone': RepoClonePayloadSchema,
   'env.ensure': EnvEnsurePayloadSchema,
+  'repo.initial_commit': RepoInitialCommitPayloadSchema,
   'rights.verify': RightsVerifyPayloadSchema,
   'env.secret.set': EnvSecretSetPayloadSchema,
   'env.secret.clear': EnvSecretClearPayloadSchema,
@@ -1955,6 +1958,12 @@ export const ShiftRejectedSchema = msg('shift.rejected', {
       branches: z.array(z.string()).max(200),
       /** Why creating the branch from the default branch did not work (the runner tries first). */
       createFailed: z.string().max(500).optional(),
+      /**
+       * uat-runner-fixes-3 finding 5: the repository has no commit at all (clone and origin). The server then holds the
+       * project's cards on the environment gate and asks the owner once to create the first commit, instead of asking
+       * which branch is the working branch.
+       */
+      emptyRepository: z.boolean().optional(),
     })
     .optional(),
   /** Additive, with `reason: 'busy'` (`shift-limit:2`): the limit that applied, its source and who holds the slots. */

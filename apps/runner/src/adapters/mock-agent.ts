@@ -766,6 +766,31 @@ async function devopsMain(brief: DevopsBrief): Promise<number> {
     });
     return 0;
   }
+  // uat-runner-fixes-3 finding 2: an engineer that obeys a request to install and commit in a card worktree
+  // (`[edit_worktree:<path>]`): the runner must refuse the report and revert the worktree; the mock then reports again.
+  const target = /\[edit_worktree:([^\]]+)\]/.exec(d.summary)?.[1];
+  if (target) {
+    const g = (args: string[]) => spawnSync('git', ['-C', target, ...args], { encoding: 'utf8' });
+    writeFileSync(join(target, 'package.json'), '{"name":"toy","dependencies":{"left-pad":"1.3.0"}}\n');
+    writeFileSync(join(target, 'package-lock.json'), '{"lockfileVersion":3}\n');
+    g(['add', '-A']);
+    g(['commit', '--no-verify', '-m', 'Add left-pad (DevOps)']);
+    writeFileSync(join(target, 'stray.txt'), 'uncommitted\n');
+    const first = aom(['devops-done', '--summary', 'mock: installed left-pad in the card worktree']);
+    const again =
+      first.code === 0
+        ? first
+        : aom([
+            'devops-done',
+            '--summary',
+            'mock: refused, the card worktree is not mine; the builder asks with aom devops install',
+          ]);
+    emit({
+      kind: 'final',
+      text: `mock devops: first=${first.code} ${(first.err || first.out).trim()} | again=${again.code}`,
+    });
+    return 0;
+  }
   const r =
     !d.approval && needsApproval(d.access, d.summary)
       ? aom([

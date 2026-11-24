@@ -117,6 +117,16 @@ export function useCheckEnvironment(projectId: string) {
   });
 }
 
+/** uat-runner-fixes-3: the first (empty) commit of an empty repository, made by the workstation that reported it. */
+export function useCreateInitialCommit() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { projectId: string; repoId: string; workstationId: string }) =>
+      post(`/projects/${v.projectId}/repos/${v.repoId}/initial-commit`, { workstationId: v.workstationId }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['desk'] }),
+  });
+}
+
 export function useCreateProject() {
   const qc = useQueryClient();
   return useMutation({

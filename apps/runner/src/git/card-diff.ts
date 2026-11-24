@@ -1,5 +1,5 @@
 import { CHANGED_PATHS_MAX, capDiff, type DiffUpload } from '@aom/shared';
-import { baseRef, ownChangedPaths, scoped } from './diffstat.ts';
+import { baseRef, cardPlaceholders, ownChangedPaths, scoped } from './diffstat.ts';
 import { git, gitOk, revParse } from './git.ts';
 
 export interface CardDiff {
@@ -18,18 +18,23 @@ export async function computeCardDiff(worktree: string, baseBranch: string): Pro
   const base = await baseRef(worktree, baseBranch);
   const headSha = await gitOk(worktree, ['rev-parse', 'HEAD']);
   // A branch that merged `main` (or the working branch) in: only what the card itself changed, not what the merge brought.
-  const own = await ownChangedPaths(worktree, base);
+  // sandbox placeholders a commit put on the branch are not the card's change: not shown to the reviewers
+  const hide = await cardPlaceholders(worktree, base);
+  const own = (await ownChangedPaths(worktree, base))?.filter((p) => !hide.has(p)) ?? null;
   const none = { exitCode: 0, stdout: '', stderr: '' };
   const names =
     own?.length === 0
       ? none
-      : await git(worktree, scoped(['diff', '--name-only', '-z', `${base}...HEAD`], own));
+      : await git(worktree, scoped(['diff', '--name-only', '-z', `${base}...HEAD`], own, hide));
   const changedPaths =
     names.exitCode === 0 ? names.stdout.split('\0').filter(Boolean).slice(0, CHANGED_PATHS_MAX) : [];
   const d =
     own?.length === 0
       ? none
-      : await git(worktree, scoped(['diff', '--no-color', '--no-ext-diff', '-M', `${base}...HEAD`], own));
+      : await git(
+          worktree,
+          scoped(['diff', '--no-color', '--no-ext-diff', '-M', `${base}...HEAD`], own, hide),
+        );
   const capped = capDiff(d.exitCode === 0 ? d.stdout : '');
   return {
     headSha,

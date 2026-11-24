@@ -100,7 +100,7 @@ import {
   stageEnvironmentOf,
 } from './test-environments.ts';
 import { environmentNotReadyEvents, suiteOutcomeEvents, testFailedEvents } from './testing.ts';
-import { deliver } from './workstation-setup.ts';
+import { deliver, emptyRepoNoticeEvents, environmentRequestEvents } from './workstation-setup.ts';
 
 /** The refusal of a regression failure report without a target line on a regression-loop project (P4). */
 export const TARGET_LINE_REQUIRED =
@@ -1522,7 +1522,7 @@ export async function applyShiftRejected(
   }
   let rejection: { reason: string; detail: string; kind?: 'branch'; repoId?: string } | undefined;
   if (msg.reason === 'worktree_failed' && msg.branchProblem && card.repo_id) {
-    const branch = await branchProblemEvents(ctx, tx, card, msg.branchProblem);
+    const branch = await branchProblemEvents(ctx, tx, card, msg.branchProblem, ws.id);
     extra.push(...branch.events);
     rejection = branch.rejection;
   } else if (
@@ -1650,7 +1650,9 @@ async function branchProblemEvents(
     defaultBranch?: string | undefined;
     branches: string[];
     createFailed?: string | undefined;
+    emptyRepository?: boolean | undefined;
   },
+  workstationId: string,
 ): Promise<{
   events: AppendInput[];
   rejection: { reason: string; detail: string; kind: 'branch'; repoId: string };
@@ -1667,6 +1669,21 @@ async function branchProblemEvents(
     repoId: card.repo_id as string,
   };
   const events = rejectionBackoffEvents(ctx, card);
+  if (problem.emptyRepository && repo && project) {
+    // uat-runner-fixes-3 finding 5: no commit at all is not a wrong branch name. The environment is checked again (the
+    // project's cards wait on it there, instead of one worktree_failed shift after another) and the owner is asked once
+    // to create the first commit.
+    rejection.detail = `${where} is empty: it has no commits yet`;
+    events.push(
+      ...(await environmentRequestEvents(ctx, tx, project.id, workstationId, 'manual')),
+      ...(await emptyRepoNoticeEvents(tx, project, workstationId, {
+        repoId: repo.id,
+        name: repo.name,
+        branch: problem.base,
+      })),
+    );
+    return { events, rejection };
+  }
   if (repo && project) {
     events.push(
       ...(await workingBranchQuestionEvents(ctx, tx, project, repo, {

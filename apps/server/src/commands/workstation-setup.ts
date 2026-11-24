@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import {
+  CommitAsSchema,
   DESK_SUBKIND,
   DevOpsAccessSchema,
   EnvironmentReportSchema,
   parseRemote,
   type RepoCloneResult,
   RepoCloneResultSchema,
+  RepoInitialCommitResultSchema,
   RightsReportSchema,
   SEAL_AAD_CAPABILITY,
   streamId,
@@ -247,7 +249,7 @@ export async function environmentRequestEvents(
   if (!project) return [];
   const repos = await rows(
     tx,
-    `SELECT pr.id, pr.name, pr.remote_url_normalized, pr.project_path FROM project_repos pr
+    `SELECT pr.id, pr.name, pr.remote_url_normalized, pr.project_path, pr.working_branch FROM project_repos pr
        JOIN workstation_repos wr ON wr.project_repo_id = pr.id AND wr.workstation_id = $2
       WHERE pr.project_id = $1 AND pr.removed_at IS NULL ORDER BY pr.name`,
     [projectId, workstationId],
@@ -277,6 +279,7 @@ export async function environmentRequestEvents(
       name: r.name,
       remoteUrlNormalized: r.remote_url_normalized,
       ...(r.project_path ? { projectPath: r.project_path } : {}),
+      ...(r.working_branch ? { workingBranch: r.working_branch } : {}),
     })),
     access,
   });
@@ -331,9 +334,175 @@ export async function applyEnvEnsureResult(
       ],
       { tx },
     );
-    await syncEnvironmentNotice(ctx, tx, project, workstationId, report);
+    // An empty repository is ONE plain item with its one click; the general environment notice would say it twice.
+    const empty = report.emptyRepos ?? [];
+    await syncEmptyRepoNotices(ctx, tx, project, workstationId, empty);
+    if (empty.length === 0) await syncEnvironmentNotice(ctx, tx, project, workstationId, report);
   });
   ctx.services.dispatcher.trigger();
+}
+
+/**
+ * uat-runner-fixes-3 finding 5: the desk item for a project repository with no commit (one per repository, while it is
+ * open nothing is added). Its one click is "Create the first commit on <branch>" (`createInitialCommit`).
+ */
+export async function emptyRepoNoticeEvents(
+  tx: Tx,
+  project: Row,
+  workstationId: string,
+  repo: { repoId: string; name: string; branch: string },
+  /** Set after a click that did not work: the new item says why (the old one is resolved by the caller). */
+  lastError?: string,
+): Promise<AppendInput[]> {
+  const open = lastError
+    ? null
+    : await one(
+        tx,
+        `SELECT id FROM desk_items WHERE subkind=$1 AND status='open' AND project_id=$2 AND data->>'repoId' = $3`,
+        [DESK_SUBKIND.repoEmpty, project.id, repo.repoId],
+      );
+  if (open) return [];
+  const deskItemId = randomUUID();
+  return [
+    {
+      streamId: streamId.desk(deskItemId),
+      event: {
+        type: 'DeskItemCreated',
+        payload: {
+          deskItemId,
+          kind: 'alert',
+          subkind: DESK_SUBKIND.repoEmpty,
+          title: `${repo.name} has no commits yet`,
+          body: `${lastError ? `The first commit was not made: ${lastError.slice(0, 1000)}\n\n` : ''}The repository ${repo.name} is empty, so no card of this project can start: there is no branch to work from yet. Create the first commit on ${repo.branch} with the button below (an empty commit, pushed to the repository), or push one yourself. The cards start by themselves afterwards.`,
+          options: [],
+          blocking: false,
+          pinned: true,
+          projectId: project.id,
+          affectedCardIds: [],
+          askedBy: { kind: 'system' },
+          data: { projectId: project.id, repoId: repo.repoId, workstationId, branch: repo.branch },
+        },
+      },
+      actor: SYSTEM_ACTOR,
+      scope: projectScope(project.org_id, project.id),
+    },
+  ];
+}
+
+/** Opens the item of each empty repository, and closes the ones of this workstation whose repository is no longer empty. */
+async function syncEmptyRepoNotices(
+  ctx: Ctx,
+  tx: Tx,
+  project: Row,
+  workstationId: string,
+  empty: ReadonlyArray<{ repoId: string; name: string; branch: string }>,
+): Promise<void> {
+  const events: AppendInput[] = [];
+  for (const e of empty) events.push(...(await emptyRepoNoticeEvents(tx, project, workstationId, e)));
+  const stale = await rows(
+    tx,
+    `SELECT id FROM desk_items WHERE subkind=$1 AND status='open' AND project_id=$2
+        AND data->>'workstationId' = $3 AND NOT (data->>'repoId' = ANY($4::text[]))`,
+    [DESK_SUBKIND.repoEmpty, project.id, workstationId, empty.map((e) => e.repoId)],
+  );
+  for (const s of stale)
+    events.push(resolveDeskItem(project, s.id, 'The repository has its first commit now.'));
+  if (events.length) await ctx.store.append(events, { tx });
+}
+
+const resolveDeskItem = (project: Row, deskItemId: string, note: string): AppendInput => ({
+  streamId: streamId.desk(deskItemId),
+  event: {
+    type: 'DeskItemResolved',
+    payload: { deskItemId, resolution: 'acknowledged', note, by: { kind: 'system' } },
+  },
+  actor: SYSTEM_ACTOR,
+  scope: projectScope(project.org_id, project.id),
+});
+
+/**
+ * The owner's one click: the runner that reported the empty repository makes an empty first commit on the branch and
+ * pushes it (`repo.initial_commit`, never forced; it refuses when the repository has a commit by then). Project owner
+ * only. Returns the workstation to deliver to.
+ */
+export async function queueInitialCommit(
+  tx: Tx,
+  project: Row,
+  repoId: string,
+  workstationId: string,
+): Promise<void> {
+  const repo = await one(
+    tx,
+    'SELECT * FROM project_repos WHERE id=$1 AND project_id=$2 AND removed_at IS NULL',
+    [repoId, project.id],
+  );
+  if (!repo) throw notFound('repository not found');
+  const item = await one(
+    tx,
+    `SELECT data FROM desk_items WHERE subkind=$1 AND status='open' AND project_id=$2 AND data->>'repoId' = $3
+        AND data->>'workstationId' = $4`,
+    [DESK_SUBKIND.repoEmpty, project.id, repoId, workstationId],
+  );
+  if (!item)
+    throw conflict(
+      'not_empty',
+      'this repository is not reported empty on that workstation (check again first)',
+    );
+  const branch = String(repo.working_branch || item.data?.branch || 'main');
+  const commitAs = CommitAsSchema.safeParse(project.commit_as ?? null);
+  await enqueueRunnerCommand(tx, workstationId, 'repo.initial_commit', {
+    requestId: randomUUID(),
+    projectId: project.id,
+    repoId,
+    remoteUrlNormalized: repo.remote_url_normalized,
+    branch,
+    ...(commitAs.success ? { commitAs: commitAs.data } : {}),
+  });
+}
+
+/** `command.result` of `repo.initial_commit`: done -> the item closes and the environment is checked again; else why. */
+export async function applyInitialCommitResult(
+  ctx: Ctx,
+  workstationId: string,
+  payload: Record<string, any>,
+  ok: boolean,
+  result: unknown,
+  error: string | undefined,
+): Promise<void> {
+  const parsed = ok ? RepoInitialCommitResultSchema.safeParse(result) : null;
+  const r = parsed?.success ? parsed.data : { ok: false, error: error ?? 'the runner could not do it' };
+  await withAppendTx(ctx.pool, async (tx) => {
+    const project = await one(tx, 'SELECT * FROM projects WHERE id=$1', [payload.projectId]);
+    if (!project) return;
+    const item = await one(
+      tx,
+      `SELECT id FROM desk_items WHERE subkind=$1 AND status='open' AND project_id=$2 AND data->>'repoId' = $3`,
+      [DESK_SUBKIND.repoEmpty, project.id, payload.repoId],
+    );
+    const events: AppendInput[] = [];
+    if (r.ok) {
+      if (item)
+        events.push(
+          resolveDeskItem(project, item.id, `The first commit is on ${r.branch ?? payload.branch}.`),
+        );
+      events.push(...(await environmentRequestEvents(ctx, tx, project.id, workstationId, 'manual')));
+    } else if (item) {
+      const repo = await one(tx, 'SELECT name FROM project_repos WHERE id=$1', [payload.repoId]);
+      events.push(
+        resolveDeskItem(project, item.id, 'The first commit was not made (see the new item).'),
+        ...(await emptyRepoNoticeEvents(
+          tx,
+          project,
+          workstationId,
+          { repoId: payload.repoId, name: repo?.name ?? 'The repository', branch: String(payload.branch) },
+          String(r.error ?? 'unknown reason'),
+        )),
+      );
+    }
+    if (events.length) await ctx.store.append(events, { tx });
+  });
+  ctx.services.dispatcher.trigger();
+  deliver(ctx, [workstationId]);
 }
 
 /**

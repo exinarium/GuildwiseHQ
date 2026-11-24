@@ -9,6 +9,10 @@ import type {
 export type ScriptResult = {
   finalText?: string;
   exitCode?: number;
+  /** The exit says the runtime's login does not work. */
+  authFailed?: boolean;
+  /** The exit says the usage limit was hit (resets at this ISO time). */
+  usageLimit?: { until: string };
 };
 
 export interface Ctl {
@@ -96,7 +100,12 @@ export class ScriptedAdapter implements RuntimeAdapter {
         if (r === 'aborted') exit = { kind: 'exit', code: null, signal: 'SIGTERM' };
         else {
           if (r?.finalText) push({ kind: 'final', text: r.finalText });
-          exit = { kind: 'exit', code: r?.exitCode ?? 0 };
+          exit = {
+            kind: 'exit',
+            code: r?.exitCode ?? 0,
+            ...(r?.authFailed ? { authFailed: true } : {}),
+            ...(r?.usageLimit ? { usageLimit: r.usageLimit } : {}),
+          };
         }
       } catch (err) {
         exit = { kind: 'exit', code: 1, error: String(err) };

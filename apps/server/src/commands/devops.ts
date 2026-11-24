@@ -3,6 +3,7 @@ import {
   blockedSwitch,
   type CreateDevOpsRequest,
   DEFAULT_AVATAR_STYLE,
+  DESK_SUBKIND,
   DEVOPS_OUTCOME_APPROVAL,
   DEVOPS_OUTCOME_DONE,
   DEVOPS_ROLE_KEY,
@@ -1140,7 +1141,42 @@ export async function endDevopsShift(
   ];
   if (req)
     events.push(...devopsShiftEndEvents(req, outcome, shift.org_id, extra.finalText, extra.refusedLocally));
+  events.push(...cardFenceNotice(shift, extra.guardViolations ?? []));
   return events;
+}
+
+/**
+ * uat-runner-fixes-3 Rework 2 (R2-S1): the runner refused what a DevOps shift changed in a card worktree but could not undo
+ * all of it. The violation alone reached nobody who can act, so the organization's owners get one alert with the runner's
+ * account (worktree, what changed, what was not reverted, where the refused work is kept).
+ */
+export function cardFenceNotice(shift: Row, violations: { rule: string; detail: string }[]): AppendInput[] {
+  const v = violations.find((x) => x.rule === 'devops_card_worktree' && /NOT fully reverted/.test(x.detail));
+  if (!v) return [];
+  const deskItemId = randomUUID();
+  return [
+    {
+      streamId: streamId.desk(deskItemId),
+      event: {
+        type: 'DeskItemCreated',
+        payload: {
+          deskItemId,
+          kind: 'alert',
+          subkind: DESK_SUBKIND.devopsCardWorktree,
+          title: 'DevOps changed a card worktree: check it by hand',
+          body: `The DevOps engineer changed a card's working folder, which it never may. The workstation undid what it could, but not everything: please look at the folder named below before the card goes on.\n\n${v.detail.slice(0, 3000)}`,
+          options: [],
+          blocking: false,
+          pinned: true,
+          affectedCardIds: [],
+          askedBy: { kind: 'system' },
+          data: { shiftId: shift.id, workstationId: shift.workstation_id },
+        },
+      },
+      actor: { kind: 'runner', id: shift.workstation_id },
+      scope: orgScope(shift.org_id),
+    },
+  ];
 }
 
 /** The DevOps request a shift is working (if it still is). */

@@ -13,6 +13,7 @@ import {
 import { forgeForUrl } from '../forge/index.ts';
 import { defaultMethodFor, sshGitAuth } from '../forge/ssh.ts';
 import type { ForgeEnv, GitAuth } from '../forge/types.ts';
+import { emptyRepoDetail, repoStartState } from '../git/empty-repo.ts';
 import { GIT_HARDEN_ENV, hardenedGitArgs } from '../git/harden.ts';
 import type { Executor } from '../toolchain/exec.ts';
 
@@ -140,14 +141,21 @@ export class RepoCloner {
   private async clone(p: RepoClonePayload): Promise<RepoCloneResult> {
     const normalized = normalizeRemoteUrl(p.remoteUrl);
     const known = await this.deps.findExisting(normalized);
-    if (known)
+    if (known) {
+      const start = await repoStartState(
+        known.localPath,
+        p.workingBranch,
+        async (url) => (await this.authFor(url, p.forge)) ?? { args: [], env: {} },
+      ).catch(() => null);
       return {
         ok: true,
         state: 'cloned',
         existing: true,
         localPath: known.localPath,
-        detail: `Already cloned at ${known.localPath}`,
+        detail: `Already cloned at ${known.localPath}${start?.empty ? `. ${emptyRepoDetail(dirNameFromUrl(p.remoteUrl) ?? 'The repository', start.branch)}` : ''}`,
+        ...(start?.empty ? { empty: { branch: start.branch } } : {}),
       };
+    }
 
     const rootDir = this.deps.repoRoots()[0];
     if (!rootDir)
@@ -218,6 +226,20 @@ export class RepoCloner {
         }
       }
       await this.deps.afterClone?.();
+      // uat-runner-fixes-3 finding 5: an empty repository clones fine but cannot hold a card: say so now
+      const start = await repoStartState(
+        target,
+        p.workingBranch,
+        async () => probe.auth ?? { args: [], env: {} },
+      ).catch(() => null);
+      if (start?.empty)
+        return {
+          ok: true,
+          state: 'cloned',
+          localPath: realpathSync(target),
+          detail: `Cloned to ${target}. ${emptyRepoDetail(dir, start.branch)}`,
+          empty: { branch: start.branch },
+        };
       return { ok: true, state: 'cloned', localPath: realpathSync(target), detail: `Cloned to ${target}` };
     }
 

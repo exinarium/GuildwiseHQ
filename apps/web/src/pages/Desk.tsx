@@ -36,6 +36,7 @@ import {
   RememberCheckbox,
 } from '../components/ceo/DeskCeo.tsx';
 import { DigestRating } from '../components/DigestRating.tsx';
+import { EmptyRepoBlock } from '../components/desk/EmptyRepoBlock.tsx';
 import { FormOfflineLinkBlock } from '../components/desk/FormOfflineLinkBlock.tsx';
 import { SizeExceptionDeskItem } from '../components/desk/SizeExceptionDeskItem.tsx';
 import { AskDevOpsButton } from '../components/devops/AskDevOps.tsx';
@@ -570,6 +571,9 @@ export function DeskItem({ item, now, bare = false }: { item: DeskItemDto; now?:
         typeof item.data?.devopsSwitch === 'string' && (
           <DevopsSwitchBlock data={item.data as Record<string, unknown>} />
         )}
+      {item.subkind === DESK_SUBKIND.repoEmpty && item.data && (
+        <EmptyRepoBlock data={item.data as Record<string, unknown>} />
+      )}
       {item.subkind === DESK_SUBKIND.workstationLocalStep && typeof item.data?.command === 'string' && (
         <div className="mt-3" data-testid="desk-local-step">
           <LocalCommand

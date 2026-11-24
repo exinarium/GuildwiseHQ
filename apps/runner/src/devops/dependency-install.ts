@@ -506,6 +506,28 @@ export function exactReopens(o: {
   return out;
 }
 
+/**
+ * Where the package manager is, and which Node runs it: the registered agent toolchains first (a tool DevOps installed
+ * at user level and registered with `aom toolchain add`; its own Node, from the same bin folder or another toolchain bin
+ * folder, then runs it), else the user bin folders, the runner's PATH and Homebrew with the runner's own Node.
+ */
+export function findPackageManager(
+  cmd: string,
+  o: { toolchainDirs: readonly string[]; realHome: string; path: string },
+): { toolPath: string; nodeExec?: string } | null {
+  const toolchains = o.toolchainDirs.filter((x, i, a) => x && a.indexOf(x) === i).join(delimiter);
+  const fromToolchain = toolchains ? whichOn(cmd, toolchains) : null;
+  if (fromToolchain) {
+    const node = whichOn('node', [dirname(fromToolchain), toolchains].join(delimiter));
+    return { toolPath: fromToolchain, ...(node ? { nodeExec: node } : {}) };
+  }
+  const searchPath = [...userBinDirs(o.realHome), ...o.path.split(delimiter), ...BREW_BIN_DIRS]
+    .filter((x, i, a) => x && a.indexOf(x) === i)
+    .join(delimiter);
+  const toolPath = whichOn(cmd, searchPath);
+  return toolPath ? { toolPath } : null;
+}
+
 /** Finds `cmd` on `path` (no shell): the first executable file. */
 function whichOn(cmd: string, path: string): string | null {
   for (const d of path.split(delimiter)) {
@@ -653,6 +675,11 @@ export async function runDependencyChange(o: {
   log?: (line: string) => void;
   /** Test hook: start the egress proxy (default `startEgressProxy`). */
   startProxy?: typeof startEgressProxy;
+  /**
+   * The bin folders of the agent toolchains (`ToolchainRegistry.resolve().pathDirs`): a package manager that DevOps
+   * installed and registered (`aom toolchain add`) is looked for there first, and then runs with that toolchain's Node.
+   */
+  toolchainDirs?: readonly string[];
 }): Promise<IpcRpcResponse> {
   const plan = planDependencyChange(o.change, o.dir, o.repo, o.scriptsAllowed);
   if (!plan.ok) return { ok: false, error: `DevOps did not run it: ${plan.reason}` };
@@ -720,11 +747,14 @@ export async function runDependencyChange(o: {
     await mkdir(join(cacheDir, 'bun'), { recursive: true });
     await mkdir(join(cacheDir, 'corepack'), { recursive: true });
     const parent = o.parentEnv ?? process.env;
-    const searchPath = [...userBinDirs(o.realHome), ...(parent.PATH ?? '').split(delimiter), ...BREW_BIN_DIRS]
-      .filter((x, i, a) => x && a.indexOf(x) === i)
-      .join(delimiter);
-    const toolPath = whichOn(plan.cmd, searchPath);
-    if (!toolPath) return refuse(`${plan.cmd} is not installed on this workstation`);
+    const found = findPackageManager(plan.cmd, {
+      toolchainDirs: o.toolchainDirs ?? [],
+      realHome: o.realHome,
+      path: parent.PATH ?? '',
+    });
+    if (!found) return refuse(`${plan.cmd} is not installed on this workstation`);
+    const toolPath = found.toolPath;
+    const nodeExec = found.nodeExec ?? process.execPath;
     const spec = {
       runnerRoot: o.runnerRoot,
       realHome: o.realHome,
@@ -737,8 +767,8 @@ export async function runDependencyChange(o: {
       extraMasked: [o.realHome],
     };
     const masked = maskedPaths(spec);
-    const readOnly = exactReopens({ toolPath, nodeExec: process.execPath, realHome: o.realHome, masked });
-    const nodeBin = join(dirname(dirname(realpathSync(process.execPath))), 'bin');
+    const readOnly = exactReopens({ toolPath, nodeExec, realHome: o.realHome, masked });
+    const nodeBin = join(dirname(dirname(realpathSync(nodeExec))), 'bin');
     const boxPath = [nodeBin, '/usr/local/bin', '/usr/bin', '/bin'].join(delimiter);
     const socketPath = join(runTmp, 'egress.sock');
     proxy = await (o.startProxy ?? startEgressProxy)({

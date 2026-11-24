@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { CommitAs, RebaseErrorInfo } from '@aom/shared';
 import { isSafeGitRef, REBASE_ERROR_STDERR_MAX } from '@aom/shared';
+import { restoreTrackedSandboxStubs, withWorktreeHeld } from '../adapters/sandbox-placeholders.ts';
 import { redactSecrets } from '../secrets/redact.ts';
 import { type GitResult, git, hasRemote, originAuth, type RemoteAuth, revParse } from './git.ts';
 import { type BoundPostAs, committerEnv, requireCommitIdentity } from './identity.ts';
@@ -131,7 +132,15 @@ export async function baseTarget(worktree: string, baseBranch: string): Promise<
  * command, exit code, git's message), also after aborting what was in progress: that is a workstation problem, not a
  * conflict. Untracked files in the worktree are never touched.
  */
-export async function rebaseOntoBase(
+/** {@link rebaseOntoBaseUnheld}, with the worktree registered as the runner's own work (REVIEW B1). */
+export function rebaseOntoBase(
+  worktree: string,
+  ...rest: Parameters<typeof rebaseOntoBaseUnheld> extends [string, ...infer R] ? R : never
+): Promise<'up_to_date' | 'rebased' | 'merged'> {
+  return withWorktreeHeld(worktree, 'rebase', () => rebaseOntoBaseUnheld(worktree, ...rest));
+}
+
+async function rebaseOntoBaseUnheld(
   worktree: string,
   baseBranch: string,
   commitAs?: CommitAs | null,
@@ -140,6 +149,8 @@ export async function rebaseOntoBase(
   auth?: RemoteAuth,
 ): Promise<'up_to_date' | 'rebased' | 'merged'> {
   if (!isSafeGitRef(baseBranch)) throw new Error(`refusing unsafe base branch ${JSON.stringify(baseBranch)}`);
+  // a committed placeholder the sandbox took away is an unstaged deletion git rebase refuses on (REVIEW S2)
+  await restoreTrackedSandboxStubs(worktree).catch(() => []);
   // Best effort: a failed fetch leaves the last fetched origin/<base>, which is still a valid base.
   if (await hasRemote(worktree)) {
     const a = await originAuth(worktree, auth);

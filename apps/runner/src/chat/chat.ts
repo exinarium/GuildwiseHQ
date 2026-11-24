@@ -30,6 +30,7 @@ import {
   type Usage,
 } from '@aom/shared';
 import { formatLimitTime } from '../adapters/claude-usage-limit.ts';
+import { holdWorktree } from '../adapters/sandbox-placeholders.ts';
 import type { RuntimeAdapter, RuntimeSession } from '../adapters/types.ts';
 import {
   allowedJiraKeys,
@@ -129,6 +130,8 @@ export interface ChatDeps {
 
 interface ActiveChat {
   msg: ChatStartMsg;
+  /** An @mention that works in a card worktree holds it for the turn (the DevOps fence never judges it, REVIEW B1). */
+  releaseWorktree?: () => void;
   session?: RuntimeSession;
   token?: string;
   /** The token's env file; `revoke()` ends both (see session/shift-credential.ts). */
@@ -349,6 +352,7 @@ export class ChatManager {
       this.remember(msg.chatId);
       if (chat.turnDir) removeTurnDir(chat.turnDir);
       this.deps.restart?.turnFinished(msg.chatId, this.terminalFrames.get(msg.chatId));
+      chat.releaseWorktree?.();
       chat.releaseTmp?.();
       if (chat.sandbox) await cleanAgentTmp(chat.sandbox.tmp);
     }
@@ -1156,6 +1160,7 @@ export class ChatManager {
     }
     const work = asksWork && workTools && hasWt;
     const readOnly = hasWt && !work;
+    if (work && wt) chat.releaseWorktree = holdWorktree(wt, `chat:${msg.chatId}`);
     const cwd = hasWt && wt ? wt : sandbox.scratch;
     // Repositories this chat may read (read-only): the project's reference repositories, and when there is no card
     // worktree here also the project's own clones (a chat about the project, or about a card not started here). The

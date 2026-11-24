@@ -214,6 +214,12 @@ export const DevopsShiftSchema = z.object({
     .optional(),
   /** The card's project does not require the owner's approval for merges: merge conflicts in the card worktree are yours. */
   mergeApprovalWaived: z.boolean().optional(),
+  /**
+   * uat-runner-fixes-3: set by the server only for a conflict request it filed itself (G-Q2, `origin = 'conflict'`), never
+   * from request text. The runner lets this one card branch move forward (a fast-forward to the resolution) in this one
+   * card's worktree; every other card worktree and card branch stays untouched by DevOps whatever the request says.
+   */
+  conflictCard: z.object({ ref: z.string().max(100), branch: z.string().max(300) }).optional(),
   /** Repository hygiene: the repositories of this workstation to tidy (see `aom hygiene run`). */
   hygiene: HygieneSpecSchema.optional(),
   /** A `run` request: the environment to bring up (see `aom run`). */

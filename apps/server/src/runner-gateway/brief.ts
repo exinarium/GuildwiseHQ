@@ -1130,6 +1130,21 @@ async function mergeWaiver(ctx: Ctx, cardId: string | null): Promise<{ mergeAppr
   return projectWaivesMergeApproval(p) ? { mergeApprovalWaived: true } : {};
 }
 
+/**
+ * The card a conflict request (G-Q2) was filed for, with its branch: the only card branch the runner lets a DevOps shift
+ * move (uat-runner-fixes-3 finding 2). Only for `origin = 'conflict'`, which only the server sets.
+ */
+async function conflictCardOf(
+  ctx: Ctx,
+  req: Row,
+): Promise<{ conflictCard?: { ref: string; branch: string } }> {
+  if (req.origin !== 'conflict' || !req.card_id) return {};
+  const c = await one(ctx.pool, 'SELECT ref, branch_name FROM cards WHERE id = $1', [req.card_id]);
+  return c?.ref && c.branch_name
+    ? { conflictCard: { ref: String(c.ref), branch: String(c.branch_name) } }
+    : {};
+}
+
 export async function buildDevopsShiftStart(
   ctx: Ctx,
   requestId: string,
@@ -1256,6 +1271,7 @@ export async function buildDevopsShiftStart(
       ...(orders.context.length ? { contextOrders: orders.context } : {}),
       access: DevOpsAccessSchema.parse(ws.devops_access ?? {}),
       ...(await mergeWaiver(ctx, req.card_id)),
+      ...(await conflictCardOf(ctx, req)),
       hygiene: req.hygiene ?? undefined,
       run: (await runBriefFor(ctx, req)) ?? undefined,
       ...(scan ? { scan } : {}),

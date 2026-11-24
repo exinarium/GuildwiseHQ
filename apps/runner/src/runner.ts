@@ -75,6 +75,8 @@ import {
   REPLAY_CAPABILITY,
   type ReleasePreparePayload,
   ReleaseSignPayloadSchema,
+  type RepoInitialCommitPayload,
+  type RepoInitialCommitResult,
   type RepoOpenPrPayload,
   type RepoOpenPrResult,
   type RepoReport,
@@ -120,6 +122,7 @@ import {
   swapMainLoginAccount,
 } from './adapters/login-accounts.ts';
 import { buildAdapters } from './adapters/registry.ts';
+import { withWorktreeHeld } from './adapters/sandbox-placeholders.ts';
 import type { RuntimeAdapter } from './adapters/types.ts';
 import { appTokenProbe, checkAppAccess } from './apps/access-check.ts';
 import { AppTokenBroker } from './apps/broker.ts';
@@ -175,9 +178,16 @@ import { listMergedPrs, listOpenPrs } from './forge/list-prs.ts';
 import { runSshAction, SshSettingsStore } from './forge/ssh.ts';
 import type { ForgeEnv } from './forge/types.ts';
 import { type CompletionInput, executeCompletion } from './git/completion.ts';
+import { makeInitialCommit, repoStartState } from './git/empty-repo.ts';
 import type { PrCreator } from './git/gh.ts';
 import { git } from './git/git.ts';
-import { AppIdentityError, type AppTokenProbe, appIdentityWire } from './git/identity.ts';
+import {
+  AppIdentityError,
+  type AppTokenProbe,
+  appIdentityWire,
+  NO_IDENTITY_WIRE,
+  resolveCommitIdentity,
+} from './git/identity.ts';
 import { checkBranchMerged } from './git/merged.ts';
 import { runReleaseDocsPrep } from './git/release-docs-prep.ts';
 import { sandboxedDocsPrepExec } from './git/release-docs-prep-exec.ts';
@@ -981,6 +991,8 @@ export class Runner {
           // outside every agent sandbox (the data dir is denied to agents): never the shared agent cache
           cacheRoot: installCacheRoot(this.paths),
           tmpRoot: join(this.paths.root, 'install-stage'),
+          // a package manager DevOps installed and registered as an agent toolchain (uat-runner-fixes-3 finding 1)
+          toolchainDirs: this.toolchains.resolve().pathDirs,
           log: (l) => process.stderr.write(`[devops] ${r.shiftId.slice(0, 8)} ${l}\n`),
         }),
       git: this.agentGit,
@@ -2293,7 +2305,29 @@ export class Runner {
         }),
       // R18-S: installs run their scripts only for repositories allowed on this workstation
       installScriptsAllowed: (remote) => this.authority.policy().installScripts[remote] === true,
+      // uat-runner-fixes-3: an empty repository (or a missing working branch) is told before any card is turned away
+      repoState: (localPath, workingBranch) =>
+        repoStartState(localPath, workingBranch, (url) => gitAuthFor(this.forgeEnv, url)),
     });
+  }
+
+  /** `repo.initial_commit`: the owner's one click for an empty repository (an empty first commit, pushed, never forced). */
+  private async initialCommit(p: RepoInitialCommitPayload): Promise<RepoInitialCommitResult> {
+    const repo = await this.findRepo(p.remoteUrlNormalized);
+    if (!repo) return { ok: false, error: 'this workstation has no clone of the repository' };
+    const identity = await resolveCommitIdentity(repo.localPath, p.commitAs ?? null);
+    if (!identity) return { ok: false, error: NO_IDENTITY_WIRE };
+    const r = await makeInitialCommit({
+      repo: repo.localPath,
+      branch: p.branch,
+      identity,
+      auth: (url) => gitAuthFor(this.forgeEnv, url),
+    });
+    if (r.ok) {
+      this.log.info(`first commit ${r.sha.slice(0, 8)} on ${r.branch} of ${repo.localPath}`);
+      await this.scan().catch(() => undefined);
+    }
+    return r.ok ? { ok: true, sha: r.sha, branch: r.branch } : { ok: false, error: r.error };
   }
 
   /** The repositories as reported to the server, each with whether a reviewer token is held (never the token). */
@@ -3224,19 +3258,25 @@ export class Runner {
           const sshRefusal = appOriginRefusal(scope, repo.remoteUrl);
           const completion = sshRefusal
             ? { ok: false, action: p.action, error: sshRefusal }
-            : await executeCompletion({
-                payload: p,
-                repoPath: repo.localPath,
-                appProbe: this.appProbe,
-                worktreePath: this.paths.worktreePath(p.projectKey, p.ref, p.projectId),
-                worktreesDir: this.paths.worktrees,
-                integrationDir: this.paths.integration,
-                pr: this.opts.prCreator ?? forgePrCreator(scope.forgeEnv),
-                auth: scope.auth,
-                rules:
-                  this.opts.branchRules ??
-                  ((cwd, branch, forge) => branchRulesFor(scope.forgeEnv, cwd, branch, forge)),
-              });
+            : // the runner's own work on the card worktree, never the DevOps engineer's (REVIEW B1)
+              await withWorktreeHeld(
+                this.paths.worktreePath(p.projectKey, p.ref, p.projectId),
+                'finalize',
+                () =>
+                  executeCompletion({
+                    payload: p,
+                    repoPath: repo.localPath,
+                    appProbe: this.appProbe,
+                    worktreePath: this.paths.worktreePath(p.projectKey, p.ref, p.projectId),
+                    worktreesDir: this.paths.worktrees,
+                    integrationDir: this.paths.integration,
+                    pr: this.opts.prCreator ?? forgePrCreator(scope.forgeEnv),
+                    auth: scope.auth,
+                    rules:
+                      this.opts.branchRules ??
+                      ((cwd, branch, forge) => branchRulesFor(scope.forgeEnv, cwd, branch, forge)),
+                  }),
+              );
           done(true, completion);
           // The working branch on origin may have moved (a merge, or a pull request merged since): bring the local one along.
           if (completion.ok && (p.action === 'pr' || p.action === 'merge'))
@@ -3497,6 +3537,9 @@ export class Runner {
         done(true, await this.repoCloner.run(CommandPayloadSchemas['repo.clone'].parse(payload)));
       } else if (command === 'env.ensure') {
         done(true, await this.ensureEnv(CommandPayloadSchemas['env.ensure'].parse(payload)));
+      } else if (command === 'repo.initial_commit') {
+        // A refusal is an answer (ok:true, result.ok:false): the desk item says why.
+        done(true, await this.initialCommit(CommandPayloadSchemas['repo.initial_commit'].parse(payload)));
       } else if (command === 'rights.verify') {
         const p = CommandPayloadSchemas['rights.verify'].parse(payload);
         done(true, await verifyRights(p.access, { exec: this.exec, platform: this.platform() }));

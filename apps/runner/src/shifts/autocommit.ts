@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { copyFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { statusLinesWithoutStubs, untrackedSandboxStubs } from '../adapters/sandbox-placeholders.ts';
+import { excludeStubs, sandboxStubNoise, statusLinesWithoutStubs } from '../adapters/sandbox-placeholders.ts';
 import { git } from '../git/git.ts';
 
 export interface AutoCommitInput {
@@ -151,8 +151,10 @@ export async function autoCommit(input: AutoCommitInput): Promise<AutoCommitResu
   // The sandbox's empty mount stubs (.gitmodules, .bashrc, ...) are never work: not committed, not a reason to commit.
   const status = await statusLinesWithoutStubs(input.worktree);
   if (!status.ok || status.lines.length === 0) return { committed: false, skipped: 'clean' };
-  const stubs = await untrackedSandboxStubs(input.worktree);
-  const pathspec = ['--', '.', ...stubs.map((n) => `:(exclude,top)${n}`)];
+  // Untracked stubs are not added, and a placeholder an earlier commit put on the branch is not deleted by this one:
+  // its disappearance is the sandbox's doing, never a revert of the earlier commit (uat-runner-fixes-3 finding 4).
+  const stubs = await sandboxStubNoise(input.worktree);
+  const pathspec = ['--', '.', ...excludeStubs(stubs)];
   const hasHead =
     (await git(input.worktree, ['rev-parse', '-q', '--verify', 'HEAD^{commit}'])).exitCode === 0;
   if (hasHead) {

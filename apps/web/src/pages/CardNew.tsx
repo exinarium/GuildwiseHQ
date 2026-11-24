@@ -16,6 +16,7 @@ import { missingFromError, useCreateCard } from '../api/queries/cards.ts';
 import { useProjectWorkflows } from '../api/queries/project-workflows.ts';
 import { useProject, useProjects } from '../api/queries/projects.ts';
 import { CardFormFields } from '../components/CardFormFields.tsx';
+import { CommitAsPrompt } from '../components/CommitAsPrompt.tsx';
 import { NewCardFiles } from '../components/NewCardFiles.tsx';
 import {
   Button,
@@ -44,7 +45,10 @@ export function CardNew() {
   const workflows = useWorkflows(project?.id);
   const detail = useProject(project?.id);
   const enabledWorkflows = useProjectWorkflows(project?.id);
-  const mockUi = useMe().data?.features?.mockUi ?? false;
+  const me = useMe().data;
+  const mockUi = me?.features?.mockUi ?? false;
+  // who may set Commit as: the project owner, and the organization's Owners and Admins (as the server allows; REVIEW N3)
+  const orgAdmin = me?.activeOrg?.role === 'owner' || me?.activeOrg?.role === 'admin';
   const business = useBusinessView();
   const workflow = useMemo(
     () =>
@@ -108,23 +112,34 @@ export function CardNew() {
       ? typeParam
       : undefined;
 
+  const liveRepos = (detail.data?.repos ?? []).filter((r) => !r.removedAt);
   return (
-    <CardNewForm
-      key={project.id}
-      initialType={initialType}
-      projectId={project.id}
-      projectKey={project.key}
-      projectKeys={projects.data.map((p) => p.key)}
-      onProject={setChosen}
-      workflow={workflow}
-      extraWorkflows={extras}
-      defaultWorkflowFor={defaults}
-      repos={(detail.data?.repos ?? []).filter((r) => !r.removedAt)}
-      mockUi={mockUi}
-      business={business}
-      designDefault={detail.data?.project.designStep ?? false}
-      projectDefault={detail.data?.project.defaultCompletion}
-    />
+    <>
+      {liveRepos.length > 0 && (
+        <div className="mx-auto mb-4 max-w-2xl">
+          <CommitAsPrompt
+            projectId={project.id}
+            canEdit={detail.data?.project.myRole === 'owner' || orgAdmin}
+          />
+        </div>
+      )}
+      <CardNewForm
+        key={project.id}
+        initialType={initialType}
+        projectId={project.id}
+        projectKey={project.key}
+        projectKeys={projects.data.map((p) => p.key)}
+        onProject={setChosen}
+        workflow={workflow}
+        extraWorkflows={extras}
+        defaultWorkflowFor={defaults}
+        repos={(detail.data?.repos ?? []).filter((r) => !r.removedAt)}
+        mockUi={mockUi}
+        business={business}
+        designDefault={detail.data?.project.designStep ?? false}
+        projectDefault={detail.data?.project.defaultCompletion}
+      />
+    </>
   );
 }
 

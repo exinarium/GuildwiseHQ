@@ -74,6 +74,14 @@ export interface EnsureDeps {
    * false: only the script-free install modes run (`policy/installs.ts`); every other install is refused.
    */
   installScriptsAllowed?: (remoteUrlNormalized: string) => boolean;
+  /**
+   * uat-runner-fixes-3 finding 5: whether the clone can hold card work (`repoStartState`): empty (no commit anywhere) or
+   * its working branch missing. Absent: not checked (tests of the toolchain alone).
+   */
+  repoState?: (
+    localPath: string,
+    workingBranch: string | undefined,
+  ) => Promise<{ empty: boolean; branch: string; branchMissing: boolean }>;
 }
 
 /**
@@ -146,6 +154,7 @@ export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): 
   const stackList: EnvironmentReport['stacks'] = [];
   const need = new Map<string, { spec: ToolSpec; params: Params; stack: string }>();
   const runs: Array<{ name: string; localPath: string; detections: Detection[]; remote: string }> = [];
+  const emptyRepos: NonNullable<EnvironmentReport['emptyRepos']> = [];
 
   // 1. What the repositories use.
   for (const r of p.repos) {
@@ -160,6 +169,26 @@ export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): 
       });
       continue;
     }
+    // An empty repository (no commit in the clone or on origin) has no branch to start a card from: say so plainly, once.
+    const start = deps.repoState
+      ? await deps.repoState(repo.localPath, r.workingBranch).catch(() => null)
+      : null;
+    if (start?.empty) {
+      emptyRepos.push({ repoId: r.repoId, name: r.name, branch: start.branch });
+      reports.push({
+        stack: 'repository',
+        tool: r.name,
+        status: 'failed',
+        detail: 'the repository is empty: it has no commits yet',
+        fix: `Create the first commit on ${start.branch} (one click on the desk), or push one yourself, then check again.`,
+      });
+      log(`${r.name}: empty repository (no commits); the first commit would go on ${start.branch}`);
+      continue;
+    }
+    if (start?.branchMissing)
+      log(
+        `${r.name}: working branch ${start.branch} does not exist yet; the first card creates it from the default branch`,
+      );
     // The project may live in a sub directory of the repository: detect and install from there.
     let projectDir = repo.localPath;
     try {
@@ -249,7 +278,14 @@ export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): 
       : `${state === 'needs_access' ? 'Needs access' : 'Not ready'}: ${problems
           .map((r) => `${r.tool}${r.detail ? ` (${r.detail})` : ''}`)
           .join('; ')}`.slice(0, 1900);
-  return { state, stacks: stackList, tools: reports, summary, logTail };
+  return {
+    state,
+    stacks: stackList,
+    tools: reports,
+    summary,
+    logTail,
+    ...(emptyRepos.length ? { emptyRepos } : {}),
+  };
 }
 
 /** The program a dependency step runs: a repository script (`./mvnw`, a Windows `.cmd` path) resolved in `dir`, else the command. */

@@ -866,6 +866,8 @@ function buildDevopsSettings(
     ...claudeLogin.flatMap((a) => [`Read(${a}/**)`, `Read(${a})`]),
     `Edit(${ruleAbs(paths.configDir)}/**)`,
     ...ctx.addDirs.map((d) => `Edit(${ruleAbs(d)}/**)`),
+    // uat-runner-fixes-3 finding 2: the card worktrees are never the DevOps engineer's to edit, whatever it is asked
+    `Edit(${ruleAbs(join(ctx.runnerRoot, 'worktrees'))}/**)`,
   ];
   return {
     permissions: {

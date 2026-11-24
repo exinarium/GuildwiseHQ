@@ -71,7 +71,12 @@ import {
 } from '@aom/shared';
 import { isReadOnlyWorktreeRole, type ScopedVault } from '../adapters/claude-policy.ts';
 import { formatLimitTime } from '../adapters/claude-usage-limit.ts';
-import { holdWorktree, otherShiftsUse, removeSandboxStubs } from '../adapters/sandbox-placeholders.ts';
+import {
+  holdWorktree,
+  otherShiftsUse,
+  removeSandboxStubs,
+  usedSince,
+} from '../adapters/sandbox-placeholders.ts';
 import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../adapters/types.ts';
 import {
   attachFileFromAgent,
@@ -102,6 +107,12 @@ import {
   delegateUsageReporter,
 } from '../delegate/delegate.ts';
 import { recordDevopsAudit } from '../devops/audit.ts';
+import {
+  type CardWorktreeSnapshot,
+  enforceCardFence,
+  fenceViolation,
+  snapshotCardWorktrees,
+} from '../devops/card-fence.ts';
 import {
   DEVOPS_INSTALL_RPC,
   type DependencyChange,
@@ -492,6 +503,8 @@ interface ActiveShift {
   reportState: 'none' | 'pending' | 'accepted';
   pendingReports: Map<string, (r: ReportVerdict) => void>;
   guardViolations: GuardViolation[];
+  /** A DevOps shift: the card worktrees when it started (devops/card-fence.ts, uat-runner-fixes-3 finding 2). */
+  cardFence?: { before: CardWorktreeSnapshot; startedAtMs: number; ended?: boolean };
   finalText?: string;
   progress: Array<{ at: string; kind: 'text' | 'tool' | 'status'; text: string }>;
   env: Record<string, string>;
@@ -785,6 +798,11 @@ export class ShiftSupervisor {
       if (!shift.session)
         this.reject(msg.shiftId, 'internal', err instanceof Error ? err.message : String(err));
     } finally {
+      // an unexpected error skipped the shift end: the card worktrees are still checked (REVIEW B2)
+      if (shift.cardFence && !shift.cardFence.ended)
+        await this.endCardFence(shift).catch((err) =>
+          this.log.error(`shift ${msg.shiftId}: the card worktree check failed`, err),
+        );
       if (shift.readOnlyCheckout)
         await removeReadOnlyCheckout(shift.readOnlyCheckout.repoPath, shift.readOnlyCheckout.path);
       if (shift.prepTask) await removePrepTaskWorktree(shift.prepTask);
@@ -1258,6 +1276,8 @@ export class ShiftSupervisor {
     // A DevOps request about a card whose repository posts as an app (a conflict resolution): every commit of the
     // engineer is the app's, or the request does not run. Other DevOps requests keep today's identity.
     if (msg.kind === 'devops' && msg.agent.isDevops) {
+      // the card worktrees as they are now: what this shift changes there is refused and reverted (finding 2)
+      s.cardFence = { before: await snapshotCardWorktrees(paths.worktrees), startedAtMs: Date.now() };
       const appIdentity = await devopsRequestIdentity(
         msg.postAs,
         msg.devops?.card?.remoteUrlNormalized,
@@ -1430,7 +1450,14 @@ export class ShiftSupervisor {
             err.info,
           );
         } else if (err instanceof BaseBranchMissingError) {
+          // uat-runner-fixes-3 finding 5: no commit anywhere is not a wrong branch name: the server asks for a first commit
+          const empty =
+            err.branches.length === 0 &&
+            !(
+              await git(repo.localPath, ['for-each-ref', '--count=1', 'refs/heads', 'refs/remotes'])
+            ).stdout.trim();
           this.reject(msg.shiftId, 'worktree_failed', err.message, undefined, undefined, {
+            ...(empty ? { emptyRepository: true } : {}),
             base: err.base,
             ...(err.defaultBranch ? { defaultBranch: err.defaultBranch } : {}),
             branches: err.branches.slice(0, 200),
@@ -1986,7 +2013,7 @@ export class ShiftSupervisor {
     // The sandbox's empty mount stubs (.gitmodules, .bashrc, ...) go before anything looks at the worktree, whoever made
     // them (the runner's placeholders or Claude Code itself): never tracked files, never non-empty ones.
     // Not while another shift still works in this worktree (it may be using them as mount points); the last one out
-    // clears them. They are empty files, which `untrackedSandboxStubs` keeps out of every status and commit.
+    // clears them. They are empty files, which `sandboxStubNoise` keeps out of every status, guard and commit.
     if (msg.worktree && s.worktree && !otherShiftsUse(s.worktree.path, msg.shiftId))
       await removeSandboxStubs(s.worktree.path).catch(() => []);
 
@@ -2066,6 +2093,10 @@ export class ShiftSupervisor {
       if (undone)
         this.log.warn(`rolled back changes a read-only role made in the worktree of shift ${msg.shiftId}`);
     }
+
+    // a DevOps shift that changed a card worktree after its report (or without one): reverted all the same (finding 2),
+    // before any early return below (usage limit, expired login: REVIEW B2)
+    if (s.cardFence) await this.endCardFence(s);
 
     // The Claude login does not work: not an agent crash. Whatever the agent left is committed above; the card goes back
     // to the queue without penalty and waits (the runtime is reported expired) until the login works again.
@@ -3542,6 +3573,38 @@ export class ShiftSupervisor {
     if (s.worktreePrep?.ok) s.depsRefreshed = true;
   }
 
+  /**
+   * uat-runner-fixes-3 finding 2: compares the card worktrees with the DevOps shift's start, reverts what it changed and
+   * records the violation (sent with `shift.ended`). Returns the refusal for the agent, or null when nothing changed.
+   */
+  private async checkCardFence(s: ActiveShift): Promise<string | null> {
+    const fence = s.cardFence;
+    if (!fence) return null;
+    const findings = await enforceCardFence({
+      root: this.deps.paths.worktrees,
+      before: fence.before,
+      shiftId: s.msg.shiftId,
+      ...(s.msg.kind === 'devops' && s.msg.devops?.conflictCard
+        ? { conflictBranch: s.msg.devops.conflictCard.branch }
+        : {}),
+      usedByOthers: (p) => usedSince(p, fence.startedAtMs),
+    });
+    if (findings.length === 0) return null;
+    const v = fenceViolation(findings);
+    if (!s.guardViolations.some((x) => x.rule === v.rule && x.detail === v.detail)) s.guardViolations.push(v);
+    this.log.warn(`shift ${s.msg.shiftId.slice(0, 8)}: ${v.detail}`);
+    // the next comparison starts from the reverted state
+    fence.before = await snapshotCardWorktrees(this.deps.paths.worktrees);
+    return `${v.detail}. Report again with what you did NOT do and why: the card's builder asks for a package with \`aom devops install\` from its own shift.`;
+  }
+
+  /** The last card worktree check of a DevOps shift (its end, whichever way it ends). */
+  private async endCardFence(s: ActiveShift): Promise<void> {
+    if (!s.cardFence || s.cardFence.ended) return;
+    s.cardFence.ended = true;
+    await this.checkCardFence(s);
+  }
+
   /** Validates, guards, attaches runner data, sends `shift.report` and waits for the server's verdict. */
   private async submit(
     s: ActiveShift,
@@ -3555,6 +3618,12 @@ export class ShiftSupervisor {
         message: 'A terminal report was already recorded for this shift.',
         error: 'already reported',
       };
+    }
+
+    // The DevOps engineer never changes a card worktree: refused and reverted before the report goes anywhere (finding 2)
+    if (terminal && s.cardFence) {
+      const fenced = await this.checkCardFence(s);
+      if (fenced) return rejected(fenced);
     }
 
     let attach: Record<string, unknown> = {};

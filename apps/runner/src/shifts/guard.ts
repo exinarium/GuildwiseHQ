@@ -14,8 +14,9 @@ import {
 } from '@aom/shared';
 import picomatch from 'picomatch';
 import {
+  placeholderPathsBetween,
+  sandboxStubNoise,
   statusLinesWithoutStubs,
-  untrackedSandboxStubs,
   withoutSandboxStubs,
 } from '../adapters/sandbox-placeholders.ts';
 import { currentBranch, git } from '../git/git.ts';
@@ -409,8 +410,9 @@ async function dirtyPaths(worktree: string): Promise<string[]> {
     '--untracked-files=all',
   ]);
   const out = new Set<string>();
-  // the sandbox's empty mount stubs (.gitmodules, .bashrc, ...) are not changes (hotfix #77)
-  const dirtyLines = withoutSandboxStubs(dirty.stdout.split('\n'), await untrackedSandboxStubs(worktree));
+  // the sandbox's empty mount stubs (.gitmodules, .bashrc, .idea, ...) are not changes (hotfix #77), nor is a committed
+  // placeholder that went away again (uat-runner-fixes-3 finding 3)
+  const dirtyLines = withoutSandboxStubs(dirty.stdout.split('\n'), await sandboxStubNoise(worktree));
   for (const l of dirtyLines) {
     if (l.length > 3) out.add(l.slice(3).replace(/^"|"$/g, '').split(' -> ').pop() as string);
   }
@@ -425,8 +427,11 @@ export async function changedPaths(
 ): Promise<string[]> {
   const committed = await git(worktree, ['diff', '--name-only', `${startSha}..HEAD`]);
   const { exempt } = await mergeExemptions(worktree, startSha, opts);
+  // a placeholder the shift (or its `git add -A`) committed, or a committed one it dropped, is not a change
+  const names = lines(committed.stdout).map((l) => l.trim());
+  const stubs = await placeholderPathsBetween(worktree, startSha, 'HEAD', names);
   const out = new Set<string>();
-  for (const l of committed.stdout.split('\n')) if (l.trim() && !exempt.has(l.trim())) out.add(l.trim());
+  for (const l of names) if (l && !exempt.has(l) && !stubs.has(l)) out.add(l);
   for (const p of await dirtyPaths(worktree)) out.add(p);
   return [...out].filter((p) => !isTestArtifact(p));
 }

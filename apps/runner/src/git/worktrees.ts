@@ -3,6 +3,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { ForgeKind, WorktreeSpec } from '@aom/shared';
 import { isSafeGitRef } from '@aom/shared';
+import { statusLinesWithoutStubs, withWorktreeHeld } from '../adapters/sandbox-placeholders.ts';
 import { confineAny } from '../fs-safe.ts';
 import {
   ambiguousMainMessage,
@@ -126,7 +127,8 @@ export async function switchBackFromConflictBranch(
     throw new WorktreeError(m);
   },
 ): Promise<void> {
-  const dirty = (await gitOk(path, ['status', '--porcelain'])).trim();
+  // the sandbox's placeholders are not a resolution in progress (uat-runner-fixes-3 finding 3)
+  const dirty = (await statusLinesWithoutStubs(path)).lines.join('\n').trim();
   if (dirty)
     fail(
       `The worktree is on ${onBranch}, not ${branch}, and has uncommitted changes (${dirty.split('\n').length} file(s)): a conflict resolution may be in progress, so it was left as it is. A DevOps conflict attempt or a person must finish or discard it.`,
@@ -160,7 +162,11 @@ async function isWorktreeOn(path: string, branch: string): Promise<boolean> {
 export async function ensureWorktree(input: EnsureWorktreeInput): Promise<WorktreeResult> {
   // Worktree add, branch create and the config writes behind them are serialized per clone (two shifts starting at once
   // collided on .git/config.lock).
-  return withRepoLock(input.repoPath, () => ensureWorktreeLocked(input));
+  // the runner's own work on the card worktree, never the DevOps engineer's (REVIEW B1)
+  const at = input.spec.mode === 'reuse' && input.spec.path ? input.spec.path : input.defaultPath;
+  return withWorktreeHeld(at, 'ensure', () =>
+    withRepoLock(input.repoPath, () => ensureWorktreeLocked(input)),
+  );
 }
 
 async function ensureWorktreeLocked(input: EnsureWorktreeInput): Promise<WorktreeResult> {
@@ -426,6 +432,16 @@ export interface ReadOnlyCheckout {
  * runner removes it after the shift (`removeReadOnlyCheckout`). Idempotent: a leftover of a crashed shift is replaced.
  */
 export async function ensureReadOnlyCheckout(input: {
+  repoPath: string;
+  baseBranch: string;
+  path: string;
+  roots: string[];
+  auth?: GitAuth;
+}): Promise<ReadOnlyCheckout> {
+  return withWorktreeHeld(input.path, 'readonly-checkout', () => readOnlyCheckoutHeld(input));
+}
+
+async function readOnlyCheckoutHeld(input: {
   repoPath: string;
   baseBranch: string;
   path: string;

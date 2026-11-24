@@ -137,6 +137,7 @@ import {
 } from '../commands/workstation-notices.ts';
 import {
   applyEnvEnsureResult,
+  applyInitialCommitResult,
   applyRepoCloneResult,
   applyRightsResult,
   deliver,
@@ -355,7 +356,11 @@ export class RunnerHandlers {
         const s = await one(this.ctx.pool, 'SELECT agent_id FROM shifts WHERE id=$1', [msg.shiftId]);
         if (s) this.ctx.services.dispatcher.cooldown.set(s.agent_id, this.ctx.clock.now().getTime() + 30_000);
         await this.withInbox(conn, msg.id, (tx) => applyShiftRejected(this.ctx, tx, ws, msg));
-        return this.ack(conn, msg);
+        this.ack(conn, msg);
+        // an empty repository queues env.ensure (uat-runner-fixes-3)
+        if (msg.branchProblem?.emptyRepository)
+          void Promise.resolve(this.deliverPending(conn.workstationId)).catch(() => undefined);
+        return;
       }
       case 'shift.started':
         await this.withInbox(conn, msg.id, (tx) => applyShiftStarted(this.ctx, tx, ws, msg));
@@ -665,6 +670,17 @@ export class RunnerHandlers {
     } else if (cmd?.type === 'env.ensure') {
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
       await applyEnvEnsureResult(this.ctx, conn.workstationId, cmd.payload, msg.ok, msg.result, msg.error);
+    } else if (cmd?.type === 'repo.initial_commit') {
+      // Terminal: made (the environment is checked again) or a reason on the desk item; the owner clicks again.
+      await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());
+      await applyInitialCommitResult(
+        this.ctx,
+        conn.workstationId,
+        cmd.payload,
+        msg.ok,
+        msg.result,
+        msg.error,
+      );
     } else if (cmd?.type === 'forge.repos') {
       // Terminal: the picker polls the stored answer.
       await completeCommand(this.ctx.pool, msg.commandId, true, undefined, this.ctx.clock.now());

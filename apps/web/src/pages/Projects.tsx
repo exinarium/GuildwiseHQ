@@ -4,6 +4,7 @@ import {
   BUSINESS_CARD_TYPES,
   BUSINESS_WORKFLOW_DESCRIPTION,
   BUSINESS_WORKFLOW_KEY,
+  CommitAsSchema,
   CreateProjectRequestSchema,
   workflowUsesRepos,
 } from '@aom/shared';
@@ -361,6 +362,10 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
   const [keyTouched, setKeyTouched] = useState(false);
   const [picked, setWorkflowKey] = useState('code');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // uat-runner-fixes-3 finding 6: who the project's commits are made as, asked up front (prefilled with the account)
+  const me = useMe().data?.user;
+  const [commitName, setCommitName] = useState<string | null>(null);
+  const [commitEmail, setCommitEmail] = useState<string | null>(null);
   const business = useBusinessView();
   // `code-bugfix` runs only the bug cards a failed test files under a code card: never a project's workflow.
   // Every workflow is offered in every view. The Business view leads with the ones that need no repository and puts the
@@ -396,14 +401,24 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    const parsed = CreateProjectRequestSchema.safeParse({ key: key.trim(), name: name.trim(), workflowKey });
-    if (!parsed.success) {
+    const cName = (commitName ?? me?.displayName ?? '').trim();
+    const cEmail = (commitEmail ?? me?.email ?? '').trim();
+    const commit = noRepo ? null : CommitAsSchema.safeParse({ name: cName, email: cEmail });
+    const parsed = CreateProjectRequestSchema.safeParse({
+      key: key.trim(),
+      name: name.trim(),
+      workflowKey,
+      ...(commit?.success ? { commitAs: commit.data } : {}),
+    });
+    if (!parsed.success || (commit && !commit.success)) {
       const errs: Record<string, string> = {};
-      for (const i of parsed.error.issues) {
+      for (const i of parsed.success ? [] : parsed.error.issues) {
         const k = String(i.path[0]);
         errs[k] =
           k === 'key' ? 'Key is 2-10 characters: A-Z and 0-9, starting with a letter' : 'Name is required';
       }
+      if (commit && !commit.success)
+        errs.commitAs = `Commit as: ${commit.error.issues[0]?.message ?? 'a name and an e-mail address are needed'}`;
       setErrors(errs);
       return;
     }
@@ -414,6 +429,8 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
         setKey('');
         setName('');
         setKeyTouched(false);
+        setCommitName(null);
+        setCommitEmail(null);
         onOpenChange(false);
       },
     });
@@ -486,6 +503,31 @@ function NewProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
             </Disclosure>
           )}
         </fieldset>
+        {!noRepo && (
+          <fieldset className="flex flex-col gap-2" data-testid="new-project-commit-as">
+            <legend className="mb-1.5 text-sm font-medium text-fg">Commit as</legend>
+            <p className="-mt-1 text-sm text-muted">
+              Every commit made for this project carries this name and e-mail address, so the work reads as
+              yours. You can change it later in the project settings.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <TextInput
+                label="Name"
+                value={commitName ?? me?.displayName ?? ''}
+                onChange={(e) => setCommitName(e.target.value)}
+                autoComplete="name"
+              />
+              <TextInput
+                label="E-mail"
+                type="email"
+                value={commitEmail ?? me?.email ?? ''}
+                onChange={(e) => setCommitEmail(e.target.value)}
+                autoComplete="email"
+                error={errors.commitAs}
+              />
+            </div>
+          </fieldset>
+        )}
         <p className="-mt-2 text-xs text-subtle" data-testid="workflow-hint">
           {noRepo || business
             ? t.reword("No repository needed; results go to the project's vault folder.")

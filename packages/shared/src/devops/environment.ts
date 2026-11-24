@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { DevOpsAccessSchema } from '../events/devops.ts';
 import { ForgeKindSchema, GitAccessMethodSchema } from '../forge/index.ts';
+import { CommitAsSchema } from '../repo/commit-identity.ts';
 import { PostAsPlanSchema } from '../repo/post-as.ts';
 
 /**
@@ -58,6 +59,8 @@ export const RepoCloneResultSchema = z.object({
   error: z.string().max(2000).optional(),
   /** The directory existed already as a clone of this repository: nothing was cloned. */
   existing: z.boolean().optional(),
+  /** uat-runner-fixes-3: the repository has no commit yet; `branch` is where the first one would go. */
+  empty: z.object({ branch: z.string().max(250) }).optional(),
 });
 export type RepoCloneResult = z.infer<typeof RepoCloneResultSchema>;
 
@@ -92,6 +95,14 @@ export const EnvironmentReportSchema = z.object({
   summary: z.string().max(2000),
   /** Last lines of the install log (the full log is in `logs/env/` on the workstation). */
   logTail: z.array(z.string().max(500)).max(80).default([]),
+  /**
+   * uat-runner-fixes-3 finding 5: repositories that have no commit at all (clone and origin). Their cards wait (the
+   * state is `failed`) and the server asks the owner once, with a one-click "Create the first commit on <branch>".
+   */
+  emptyRepos: z
+    .array(z.object({ repoId: z.uuid(), name: z.string().max(200), branch: z.string().max(250) }))
+    .max(50)
+    .optional(),
 });
 export type EnvironmentReport = z.infer<typeof EnvironmentReportSchema>;
 
@@ -107,12 +118,38 @@ export const EnvEnsurePayloadSchema = z.object({
         remoteUrlNormalized: z.string(),
         /** The sub directory the project lives in (absent: the repository root). Detection and installs run there. */
         projectPath: z.string().optional(),
+        /** The repository's working branch, when set (uat-runner-fixes-3: an empty repository or a missing branch is told). */
+        workingBranch: z.string().max(250).optional(),
       }),
     )
     .min(1),
   access: DevOpsAccessSchema,
 });
 export type EnvEnsurePayload = z.infer<typeof EnvEnsurePayloadSchema>;
+
+/**
+ * `repo.initial_commit` (uat-runner-fixes-3 finding 5): the owner's one click on the desk. The runner makes an empty first
+ * commit on `branch` in its clone of an EMPTY repository and pushes it (never forced); it refuses when the repository has
+ * a commit by then.
+ */
+export const RepoInitialCommitPayloadSchema = z.object({
+  requestId: z.uuid(),
+  projectId: z.uuid(),
+  repoId: z.uuid(),
+  remoteUrlNormalized: z.string().min(1).max(2000),
+  branch: z.string().min(1).max(250),
+  /** The project's Commit as; absent: the clone's or the workstation's git identity. */
+  commitAs: CommitAsSchema.optional(),
+});
+export type RepoInitialCommitPayload = z.infer<typeof RepoInitialCommitPayloadSchema>;
+
+export const RepoInitialCommitResultSchema = z.object({
+  ok: z.boolean(),
+  sha: z.string().optional(),
+  branch: z.string().optional(),
+  error: z.string().max(2000).optional(),
+});
+export type RepoInitialCommitResult = z.infer<typeof RepoInitialCommitResultSchema>;
 
 // ------------------------------------------------------------------------------------------------- rights
 

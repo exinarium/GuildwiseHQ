@@ -61,6 +61,16 @@ export const DESK_SUBKIND = {
   testerLoop: 'tester_loop',
   /** D5: a project environment needs access or failed on a workstation. */
   environmentAttention: 'environment_attention',
+  /**
+   * uat-runner-fixes-3: a project repository has no commit yet, so no card can start there. One item per repository with a
+   * one-click "Create the first commit on <branch>" (`data`: projectId, repoId, workstationId, branch).
+   */
+  repoEmpty: 'repo_empty',
+  /**
+   * uat-runner-fixes-3 Rework 2: the runner refused a DevOps shift's change in a card worktree and could not undo all of it
+   * (prior uncommitted work, ignored files that existed before, nothing could be kept): the owner checks by hand.
+   */
+  devopsCardWorktree: 'devops_card_worktree',
   /** G-Q2: DevOps is trying to resolve a rebase/merge conflict (a notice). */
   conflictAttempt: 'conflict_attempt',
   /** G-Q2: two DevOps attempts failed; the conflict needs a person. */

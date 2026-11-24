@@ -68,6 +68,8 @@ export interface DevopsGuardInput {
   appRepos?: Array<{ remote: string; label: string; botEmail: string }>;
   /** The commit e-mail of the session's environment. */
   identityEmail?: string;
+  /** A conflict request the server filed: the one card branch DevOps may fast-forward (`git merge --ff-only`). */
+  conflictBranch?: string;
 }
 
 /**

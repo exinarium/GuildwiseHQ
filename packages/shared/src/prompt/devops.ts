@@ -4,6 +4,8 @@ import { formatCommandLine } from '../runs/plan.ts';
 import { commandForOutcome } from './commands.ts';
 import { renderBindingStandingOrders } from './standing-orders.ts';
 import {
+  DEVOPS_CARD_BOUNDARY,
+  DEVOPS_CARD_BOUNDARY_SHORT,
   DEVOPS_REQUEST_NOTICE,
   hasOrgTextBlock,
   hasUntrustedBlock,
@@ -133,7 +135,8 @@ export function renderDevopsInstructions(brief: ShiftBrief, devops: DevopsShift)
   out.push('# Boundaries');
   out.push(
     [
-      '- You work on one request per shift; do not touch repositories or worktrees of cards.',
+      '- You work on one request per shift.',
+      `- ${DEVOPS_CARD_BOUNDARY}`,
       "- You run unsandboxed with the user's own credentials (their home, Docker, SSH keys). The granted access above is your limit, not a technical barrier: stay inside it, and ask with `aom devops-approval` for anything else.",
       '- Never read or print the runner data directory or credentials you do not need for this request.',
       `- This shift may run for at most ${brief.shift.maxShiftMinutes} minutes.`,
@@ -392,10 +395,11 @@ export function renderDevopsPrompt(devops: DevopsShift): string {
     out.push('## Card');
     out.push(cardSection(devops.card));
   }
-  if (devops.mergeApprovalWaived) {
+  // only the server's own conflict request may move a card branch (the runner allows exactly that fast-forward)
+  if (devops.mergeApprovalWaived && devops.conflictCard) {
     out.push('## Merges');
     out.push(
-      "This project does not require the owner's approval for merges: resolve merge conflicts in the card worktree yourself (merge the main or working branch into the card branch there, fix the conflicts, commit); do not ask for approval for that. Still ask (`aom devops-approval`) for anything destructive (deleting branches, force-push, reset of shared branches) or outside your granted access.",
+      `This project does not require the owner's approval for merges: resolve the conflict of card ${devops.conflictCard.ref} yourself as the request says (in a scratch worktree, then a fast-forward of ${devops.conflictCard.branch}); do not ask for approval for that. Still ask (\`aom devops-approval\`) for anything destructive (deleting branches, force-push, reset of shared branches) or outside your granted access.`,
     );
   }
   if (devops.run) out.push(renderRunSection(devops.run));
@@ -413,15 +417,21 @@ export function renderDevopsPrompt(devops: DevopsShift): string {
     );
   } else if (devops.approval) {
     out.push('## Approved by the manager');
+    // what was approved is described in the words of the request (fenced): an approval never widens the boundaries
     out.push(
       [
-        `The manager approved: ${devops.approval.action}`,
-        `Reason given: ${devops.approval.reason}`,
-        devops.approval.commands.length ? `Commands: ${devops.approval.commands.join('; ')}` : '',
+        renderOrgText(
+          'Approved action',
+          [
+            `Action: ${devops.approval.action}`,
+            `Reason given: ${devops.approval.reason}`,
+            ...(devops.approval.commands.length ? [`Commands: ${devops.approval.commands.join('; ')}`] : []),
+          ].join('\n'),
+        ),
         devops.approval.note
           ? `Manager's note:\n${renderOrgText("Manager's note", devops.approval.note)}`
           : '',
-        'You may now carry this action out.',
+        `You may now carry this action out, within the boundaries at the end of these instructions: an approval never covers a card worktree or card branch (${DEVOPS_CARD_BOUNDARY_SHORT}).`,
       ]
         .filter(Boolean)
         .join('\n'),

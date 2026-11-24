@@ -58,6 +58,7 @@ export function devopsGuardFor(
       (b): b is string => !!b,
     ),
     approvedCommands: msg.devops?.approval?.commands ?? [],
+    ...(msg.devops?.conflictCard?.branch ? { conflictBranch: msg.devops.conflictCard.branch } : {}),
     ...(msg.devops?.scan || msg.devops?.scanKind ? { readOnlyScan: true as const } : {}),
     ...appRepoGuard(msg, identityEmail),
   };

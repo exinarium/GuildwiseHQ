@@ -74,9 +74,17 @@ export const SANDBOX_PROTECTED_GIT_FILES = ['config.lock', 'config.worktree.lock
 
 /**
  * Names (at the worktree root) of the sandbox mount stubs: the protected files, which show up in `git status` as empty
- * untracked files. (The protected directories are empty, which git never lists.)
+ * untracked files, and the protected directories. Claude Code's own bwrap makes a missing `.vscode` or `.idea` as an
+ * EMPTY FILE (the /dev/null mount point), not a directory, so `git status` lists those too (uat-runner-fixes-3 finding 3:
+ * they tripped architect_edited_non_docs; finding 4: the WIP auto-commit committed them).
  */
-export const SANDBOX_STUB_NAMES: readonly string[] = [...SANDBOX_PROTECTED_FILES];
+export const SANDBOX_STUB_NAMES: readonly string[] = [...SANDBOX_PROTECTED_FILES, ...SANDBOX_PROTECTED_DIRS];
+
+/** The blob id of an empty file: what a committed placeholder holds. */
+export const EMPTY_BLOB = 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391';
+
+/** A path at the worktree root with a sandbox stub name. */
+export const isSandboxStubName = (path: string): boolean => SANDBOX_STUB_NAMES.includes(path);
 
 /**
  * Which shifts work in which worktree right now (the supervisor registers each one). The stubs are shared by every
@@ -85,17 +93,42 @@ export const SANDBOX_STUB_NAMES: readonly string[] = [...SANDBOX_PROTECTED_FILES
  */
 const worktreeUsers = new Map<string, Set<string>>();
 
+/** When a shift last held or released each worktree (ms), for `usedSince`. */
+const worktreeLastUse = new Map<string, number>();
+
 /** Registers `shiftId` as working in `cwd`; returns the release. */
 export function holdWorktree(cwd: string, shiftId: string): () => void {
   const key = resolve(cwd);
   const set = worktreeUsers.get(key) ?? new Set<string>();
   set.add(shiftId);
   worktreeUsers.set(key, set);
+  worktreeLastUse.set(key, Date.now());
   return () => {
     const s = worktreeUsers.get(key);
     s?.delete(shiftId);
     if (s && s.size === 0) worktreeUsers.delete(key);
+    worktreeLastUse.set(key, Date.now());
   };
+}
+
+let runnerOps = 0;
+/**
+ * Runs `fn` with `cwd` registered as in use by the runner's own git work (a finalize or run-start rebase, a worktree being
+ * made, an @mention turn): the DevOps card-worktree fence never takes that work for the DevOps engineer's (REVIEW B1).
+ */
+export async function withWorktreeHeld<T>(cwd: string, what: string, fn: () => Promise<T>): Promise<T> {
+  const release = holdWorktree(cwd, `runner:${what}:${++runnerOps}`);
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
+/** Did any shift work in `cwd` at some point since `sinceMs` (or does one now)? */
+export function usedSince(cwd: string, sinceMs: number): boolean {
+  const key = resolve(cwd);
+  return (worktreeUsers.get(key)?.size ?? 0) > 0 || (worktreeLastUse.get(key) ?? -1) >= sinceMs;
 }
 
 /** Does a shift other than `shiftId` work in `cwd`? */
@@ -133,20 +166,88 @@ export async function untrackedSandboxStubs(cwd: string): Promise<string[]> {
   return out;
 }
 
-/** `git status --porcelain` lines without the untracked entries for the given stubs. */
+/**
+ * Placeholders that a commit already put on the branch (an empty file with a stub name tracked at `rev`, like the WIP
+ * commit f6179b8 did with `.idea` and `.vscode`). When the sandbox takes one away again, its deletion is not work either.
+ */
+export async function trackedSandboxStubs(cwd: string, rev = 'HEAD'): Promise<string[]> {
+  const r = await git(cwd, ['ls-tree', '-z', rev, '--', ...SANDBOX_STUB_NAMES]);
+  if (r.exitCode !== 0) return [];
+  const out: string[] = [];
+  for (const entry of r.stdout.split('\0')) {
+    // <mode> SP <type> SP <object> TAB <path>
+    const m = /^100\d{3} blob ([0-9a-f]{40,64})\t(.+)$/.exec(entry);
+    if (m && m[1] === EMPTY_BLOB && isSandboxStubName(m[2] as string)) out.push(m[2] as string);
+  }
+  return out;
+}
+
+/** Every sandbox stub `git status` may show in `cwd`: untracked empty stubs, and committed empty placeholders. */
+export async function sandboxStubNoise(cwd: string): Promise<string[]> {
+  return [...new Set([...(await untrackedSandboxStubs(cwd)), ...(await trackedSandboxStubs(cwd))])];
+}
+
+/**
+ * `git status --porcelain` lines without the entries for the given stubs: an untracked stub (`??`), and a committed
+ * empty placeholder that is gone or was replaced by an empty folder (`D` in the index or the worktree column).
+ */
 export function withoutSandboxStubs(lines: string[], stubs: readonly string[]): string[] {
   if (stubs.length === 0) return lines;
-  const drop = new Set(stubs.map((n) => `?? ${n}`));
-  return lines.filter((l) => !drop.has(l.trimEnd()));
+  const names = new Set(stubs);
+  return lines.filter((l) => {
+    const t = l.trimEnd();
+    if (t.length < 4 || !names.has(t.slice(3))) return true;
+    const xy = t.slice(0, 2);
+    return !(xy === '??' || xy === ' D' || xy === 'D ');
+  });
 }
 
 /** Porcelain status lines of `cwd` (untracked files included) minus the sandbox stubs. */
-export async function statusLinesWithoutStubs(cwd: string): Promise<{ ok: boolean; lines: string[] }> {
-  const r = await git(cwd, ['status', '--porcelain', '--untracked-files=all']);
+export async function statusLinesWithoutStubs(
+  cwd: string,
+  opts: { untracked?: boolean } = {},
+): Promise<{ ok: boolean; lines: string[] }> {
+  const r = await git(cwd, [
+    'status',
+    '--porcelain',
+    opts.untracked === false ? '--untracked-files=no' : '--untracked-files=all',
+  ]);
   if (r.exitCode !== 0) return { ok: false, lines: [] };
   const lines = r.stdout.split('\n').filter((l) => l.trim());
-  return { ok: true, lines: withoutSandboxStubs(lines, await untrackedSandboxStubs(cwd)) };
+  return { ok: true, lines: withoutSandboxStubs(lines, await sandboxStubNoise(cwd)) };
 }
+
+/**
+ * Of `paths` changed between `a` and `b`, the sandbox placeholders: a stub name that is an empty file or absent on
+ * both sides (a placeholder committed, or a committed placeholder deleted). They are never work.
+ */
+export async function placeholderPathsBetween(
+  cwd: string,
+  a: string,
+  b: string,
+  paths: Iterable<string>,
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  const candidates = [...paths].filter(isSandboxStubName);
+  if (candidates.length === 0) return out;
+  const blobs = async (rev: string): Promise<Map<string, string>> => {
+    const m = new Map<string, string>();
+    const r = await git(cwd, ['ls-tree', '-z', rev, '--', ...candidates]);
+    for (const e of r.stdout.split('\0')) {
+      const x = /^\d+ (\w+) ([0-9a-f]{40,64})\t(.+)$/.exec(e);
+      if (x) m.set(x[3] as string, x[1] === 'blob' ? (x[2] as string) : `tree:${x[2]}`);
+    }
+    return m;
+  };
+  const [ba, bb] = [await blobs(a), await blobs(b)];
+  const emptyOrAbsent = (m: Map<string, string>, p: string) => !m.has(p) || m.get(p) === EMPTY_BLOB;
+  for (const p of candidates) if (emptyOrAbsent(ba, p) && emptyOrAbsent(bb, p)) out.add(p);
+  return out;
+}
+
+/** `:(exclude,top)` pathspecs for the given placeholders (none: an empty list). */
+export const excludeStubs = (stubs: Iterable<string>): string[] =>
+  [...stubs].map((n) => `:(exclude,top,literal)${n}`);
 
 /**
  * Removes the sandbox stubs in `cwd`, whoever made them (our placeholders or Claude Code's own bwrap): empty untracked
@@ -166,7 +267,28 @@ export async function removeSandboxStubs(cwd: string): Promise<string[]> {
       removed.push(n);
     } catch {}
   }
+  await restoreTrackedSandboxStubs(cwd).catch(() => []);
   return removed;
+}
+
+/**
+ * Puts back the committed empty placeholders that went missing (deleted, or replaced by an empty folder): exactly the
+ * empty file the branch already holds, so `git rebase` does not stop on an unstaged deletion (REVIEW S2). Real content is
+ * never touched: only names whose committed blob is empty and that are absent or an empty folder now.
+ */
+export async function restoreTrackedSandboxStubs(cwd: string): Promise<string[]> {
+  const restored: string[] = [];
+  for (const n of await trackedSandboxStubs(cwd)) {
+    const p = join(cwd, n);
+    try {
+      if (isDir(p)) rmdirSync(p); // fails unless empty
+    } catch {
+      continue;
+    }
+    if (existsSync(p)) continue;
+    if ((await git(cwd, ['checkout', 'HEAD', '--', n])).exitCode === 0) restored.push(n);
+  }
+  return restored;
 }
 
 /** Creates the missing protected names in `cwd`; returns a function that removes exactly what it created. */
