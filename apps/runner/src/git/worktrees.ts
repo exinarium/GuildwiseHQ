@@ -5,6 +5,7 @@ import type { ForgeKind, WorktreeSpec } from '@aom/shared';
 import { isSafeGitRef } from '@aom/shared';
 import { statusLinesWithoutStubs, withWorktreeHeld } from '../adapters/sandbox-placeholders.ts';
 import { confineAny } from '../fs-safe.ts';
+import type { BranchLedger } from './branch-ledger.ts';
 import {
   ambiguousMainMessage,
   branchNames,
@@ -71,6 +72,8 @@ export interface EnsureWorktreeInput {
    * clone's lock: the runner uses it to bring the local working branch up to date too.
    */
   onFetched?: (base: string) => Promise<void>;
+  /** The runner's card branch ledger (T1): a card branch created here is recorded. A failed write never fails this. */
+  ledger?: BranchLedger;
 }
 
 /** Credentials for git against the repository's host (clone, push). */
@@ -259,6 +262,8 @@ async function ensureWorktreeLocked(input: EnsureWorktreeInput): Promise<Worktre
     startPoint = base;
   }
   const madeHere = await addWorktreeOnBranch(repoPath, branch, path, startPoint, fail);
+  // T1: a branch this runner cut itself (never one it found, here or on origin) goes into its ledger.
+  if (madeHere && input.ledger) await input.ledger.recordFor(repoPath, branch, 'created');
   return {
     ...(await result(madeHere)),
     added: true,

@@ -1137,8 +1137,20 @@ async function mergeWaiver(ctx: Ctx, cardId: string | null): Promise<{ mergeAppr
 async function conflictCardOf(
   ctx: Ctx,
   req: Row,
-): Promise<{ conflictCard?: { ref: string; branch: string } }> {
-  if (req.origin !== 'conflict' || !req.card_id) return {};
+): Promise<{
+  conflictCard?: { ref: string; branch: string };
+  conflictRepo?: { repoId: string; localPath: string; workingBranch: string };
+}> {
+  if (req.origin !== 'conflict') return {};
+  if (!req.card_id) {
+    // T7: a working-branch conflict hygiene found; the runner moves that branch itself after "Resolved:"
+    const c = (req.context ?? {}) as { repoId?: unknown; localPath?: unknown; workingBranch?: unknown };
+    return typeof c.repoId === 'string' &&
+      typeof c.localPath === 'string' &&
+      typeof c.workingBranch === 'string'
+      ? { conflictRepo: { repoId: c.repoId, localPath: c.localPath, workingBranch: c.workingBranch } }
+      : {};
+  }
   const c = await one(ctx.pool, 'SELECT ref, branch_name FROM cards WHERE id = $1', [req.card_id]);
   return c?.ref && c.branch_name
     ? { conflictCard: { ref: String(c.ref), branch: String(c.branch_name) } }

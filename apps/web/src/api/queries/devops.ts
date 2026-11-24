@@ -46,8 +46,12 @@ export function useResolveDevOpsApproval() {
       post<DevOpsRequestDetail>(`/devops/requests/${v.id}/resolve`, {
         resolution: v.resolution,
         ...(v.note ? { note: v.note } : {}),
+        ...(v.scope ? { scope: v.scope } : {}),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['devops'] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['devops'] });
+      void qc.invalidateQueries({ queryKey: ['desk'] });
+    },
   });
 }
 

@@ -10,18 +10,19 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { dirname, isAbsolute, join } from 'node:path';
 import { CARD_ATTACHMENTS_DIR, type ClaudeAccountInfo, MAIN_ACCOUNT } from '@aom/shared';
 import { execa } from 'execa';
 import type { z } from 'zod';
 import { type GrantedSkill, materializeSkills, skillsDirOf } from '../capabilities/materialize.ts';
 import type { ClaudeRuntimeConfigSchema } from '../config.ts';
-import { deleteRootsFor, type GuardConfig } from '../devops/guard.ts';
+import { alwaysPathRefusal, deleteRootsFor, type GuardConfig } from '../devops/guard.ts';
 import type { ProviderStore } from '../direct/store.ts';
 import { holdSandboxRepo } from '../git/config-lock.ts';
 import { discoverPluginMcpServers, mcpConfigFor, type PluginMcpServer } from '../mcp/plugins.ts';
 import type { RunnerPaths } from '../paths.ts';
+import { policyDir as localPolicyDir } from '../policy/store.ts';
 import { reviewerPolicy } from '../review/reviewer-sandbox.ts';
 import {
   agentTmpDir,
@@ -32,6 +33,7 @@ import {
 } from '../sandbox/sandbox.ts';
 import { SHIFT_ENV_POINTER, sessionEnvDirOf } from '../session/shift-credential.ts';
 import { selfCommand } from '../shims.ts';
+import { detectionRoots } from '../toolchain/registry.ts';
 import { type AccountCredential, type ClaudeAccount, ClaudeAccountRegistry } from './claude-accounts.ts';
 import {
   type ClaudeAuthMonitor,
@@ -610,6 +612,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       toolchainReadDirs?: string[];
       extraAllowedDomains?: string[];
       testServiceDomains?: string[];
+      devopsGuard?: { access?: { allowInstall: boolean; allowedPaths: string[] } };
     },
     cwd: string,
     /** A chat never writes: the repository metadata of its worktree is read-only there, not a writable dir. */
@@ -650,6 +653,29 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       otherAgentTmps: this.paths ? otherAgentTmps(this.paths, dirname(input.sandbox.home)) : [],
       ...(guardHookCommand ? { guardHookCommand } : {}),
       ...(readOnlyScan ? { readOnlyScan: true } : {}),
+      // T2: no agent reads or writes the local authority's folder
+      policyDir: localPolicyDir(),
+      // T10: the DevOps engineer's Edit and Write tools reach only its own folders and what the switches open
+      ...(input.devopsGuard?.access
+        ? {
+            devopsWriteRoots: [
+              tmpdir(),
+              '/tmp',
+              '/var/tmp',
+              ...input.devopsGuard.access.allowedPaths.filter(
+                (p) =>
+                  isAbsolute(p) &&
+                  alwaysPathRefusal(p, {
+                    home: this.realHome(),
+                    policyRoot: localPolicyDir(),
+                    worktrees: join(root, 'worktrees'),
+                    runnerRoot: root,
+                  }) === null,
+              ),
+              ...(input.devopsGuard.access.allowInstall ? detectionRoots(this.realHome()) : []),
+            ],
+          }
+        : {}),
     };
   }
 
@@ -661,8 +687,17 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     configDir: string,
     guard: DevopsGuardInput | undefined,
     kind: 'shift' | 'chat',
+    sandbox?: { home: string; scratch: string; tmp: string },
   ): { command: string; file: string } | undefined {
     if (!guard || !this.paths) return undefined;
+    // T10: where the session writes without the paths switch; with installs on, also the toolchain folders
+    const writeRoots = [
+      ...(sandbox ? [sandbox.home, sandbox.scratch, sandbox.tmp] : []),
+      tmpdir(),
+      '/tmp',
+      '/var/tmp',
+      ...(guard.access?.allowInstall ? detectionRoots(this.realHome()) : []),
+    ];
     const cfg: GuardConfig = {
       sessionRef: guard.sessionRef,
       kind,
@@ -677,7 +712,10 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       ...(guard.identityEmail ? { identityEmail: guard.identityEmail } : {}),
       // uat-runner-fixes-3 finding 2: never a write or commit in a card worktree (runner configuration, not the prompt)
       cardWorktreesRoot: this.paths.worktrees,
-      ...(guard.conflictBranch ? { conflictBranch: guard.conflictBranch } : {}),
+      ...(guard.installScriptsOff ? { installScriptsOff: true } : {}),
+      // T2: the shell never touches the local approval settings, and runs only the read-only runner CLI verbs
+      policyRoot: localPolicyDir(),
+      ...(guard.access ? { access: guard.access, writeRoots } : {}),
       secretRoots: ['secrets', 'keys', 'config.json'].map((d) => join(this.paths?.root ?? '', d)),
       auditFile: join(this.paths.logs, 'devops-audit.jsonl'),
     };
@@ -1010,7 +1048,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
   ): Promise<RuntimeSession> {
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
-    const guard = input.agent.isDevops ? this.devopsGuard(dir, input.devopsGuard, 'shift') : undefined;
+    const guard = input.agent.isDevops
+      ? this.devopsGuard(dir, input.devopsGuard, 'shift', input.sandbox)
+      : undefined;
     if (input.agent.isDevops && input.kind === 'release_prep' && !guard)
       throw new Error(
         'the DevOps guard could not be attached to this release prep shift (no guard settings or no runner paths)',
@@ -1147,7 +1187,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
   ): Promise<RuntimeSession> {
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
-    const guard = devops ? this.devopsGuard(dir, input.devopsGuard, 'chat') : undefined;
+    const guard = devops ? this.devopsGuard(dir, input.devopsGuard, 'chat', input.sandbox) : undefined;
     if (guard) input = { ...input, env: { ...input.env, AOM_DEVOPS_GUARD: guard.file } };
     // Granted plugin MCP servers this role may call (the DevOps engineer's chat keeps its own behaviour).
     const intakeMcp = input.intake ? this.cfg.intake?.mcpConfig : undefined;

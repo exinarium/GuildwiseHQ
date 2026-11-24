@@ -61,6 +61,9 @@ export const DevOpsRequestContextSchema = z.object({
   envId: z.uuid().optional(),
   /** The saved run plan was replayed first and failed: why, with the tail of the failing log (for the DevOps brief). */
   replayFailure: z.string().max(12000).optional(),
+  /** runner-authority-fixes T7: a working-branch conflict request: the clone and branch the runner may move forward. */
+  localPath: z.string().max(4000).optional(),
+  workingBranch: z.string().max(300).optional(),
 });
 export type DevOpsRequestContext = z.infer<typeof DevOpsRequestContextSchema>;
 
@@ -114,6 +117,8 @@ export const devopsEvents = [
       question: z.boolean().optional(),
       /** UAT 1.10.0 finding 3: blocked by this workstation switch; the request waits for it, not for an approval. */
       blockedBy: z.enum(['allowInstall', 'allowDocker', 'allowedPaths']).optional(),
+      /** runner-authority-fixes T10 (R4-S2): with `allowedPaths`, the folder "Always allow" adds (absent: once only). */
+      alwaysPath: z.string().max(4000).optional(),
     }),
   ),
   /** G-Q2: DevOps tries to resolve a card's rebase/merge conflict on a branch; the card waits on the request. */
@@ -137,6 +142,8 @@ export const devopsEvents = [
       deskItemId: Id,
       party: z.enum(['manager', 'workstation_user']),
       by: Id,
+      /** runner-authority-fixes T10: this party chose "Always allow" (absent: once). */
+      always: z.boolean().optional(),
     }),
   ),
   /** The approval was answered; `approved` re-queues the request with the approval attached. */

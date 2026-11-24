@@ -35,6 +35,11 @@ const PRIVATE_ENTRIES = [
   'deploys',
   'logs',
   'session-env',
+  // runner-authority-fixes T8: the card worktrees (a full-power turn never changes a card's folder; the Read tool still
+  // reads them, a shell command naming them is refused) and the runner's branch and conflict records
+  'worktrees',
+  'conflicts.json',
+  'card-branches.json',
 ];
 
 /** The runner's own service units can be inspected (`systemctl status`, `journalctl`) but not stopped from inside a turn. */
@@ -94,6 +99,12 @@ export function floorDenies(opts: { runnerRoots: readonly string[]; pid: number;
       out.push(
         `${tool}(${ruleAbs(join(root, 'secrets'))}/**)`,
         `${tool}(${ruleAbs(join(root, 'config.json'))})`,
+      );
+    // T8: no edit or write of a card worktree from a full-power turn
+    for (const tool of ['Edit', 'Write'])
+      out.push(
+        `${tool}(${ruleAbs(join(root, 'worktrees'))}/**)`,
+        `${tool}(${ruleAbs(join(root, 'worktrees'))})`,
       );
     // The same places as spelled in a shell command: absolute, `~/...` and `$HOME/...`.
     for (const spelling of floorSpellings({ runnerRoots: [root], home }))

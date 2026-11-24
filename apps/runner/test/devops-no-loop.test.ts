@@ -5,6 +5,7 @@ import { HeldStore } from '../src/policy/held.ts';
 import { PolicyStore } from '../src/policy/store.ts';
 import { type Harness, startHarness } from './harness.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
+import { ScriptedAdapter } from './scripted-adapter.ts';
 import { makeDevopsStart } from './vault-fixtures.ts';
 
 cleanupTmp();
@@ -110,7 +111,39 @@ describe('a local no (REVIEW S1)', () => {
 
 describe('a DevOps request blocked by Install off', () => {
   it('shows as one item on Approvals on this computer, with the switch and the local command', async () => {
-    h = await startHarness();
+    // runner-authority-fixes Rework 1 (S2): a switch wait needs the guard's own refusal of the command (the agent's
+    // words alone no longer pick a switch), so the agent here is scripted: the guard refused `npm i -g node@22`
+    const adapter = new ScriptedAdapter(async (input, ctl) => {
+      await ctl.post('/v1/rpc', {
+        method: 'devops.audit',
+        params: {
+          entries: [
+            {
+              at: new Date().toISOString(),
+              sessionRef: input.shiftId,
+              kind: 'shift',
+              decision: 'refused',
+              rule: 'install_off',
+              command: 'npm i -g node@22',
+            },
+          ],
+        },
+      });
+      await ctl.post('/v1/report', {
+        report: {
+          kind: 'outcome',
+          outcomeId: 'devops_approval',
+          note: 'Needs approval',
+          data: {
+            action: 'install Node 22',
+            reason: 'needed',
+            commands: ['npm i -g node@22'],
+            blockedBy: 'allowInstall',
+          },
+        },
+      });
+    });
+    h = await startHarness({}, { adapters: new Map([['mock', adapter]]) });
     const start = makeDevopsStart({ summary: 'install Node 22' }) as Record<string, any>;
     h.server.send('shift.start', start);
     await h.server.waitFor('shift.ended', (m) => m.shiftId === start.shiftId, 60_000);

@@ -2092,10 +2092,11 @@ const VERBS: Record<string, Verb> = {
     const action = one(p, 'action');
     const reason = one(p, 'reason');
     const USAGE =
-      'usage: aom devops-approval --action "<action>" --reason "<why>" [--command "<cmd>"]... [--blocked-by install|docker|paths]';
+      'usage: aom devops-approval --action "<action>" --reason "<why>" [--command "<cmd>"]... [--switch install|docker|paths]';
     if (!action || !reason) throw new UsageError(USAGE);
-    // UAT 1.10.0 finding 3: the workstation switch that is off and blocks the request (the owner is told which one)
-    const by = one(p, 'blocked-by');
+    // UAT 1.10.0 finding 3 / T10: the workstation switch that is off and blocks the request (the runner checks it against
+    // the guard's own refusal of the command before the owner sees it); `--blocked-by` is the older spelling
+    const by = one(p, 'switch') ?? one(p, 'blocked-by');
     const SWITCH = { install: 'allowInstall', docker: 'allowDocker', paths: 'allowedPaths' } as const;
     if (by !== undefined && !(by in SWITCH)) throw new UsageError(USAGE);
     return report(

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   accessSync,
   chmodSync,
@@ -39,6 +40,28 @@ export interface ToolchainEntry {
 }
 
 export class ToolchainError extends Error {}
+
+/**
+ * runner-authority-fixes T10: the user-space folders tool installers write to (the ones `detectToolchains` looks in). With
+ * the Install switch on, the DevOps guard lets the session write there; with it off, these ask like any other path.
+ */
+export function detectionRoots(home: string): string[] {
+  return [
+    '.local',
+    '.dotnet',
+    '.nvm',
+    '.cargo',
+    '.rustup',
+    '.bun',
+    '.pyenv',
+    'go',
+    '.sdkman',
+    '.asdf',
+    '.deno',
+    '.volta',
+    '.npm-global',
+  ].map((d) => join(home, d));
+}
 
 const MAX_DIRS = 8;
 const MAX_ENV = 16;
@@ -375,9 +398,26 @@ export interface ResolvedToolchains {
   env: Record<string, string>;
 }
 
+/**
+ * The pin of a registered toolchain (runner-authority-fixes T2, D2): sha256 over its name, directories and variables.
+ * Changing any of them makes a new entry that needs a new local yes.
+ */
+export function toolchainHash(e: Pick<ToolchainEntry, 'name' | 'binDirs' | 'readDirs' | 'env'>): string {
+  const env = Object.fromEntries(Object.entries(e.env).sort(([a], [b]) => a.localeCompare(b)));
+  return createHash('sha256')
+    .update(JSON.stringify({ name: e.name, binDirs: e.binDirs, readDirs: e.readDirs, env }))
+    .digest('hex');
+}
+
 export class ToolchainRegistry {
   /** Called after a registration or removal (the runner reports the new list to the server). */
   onChange?: () => void;
+  /**
+   * T2 (D2): is this DevOps-registered entry pinned in policy.json (`toolchainPins`)? Set by the runner. An unpinned
+   * entry stays off every agent's PATH and read list and is listed as waiting for the owner's yes. Owner-added entries
+   * need no pin. Unset (unit tests of the registry alone): no gate.
+   */
+  pinned?: (hash: string) => boolean;
 
   constructor(
     private readonly file: string,
@@ -467,9 +507,21 @@ export class ToolchainRegistry {
     });
   }
 
+  /** A DevOps-registered entry not pinned yet (waits for `guildwise-runner toolchain approve <hash>`). */
+  isWaiting(e: ToolchainEntry): boolean {
+    return !!this.pinned && e.addedBy !== 'owner' && !this.pinned(toolchainHash(e));
+  }
+
+  /** DevOps-registered entries waiting for the owner's yes, with their pin. */
+  waiting(): Array<{ entry: ToolchainEntry; hash: string }> {
+    return this.persisted()
+      .filter((e) => this.isWaiting(e))
+      .map((entry) => ({ entry, hash: toolchainHash(entry) }));
+  }
+
   /** Every entry in stable order: devops, config, detected (a detected entry yields to a registered one of the same name). */
   list(): ToolchainEntry[] {
-    const devops = this.persisted();
+    const devops = this.persisted().filter((e) => !this.isWaiting(e));
     const detected = detectToolchains({
       home: this.home,
       platform: this.platform,
@@ -549,7 +601,17 @@ export function toolchainRpc(
   const strings = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
   try {
     if (method === 'toolchain.list')
-      return { ok: true, result: { text: formatToolchainList(registry.list()) } };
+      return {
+        ok: true,
+        result: {
+          text: [
+            formatToolchainList(registry.list()),
+            ...registry
+              .waiting()
+              .map(({ entry }) => `${entry.name}  [waiting for the owner's yes on this computer]`),
+          ].join('\n'),
+        },
+      };
     if (!isDevops) return { ok: false, error: 'only the DevOps engineer can add or remove toolchains' };
     if (method === 'toolchain.add') {
       const env =
@@ -565,7 +627,9 @@ export function toolchainRpc(
       return {
         ok: true,
         result: {
-          message: `Registered "${e.name}". New shifts and chats of the agents get it on PATH and can read it.`,
+          message: registry.isWaiting(e)
+            ? `Registered "${e.name}". It waits for the owner's yes on this computer (shown on the Desk with the command to run); after that, new shifts and chats of the agents get it on PATH.`
+            : `Registered "${e.name}". New shifts and chats of the agents get it on PATH and can read it.`,
         },
       };
     }

@@ -244,8 +244,10 @@ describe('B2: the fence runs whichever way a DevOps shift ends', () => {
       const start = makeDevopsStart({ summary: `install it [edit_worktree:${wt}]` });
       const shiftId = start.shiftId as string;
       h.server.send('shift.start', start);
-      await h.server.waitFor('shift.rejected', (m) => m.shiftId === shiftId, 60_000);
+      const rejected = await h.server.waitFor('shift.rejected', (m) => m.shiftId === shiftId, 60_000);
       await h.runner.supervisor.whenSettled(shiftId);
+      // runner-authority-fixes T9: the put-back still carries the card worktree violation (the owners' alert needs it)
+      expect(rejected.guardViolations).toEqual([expect.objectContaining({ rule: 'devops_card_worktree' })]);
       expect(sh(wt, 'git', ['rev-parse', 'HEAD']).trim()).toBe(head);
       expect(sh(wt, 'git', ['status', '--porcelain', '--untracked-files=all'])).toBe('');
     }, 120_000);

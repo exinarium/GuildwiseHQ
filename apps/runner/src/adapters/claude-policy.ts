@@ -2,6 +2,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from '
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative, resolve, sep } from 'node:path';
 import { type AgentPermissions, TEST_SERVICE_HOSTS, testServiceDomain } from '@aom/shared';
+import { HOME_SECRET_ENTRIES } from '../devops/home-secrets.ts';
 import { protectedGitPaths } from '../git/harden.ts';
 import {
   TEST_SERVICE_ROLES,
@@ -123,6 +124,17 @@ export interface ClaudePolicyContext {
    * role's `rm` deny patterns are left out of the DevOps settings: the guard judges deletes.
    */
   guardHookCommand?: string;
+  /**
+   * runner-authority-fixes T2: the local authority's folder (`~/.config/aom-runner`: policy.json, its key, held items,
+   * paired browsers). No agent tool reads or writes it (the DevOps engineer's included), and sandboxed shells cannot see it.
+   */
+  policyDir?: string;
+  /**
+   * runner-authority-fixes T10: the DevOps engineer's Edit and Write tools are scoped to its scratch, tmp and home plus
+   * these folders (the OS temp folders, the allowed paths, and with installs on the toolchain folders). Absent (release
+   * prep, unit tests without access): the tools stay unscoped as before.
+   */
+  devopsWriteRoots?: string[];
 }
 
 /** A read-only vault clone of which only the root, everything outside `projects/` and `keep` are readable. */
@@ -230,32 +242,8 @@ export const REGISTRY_DOMAINS = [
   'objects.githubusercontent.com',
 ];
 
-/** Credential stores in the real home that no agent has any business reading. */
-export const HOME_SECRETS = [
-  '.ssh',
-  '.aws',
-  '.azure',
-  '.gnupg',
-  '.kube',
-  '.docker',
-  '.netrc',
-  '.npmrc',
-  '.pypirc',
-  '.git-credentials',
-  '.config/gh',
-  '.config/gcloud',
-  '.claude',
-  '.claude.json',
-  // browser profiles (cookies, saved logins), R18-L
-  '.mozilla',
-  '.config/google-chrome',
-  '.config/chromium',
-  '.config/BraveSoftware',
-  '.config/microsoft-edge',
-  'Library/Application Support/Google/Chrome',
-  'Library/Application Support/Firefox',
-  'Library/Application Support/BraveSoftware',
-];
+/** Credential stores in the real home that no agent has any business reading (devops/home-secrets.ts). */
+export const HOME_SECRETS: readonly string[] = HOME_SECRET_ENTRIES;
 
 /**
  * Browsers (Playwright/Chromium) need `socket(AF_UNIX)`, which the Linux sandbox's seccomp filter blocks entirely
@@ -341,6 +329,10 @@ export const RUNNER_PRIVATE = [
   'secrets',
   'keys',
   'session-env',
+  // runner-authority-fixes: toolchains the DevOps engineer registered, and the runner's card branch and conflict records
+  'toolchains.json',
+  'card-branches.json',
+  'conflicts.json',
 ];
 
 /**
@@ -491,6 +483,7 @@ function sandboxBlock(
     ...(ctx.otherAgentTmps ?? []),
     ...HOME_SECRETS.map((p) => join(ctx.realHome, p)),
     ...(ctx.accountDirs ?? []),
+    ...(ctx.policyDir ? [ctx.policyDir] : []),
     ...(profile.browser ? browserMask(ctx) : []),
   ];
   const readDirs = ctx.readDirs ?? [];
@@ -843,6 +836,19 @@ export function scanSandboxBlock(
   return base;
 }
 
+/** T2: every tool rule that keeps an agent out of the local authority's folder. */
+export function policyDirDenies(dir: string): string[] {
+  const abs = ruleAbs(dir);
+  return [
+    `Read(${abs})`,
+    `Read(${abs}/**)`,
+    `Edit(${abs})`,
+    `Edit(${abs}/**)`,
+    `Write(${abs})`,
+    `Write(${abs}/**)`,
+  ];
+}
+
 function buildDevopsSettings(
   p: AgentPermissions,
   ctx: ClaudePolicyContext,
@@ -868,6 +874,8 @@ function buildDevopsSettings(
     ...ctx.addDirs.map((d) => `Edit(${ruleAbs(d)}/**)`),
     // uat-runner-fixes-3 finding 2: the card worktrees are never the DevOps engineer's to edit, whatever it is asked
     `Edit(${ruleAbs(join(ctx.runnerRoot, 'worktrees'))}/**)`,
+    // T2: the local approval settings are never the DevOps engineer's to read or change (its shell: the guard's policyFence)
+    ...(ctx.policyDir ? policyDirDenies(ctx.policyDir) : []),
   ];
   return {
     permissions: {
@@ -881,7 +889,13 @@ function buildDevopsSettings(
         // names. The denies below still win over it.
         ...(ctx.readOnlyScan
           ? [`Edit(${ruleAbs(paths.scratch)}/**)`, `Write(${ruleAbs(paths.scratch)}/**)`]
-          : ['Edit', 'Write', 'NotebookEdit']),
+          : ctx.devopsWriteRoots
+            ? [paths.scratch, paths.tmp, paths.home, ...ctx.devopsWriteRoots].flatMap((d) => [
+                `Edit(${ruleAbs(d)}/**)`,
+                `Write(${ruleAbs(d)}/**)`,
+                `NotebookEdit(${ruleAbs(d)}/**)`,
+              ])
+            : ['Edit', 'Write', 'NotebookEdit']),
         // a read-only scan has no web: nothing to send a secret to
         ...(ctx.readOnlyScan ? [] : ['WebFetch', 'WebSearch']),
         ...DEPLOY_ASK_ALLOW,

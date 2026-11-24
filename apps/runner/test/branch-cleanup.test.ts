@@ -2,7 +2,8 @@ import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { HygieneRepoSpec } from '@aom/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { hygieneRepo } from '../src/devops/hygiene.ts';
+import { type HygieneDeps, hygieneRepo } from '../src/devops/hygiene.ts';
+import { BranchLedger } from '../src/git/branch-ledger.ts';
 import { ensureWorktree } from '../src/git/worktrees.ts';
 import { cleanupTmp, makeRepo, sh, type TestRepo, tmp } from './helpers.ts';
 
@@ -57,14 +58,40 @@ const card = (n: number, branch: string, prUrl?: string, remoteBranch?: string):
   ...(remoteBranch ? { remoteBranch } : {}),
 });
 
-/** A card branch with one commit, pushed to origin (as `pr` / `push_branch` do), back on main in the clone. */
-function pushedBranch(repo: TestRepo, branch: string, file: string) {
+/** The runner's card branch ledger of each test clone (T1: origin deletes need the runner's own push record). */
+const ledgers = new Map<string, BranchLedger>();
+const ledgerOf = (clone: string): BranchLedger => {
+  let l = ledgers.get(clone);
+  if (!l) {
+    l = new BranchLedger(join(tmp(), 'card-branches.json'));
+    ledgers.set(clone, l);
+  }
+  return l;
+};
+/** Records `branch` on origin as pushed by this runner, at origin's current tip. */
+const runnerPushed = (repo: TestRepo, branch: string) =>
+  ledgerOf(repo.clone).record(
+    repo.remoteNormalized,
+    branch,
+    'pushed',
+    sh(repo.origin, 'git', ['rev-parse', `refs/heads/${branch}`]),
+  );
+/** hygieneRepo with the clone's ledger. */
+const tidy = (s: HygieneRepoSpec, busy: string[] = [], deps: HygieneDeps = {}) =>
+  hygieneRepo(s, busy, { ledger: ledgerOf(s.localPath), ...deps });
+
+/**
+ * A card branch with one commit, pushed to origin (as `pr` / `push_branch` do), back on main in the clone. `ours`:
+ * pushed by this runner (in its ledger); false for a branch a person pushed.
+ */
+function pushedBranch(repo: TestRepo, branch: string, file: string, ours = true) {
   sh(repo.clone, 'git', ['checkout', '-b', branch, 'main']);
   writeFileSync(join(repo.clone, file), `${file}\n`);
   sh(repo.clone, 'git', ['add', '-A']);
   sh(repo.clone, 'git', ['commit', '-m', `add ${file}`]);
   sh(repo.clone, 'git', ['push', '-u', 'origin', branch]);
   sh(repo.clone, 'git', ['checkout', 'main']);
+  if (ours) runnerPushed(repo, branch);
 }
 const originHeads = (repo: TestRepo) =>
   sh(repo.origin, 'git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads']).split('\n');
@@ -85,7 +112,7 @@ describe('hygiene removes the branches of finished cards', () => {
       const repo = makeRepo();
       pushedBranch(repo, branch, 'a.txt');
       sh(repo.clone, 'git', ['merge', '--no-ff', '-m', 'merge a', branch]);
-      const { result } = await hygieneRepo(spec(repo, [card(1, branch)], { branchPrefix: prefix }));
+      const { result } = await tidy(spec(repo, [card(1, branch)], { branchPrefix: prefix }));
       expect(result.cleaned.map((c) => c.branch)).toEqual([branch]);
       expect(localHeads(repo)).not.toContain(branch);
     },
@@ -96,7 +123,7 @@ describe('hygiene removes the branches of finished cards', () => {
     pushedBranch(repo, 'aom/toy-1-a', 'a.txt');
     sh(repo.clone, 'git', ['merge', '--no-ff', '-m', 'merge a', 'aom/toy-1-a']);
     sh(repo.clone, 'git', ['push', 'origin', 'main']);
-    const { result, commands } = await hygieneRepo(spec(repo, [card(1, 'aom/toy-1-a')]));
+    const { result, commands } = await tidy(spec(repo, [card(1, 'aom/toy-1-a')]));
     expect(result.problem).toBeNull();
     expect(result.cleaned).toEqual([
       expect.objectContaining({
@@ -122,7 +149,7 @@ describe('hygiene removes the branches of finished cards', () => {
     sh(repo.clone, 'git', ['commit', '-m', 'earlier']);
     sh(repo.clone, 'git', ['cherry-pick', 'aom/toy-2-b']);
     sh(repo.clone, 'git', ['push', 'origin', 'main']);
-    const { result } = await hygieneRepo(spec(repo, [card(2, 'aom/toy-2-b')]));
+    const { result } = await tidy(spec(repo, [card(2, 'aom/toy-2-b')]));
     expect(result.cleaned[0]).toMatchObject({ branch: 'aom/toy-2-b', origin: true, local: true });
     expect(result.cleaned[0]?.reason).toContain('rebased or cherry-picked');
     expect(originHeads(repo)).toEqual(['main']);
@@ -131,10 +158,10 @@ describe('hygiene removes the branches of finished cards', () => {
   it('keeps a branch with a commit found nowhere else, and a branch that is not a Guildwise one', async () => {
     const repo = makeRepo();
     pushedBranch(repo, 'aom/toy-3-c', 'c.txt');
-    pushedBranch(repo, 'feature/mine', 'm.txt');
+    pushedBranch(repo, 'feature/mine', 'm.txt', false);
     sh(repo.clone, 'git', ['merge', '--no-ff', '-m', 'merge', 'feature/mine']); // merged, but not ours
     sh(repo.clone, 'git', ['push', 'origin', 'main']);
-    const { result } = await hygieneRepo(
+    const { result } = await tidy(
       spec(repo, [card(3, 'aom/toy-3-c'), card(4, 'feature/mine'), card(5, 'main')]),
     );
     expect(result.cleaned).toEqual([]);
@@ -147,7 +174,7 @@ describe('hygiene removes the branches of finished cards', () => {
     pushedBranch(repo, 'aom/toy-6-d', 'd.txt');
     sh(repo.clone, 'git', ['merge', '--no-ff', '-m', 'merge d', 'aom/toy-6-d']);
     sh(repo.clone, 'git', ['push', 'origin', 'main']);
-    const { result } = await hygieneRepo(spec(repo, []));
+    const { result } = await tidy(spec(repo, []));
     expect(result.cleaned).toEqual([]);
     expect(originHeads(repo)).toContain('aom/toy-6-d');
   });
@@ -165,7 +192,7 @@ describe('hygiene removes the branches of finished cards', () => {
       'https://h/pull/10': null,
     };
     const asked: string[] = [];
-    const { result } = await hygieneRepo(
+    const { result } = await tidy(
       spec(repo, [
         card(7, 'aom/toy-7-merged', 'https://h/pull/7'),
         card(8, 'aom/toy-8-open', 'https://h/pull/8'),
@@ -198,7 +225,7 @@ describe('hygiene removes the branches of finished cards', () => {
     pushedBranch(repo, 'aom/toy-12-f', 'f.txt');
     sh(repo.clone, 'git', ['merge', '--no-ff', '-m', 'merge f', 'aom/toy-12-f']);
     sh(repo.clone, 'git', ['push', 'origin', 'main']);
-    const { result } = await hygieneRepo(spec(repo, [card(12, 'aom/toy-12-f', 'https://h/pull/12')]), [], {
+    const { result } = await tidy(spec(repo, [card(12, 'aom/toy-12-f', 'https://h/pull/12')]), [], {
       changeState: async () => 'closed',
     });
     expect(result.cleaned.map((c) => c.branch)).toEqual(['aom/toy-12-f']);
@@ -210,7 +237,7 @@ describe('hygiene removes the branches of finished cards', () => {
     pushedBranch(repo, 'aom/toy-11-e', 'e.txt');
     sh(repo.clone, 'git', ['merge', '--no-ff', '-m', 'merge e', 'aom/toy-11-e']);
     sh(repo.clone, 'git', ['push', 'origin', 'main']);
-    const { result } = await hygieneRepo(spec(repo, [card(11, 'aom/toy-11-e', 'https://h/pull/11')]), [], {
+    const { result } = await tidy(spec(repo, [card(11, 'aom/toy-11-e', 'https://h/pull/11')]), [], {
       changeState: async () => 'open',
     });
     expect(result.cleaned).toEqual([]);
@@ -244,7 +271,7 @@ describe('hygiene removes the branches of finished cards', () => {
     }
     sh(repo.clone, 'git', ['push', 'origin', 'main']);
     writeFileSync(join(wtB, 'wip.txt'), 'unsaved\n'); // someone left edits in the second worktree
-    const { result } = await hygieneRepo(spec(repo, [card(12, 'aom/toy-12-f'), card(13, 'aom/toy-13-g')]));
+    const { result } = await tidy(spec(repo, [card(12, 'aom/toy-12-f'), card(13, 'aom/toy-13-g')]));
     expect(result.cleaned).toEqual([
       expect.objectContaining({ branch: 'aom/toy-12-f', worktree: true, local: true, origin: false }),
     ]);
@@ -270,7 +297,7 @@ describe('hygiene removes the branches of finished cards', () => {
       },
       defaultPath: wt,
     });
-    const { result } = await hygieneRepo(spec(repo, [card(14, 'aom/toy-14-h')]), [wt]);
+    const { result } = await tidy(spec(repo, [card(14, 'aom/toy-14-h')]), [wt]);
     // the whole repository is deferred while a shift runs in it
     expect(result.cleaned).toEqual([]);
     expect(localHeads(repo)).toContain('aom/toy-14-h');
@@ -290,7 +317,7 @@ describe('hygiene removes the branches of finished cards', () => {
     sh(other, 'git', ['commit', '-m', 'extra work']);
     sh(other, 'git', ['push', 'origin', 'aom/toy-15-i']);
     // the fetch inside the run sees it: the extra commit is not in main, so the branch stays
-    const { result } = await hygieneRepo(spec(repo, [card(15, 'aom/toy-15-i')]));
+    const { result } = await tidy(spec(repo, [card(15, 'aom/toy-15-i')]));
     expect(result.cleaned).toEqual([]);
     expect(originHeads(repo)).toContain('aom/toy-15-i');
   });
@@ -302,7 +329,7 @@ describe('a reopened card gets its branch back', () => {
     pushedBranch(repo, 'aom/toy-16-j', 'j.txt');
     sh(repo.clone, 'git', ['merge', '--no-ff', '-m', 'merge j', 'aom/toy-16-j']);
     sh(repo.clone, 'git', ['push', 'origin', 'main']);
-    const { result } = await hygieneRepo(spec(repo, [card(16, 'aom/toy-16-j')]));
+    const { result } = await tidy(spec(repo, [card(16, 'aom/toy-16-j')]));
     expect(result.cleaned).toHaveLength(1);
     expect(localHeads(repo)).toEqual(['main']);
 
@@ -352,11 +379,12 @@ describe('hygiene removes the pull request branch by its stored name only', () =
     const repo = makeRepo();
     pushedBranch(repo, 'aom/toy-1-a', 'a.txt');
     sh(repo.clone, 'git', ['push', 'origin', 'aom/toy-1-a:refs/heads/pieter/TOY-1']);
+    runnerPushed(repo, 'pieter/TOY-1');
     sh(repo.clone, 'git', ['push', 'origin', 'aom/toy-1-a:refs/heads/pieter/mine']);
     sh(repo.clone, 'git', ['push', 'origin', '--delete', 'aom/toy-1-a']);
     sh(repo.clone, 'git', ['merge', '--no-ff', '-m', 'merge a', 'aom/toy-1-a']);
     sh(repo.clone, 'git', ['push', 'origin', 'main']);
-    const { result } = await hygieneRepo(spec(repo, [card(1, 'aom/toy-1-a', undefined, 'pieter/TOY-1')]));
+    const { result } = await tidy(spec(repo, [card(1, 'aom/toy-1-a', undefined, 'pieter/TOY-1')]));
     expect(result.problem).toBeNull();
     expect(originHeads(repo)).not.toContain('pieter/TOY-1');
     expect(originHeads(repo)).toContain('pieter/mine');
@@ -368,7 +396,8 @@ describe('hygiene removes the pull request branch by its stored name only', () =
     const repo = makeRepo();
     pushedBranch(repo, 'aom/toy-2-b', 'b.txt');
     sh(repo.clone, 'git', ['push', 'origin', 'aom/toy-2-b:refs/heads/pieter/TOY-2']);
-    const { result } = await hygieneRepo(spec(repo, [card(2, 'aom/toy-2-b', undefined, 'pieter/TOY-2')]));
+    runnerPushed(repo, 'pieter/TOY-2');
+    const { result } = await tidy(spec(repo, [card(2, 'aom/toy-2-b', undefined, 'pieter/TOY-2')]));
     expect(result.cleaned).toEqual([]);
     expect(originHeads(repo)).toContain('pieter/TOY-2');
   });

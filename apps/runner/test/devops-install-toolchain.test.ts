@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { findPackageManager } from '../src/devops/dependency-install.ts';
 import { type ExecOptions, type Executor, realExecutor } from '../src/toolchain/exec.ts';
+import { toolchainHash } from '../src/toolchain/registry.ts';
 import { type Harness, startHarness, worktreeOf } from './harness.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
 
@@ -75,7 +76,9 @@ describe.skipIf(!bwrapOk)('a builder gets npm through DevOps once DevOps registe
     expect(spawnSync('sh', ['-c', 'command -v npm'], { encoding: 'utf8' }).stdout.trim()).not.toMatch(/npm$/);
     h = await startHarness({}, { executor });
     // what Forge did on the devbox: `aom toolchain add node-26 --bin <node>/bin`
-    h.runner.toolchains.add({ name: 'node-26', bin: [n.bin] });
+    const added = h.runner.toolchains.add({ name: 'node-26', bin: [n.bin] });
+    // ... and the owner approved it on the workstation (runner-authority-fixes T2: `guildwise-runner toolchain approve`)
+    h.runner.toolchains.pinned = (hash) => hash === toolchainHash(added);
     const { ended } = await h.runShift({ stage: 'build', ref: 'TOY-1', mock: { build: ['deps_install'] } });
     expect(ended.outcome).toBe('reported');
     const answer = readFileSync(join(worktreeOf(h), '.guildwise-mock', 'deps-install.txt'), 'utf8');

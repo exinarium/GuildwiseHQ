@@ -52,6 +52,9 @@ export async function agentOrgs(tx: Tx, workstationId: string): Promise<string[]
  * Raises `wanted` notices that are not open yet; closes the open ones of `subkind` + `keyPrefix` not in `wanted`. An open
  * notice whose wording no longer matches (a project's account or fallback changed, so "paused" became "runs on the main
  * account") is closed and replaced by a new one, without a second mail.
+ *
+ * `keepOwnerClosed` (runner-authority-fixes T6): keys whose notice a person closed stay closed while they are still
+ * wanted (the same held item still waits); a different key still raises its own notice.
  */
 export async function reconcile(
   ctx: Ctx,
@@ -60,12 +63,26 @@ export async function reconcile(
   subkind: string,
   keyPrefix: string,
   wanted: Notice[],
+  keepOwnerClosed: string[] = [],
 ): Promise<Mail[]> {
   const open = await rows<{ id: string; org_id: string; key: string; title: string; body: string }>(
     tx,
     `SELECT id, org_id, data->>'key' AS key, title, body FROM desk_items
       WHERE subkind=$1 AND status='open' AND addressee_user_id=$2 AND starts_with(data->>'key', $3)`,
     [subkind, ws.userId, keyPrefix],
+  );
+  const ownerClosed = new Set(
+    keepOwnerClosed.length === 0
+      ? []
+      : (
+          await rows<{ org_id: string; key: string }>(
+            tx,
+            `SELECT org_id, data->>'key' AS key FROM desk_items
+              WHERE subkind=$1 AND addressee_user_id=$2 AND data->>'key' = ANY($3::text[])
+                AND status <> 'open' AND answered_by IS NOT NULL`,
+            [subkind, ws.userId, keepOwnerClosed],
+          )
+        ).map((r) => `${r.key}|${r.org_id}`),
   );
   const events: AppendInput[] = [];
   const mails: Mail[] = [];
@@ -77,6 +94,8 @@ export async function reconcile(
       const current = open.filter((o) => o.key === n.key && o.org_id === orgId);
       const fresh = current.some((o) => o.title === n.title && o.body === n.body);
       if (fresh) continue;
+      // closed by its owner while the same item still waits: not raised again with a new id
+      if (current.length === 0 && ownerClosed.has(`${n.key}|${orgId}`)) continue;
       const stale = current.length > 0;
       for (const o of current) replaced.add(o.id);
       const deskItemId = randomUUID();
@@ -319,21 +338,17 @@ export async function syncLocalStepNotices(
               [ws.id],
             )
           ).map((r) => r.org_id);
-    return reconcile(
-      ctx,
-      tx,
-      ws,
-      DESK_SUBKIND.workstationLocalStep,
-      prefix,
-      steps.map((s) => ({
-        key: `${prefix}${s.key}`,
-        subkind: DESK_SUBKIND.workstationLocalStep,
-        ...localStepText(w.name, s, sentenceOf(s.kind)),
-        orgIds: ownOrgs,
-        affectedCardIds: s.cardIds,
-        data: { command: s.command, stepKind: s.kind },
-      })),
-    );
+    const wanted = steps.map((s) => ({
+      key: `${prefix}${s.key}`,
+      subkind: DESK_SUBKIND.workstationLocalStep,
+      ...localStepText(w.name, s, sentenceOf(s.kind)),
+      orgIds: ownOrgs,
+      affectedCardIds: s.cardIds,
+      data: { command: s.command, stepKind: s.kind },
+    }));
+    // A held item's notice the owner closed stays closed while that item still waits (T6). Other steps come back.
+    const heldKeys = steps.filter((s) => s.key.startsWith('held:')).map((s) => `${prefix}${s.key}`);
+    return reconcile(ctx, tx, ws, DESK_SUBKIND.workstationLocalStep, prefix, wanted, heldKeys);
   });
 }
 

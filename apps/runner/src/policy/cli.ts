@@ -1,18 +1,20 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { ReleaseSignPayloadSchema, urlHasPassword } from '@aom/shared';
 import type { Command } from 'commander';
 import { entryDir, loadIndex } from '../pairings.ts';
-import { resolveDataDir } from '../paths.ts';
+import { resolveDataDir, runnerPaths } from '../paths.ts';
 import { readOffers, type SetupOffer } from '../setup/offers.ts';
 import { RELEASE_PREP_DIR } from '../signing/release-prepare.ts';
 import { type MinisignRunner, runMinisign, secretKeyKind, signArtefact } from '../signing/release-sign.ts';
+import { ToolchainRegistry } from '../toolchain/registry.ts';
 import { openOwnerTurn } from './authority.ts';
 import { setupPending } from './gate.ts';
 import * as grants from './grants.ts';
 import { type HeldRecord, HeldStore } from './held.ts';
+import { POLICY_KEY_FILE, sealMarkerFor } from './integrity.ts';
 import { PasskeyStore } from './passkey-store.ts';
 import type { Policy } from './schema.ts';
 import { PolicyStore, policyDir } from './store.ts';
@@ -35,6 +37,8 @@ export interface PolicyCliDeps {
   now?: () => number;
   /** The organizations the server offers this workstation and their DevOps engineer here (`setup-offers.json`). */
   offers?: () => SetupOffer[];
+  /** T2: the runner's toolchain list (`toolchain approve` shows the entry it pins). */
+  toolchains?: () => ToolchainRegistry;
 }
 
 /** The offers of every pairing under the data dir (what `setup` shows); none when the runner is not paired. */
@@ -48,8 +52,18 @@ export function localOffers(dataRoot: string = resolveDataDir()): SetupOffer[] {
 
 export function defaultCliDeps(dir: string = policyDir()): PolicyCliDeps {
   const tty = !!process.stdin.isTTY && !!process.stdout.isTTY;
+  const dataDir = resolveDataDir();
   return {
-    store: new PolicyStore(dir),
+    store: new PolicyStore(dir, {
+      sealMarker: sealMarkerFor(dataDir),
+      onKeyCreated: (f) => console.warn(`created a new policy key: ${f}`),
+    }),
+    toolchains: () => {
+      const reg = new ToolchainRegistry(runnerPaths(dataDir).toolchains, dataDir);
+      const pins = new PolicyStore(dir).get().toolchainPins;
+      reg.pinned = (h) => pins.includes(h);
+      return reg;
+    },
     held: new HeldStore(dir),
     passkeys: new PasskeyStore(dir),
     out: (l) => console.log(l),
@@ -492,7 +506,15 @@ export function registerPolicyCommands(
     }),
   );
 
-  program
+  const toolchain = program.command('toolchain').description('toolchains the DevOps helper registered (T2)');
+  toolchain
+    .command('approve <sha256>')
+    .description(
+      "show a toolchain a DevOps helper registered and, after your yes, put it on the agents' PATH",
+    )
+    .action(run((h: string) => toolchainApprove(make(), h)));
+
+  const policy = program
     .command('policy')
     .description("print this workstation's local policy (policy.json)")
     .action(
@@ -500,10 +522,58 @@ export function registerPolicyCommands(
         const d = make();
         const r = d.store.read();
         if (r.error) d.out(`INVALID (${r.error}): the safe defaults apply until it is fixed`);
+        else if (r.adoptable) d.out('NOT SEALED YET: the runner seals it at its next start');
+        else if (!r.missing) d.out(`sealed with ${join(d.store.dir, POLICY_KEY_FILE)}`);
         d.out(d.store.file);
         show(d, r.policy);
       }),
     );
+  policy
+    .command('accept')
+    .description('after a change made outside the runner (or a lost key): show the file and seal it as it is')
+    .action(run(() => policyAccept(make())));
+}
+
+/**
+ * `guildwise-runner policy accept` (T2, S3): prints what the file grants, then seals it after a typed yes. The way back
+ * after a lost key or an edit made outside the runner; until then everything asks.
+ */
+export async function policyAccept(d: PolicyCliDeps): Promise<void> {
+  let text: string;
+  try {
+    text = readFileSync(d.store.file, 'utf8');
+  } catch {
+    throw new Error(`${d.store.file} does not exist: nothing to accept`);
+  }
+  const r = d.store.read();
+  d.out(d.store.file);
+  d.out(r.error ? `Now: ${r.error}` : 'Now: sealed and valid.');
+  d.out('This is what the file grants, exactly as it is on disk:');
+  d.out(text.trimEnd());
+  if (!(await confirm(d, 'Seal this policy as the approval settings of this computer?')))
+    throw new Error('not accepted');
+  d.store.accept();
+  d.out('Sealed. The runner uses it from now on.');
+}
+
+/** `guildwise-runner toolchain approve <hash>` (T2, D2): shows the entry and pins it after a typed yes. */
+export async function toolchainApprove(d: PolicyCliDeps, hash: string): Promise<void> {
+  if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error('usage: toolchain approve <sha256 shown on the Desk>');
+  const reg = d.toolchains?.();
+  const hit = reg?.waiting().find((w) => w.hash === hash);
+  if (!hit)
+    throw new Error(`no toolchain waits with ${hash.slice(0, 12)}...: \`aom toolchain list\` shows them`);
+  const e = hit.entry;
+  d.out(
+    `Toolchain "${e.name}", registered by the DevOps helper${e.addedAt ? ` on ${e.addedAt.slice(0, 10)}` : ''}:`,
+  );
+  for (const b of e.binDirs) d.out(`  on PATH:   ${b}`);
+  for (const r of e.readDirs) d.out(`  readable:  ${r}`);
+  for (const [k, v] of Object.entries(e.env)) d.out(`  sets:      ${k}=${v}`);
+  d.out('Every agent on this computer would run programs from these folders.');
+  if (!(await confirm(d, 'Allow this toolchain?'))) throw new Error('not approved');
+  d.store.update((p) => ({ ...p, toolchainPins: [...new Set([...p.toolchainPins, hash])] }));
+  d.out(`Approved "${e.name}": new shifts and chats get it.`);
 }
 
 /** `guildwise-runner ceo turn`: opens one CEO owner turn with full power from this machine (R18-S). */

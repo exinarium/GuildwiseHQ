@@ -143,3 +143,47 @@ describe('DevOps approvals on a member workstation (G-Q8)', () => {
     expect(await statusOf(id)).toBe('queued');
   });
 });
+
+describe('runner-authority-fixes T10: "Always allow" under G-Q8 needs every required approver', () => {
+  /** A request blocked by Install off (the runner checked the switch), waiting on the member's workstation. */
+  async function blocked(a: Awaited<ReturnType<typeof acme>>) {
+    const id = await waitingRequest(a);
+    await q(
+      `UPDATE devops_requests SET approval = approval || '{"blockedBy":"allowInstall","commands":["pipx install yt-dlp"]}'::jsonb WHERE id=$1`,
+      [id],
+    );
+    return id;
+  }
+  const installOn = async (ws: string) =>
+    (await q('SELECT devops_access FROM workstations WHERE id=$1', [ws]))[0]?.devops_access?.allowInstall ===
+    true;
+  const resolve = (a: Awaited<ReturnType<typeof acme>>, who: Person, id: string, scope: 'once' | 'always') =>
+    ok<any>(a.as(who, 'POST', `/api/devops/requests/${id}/resolve`, { resolution: 'approved', scope }));
+
+  it('Admin "always" then workstation user "once": Allow once (the switch stays off)', async () => {
+    const a = await acme();
+    const id = await blocked(a);
+    await resolve(a, a.admin, id, 'always');
+    await resolve(a, a.member, id, 'once');
+    expect(await statusOf(id)).toBe('queued');
+    expect(await installOn(a.member.workstationId)).toBe(false);
+  });
+
+  it('workstation user "once" then Admin "always": Allow once', async () => {
+    const a = await acme();
+    const id = await blocked(a);
+    await resolve(a, a.member, id, 'once');
+    await resolve(a, a.admin, id, 'always');
+    expect(await statusOf(id)).toBe('queued');
+    expect(await installOn(a.member.workstationId)).toBe(false);
+  });
+
+  it('both choose "always": the switch goes on', async () => {
+    const a = await acme();
+    const id = await blocked(a);
+    await resolve(a, a.member, id, 'always');
+    await resolve(a, a.admin, id, 'always');
+    expect(await statusOf(id)).toBe('queued');
+    expect(await installOn(a.member.workstationId)).toBe(true);
+  });
+});

@@ -1,4 +1,5 @@
 import { entryDir, loadIndex } from '../pairings.ts';
+import { sealMarkerFor } from '../policy/integrity.ts';
 import { localCli } from '../policy/local-command.ts';
 import type { Policy } from '../policy/schema.ts';
 import type { Executor } from '../toolchain/exec.ts';
@@ -115,7 +116,7 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
   const p = opts.yes ? null : deps.prompter;
   const say = deps.out;
   const policyFile = deps.policyFile ?? policyPath(deps.home);
-  const current = readPolicy(policyFile);
+  const current = readPolicy(policyFile, sealMarkerFor(deps.dataRoot));
   const next: Policy = structuredClone(current);
   const admin: string[] = [];
   const dirs = pairingDirsOf(deps.dataRoot);

@@ -38,6 +38,7 @@ describe('policy.json schema', () => {
       acceptRootEquivalent: false,
       passkeys: [],
       signingKeys: [],
+      toolchainPins: [],
     });
     expect(DEFAULT_POLICY.startupRefusal).toBeUndefined();
   });

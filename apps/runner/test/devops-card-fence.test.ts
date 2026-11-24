@@ -83,8 +83,8 @@ describe.sequential('the runner refuses and reverts a DevOps shift that changes 
   }, 120_000);
 });
 
-describe('the server conflict request may fast-forward its own card branch, nothing else', () => {
-  it('a fast-forward of the conflict branch passes; the same move without the conflict request is reverted', async () => {
+describe('T7 (AC9): DevOps never moves a card branch, not even a fast-forward for a conflict request', () => {
+  it('a DevOps fast-forward of the card branch is reverted (the runner moves it after "Resolved:")', async () => {
     const h = await startHarness();
     try {
       await h.runShift({ stage: 'build', ref: 'TOY-1' });
@@ -95,16 +95,7 @@ describe('the server conflict request may fast-forward its own card branch, noth
       writeFileSync(join(wt, 'resolved.txt'), 'x\n');
       sh(wt, 'git', ['add', '-A']);
       sh(wt, 'git', ['commit', '-m', 'resolution']);
-      const moved = sh(wt, 'git', ['rev-parse', 'HEAD']).trim();
-      const ok = await enforceCardFence({
-        root,
-        before,
-        shiftId: 'aaaaaaaa-1',
-        conflictBranch: branch,
-        usedByOthers: () => false,
-      });
-      expect(ok).toEqual([]);
-      expect(sh(wt, 'git', ['rev-parse', 'HEAD']).trim()).toBe(moved);
+      expect(branch).toBeTruthy();
       const refused = await enforceCardFence({
         root,
         before,
@@ -168,10 +159,10 @@ describe('the guard hook refuses writes in a card worktree before they happen (a
     ).toBe('allowed');
     const ff = 'git merge --ff-only conflict/GIT-1-a1';
     expect(classifyCommand(ff, cfg(), wt, head('guildwise/git-1-x')).decision).toBe('refused');
+    // T7: a conflict request gets no exception any more (the runner moves the card branch itself)
     expect(
-      classifyCommand(ff, cfg({ conflictBranch: 'guildwise/git-1-x' }), wt, head('guildwise/git-1-x'))
-        .decision,
-    ).toBe('allowed');
+      classifyCommand(ff, { ...cfg(), approvedCommands: [ff] }, wt, head('guildwise/git-1-x')).decision,
+    ).toBe('refused');
   });
 
   it('the DevOps settings deny the Edit tool in the card worktrees', () => {

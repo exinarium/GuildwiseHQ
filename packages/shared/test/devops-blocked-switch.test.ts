@@ -16,10 +16,13 @@ describe('blockedSwitch', () => {
     expect(blockedSwitch({ ...off, allowInstall: true }, ask('x', { blockedBy: 'allowInstall' }))).toBeNull();
   });
 
-  it('reads Install and Docker from the request when the agent gave none', () => {
-    expect(blockedSwitch(off, ask('install Node 22'))).toBe('allowInstall');
-    expect(blockedSwitch(off, ask('run the tests in docker'))).toBe('allowDocker');
-    expect(blockedSwitch({ ...off, allowInstall: true }, ask('install Node 22'))).toBeNull();
+  it("runner-authority-fixes Rework 1 (S2): never guesses a switch from the agent's words; only the runner's checked one", () => {
+    expect(blockedSwitch(off, ask('install Node 22'))).toBeNull();
+    expect(blockedSwitch(off, ask('run the tests in docker'))).toBeNull();
+    expect(blockedSwitch(off, ask('install Node 22', { blockedBy: 'allowInstall' }))).toBe('allowInstall');
+    expect(
+      blockedSwitch({ ...off, allowInstall: true }, ask('install Node 22', { blockedBy: 'allowInstall' })),
+    ).toBeNull();
   });
 
   it('REVIEW B1: a named switch never turns a destructive or download-and-run action into a switch wait', () => {

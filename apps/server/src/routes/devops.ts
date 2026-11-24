@@ -55,7 +55,14 @@ export function devopsRoutes(ctx: Ctx) {
       async (req) => {
         const s = await requireUser(ctx, req);
         if (req.body.resolution === 'approved') requireStepUp(ctx, s);
-        await resolveDevOpsApproval(ctx, s.user, req.params.id, req.body.resolution, req.body.note);
+        await resolveDevOpsApproval(
+          ctx,
+          s.user,
+          req.params.id,
+          req.body.resolution,
+          req.body.note,
+          req.body.scope,
+        );
         return getDevOpsRequest(ctx, s.user.id, req.params.id);
       },
     );

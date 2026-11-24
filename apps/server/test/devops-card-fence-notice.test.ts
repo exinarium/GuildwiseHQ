@@ -73,3 +73,31 @@ describe('a card worktree change the runner could not fully undo reaches the own
     expect(items[0]?.title).toContain('check it by hand');
   });
 });
+
+describe('T9 follow-up: a DevOps shift put back on a usage limit or an expired login still raises the alert', () => {
+  it.each(['usage_limited', 'auth_expired'] as const)(
+    '%s with a NOT fully reverted violation: one alert',
+    async (reason) => {
+      await q(`UPDATE devops_requests SET status='done' WHERE status IN ('queued','running')`);
+      const before = (await alerts()).length;
+      // a rejection cools the agent down for 30 s; the next case needs it at once
+      w.t.app.ctx.services.dispatcher.cooldown.clear();
+      const shiftId = await devopsShift();
+      r.send('shift.rejected', {
+        shiftId,
+        reason,
+        detail: 'put back',
+        // already over, so the next case still gets a shift dispatched (auth_expired runs last)
+        ...(reason === 'usage_limited' ? { limitedUntil: new Date(Date.now() - 1000).toISOString() } : {}),
+        guardViolations: [
+          {
+            rule: 'devops_card_worktree',
+            detail: `The DevOps engineer changed a card worktree ... /w/TOY-${reason}: x (NOT fully reverted: check it)`,
+          },
+        ],
+      });
+      await until(async () => (await alerts()).length === before + 1, 5000, 'alert');
+      expect((await alerts()).at(-1)?.body).toContain(`/w/TOY-${reason}`);
+    },
+  );
+});

@@ -124,6 +124,64 @@ describe('local steps', () => {
   });
 });
 
+describe('T6: a notice the owner closed stays closed while the same held item waits', () => {
+  const now = new Date();
+  const heldItem = (id: string) => ({
+    id,
+    kind: 'deploy.exec',
+    summary: `Deploy ${id}`,
+    commandHash: 'c'.repeat(64),
+    createdAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + 86_400_000).toISOString(),
+    command: `${CLI} approve ${id}`,
+  });
+  const keyed = async (suffix: string) =>
+    (await notices('workstation_local_step')).filter((n) => String(n.data.key).endsWith(suffix));
+  const dismiss = async (suffix: string) => {
+    const open = (await q(
+      `SELECT id FROM desk_items WHERE subkind='workstation_local_step' AND status='open' AND data->>'key' LIKE $1`,
+      [`%${suffix}`],
+    )) as Array<{ id: string }>;
+    expect(open).toHaveLength(1);
+    await ok(w.t.req('POST', `/api/desk/${open[0]?.id}/dismiss`, { cookie: w.owner.cookie, body: {} }));
+  };
+
+  it('closed held A is not re-created by the next approvals.held; a new held B notifies', async () => {
+    r.send('approvals.held', { items: [heldItem('aaaaaa7777')], steps: [] });
+    await until(async () => (await keyed('held:aaaaaa7777')).length === 1, 3000, 'A notice');
+    await dismiss('held:aaaaaa7777');
+    // the same item still waits and a new one arrives: the runner reports both (it does on every change and reconnect).
+    // Sent one at a time: two lists in flight could be applied out of order (the older one would close B).
+    r.send('approvals.held', { items: [heldItem('aaaaaa7777'), heldItem('bbbbbb7777')], steps: [] });
+    await until(async () => (await keyed('held:bbbbbb7777')).length === 1, 3000, 'B notice');
+    r.send('approvals.held', { items: [heldItem('aaaaaa7777'), heldItem('bbbbbb7777')], steps: [] });
+    await until(async () => (await ws())?.localAuthority.held !== undefined, 3000, 'second report applied');
+    await new Promise((res) => setTimeout(res, 300));
+    const a = await keyed('held:aaaaaa7777');
+    expect(a).toHaveLength(1);
+    expect(a[0]?.status).not.toBe('open');
+    expect((await keyed('held:bbbbbb7777')).map((n) => n.status)).toEqual(['open']);
+  });
+
+  it('an owner-closed step that is not a held item comes back while it is still needed', async () => {
+    const step = {
+      key: `devops.grant:${AGENT}`,
+      kind: 'devops.grant',
+      summary: 'let the helper work here',
+      command: `${CLI} devops grant ${ORG} --agent ${AGENT}`,
+    };
+    r.send('approvals.held', { items: [], steps: [step] });
+    await until(async () => (await keyed(step.key)).some((n) => n.status === 'open'), 3000, 'step notice');
+    await dismiss(step.key);
+    r.send('approvals.held', { items: [], steps: [step] });
+    await until(
+      async () => (await keyed(step.key)).filter((n) => n.status === 'open').length === 1,
+      3000,
+      'again',
+    );
+  });
+});
+
 describe('never held for CEO triage (only the person at the machine can act)', () => {
   it('both workstation notices are exempt from CEO routing, and are not pending triage', async () => {
     expect(ROUTING_EXEMPT_SUBKINDS).toContain(DESK_SUBKIND.workstationLocalStep);

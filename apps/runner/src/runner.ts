@@ -177,7 +177,9 @@ import {
 import { listMergedPrs, listOpenPrs } from './forge/list-prs.ts';
 import { runSshAction, SshSettingsStore } from './forge/ssh.ts';
 import type { ForgeEnv } from './forge/types.ts';
+import { BranchLedger } from './git/branch-ledger.ts';
 import { type CompletionInput, executeCompletion } from './git/completion.ts';
+import { ConflictRecords, setConflictRecords } from './git/conflict-record.ts';
 import { makeInitialCommit, repoStartState } from './git/empty-repo.ts';
 import type { PrCreator } from './git/gh.ts';
 import { git } from './git/git.ts';
@@ -222,7 +224,7 @@ import { JourneyWebhookCaller } from './outbound-delivery/journey-webhook.ts';
 import { OutboundDelivery } from './outbound-delivery/send.ts';
 import { type RunnerPaths, runnerPaths } from './paths.ts';
 import { Approvals } from './policy/approvals.ts';
-import { defaultAuthority, type LocalAuthority } from './policy/authority.ts';
+import { defaultAuthority, FileAuthority, type LocalAuthority } from './policy/authority.ts';
 import { ApprovedBundles, describeBundle } from './policy/deploy-detail.ts';
 import {
   gateCommand,
@@ -234,6 +236,7 @@ import {
   setupPending,
 } from './policy/gate.ts';
 import { type HeldRecord, HeldStore } from './policy/held.ts';
+import { sealMarkerFor } from './policy/integrity.ts';
 import { localCommand, runnerCli } from './policy/local-command.ts';
 import { PasskeyStore } from './policy/passkey-store.ts';
 import { readSetupOffers, recordSetupOffer, writeOffers } from './policy/setup-offers.ts';
@@ -275,10 +278,11 @@ import { selectDotnet } from './toolchain/dotnet.ts';
 import { ensureEnvironment } from './toolchain/ensure.ts';
 import { type Executor, realExecutor } from './toolchain/exec.ts';
 import { toolchainPathDirs, toolchainPathValue } from './toolchain/path-env.ts';
-import { ToolchainRegistry } from './toolchain/registry.ts';
+import { ToolchainRegistry, toolchainHash } from './toolchain/registry.ts';
 import type { Platform } from './toolchain/types.ts';
 import { VaultManager } from './vaults/manager.ts';
 import { RUNNER_VERSION } from './version.ts';
+import { DeviceStore, DevicesFileSchema } from './window/pairing.ts';
 
 export interface RunnerOptions {
   /** easy-runner-setup: the approvals page of this process (its port, or why it did not start). */
@@ -580,6 +584,8 @@ export class Runner {
   private readonly describing = new Set<string>();
   /** R21: the reason this runner refuses to start (it then only reports it), or null. */
   private refusedReason: string | null = null;
+  /** T2 (S4): when this process created the policy key (shown in status.json). */
+  private policyKeyCreatedAt: string | null = null;
   /** The post-welcome start-up check is running: server messages wait in `checkQueue`. */
   private startupChecking = false;
   private readonly checkQueue: ServerToRunner[] = [];
@@ -587,8 +593,20 @@ export class Runner {
   constructor(private readonly opts: RunnerOptions) {
     this.log = opts.log ?? nullLogger;
     this.paths = runnerPaths(opts.dataDir);
+    // T7: conflicts this runner sees itself (a later runner-run fast-forward needs one)
+    setConflictRecords(ConflictRecords.forRoot(this.paths.root));
     const pdir = opts.policyDir ?? policyDir();
-    this.authority = opts.authority ?? defaultAuthority(pdir);
+    this.authority =
+      opts.authority ??
+      defaultAuthority(pdir, {
+        sealMarker: sealMarkerFor(this.paths.root),
+        onKeyCreated: (f) => {
+          this.policyKeyCreatedAt = new Date().toISOString();
+          this.log.warn(
+            `created a new policy key ${f}: the local approval settings are sealed with it from now on`,
+          );
+        },
+      });
     this.narrowing = new NarrowingStore(pdir);
     this.artefacts = new ArtefactIndex(pdir);
     this.approvedBundles = new ApprovedBundles(pdir);
@@ -897,7 +915,12 @@ export class Runner {
       toolchainPaths: opts.config.runtimes['claude-code'].toolchainPaths,
       ...(opts.config.dotnetRoot ? { dotnetRoot: opts.config.dotnetRoot } : {}),
     }));
-    this.toolchains.onChange = () => this.reportToolchains(false);
+    // T2 (D2): a toolchain the DevOps engineer registered reaches other agents only once the owner pinned it
+    this.toolchains.pinned = (h) => this.authority.policy().toolchainPins.includes(h);
+    this.toolchains.onChange = () => {
+      this.reportToolchains(false);
+      this.askToolchainPins();
+    };
     this.runs = new RunManager({
       paths: this.paths,
       localAllowDocker: () => {
@@ -932,6 +955,7 @@ export class Runner {
           });
       },
       paths: this.paths,
+      installScriptsAllowed: (remote) => this.authority.policy().installScripts[remote] === true,
       config: opts.config,
       adapters: this.adapters,
       appProbe: this.appProbe,
@@ -1038,6 +1062,7 @@ export class Runner {
       capabilities: this.capabilities,
       restart: this.restartAfterReply,
       // R18-S: the opt-in must be in the local policy too, and each full-power turn needs a local action
+      narrowAccess: (a) => narrowAccess(this.authority.policy(), a),
       ceoFullPower: () => this.freshConfig().ceo.fullPower && this.authority.policy().ceo.fullPower,
       takeOwnerTurn: () => this.authority.takeOwnerTurn(),
       ceoOwnerPermissions: () => this.freshConfig().ceo.ownerPermissions,
@@ -1571,6 +1596,7 @@ export class Runner {
       this.timers.push(t);
       return;
     }
+    this.adoptPolicySeal();
     await writeShims(this.paths.bin);
     await this.ipc.start();
     await this.ipc.startSocket().catch((err) => this.log.warn(`IPC socket unavailable: ${String(err)}`));
@@ -1741,6 +1767,44 @@ export class Runner {
     });
   }
 
+  /**
+   * T2 (S4): a policy from before the seal is sealed once, at the first start of this version. The toolchains already
+   * registered are pinned (they stay on PATH), the paired browsers re-sealed, and held items written before the seal
+   * are refused so whoever asked asks again. Any other unsealed state is refused by the store (everything asks).
+   */
+  private adoptPolicySeal(): void {
+    const auth = this.authority;
+    if (!(auth instanceof FileAuthority)) return;
+    try {
+      const store = auth.store;
+      const unsealedHeld = new HeldStore(store.dir).unsealed();
+      const devices = new DeviceStore(store.dir);
+      let trusted: ReturnType<DeviceStore['devices']> = [];
+      try {
+        const raw = JSON.parse(readFileSync(devices.devicesFile, 'utf8')) as { devices?: unknown };
+        if (!('integrity' in raw)) trusted = DevicesFileSchema.parse(raw).devices;
+      } catch {
+        // no paired browser
+      }
+      const hashes = this.toolchains.persisted().map((e) => toolchainHash(e));
+      // read before the key exists: afterwards an unsealed record is quarantined on read
+      const toRefuse = this.approvals.list().filter((r) => unsealedHeld.includes(r.id));
+      if (!store.adopt(hashes)) return;
+      this.log.warn(
+        `sealed the local approval settings (${store.file}); ${hashes.length} registered toolchain(s) stay approved`,
+      );
+      if (trusted.length) devices.writeDevices(trusted);
+      for (const r of toRefuse) {
+        this.refuseHeld(r, 'held before this version sealed the approval settings: ask again');
+        new HeldStore(store.dir).remove(r.id);
+      }
+    } catch (err) {
+      this.log.warn(
+        `sealing the local approval settings failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   private writeStatus(connected: boolean): void {
     this.connected = connected;
     try {
@@ -1755,6 +1819,7 @@ export class Runner {
           outboxPending: this.outbox.count(),
           testServices: this.supervisor.testServices(),
           connection: this.client.state(),
+          ...(this.policyKeyCreatedAt ? { policyKeyCreatedAt: this.policyKeyCreatedAt } : {}),
         }),
       );
     } catch {
@@ -2719,6 +2784,7 @@ export class Runner {
         ...(msg.devops?.requestedBy?.name ? { requester: msg.devops.requestedBy.name } : {}),
         kind: msg.kind,
         ...(msg.devops?.access ? { access: msg.devops.access } : {}),
+        ...(msg.devops?.approval?.commands?.length ? { approvedCommands: msg.devops.approval.commands } : {}),
       },
       this.authority.devopsGranted(orgId, msg.agent.agentId),
     );
@@ -2869,6 +2935,18 @@ export class Runner {
       ...msg,
       devops: { ...msg.devops, access: narrowAccess(this.authority.policy(), msg.devops.access) },
     };
+  }
+
+  /** T2 (D2): one local step per toolchain that waits for the owner's yes (with its copy-paste command). */
+  private askToolchainPins(): void {
+    for (const { entry, hash } of this.toolchains.waiting())
+      this.approvals.needStep({
+        key: `toolchain.approve:${hash}`,
+        kind: 'toolchain.approve',
+        summary: `allow the tool "${entry.name}" the DevOps helper installed for the other helpers`,
+        verb: 'toolchain approve',
+        args: [hash],
+      });
   }
 
   /** Runs a held item once it was approved (locally, or by a passkey for the two routine kinds). */
@@ -3270,6 +3348,7 @@ export class Runner {
                     worktreePath: this.paths.worktreePath(p.projectKey, p.ref, p.projectId),
                     worktreesDir: this.paths.worktrees,
                     integrationDir: this.paths.integration,
+                    ledger: BranchLedger.forRoot(this.paths.root, (m) => this.log.warn(m)),
                     pr: this.opts.prCreator ?? forgePrCreator(scope.forgeEnv),
                     auth: scope.auth,
                     rules:

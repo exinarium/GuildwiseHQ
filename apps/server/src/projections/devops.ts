@@ -103,6 +103,7 @@ export const devopsProjectors: Record<string, Projector> = {
           commands: p.commands,
           ...(p.question ? { question: true } : {}),
           ...(p.blockedBy ? { blockedBy: p.blockedBy } : {}),
+          ...(p.alwaysPath ? { alwaysPath: p.alwaysPath } : {}),
           resolution: null,
         }),
       ],
@@ -114,9 +115,17 @@ export const devopsProjectors: Record<string, Projector> = {
     await exec(
       tx,
       `UPDATE devops_requests
-          SET approval = COALESCE(approval, '{}'::jsonb) || jsonb_build_object($2::text, true), updated_at = $3
+          SET approval = COALESCE(approval, '{}'::jsonb) || jsonb_build_object($2::text, true)
+                || CASE WHEN $4 THEN jsonb_build_object($5::text, true) ELSE '{}'::jsonb END,
+              updated_at = $3
         WHERE id=$1`,
-      [p.requestId, p.party === 'manager' ? 'managerApproved' : 'workstationUserAgreed', e.createdAt],
+      [
+        p.requestId,
+        p.party === 'manager' ? 'managerApproved' : 'workstationUserAgreed',
+        e.createdAt,
+        p.always === true,
+        p.party === 'manager' ? 'managerAlways' : 'workstationUserAlways',
+      ],
     );
   },
   DevOpsApprovalResolved: async (tx, e) => {

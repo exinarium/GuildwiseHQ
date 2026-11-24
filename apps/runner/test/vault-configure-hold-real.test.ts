@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { FileAuthority } from '../src/policy/authority.ts';
 import { commandHashOf } from '../src/policy/gate.ts';
 import { HeldStore } from '../src/policy/held.ts';
+import { ensurePolicyKey } from '../src/policy/integrity.ts';
 import { PolicyStore } from '../src/policy/store.ts';
 import { type Harness, startHarness } from './harness.ts';
 import { tmp, waitUntil } from './helpers.ts';
@@ -82,6 +83,9 @@ describe('vault.configure holds always name their target (real path)', () => {
       replay: { type: 'command', body: c },
       state: 'held' as const,
     };
+    // a runner of the sealed era held it (runner-authority-fixes: items from before the seal are refused at adoption)
+    ensurePolicyKey(s.policyDir);
+    s.authority.store.write({ ...s.authority.store.get(), setupDone: true });
     new HeldStore(s.policyDir).put(old);
     h = await startHarness({}, { ...s, approvalsPollMs: 50 });
     const held = await h.server.waitFor('approvals.held', (m) => m.items.some((i) => i.id === old.id));

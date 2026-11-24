@@ -177,6 +177,11 @@ export const PolicySchema = z
     legacyUpdateOrigin: Origin.optional(),
     /** Release signing keys held on this machine [R30]. */
     signingKeys: z.array(SigningKeySchema).max(20).default([]),
+    /**
+     * runner-authority-fixes T2 (D2): toolchains (`aom toolchain add` entry hashes) the owner approved locally. A
+     * toolchain the DevOps engineer registered reaches other agents' PATH only once pinned here.
+     */
+    toolchainPins: z.array(Sha256Hex).max(1000).default([]),
   })
   .superRefine((p, ctx) => {
     if (p.docker === 'host' && !p.acceptRootEquivalent)

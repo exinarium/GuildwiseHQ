@@ -8,6 +8,7 @@ import {
   canDirectAgentInOrg,
   capChatSegments,
   chatSegmentsText,
+  DevOpsAccessSchema,
   DIRECT_RUNTIME,
   MENTION_LIMITS,
   type ModelChoice,
@@ -397,6 +398,13 @@ export class ChatRelay {
       c.mention || agentSpec.isDevops || agentSpec.roleKey === 'ceo'
         ? undefined
         : await delegationSpecFor(ctx.pool, 'agent', agentSpec.agentId);
+    // T10: a DevOps chat's guard enforces this workstation's switches, as in its shifts
+    const devopsAccess = agentSpec.isDevops
+      ? DevOpsAccessSchema.parse(
+          (await one(ctx.pool, 'SELECT devops_access FROM workstations WHERE id=$1', [row.workstation_id]))
+            ?.devops_access ?? {},
+        )
+      : undefined;
     return ctx.services.runners.send(
       row.workstation_id,
       'chat.start',
@@ -407,6 +415,7 @@ export class ChatRelay {
         message,
         ...(opts.resumeSessionId ? { resumeSessionId: opts.resumeSessionId } : {}),
         context,
+        ...(devopsAccess ? { devopsAccess } : {}),
         ...(playbookGrants.length ? { playbookGrants } : {}),
         ...(delegation ? { delegation } : {}),
         ...(opts.account ? { account: { key: opts.account } } : {}),

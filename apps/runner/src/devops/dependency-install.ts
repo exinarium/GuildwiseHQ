@@ -16,6 +16,7 @@ import { maskedPaths, SERVICE_HOME, sandboxCommand } from '../runs/sandbox.ts';
 import { startEgressProxy } from '../sandbox/egress-proxy.ts';
 import { cacheEnv, ensureSharedCaches } from '../sandbox/sandbox.ts';
 import { BREW_BIN_DIRS, type Executor, userBinDirs } from '../toolchain/exec.ts';
+import { NO_PM_SWITCH } from './install-env.ts';
 
 /**
  * A project package install for a card's worktree, run by the DevOps side of the runner (owner 2026-11-21: "Devops is
@@ -77,12 +78,6 @@ export function parseDependencyChange(
     },
   };
 }
-
-const NO_PM_SWITCH: Record<string, string> = {
-  COREPACK_ENABLE_STRICT: '0',
-  COREPACK_ENABLE_AUTO_PIN: '0',
-  npm_config_manage_package_manager_versions: 'false',
-};
 
 /** The command for a change in `dir`: script-free flags forced on unless the repository may run install scripts. */
 export function planDependencyChange(

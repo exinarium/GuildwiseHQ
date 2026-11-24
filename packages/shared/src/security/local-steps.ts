@@ -71,6 +71,7 @@ const VERBS: ReadonlyArray<{ verb: readonly string[]; args: readonly ArgCheck[] 
   { verb: ['devops', 'grant'], args: [re(UUID_RE), lit('--agent'), re(UUID_RE)] },
   { verb: ['repo', 'allow-scripts'], args: [re(REPO_URL_RE)] },
   { verb: ['formatter', 'pin'], args: [re(SHA256_RE)] },
+  { verb: ['toolchain', 'approve'], args: [re(SHA256_RE)] },
   { verb: ['passkey', 'trust'], args: [re(B64URL_RE)] },
   { verb: ['approvals', 'pair'], args: [re(PAIR_CODE_RE)] },
   { verb: ['extras', 'install'], args: [lit('yt-dlp')] },
@@ -143,6 +144,7 @@ export const LOCAL_STEP_KINDS = [
   'signing.key',
   'extras.ytdlp',
   'devops.install',
+  'toolchain.approve',
 ] as const;
 export type LocalStepKind = (typeof LOCAL_STEP_KINDS)[number];
 
@@ -163,6 +165,8 @@ export const LOCAL_STEP_TEXT: Readonly<Record<LocalStepKind | 'held', string>> =
   'signing.key':
     'This registers your release signing key on the workstation. Replace <key-file> with the path of the key file.',
   'extras.ytdlp': 'This installs the video transcript tool (yt-dlp) in the runner’s own folder.',
+  'toolchain.approve':
+    'The DevOps helper installed a tool for the other helpers. Run this on the workstation to see exactly what it adds and allow it.',
   'devops.install':
     'This lets the DevOps helpers install the tools your projects need, in the runner’s own folder. It turns on “Install packages and tools” for this workstation.',
 };

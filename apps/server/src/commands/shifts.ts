@@ -1460,6 +1460,8 @@ export async function applyShiftRejected(
       await endDevopsShift(tx, s, 'rejected', {
         finalText: msg.detail,
         ...(msg.refusedLocally ? { refusedLocally: true } : {}),
+        // T9: a usage limit or an expired login still reports what the card worktree check could not revert
+        ...(msg.guardViolations?.length ? { guardViolations: msg.guardViolations } : {}),
       }),
       { tx },
     );

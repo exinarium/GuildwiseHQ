@@ -41,6 +41,11 @@ export const DevopsApprovalDataSchema = z.object({
    * install|docker|paths`). The request then waits for that switch instead of an approval.
    */
   blockedBy: z.enum(DEVOPS_SWITCHES).optional(),
+  /**
+   * runner-authority-fixes T10 (R4-S2): for `allowedPaths`, the folder "Always allow" would add (the refused target's own
+   * folder). The runner sets it only when that folder may be allowed for good; absent: the Desk offers "Allow once" only.
+   */
+  alwaysPath: z.string().max(4000).optional(),
 });
 /** A DevOps "approval" whose action starts with "Question:" is a question for the escalation chain, not an approval. */
 export const DEVOPS_QUESTION_PREFIX = 'Question:';
@@ -215,11 +220,23 @@ export const DevopsShiftSchema = z.object({
   /** The card's project does not require the owner's approval for merges: merge conflicts in the card worktree are yours. */
   mergeApprovalWaived: z.boolean().optional(),
   /**
-   * uat-runner-fixes-3: set by the server only for a conflict request it filed itself (G-Q2, `origin = 'conflict'`), never
-   * from request text. The runner lets this one card branch move forward (a fast-forward to the resolution) in this one
-   * card's worktree; every other card worktree and card branch stays untouched by DevOps whatever the request says.
+   * Set by the server only for a conflict request it filed itself (G-Q2, `origin = 'conflict'`), never from request text.
+   * runner-authority-fixes T7: DevOps resolves on `conflict/<ref>-a<n>`; after "Resolved:" the RUNNER moves this card
+   * branch forward, and only onto a conflict it recorded itself. DevOps never moves a card branch.
    */
   conflictCard: z.object({ ref: z.string().max(100), branch: z.string().max(300) }).optional(),
+  /**
+   * T7: a working-branch conflict hygiene found (`origin = 'conflict'`, no card). The working branch is frozen for DevOps;
+   * after "Resolved:" the runner moves it forward to DevOps's merge of origin, within the bound of conflict-ff.ts.
+   * Optional: older servers send none (then nothing is moved).
+   */
+  conflictRepo: z
+    .object({
+      repoId: z.string().max(100),
+      localPath: z.string().max(4000),
+      workingBranch: z.string().max(300),
+    })
+    .optional(),
   /** Repository hygiene: the repositories of this workstation to tidy (see `aom hygiene run`). */
   hygiene: HygieneSpecSchema.optional(),
   /** A `run` request: the environment to bring up (see `aom run`). */
@@ -275,10 +292,9 @@ export function blockedSwitch(
   // names a switch itself (REVIEW B1)
   if (/\b(sudo|delete|destroy|wipe|format|rm|uninstall|drop|force|curl|wget)\b|\|\s*(sh|bash)\b/.test(t))
     return null;
+  // runner-authority-fixes Rework 1 (S2, R4-S3): only the switch the runner checked against the guard's own refusal; the
+  // agent's words never pick one (a guess is an ordinary approval)
   if (data.blockedBy) return devopsSwitchOn(access, data.blockedBy) ? null : data.blockedBy;
-  if (/\bdocker\b/.test(t) && !access.allowDocker) return 'allowDocker';
-  if (/\b(install|installing|npm i|apt|brew|pip install|toolchain)\b/.test(t) && !access.allowInstall)
-    return 'allowInstall';
   return null;
 }
 

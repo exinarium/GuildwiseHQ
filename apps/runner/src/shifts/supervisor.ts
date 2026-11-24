@@ -10,8 +10,8 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { delimiter, isAbsolute, join, resolve } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import {
   type AgentRuntimeSpec,
   type BriefAttachment,
@@ -114,14 +114,29 @@ import {
   snapshotCardWorktrees,
 } from '../devops/card-fence.ts';
 import {
+  applyConflictResolution,
+  type ConflictRefSnapshot,
+  type ConflictResolution,
+  type ConflictTarget,
+  conflictRefSnapshot,
+} from '../devops/conflict-ff.ts';
+import {
   DEVOPS_INSTALL_RPC,
   type DependencyChange,
   parseDependencyChange,
 } from '../devops/dependency-install.ts';
 import { devopsPushPlan, devopsRequestIdentity, withAppPushRefusal } from '../devops/devops-git.ts';
-import { redactCommand } from '../devops/guard.ts';
+import { alwaysPathRefusal, redactCommand } from '../devops/guard.ts';
 import { type HygieneDeps, runHygiene } from '../devops/hygiene.ts';
-import { cardPayload, devopsGuardFor, guardedShift, shiftTexts } from '../devops/requests.ts';
+import { installScriptsOffFor, withInstallScriptsOff } from '../devops/install-env.ts';
+import {
+  cardPayload,
+  devopsGuardFor,
+  guardedShift,
+  isReadOnlyScan,
+  SCAN_RPC_ALLOWED,
+  shiftTexts,
+} from '../devops/requests.ts';
 import { type ExternalAdapters, formatSource } from '../external/index.ts';
 import { checkFeedItemsFetched, FetchedUrls } from '../feeds/validation.ts';
 import {
@@ -131,7 +146,9 @@ import {
   architectVerifyMerge,
   type GitReply,
 } from '../git/architect-git.ts';
+import { BranchLedger } from '../git/branch-ledger.ts';
 import { computeCardDiff } from '../git/card-diff.ts';
+import { conflictRecords } from '../git/conflict-record.ts';
 import { baseRef, computeDiffStats, riskTier } from '../git/diffstat.ts';
 import { git, gitOk, originBranchNames } from '../git/git.ts';
 import {
@@ -180,6 +197,7 @@ import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
 import { type Logger, nullLogger } from '../log.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { playbookNote } from '../playbooks/note.ts';
+import { policyDir as localPolicyDir } from '../policy/store.ts';
 import { mergeReadFolders, resolveOrgFolderRepos, resolveReadRepos } from '../read-repos.ts';
 import { preparePublication } from '../research/publish.ts';
 import { type EnvForwards, startForwards } from '../runs/forward.ts';
@@ -424,6 +442,8 @@ export interface SupervisorDeps {
   idle?: Partial<IdleLimits> & { now?: () => number };
   /** Agent toolchains (PATH, read access, variables of sandboxed agents; `aom toolchain` of the DevOps engineer). */
   toolchains?: ToolchainRegistry;
+  /** T4: the owner allowed install scripts for this normalized remote (policy.json `installScripts`); absent: never. */
+  installScriptsAllowed?: (remote: string) => boolean;
   /** Run a branch (#58): the environments `aom run` of a DevOps `run` request works on. */
   runs?: RunManager;
   /** Test hook: how a new card worktree is prepared (default: `prepareWorktree`). */
@@ -503,8 +523,12 @@ interface ActiveShift {
   reportState: 'none' | 'pending' | 'accepted';
   pendingReports: Map<string, (r: ReportVerdict) => void>;
   guardViolations: GuardViolation[];
+  /** T10 (R4-S3): what the guard refused in this shift, by exact (redacted, normalized) command. */
+  guardRefusals: Map<string, { rule: string; target?: string }>;
   /** A DevOps shift: the card worktrees when it started (devops/card-fence.ts, uat-runner-fixes-3 finding 2). */
   cardFence?: { before: CardWorktreeSnapshot; startedAtMs: number; ended?: boolean };
+  /** T7: a server conflict request: the branch the runner may move after "Resolved:", and the conflict refs at start. */
+  conflictFf?: { target: ConflictTarget; before: ConflictRefSnapshot; done?: boolean };
   finalText?: string;
   progress: Array<{ at: string; kind: 'text' | 'tool' | 'status'; text: string }>;
   env: Record<string, string>;
@@ -647,6 +671,8 @@ export function cardScopedVaults(
 export class ShiftSupervisor {
   private readonly active = new Map<string, ActiveShift>();
   private readonly log: Logger;
+  /** The card branches this runner created or pushed (T1). */
+  private readonly ledger: BranchLedger;
 
   private readonly sessions: SessionRegistry;
   /** `aom delegate`: read-only persona sub-tasks of a running shift (costs booked under the shift). */
@@ -657,6 +683,7 @@ export class ShiftSupervisor {
 
   constructor(private readonly deps: SupervisorDeps) {
     this.log = deps.log ?? nullLogger;
+    this.ledger = BranchLedger.forRoot(deps.paths.root, (m) => this.log.warn(m));
     this.delegates = new DelegateRunner({
       adapters: deps.adapters,
       paths: deps.paths,
@@ -775,6 +802,7 @@ export class ShiftSupervisor {
       reportState: 'none',
       pendingReports: new Map(),
       guardViolations: [],
+      guardRefusals: new Map(),
       progress: [],
       fetched: new FetchedUrls(),
       transcripts: new Map(),
@@ -1057,6 +1085,7 @@ export class ShiftSupervisor {
     accountKey?: string,
     capacity?: ShiftCapacity,
     rebaseError?: RebaseErrorInfo,
+    guardViolations?: GuardViolation[],
   ): void {
     // Every rejection leaves a line here and a reason on the wire: "the runner refused" without either cost a day of
     // searching (backlog #79).
@@ -1073,6 +1102,7 @@ export class ShiftSupervisor {
       ...(accountKey ? { accountKey } : {}),
       ...(capacity ? { capacity } : {}),
       ...(rebaseError ? { rebaseError } : {}),
+      ...(guardViolations?.length ? { guardViolations: guardViolations.slice(0, 50) } : {}),
     });
   }
 
@@ -1278,6 +1308,8 @@ export class ShiftSupervisor {
     if (msg.kind === 'devops' && msg.agent.isDevops) {
       // the card worktrees as they are now: what this shift changes there is refused and reverted (finding 2)
       s.cardFence = { before: await snapshotCardWorktrees(paths.worktrees), startedAtMs: Date.now() };
+      const target = await this.conflictTargetOf(msg);
+      if (target) s.conflictFf = { target, before: await conflictRefSnapshot(target.repoPath) };
       const appIdentity = await devopsRequestIdentity(
         msg.postAs,
         msg.devops?.card?.remoteUrlNormalized,
@@ -1405,6 +1437,7 @@ export class ShiftSupervisor {
           defaultPath: paths.worktreePath(msg.brief.project.key, msg.brief.card.ref, msg.brief.project.id),
           roots: [paths.worktrees],
           auth: this.shiftAuth(msg),
+          ledger: this.ledger,
           // Bring the local working branch up to date with the fetch just made (only the project's own working branch).
           ...(this.deps.syncAfterFetch && msg.worktree.baseBranch === msg.brief.project.workingBranch
             ? {
@@ -1770,6 +1803,12 @@ export class ShiftSupervisor {
     };
     // The DevOps engineer's raw pushes to app repositories go nowhere (it uses `aom git push --repo`, run here).
     if (msg.kind === 'devops' && msg.agent.isDevops) s.env = withAppPushRefusal(s.env, msg.postAs);
+    // T4: installs the DevOps engineer runs skip lifecycle scripts a builder may have written, unless the owner allowed
+    // scripts for every repository of the request.
+    const installScriptsOff =
+      guardedShift(msg) &&
+      installScriptsOffFor(msg.postAs?.repos, (r) => this.deps.installScriptsAllowed?.(r) === true);
+    if (installScriptsOff) s.env = withInstallScriptsOff(s.env);
     // A remote target: its address, and the test accounts declared for it as a 0600 file the tester's tools read.
     if (hasEnv && testEnv?.mode === 'remote' && testEnv.target) {
       s.env.AOM_TARGET_URL = testEnv.target.url;
@@ -1843,7 +1882,8 @@ export class ShiftSupervisor {
       msg.kind === 'ceo' ||
       msg.kind === 'devops' ||
       (msg.kind === 'card' && msg.brief.shift.stage === QA_STEPS_STAGE);
-    const devopsGuard = devopsGuardFor(msg, s.identity?.email);
+    const guardFor = devopsGuardFor(msg, s.identity?.email);
+    const devopsGuard = guardFor && installScriptsOff ? { ...guardFor, installScriptsOff: true } : guardFor;
     if (guardedShift(msg) && !devopsGuard) {
       this.reject(msg.shiftId, 'internal', 'the DevOps guard could not be configured for this shift');
       return;
@@ -2114,6 +2154,10 @@ export class ShiftSupervisor {
         undefined,
         undefined,
         msg.account?.key ?? 'main',
+        undefined,
+        undefined,
+        // T9: what the card worktree check could not revert still reaches the owners
+        s.guardViolations,
       );
       return;
     }
@@ -2135,6 +2179,9 @@ export class ShiftSupervisor {
         undefined,
         until.toISOString(),
         msg.account?.key ?? 'main',
+        undefined,
+        undefined,
+        s.guardViolations,
       );
       return;
     }
@@ -2424,6 +2471,12 @@ export class ShiftSupervisor {
     return {
       report: async (req: IpcReportRequest) => this.submit(s, req.report),
       rpc: async (req: IpcRpcRequest) => {
+        // T3: a read-only scan reaches only its read-only verbs, whatever its shell managed to run.
+        if (isReadOnlyScan(s.msg) && !SCAN_RPC_ALLOWED.has(req.method))
+          return {
+            ok: false,
+            error: `\`${req.method}\` is not available in a read-only scan`,
+          } as IpcRpcResponse;
         if (req.method === 'skill.show' || req.method === 'skill.list')
           return skillRpc(
             this.deps.capabilities,
@@ -2518,7 +2571,16 @@ export class ShiftSupervisor {
           return recordDevopsAudit(req.params, {
             isDevops: s.msg.agent.isDevops === true,
             logFile: join(this.deps.paths.logs, 'devops-audit.jsonl'),
-            send: (entries) => void this.deps.transport.send('devops.audit', { entries }),
+            send: (entries) => {
+              // T10 (R4-S3): the guard's own refusals of this shift, by exact command
+              for (const e of entries)
+                if (e.decision === 'refused')
+                  s.guardRefusals.set(e.command.trim().replace(/\s+/g, ' '), {
+                    rule: e.rule,
+                    ...(e.target ? { target: e.target } : {}),
+                  });
+              void this.deps.transport.send('devops.audit', { entries });
+            },
             redact: redactCommand,
           });
         if (req.method.startsWith('run.')) return this.runRpc(s, req.method, req.params);
@@ -2915,6 +2977,7 @@ export class ShiftSupervisor {
     if (!spec)
       return { ok: false, error: 'this request is not a repository hygiene request: nothing to run' };
     const run = await runHygiene(spec, this.worktreePaths(), {
+      ledger: this.ledger,
       changeState: async (q) => {
         try {
           const r = await this.deps.rpc(msg.shiftId, 'hygiene.change_state', q);
@@ -3584,9 +3647,6 @@ export class ShiftSupervisor {
       root: this.deps.paths.worktrees,
       before: fence.before,
       shiftId: s.msg.shiftId,
-      ...(s.msg.kind === 'devops' && s.msg.devops?.conflictCard
-        ? { conflictBranch: s.msg.devops.conflictCard.branch }
-        : {}),
       usedByOthers: (p) => usedSince(p, fence.startedAtMs),
     });
     if (findings.length === 0) return null;
@@ -3596,6 +3656,125 @@ export class ShiftSupervisor {
     // the next comparison starts from the reverted state
     fence.before = await snapshotCardWorktrees(this.deps.paths.worktrees);
     return `${v.detail}. Report again with what you did NOT do and why: the card's builder asks for a package with \`aom devops install\` from its own shift.`;
+  }
+
+  /**
+   * T7: the branch a server conflict request is about, in a clone this runner knows. A card: its card branch in the card's
+   * clone. A working branch: the request's clone only when it is the clone this runner found for that origin.
+   */
+  private async conflictTargetOf(msg: ShiftStartMsg): Promise<ConflictTarget | null> {
+    const d = msg.devops;
+    if (!d) return null;
+    try {
+      if (d.conflictCard && d.card?.remoteUrlNormalized) {
+        const repo = await this.deps.findRepo(d.card.remoteUrlNormalized);
+        return repo
+          ? { kind: 'card', repoPath: repo.localPath, branch: d.conflictCard.branch, ref: d.conflictCard.ref }
+          : null;
+      }
+      if (d.conflictRepo && !d.conflictCard) {
+        const path = d.conflictRepo.localPath;
+        const url = (await git(path, ['remote', 'get-url', 'origin'])).stdout.trim();
+        const repo = url ? await this.deps.findRepo(normalizeRemoteUrl(url)) : undefined;
+        const real = (p: string) => {
+          try {
+            return realpathSync(p);
+          } catch {
+            return p;
+          }
+        };
+        return repo && real(repo.localPath) === real(path)
+          ? { kind: 'working', repoPath: repo.localPath, branch: d.conflictRepo.workingBranch }
+          : null;
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  /** T7: after a terminal "Resolved:" report the runner moves the branch itself, within the bound of conflict-ff.ts. */
+  private async applyConflictFf(s: ActiveShift, report: ShiftReport): Promise<void> {
+    const c = s.conflictFf;
+    if (!c || c.done || report.kind !== 'outcome' || report.outcomeId !== 'devops_done') return;
+    const summary = String((report.data as { summary?: unknown } | undefined)?.summary ?? report.note ?? '');
+    if (!/^\s*resolved:/i.test(summary)) return;
+    c.done = true;
+    const r = await applyConflictResolution({
+      target: c.target,
+      before: c.before,
+      records: conflictRecords(),
+      ledger: this.ledger,
+    }).catch(
+      (err): ConflictResolution => ({
+        moved: false,
+        note: `${c.target.branch} was not moved: ${String(err)}`,
+      }),
+    );
+    this.addProgress(s, 'status', r.note);
+    (r.moved ? this.log.info : this.log.warn).call(this.log, `shift ${s.msg.shiftId.slice(0, 8)}: ${r.note}`);
+    // the runner's own move is the new starting point of the card worktree check
+    if (r.moved && s.cardFence) s.cardFence.before = await snapshotCardWorktrees(this.deps.paths.worktrees);
+  }
+
+  /**
+   * T10 (R4-S3, R4-S2): an approval's `blockedBy` (from `aom devops-approval --switch`) is replaced by the rule the guard
+   * recorded when it refused that exact command; with no recorded switch refusal it is dropped (the request is then an
+   * ordinary approval). For a paths refusal the folder "Always allow" may add is set only when that folder is safe.
+   */
+  private checkedSwitch(s: ActiveShift, data: Record<string, unknown> | undefined): Record<string, unknown> {
+    const d: Record<string, unknown> = { ...(data ?? {}) };
+    delete d.alwaysPath;
+    const claimed = d.blockedBy;
+    delete d.blockedBy;
+    const commands = Array.isArray(d.commands) ? d.commands.map(String) : [];
+    const RULE_SWITCH: Record<string, 'allowInstall' | 'allowDocker' | 'allowedPaths'> = {
+      install_off: 'allowInstall',
+      docker_off: 'allowDocker',
+      paths: 'allowedPaths',
+    };
+    let found: {
+      sw: 'allowInstall' | 'allowDocker' | 'allowedPaths';
+      command: string;
+      target?: string;
+    } | null = null;
+    for (const c of commands) {
+      const r = s.guardRefusals.get(redactCommand(c).trim().replace(/\s+/g, ' '));
+      const sw = r ? RULE_SWITCH[r.rule] : undefined;
+      if (r && sw) {
+        found = { sw, command: c, ...(r.target ? { target: r.target } : {}) };
+        break;
+      }
+    }
+    if (!found) {
+      if (claimed)
+        this.log.warn(
+          `shift ${s.msg.shiftId.slice(0, 8)}: --switch ${String(claimed)} refused: the guard recorded no such refusal`,
+        );
+      return d;
+    }
+    if (claimed && claimed !== found.sw)
+      this.log.warn(
+        `shift ${s.msg.shiftId.slice(0, 8)}: --switch ${String(claimed)} corrected to ${found.sw} (the guard's own refusal)`,
+      );
+    d.blockedBy = found.sw;
+    // Rework 1 (B1): a switch approval is for exactly the command the guard refused, the one the owner is shown
+    if (commands.length !== 1)
+      this.log.warn(
+        `shift ${s.msg.shiftId.slice(0, 8)}: a switch approval named ${commands.length} commands; only the refused one is asked for`,
+      );
+    d.commands = [found.command];
+    if (found.sw === 'allowedPaths' && found.target) {
+      const dir = dirname(found.target);
+      const why = alwaysPathRefusal(dir, {
+        home: homedir(),
+        policyRoot: localPolicyDir(),
+        worktrees: this.deps.paths.worktrees,
+        runnerRoot: this.deps.paths.root,
+      });
+      if (!why) d.alwaysPath = dir;
+    }
+    return d;
   }
 
   /** The last card worktree check of a DevOps shift (its end, whichever way it ends). */
@@ -3625,6 +3804,8 @@ export class ShiftSupervisor {
       const fenced = await this.checkCardFence(s);
       if (fenced) return rejected(fenced);
     }
+    // T7: DevOps resolved on its scratch branch; the runner moves the real branch forward (never DevOps itself)
+    if (terminal) await this.applyConflictFf(s, report);
 
     let attach: Record<string, unknown> = {};
     let checkNote = '';
@@ -3830,6 +4011,9 @@ export class ShiftSupervisor {
         }
       }, this.deps.reportWaitMs ?? 120_000).unref?.();
     });
+    // T10 (R4-S3): the switch an approval names follows the guard's own refusal of that exact command, never the agent
+    if (msg.agent.isDevops && toSend.kind === 'outcome' && toSend.outcomeId === 'devops_approval')
+      toSend = { ...toSend, data: this.checkedSwitch(s, toSend.data) };
     if (
       msg.agent.isDevops &&
       toSend.kind === 'outcome' &&

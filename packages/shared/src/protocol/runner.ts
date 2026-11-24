@@ -64,6 +64,7 @@ import {
 } from '../devops/environment.ts';
 import { DevopsShiftSchema } from '../devops/index.ts';
 import { Usage } from '../events/define.ts';
+import { DevOpsAccessSchema } from '../events/devops.ts';
 import { GuardViolation, ShiftKind } from '../events/shift.ts';
 import { BUILDER_TEST_GAP_REASONS, TestEnvProblem } from '../events/testing.ts';
 import { VaultEventKind } from '../events/vault.ts';
@@ -1973,6 +1974,11 @@ export const ShiftRejectedSchema = msg('shift.rejected', {
    * a conflict (base ref, git command, exit code, git's message). Not a conflict: the card is not sent to Rework.
    */
   rebaseError: RebaseErrorInfoSchema.optional(),
+  /**
+   * Additive (runner-authority-fixes T9): a DevOps shift put back on a usage limit or an expired login still had its
+   * card worktree changes reverted; what could not be reverted travels here, as with `shift.ended`, so the owners are told.
+   */
+  guardViolations: z.array(GuardViolation).max(50).optional(),
 });
 export const ShiftStartedSchema = msg('shift.started', {
   shiftId: z.uuid(),
@@ -2075,6 +2081,8 @@ export const DevopsAuditEntrySchema = z.object({
   /** The rule that refused it, or the class an allowed command fell in. */
   rule: z.string().max(80),
   command: z.string().max(2000),
+  /** runner-authority-fixes T10: for a `paths` refusal, the path the command writes (the runner's own check uses it). */
+  target: z.string().max(4000).optional(),
 });
 export type DevopsAuditEntry = z.infer<typeof DevopsAuditEntrySchema>;
 export const DevopsAuditSchema = msg('devops.audit', { entries: z.array(DevopsAuditEntrySchema).max(200) });
@@ -2470,6 +2478,11 @@ export const ChatStartSchema = msg('chat.start', {
    * reports `chat.done.degraded`.
    */
   ceoMode: z.enum(['owner', 'order']).optional(),
+  /**
+   * runner-authority-fixes T10: the workstation's DevOps access switches, sent with a DevOps engineer's chat so its guard
+   * enforces them as in its shifts. Absent (an older server): every switch counts as off, so a blocked command asks.
+   */
+  devopsAccess: DevOpsAccessSchema.optional(),
   /** The fixed working directory of the CEO session (`--resume` keys sessions by it); absent: the Owner's home directory. */
   cwd: z.string().optional(),
   /** Extra working directories (`aom ceo dir add`). */

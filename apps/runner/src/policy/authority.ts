@@ -1,7 +1,8 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { assertNotAgentSession, checkSeal, sealIfKeyed } from './integrity.ts';
 import type { Policy } from './schema.ts';
-import { PolicyStore, policyDir, writeFileAtomic } from './store.ts';
+import { PolicyStore, type PolicyStoreOptions, policyDir, writeFileAtomic } from './store.ts';
 
 /**
  * What the runner asks the local authority (R18-S). Production reads policy.json (`FileAuthority`); tests inject their
@@ -27,8 +28,10 @@ export interface LocalAuthority {
 export const CEO_TURN_FILE = 'ceo-turn.json';
 
 export function openOwnerTurn(dir: string, minutes: number, now = Date.now()): string {
+  assertNotAgentSession();
   const until = new Date(now + minutes * 60_000).toISOString();
-  writeFileAtomic(join(dir, CEO_TURN_FILE), `${JSON.stringify({ until })}\n`, 0o600);
+  // T2: sealed, so a turn file written outside the runner's CLI never opens a full-power turn
+  writeFileAtomic(join(dir, CEO_TURN_FILE), `${JSON.stringify(sealIfKeyed(dir, { until }))}\n`, 0o600);
   return until;
 }
 
@@ -51,15 +54,18 @@ export class FileAuthority implements LocalAuthority {
     if (!this.policy().ceo.fullPower) return false;
     const file = join(this.store.dir, CEO_TURN_FILE);
     let until = 0;
+    let sealed = false;
     try {
-      until = Date.parse((JSON.parse(readFileSync(file, 'utf8')) as { until?: string }).until ?? '');
+      const { check, body } = checkSeal(this.store.dir, JSON.parse(readFileSync(file, 'utf8')));
+      sealed = check === 'ok';
+      until = Date.parse(String((body as { until?: string } | null)?.until ?? ''));
     } catch {
       return false;
     }
     rmSync(file, { force: true }); // one turn per local action
-    return Number.isFinite(until) && until > this.now();
+    return sealed && Number.isFinite(until) && until > this.now();
   }
 }
 
-export const defaultAuthority = (dir: string = policyDir()): FileAuthority =>
-  new FileAuthority(new PolicyStore(dir));
+export const defaultAuthority = (dir: string = policyDir(), opts: PolicyStoreOptions = {}): FileAuthority =>
+  new FileAuthority(new PolicyStore(dir, opts));

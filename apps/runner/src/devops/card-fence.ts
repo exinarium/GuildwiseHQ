@@ -13,9 +13,9 @@ import { currentBranch, git } from '../git/git.ts';
  * there is refused and reverted, whatever the request, a prompt or an approval said: its commits are kept under
  * `refs/guildwise/refused/...` and its files in a stash entry (nothing is lost, nothing stays on the card branch).
  *
- * The one exception is the server's own conflict request (G-Q2, `devops.conflictCard`, never request text): that card's
- * branch may move FORWARD to the resolution (a fast-forward, worktree clean). A worktree another shift used meanwhile is
- * not judged (the change cannot be told apart); the guard hook's refusal still applies there.
+ * There is no exception (runner-authority-fixes T7): a conflict resolution stays on DevOps's scratch branch and the runner
+ * moves the card branch itself (devops/conflict-ff.ts). A worktree another shift used meanwhile is not judged (the
+ * change cannot be told apart); the guard hook's refusal still applies there.
  */
 
 export interface CardWorktreeState {
@@ -129,8 +129,6 @@ export interface FenceInput {
   root: string;
   before: CardWorktreeSnapshot;
   shiftId: string;
-  /** The server's conflict request: this card branch may be fast-forwarded. */
-  conflictBranch?: string;
   /** Did another shift work in this worktree since the DevOps shift started? */
   usedByOthers: (path: string) => boolean;
 }
@@ -175,16 +173,6 @@ export async function enforceCardFence(o: FenceInput): Promise<FenceFinding[]> {
           out.push({ path, changed: ignored.text, reverted: ignored.allReverted, keptAt: [] });
         continue;
       }
-      if (
-        o.conflictBranch &&
-        before.branch === o.conflictBranch &&
-        now.branch === before.branch &&
-        now.dirty.length === 0 &&
-        before.head &&
-        now.head &&
-        (await git(path, ['merge-base', '--is-ancestor', before.head, now.head])).exitCode === 0
-      )
-        continue;
       const f = await revert(path, before, now, short);
       if (ignored.text) {
         f.changed += `; ${ignored.text}`;

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { NO_PM_SWITCH } from '../devops/install-env.ts';
 
 /**
  * Installs that run no repository code (R18-S [rv3-2, rv4-3]): `env.ensure` and worktree preparation run a dependency
@@ -17,13 +18,6 @@ export type InstallPlan =
 
 export const allowScriptsHint = (repo: string): string =>
   `allow scripts for ${repo} on the workstation: \`guildwise-runner repo allow-scripts ${repo}\``;
-
-/** Corepack and pnpm never switch to the package manager version a repository's `packageManager` names. */
-const NO_PM_SWITCH: Record<string, string> = {
-  COREPACK_ENABLE_STRICT: '0',
-  COREPACK_ENABLE_AUTO_PIN: '0',
-  npm_config_manage_package_manager_versions: 'false',
-};
 
 const withFlags = (args: string[], flags: string[]): string[] => [
   ...args,

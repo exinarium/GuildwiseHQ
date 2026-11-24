@@ -24,6 +24,7 @@ import { ApiError } from '../api/client.ts';
 import { useMe } from '../api/queries/auth.ts';
 import { useOverrideBudget } from '../api/queries/costs.ts';
 import { useAnswerDeskItem, useDesk, useDismissDeskItem, useResolveDeskItem } from '../api/queries/desk.ts';
+import { useResolveDevOpsApproval } from '../api/queries/devops.ts';
 import { ApprovalDeskItem } from '../components/ApprovalDeskItem.tsx';
 import { BaNote, FloorReport } from '../components/BaNote.tsx';
 import { ChatDrawer } from '../components/ChatDrawer.tsx';
@@ -1199,8 +1200,57 @@ export function DevopsSwitchBlock({ data }: { data: Record<string, unknown> }) {
       ? data.workstationName
       : 'the workstation';
   const command = typeof data.command === 'string' && localCommandOk(data.command) ? data.command : null;
+  // runner-authority-fixes T10: the guard refused this exact command; allow it once, or always (the switch goes on)
+  const requestId = typeof data.requestId === 'string' ? data.requestId : null;
+  const exact = typeof data.exactCommand === 'string' ? data.exactCommand : null;
+  const always = data.allowAlways === true;
+  const resolve = useResolveDevOpsApproval();
+  const [error, setError] = useState<string | null>(null);
+  const allow = (scope: 'once' | 'always') => {
+    if (!requestId) return;
+    setError(null);
+    resolve.mutate(
+      { id: requestId, resolution: 'approved', scope },
+      { onError: (e) => setError(e instanceof Error ? e.message : String(e)) },
+    );
+  };
   return (
     <div className="mt-3 flex flex-col gap-2" data-testid="desk-devops-switch">
+      {requestId && exact && (
+        <div className="flex flex-col gap-2" data-testid="desk-devops-allow">
+          <code className="whitespace-pre-wrap break-all text-xs" data-testid="desk-devops-allow-command">
+            {exact}
+          </code>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={() => allow('once')}
+              disabled={resolve.isPending}
+              data-testid="desk-devops-allow-once"
+            >
+              Allow once
+            </Button>
+            {always ? (
+              <Button
+                onClick={() => allow('always')}
+                disabled={resolve.isPending}
+                data-testid="desk-devops-allow-always"
+              >
+                Always allow
+              </Button>
+            ) : null}
+          </div>
+          {typeof data.alwaysPath === 'string' && always && (
+            <p className="text-xs text-muted" data-testid="desk-devops-allow-path">
+              Always allow adds {data.alwaysPath} for {name}.
+            </p>
+          )}
+          {error && (
+            <p className="text-sm text-danger" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
+      )}
       <Link
         to={
           typeof data.workstationId === 'string'

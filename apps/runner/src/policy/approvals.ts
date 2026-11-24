@@ -78,6 +78,8 @@ function satisfied(s: LocalStepRecord, p: Policy, pendingSetup: boolean): boolea
       return p.passkeys.some((k) => k.credentialId.startsWith(s.args[0] ?? '\u0000'));
     case 'formatter.pin':
       return p.formatterPins.includes(s.args[0] ?? '');
+    case 'toolchain.approve':
+      return p.toolchainPins.includes(s.args[0] ?? '');
     default:
       return false;
   }

@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { buildDevopsShiftStart } from '../src/runner-gateway/brief.ts';
 import { closeAdminPool, q } from './helpers/db.ts';
 import type { FakeRunner } from './helpers/fake-runner.ts';
 import { createWorld, ok, until, type World } from './helpers/world.ts';
@@ -176,6 +178,47 @@ describe('what hygiene cannot resolve becomes a reporter signal', () => {
     expect(
       await q(`SELECT 1 FROM ba_signals WHERE kind='repo_hygiene' AND status <> 'resolved'`),
     ).toHaveLength(0);
+  });
+
+  it('T7 (AC9): a working-branch conflict request tells DevOps to merge in a scratch worktree and names the branch the runner may move', async () => {
+    // earlier attempts of this world are done and older than a day: this conflict is attempt 1 again
+    await q(
+      `UPDATE devops_requests SET status='done', created_at = now() - interval '2 days' WHERE origin='conflict'`,
+    );
+    await report({
+      repos: [
+        repoResult({ problem: { kind: 'conflict', detail: 'main and origin/main could not be combined' } }),
+      ],
+    });
+    const [req] = await q(
+      `SELECT * FROM devops_requests WHERE origin='conflict' ORDER BY created_at DESC LIMIT 1`,
+    );
+    expect(req, 'a conflict request for the workstation DevOps engineer').toBeTruthy();
+    expect(req?.summary).toContain('git worktree add -b conflict/');
+    expect(req?.summary).toContain('MERGE origin/');
+    expect(req?.summary).toMatch(/runner moves .* forward/);
+    expect(req?.summary).not.toMatch(/fast-forward the local|reset --keep/);
+    expect(req?.context).toMatchObject({ repoId: w.repoId, localPath: '/tmp/toy' });
+    // the working branch is not confirmed in this world: no branch is named, so the runner moves nothing (fail closed)
+    expect(req?.context.workingBranch).toBeUndefined();
+    expect(
+      (await buildDevopsShiftStart(ctx(), String(req?.id), randomUUID()))?.devops?.conflictRepo,
+    ).toBeUndefined();
+    // with a confirmed working branch the request names it
+    await q(`UPDATE devops_requests SET context = context || '{"workingBranch":"main"}'::jsonb WHERE id=$1`, [
+      req?.id,
+    ]);
+    const start = await buildDevopsShiftStart(ctx(), String(req?.id), randomUUID());
+    expect(start?.devops?.conflictRepo).toEqual({
+      repoId: w.repoId,
+      localPath: '/tmp/toy',
+      workingBranch: 'main',
+    });
+    expect(start?.devops?.conflictCard).toBeUndefined();
+    await q(`UPDATE devops_requests SET status='done' WHERE origin='conflict'`);
+    // a clean run resolves the finding again for the tests that follow
+    await report({ repos: [repoResult()] });
+    await reporter().run();
   });
 
   it('a dead card worktree with uncommitted changes (the runner sweep) is a finding until it is gone', async () => {

@@ -422,6 +422,17 @@ describe('aom CLI', () => {
     expect(await t.run('devops-approval', '--action', 'a', '--reason', 'b', '--blocked-by', 'sudo')).toBe(1);
   });
 
+  it('runner-authority-fixes T10: devops-approval --switch is the spelling the guard asks for', async () => {
+    const t = await setup();
+    const args = ['--action', 'install yt-dlp', '--reason', 'needed', '--command', 'pipx install yt-dlp'];
+    expect(await t.run('devops-approval', ...args, '--switch', 'paths')).toBe(0);
+    expect(t.reports.at(-1)).toMatchObject({
+      outcomeId: 'devops_approval',
+      data: { commands: ['pipx install yt-dlp'], blockedBy: 'allowedPaths' },
+    });
+    expect(await t.run('devops-approval', ...args, '--switch', 'root')).toBe(1);
+  });
+
   it('devops-question reports a "Question:" approval', async () => {
     const t = await setup();
     expect(await t.run('devops-question', '--text', 'which branch?', '--reason', 'A) dev B) main')).toBe(0);

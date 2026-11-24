@@ -1,5 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { assertNotAgentSession, checkSeal, readPolicyKey, seal } from '../policy/integrity.ts';
 import {
   DEFAULT_POLICY,
   POLICY_FILE,
@@ -14,7 +15,7 @@ export function policyPath(home: string): string {
 }
 
 /** The local policy, or the safe default when the file does not exist yet. Throws on a damaged file. */
-export function readPolicy(file: string): Policy {
+export function readPolicy(file: string, sealMarker?: string): Policy {
   if (!existsSync(file)) return structuredClone(DEFAULT_POLICY);
   let raw: unknown;
   try {
@@ -22,7 +23,20 @@ export function readPolicy(file: string): Policy {
   } catch {
     throw new Error(`${file} is not valid JSON: fix or remove it, then run setup again`);
   }
-  const r = PolicySchema.safeParse(raw);
+  // runner-authority-fixes T2: with a key on this machine the file must carry its seal (setup never launders an edit)
+  const { check, body } = checkSeal(dirname(file), raw);
+  // Rework 1 (S1): the store's keyless rule. A key that went missing on a policy that was sealed before (toolchain pins, or
+  // the adoption marker) is tampering, never a fresh start that setup may seal again with a new key
+  const sealedBefore =
+    check === 'no_key' &&
+    ((!!body && 'toolchainPins' in body) ||
+      (raw !== null && typeof raw === 'object' && 'integrity' in raw) ||
+      (!!sealMarker && existsSync(sealMarker)));
+  if (check === 'bad' || check === 'unsealed' || sealedBefore)
+    throw new Error(
+      `${file} was changed outside the runner (its seal does not match): check it, then run \`guildwise-runner policy accept\` and setup again`,
+    );
+  const r = PolicySchema.safeParse(body);
   if (!r.success)
     throw new Error(
       `${file} is not a valid policy (${r.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')})`,
@@ -32,6 +46,7 @@ export function readPolicy(file: string): Policy {
 
 /** Writes the policy atomically, mode 600 in a 700 folder. Validates it first, so an invalid policy is never written. */
 export function writePolicy(file: string, policy: Policy): Policy {
+  assertNotAgentSession();
   const valid = PolicySchema.parse(policy);
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   try {
@@ -41,7 +56,12 @@ export function writePolicy(file: string, policy: Policy): Policy {
   }
   const tmp = `${file}.${process.pid}.tmp`;
   rmSync(tmp, { force: true });
-  writeFileSync(tmp, `${JSON.stringify(valid, null, 2)}\n`, { mode: POLICY_FILE_MODE, flag: 'wx' });
+  // T2: sealed with the runner's key when it exists; before the runner's first start it stays unsealed (and without the
+  // empty toolchain pins) so the runner adopts it once (Rework 1, S1)
+  const key = readPolicyKey(dirname(file));
+  const { toolchainPins, ...legacy } = valid;
+  const out = key ? seal(key, valid) : toolchainPins.length ? valid : legacy;
+  writeFileSync(tmp, `${JSON.stringify(out, null, 2)}\n`, { mode: POLICY_FILE_MODE, flag: 'wx' });
   try {
     chmodSync(tmp, POLICY_FILE_MODE);
   } catch {

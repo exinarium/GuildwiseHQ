@@ -4,6 +4,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { CARD_BRANCH_PREFIXES, type DevopsAuditEntry, normalizeRemoteUrl } from '@aom/shared';
 import { redactSecrets } from '../redact.ts';
+import { HOME_SECRET_ENTRIES } from './home-secrets.ts';
 
 /**
  * Guardrails of the DevOps engineer (the one agent that runs outside the OS sandbox, as the user). Enforced by a Claude
@@ -55,8 +56,27 @@ export interface GuardConfig {
    * the card worktrees after the shift and reverts what changed (devops/card-fence.ts); this is the early refusal.
    */
   cardWorktreesRoot?: string;
-  /** A conflict request the server filed (G-Q2): this card branch may be fast-forwarded (`git merge --ff-only`) only. */
-  conflictBranch?: string;
+  /**
+   * T4: installs in this session run with scripts off (devops/install-env.ts). Yarn 1, Bun and Composer have no safe
+   * environment switch, so their install commands need the script-free flag (`install_scripts`).
+   */
+  installScriptsOff?: boolean;
+  /**
+   * T2: the local authority's folder (`~/.config/aom-runner`). Nothing may be read from, written to or run in it, and the
+   * runner's own CLI runs only its read-only verbs (`policyFence`). An approval never lifts this.
+   */
+  policyRoot?: string;
+  /**
+   * runner-authority-fixes T10: the workstation's DevOps access switches, already narrowed by the local policy. Set for
+   * DevOps shifts and chats (a chat without `devopsAccess` from the server gets every switch off). Absent (release prep,
+   * old configuration): the switches are not enforced here.
+   */
+  access?: { allowInstall: boolean; allowDocker: boolean; allowedPaths: string[] };
+  /**
+   * T10 `paths`: where this session may write without the paths switch (scratch, the agent's tmp and home, the OS temp
+   * folders; with installs on also the toolchain detection roots). `access.allowedPaths` are added to these.
+   */
+  writeRoots?: string[];
 }
 
 /** Lookups the classifier needs from the machine, injected so `classifyCommand` stays pure. */
@@ -73,6 +93,8 @@ export interface GuardVerdict {
   rule: string;
   /** For the agent, on a refusal. */
   reason?: string;
+  /** T10 `paths`: the path the refused command writes (the runner offers its folder for "Always allow"). */
+  target?: string;
 }
 
 /** The runner's data folders a DevOps command may delete in (relative to the runner root). */
@@ -394,7 +416,29 @@ interface Ctx {
   cwd: string;
   usedApproval: boolean;
   deps: GuardDeps;
+  /** T10 (R3-B2): the whole line was approved: only the rules in APPROVAL_LIFTS are lifted. */
+  lift?: boolean;
 }
+
+/**
+ * runner-authority-fixes T10 (R3-B2): the only guard rules a manager's approval of an exact command lifts. Never the card
+ * worktrees, the policy fence, secrets, the delete floor, protected or frozen branches, app repositories or user admin.
+ */
+export const APPROVAL_LIFTS: ReadonlySet<string> = new Set([
+  'off_workstation',
+  'install_off',
+  'docker_off',
+  'paths',
+]);
+
+/** T10: the guard rule of each switch, and the `aom devops-approval --switch` word. */
+export const SWITCH_OF_RULE: Readonly<
+  Record<string, { word: 'install' | 'docker' | 'paths'; label: string }>
+> = {
+  install_off: { word: 'install', label: 'installs are off' },
+  docker_off: { word: 'docker', label: 'Docker is off' },
+  paths: { word: 'paths', label: 'writing outside the allowed folders is off' },
+};
 
 const inside = (child: string, parent: string): boolean => {
   const r = relative(parent, child);
@@ -440,12 +484,192 @@ const ok = (rule = 'ok'): GuardVerdict => ({ decision: 'allowed', rule });
 const ASK =
   'Ask for approval with `aom devops-approval --action "<what>" --reason "<why>" --command "<the exact command>"`; the shift then ends and resumes after the manager approves, with that command allowed.';
 
-function offWorkstation(c: Ctx, seg: Segment, what: string): GuardVerdict {
+/** The segment itself was approved (or the whole line, `c.lift`): a lift-able rule lets it pass. */
+function approvedHere(c: Ctx, seg: Segment): boolean {
   const norm = normWs(seg.raw);
-  if (c.cfg.approvedCommands.some((a) => normWs(a) === norm)) {
+  if (c.lift || c.cfg.approvedCommands.some((a) => normWs(a) === norm)) {
     c.usedApproval = true;
-    return ok('off_workstation_approved');
+    return true;
   }
+  return false;
+}
+
+/**
+ * T10 (D5): a switch the owner turned off refuses, and the refusal asks: in a shift with `aom devops-approval --switch`,
+ * which the runner checks against this refusal before the Desk item reads "installs are off on this computer".
+ */
+function switchRefusal(
+  c: Ctx,
+  seg: Segment,
+  rule: 'install_off' | 'docker_off' | 'paths',
+  what: string,
+  target?: string,
+): GuardVerdict {
+  const sw = SWITCH_OF_RULE[rule] as { word: string; label: string };
+  const cmd = normWs(seg.raw).replace(/"/g, '\\"');
+  const ask =
+    c.cfg.kind === 'chat'
+      ? `In a chat, tell the owner the exact command (\`${normWs(seg.raw)}\`): they file it as a DevOps request to allow it once, or turn the switch on to always allow it.`
+      : `Ask with \`aom devops-approval --switch ${sw.word} --command "${cmd}" --action "<what>" --reason "<why>"\`; the owner allows it once or always.`;
+  return { ...refuse(rule, `${what}: ${sw.label} on this computer. ${ask}`), ...(target ? { target } : {}) };
+}
+
+/** Package managers and installers (T10 `install_off`); `toolchain.add` is not one (the D2 pin gates it). */
+const SYSTEM_PMS = new Set([
+  'apt',
+  'apt-get',
+  'aptitude',
+  'dnf',
+  'yum',
+  'zypper',
+  'pacman',
+  'apk',
+  'snap',
+  'flatpak',
+  'port',
+]);
+const JS_PMS = new Set(['npm', 'pnpm', 'yarn', 'bun', 'cnpm']);
+function installVerdict(cmd: string, words: string[], c: Ctx, seg: Segment): GuardVerdict | null {
+  const args = words.slice(1);
+  const sub = args.find((a) => !a.startsWith('-'));
+  let what: string | null = null;
+  if (SYSTEM_PMS.has(cmd) && sub && /^(install|reinstall|add|upgrade|dist-upgrade|refresh|update)$/.test(sub))
+    what = `\`${cmd} ${sub}\``;
+  else if (cmd === 'brew' && sub && /^(install|reinstall|upgrade|tap)$/.test(sub)) what = `\`brew ${sub}\``;
+  else if (/^(pip|pip3|pipx)$/.test(cmd) && sub && /^(install|inject|upgrade)$/.test(sub))
+    what = `\`${cmd} ${sub}\``;
+  else if (
+    /^python3?$/.test(cmd) &&
+    args[0] === '-m' &&
+    /^pip/.test(args[1] ?? '') &&
+    args.includes('install')
+  )
+    what = '`python -m pip install`';
+  else if (
+    cmd === 'uv' &&
+    (args.slice(0, 2).join(' ') === 'tool install' || args.slice(0, 2).join(' ') === 'pip install')
+  )
+    what = `\`uv ${args.slice(0, 2).join(' ')}\``;
+  else if (
+    JS_PMS.has(cmd) &&
+    (sub === undefined ? cmd === 'yarn' : /^(add|a|install|i|in|ci|global|upgrade|up|update)$/.test(sub))
+  )
+    what = `\`${cmd} ${sub ?? 'install'}\``;
+  else if (JS_PMS.has(cmd) && args.some((a) => a === '-g' || a === '--global')) what = `\`${cmd} --global\``;
+  else if (
+    /^(cargo|go|gem|dotnet)$/.test(cmd) &&
+    (sub === 'install' || (cmd === 'dotnet' && args.slice(0, 2).join(' ') === 'tool install'))
+  )
+    what = `\`${cmd} install\``;
+  if (!what) return null;
+  return approvedHere(c, seg) ? ok('install_approved') : switchRefusal(c, seg, 'install_off', what);
+}
+
+/** Commands that write the path(s) they name (T10 `paths`): which arguments are targets. */
+const WRITE_LAST = new Set(['cp', 'mv', 'ln', 'install', 'rsync']);
+const WRITE_ALL = new Set(['tee', 'touch', 'mkdir', 'truncate']);
+
+/** T10: may this session write `abs` without the paths switch (its own folders, plus allowed paths that are safe)? */
+function writable(abs: string, c: Ctx): boolean {
+  const roots = [
+    ...(c.cfg.writeRoots ?? []),
+    ...(c.cfg.access?.allowedPaths ?? []).filter(
+      (p) =>
+        isAbsolute(p) &&
+        alwaysPathRefusal(p, {
+          home: c.cfg.home,
+          policyRoot: c.cfg.policyRoot,
+          worktrees: c.cfg.cardWorktreesRoot,
+          runnerRoot: c.cfg.cardWorktreesRoot ? dirname(resolve(c.cfg.cardWorktreesRoot)) : undefined,
+        }) === null,
+    ),
+  ];
+  if (
+    abs === '/dev/null' ||
+    abs.startsWith('/dev/fd/') ||
+    abs === '/dev/stdout' ||
+    abs === '/dev/stderr' ||
+    abs === '/dev/tty'
+  )
+    return true;
+  return roots.some((r) => abs === resolve(r) || inside(abs, resolve(r)));
+}
+
+function pathsVerdict(cmd: string, words: string[], c: Ctx, seg: Segment): GuardVerdict | null {
+  const targets: string[] = [...seg.redirects];
+  const args = words.slice(1).filter((a) => !a.startsWith('-'));
+  if (WRITE_LAST.has(cmd) && args.length >= 2) targets.push(args[args.length - 1] as string);
+  else if (WRITE_ALL.has(cmd)) targets.push(...args);
+  else if (cmd === 'sed' && words.some((w) => /^-[a-zA-Z]*i/.test(w) || w.startsWith('--in-place')))
+    targets.push(...args.slice(1));
+  else if (cmd === 'dd') for (const w of words) if (w.startsWith('of=')) targets.push(w.slice(3));
+  for (const t of targets) {
+    const abs = resolveArg(t, c.cwd, c.cfg.home);
+    if (abs === null || writable(abs, c)) continue;
+    if (approvedHere(c, seg)) return ok('paths_approved');
+    return switchRefusal(c, seg, 'paths', `Writing ${t}`, abs);
+  }
+  return null;
+}
+
+/** The T10 switches for one segment (after the hard fences, before everything else): null when none applies. */
+function switchVerdict(cmd: string, words: string[], c: Ctx, seg: Segment): GuardVerdict | null {
+  const access = c.cfg.access;
+  if (!access) return null;
+  if (!access.allowInstall) {
+    const v = installVerdict(cmd, words, c, seg);
+    if (v && v.decision === 'refused') return v;
+  }
+  if (!access.allowDocker && DOCKER_LIKE.has(cmd))
+    return approvedHere(c, seg) ? null : switchRefusal(c, seg, 'docker_off', `\`${cmd}\``);
+  return pathsVerdict(cmd, words, c, seg);
+}
+
+/** Folders "Always allow" never adds (R4-S2 and the round 5 nit): they or their contents hold secrets or settings. */
+const SHELL_STARTUP = [
+  '.bashrc',
+  '.bash_profile',
+  '.bash_login',
+  '.profile',
+  '.zshrc',
+  '.zprofile',
+  '.zshenv',
+  '.config/fish',
+];
+
+/**
+ * Why `dir` may not be added to the allowed paths for good (null: it may). Never the home folder itself or `/`, a parent of
+ * the runner's folder, the policy folder, the card worktrees, a credential store, a shell start-up file, or a folder that
+ * CONTAINS any of those (for example `~/.config`, which holds `.config/gh` and the policy folder).
+ */
+export function alwaysPathRefusal(
+  dir: string,
+  o: {
+    home: string;
+    policyRoot?: string | undefined;
+    worktrees?: string | undefined;
+    runnerRoot?: string | undefined;
+  },
+): string | null {
+  const d = resolve(dir);
+  const home = resolve(o.home);
+  if (d === '/' || d === home) return 'the home folder or / as a whole';
+  const sensitive = [
+    ...(o.runnerRoot ? [resolve(o.runnerRoot)] : []),
+    ...(o.policyRoot ? [resolve(o.policyRoot)] : []),
+    ...(o.worktrees ? [resolve(o.worktrees)] : []),
+    ...HOME_SECRET_ENTRIES.map((e) => join(home, e)),
+    ...SHELL_STARTUP.map((e) => join(home, e)),
+  ];
+  for (const p of sensitive) {
+    if (d === p || inside(d, p)) return `${p} holds secrets or settings`;
+    if (inside(p, d)) return `it contains ${p}`;
+  }
+  return null;
+}
+
+function offWorkstation(c: Ctx, seg: Segment, what: string): GuardVerdict {
+  if (approvedHere(c, seg)) return ok('off_workstation_approved');
   return refuse(
     'off_workstation',
     `${what} leaves this workstation, which needs the manager's approval. ${c.cfg.kind === 'chat' ? 'In a chat, tell the owner what you need and file a DevOps request (`aom devops "<request>"`) so it can be approved on the desk.' : ASK}`,
@@ -623,10 +847,12 @@ function gitSubcommand(
   return { sub: words[i], args: words.slice(i + 1), dir };
 }
 
-const frozenRefusal = (b: string): GuardVerdict =>
+const frozenRefusal = (b: string, shiftKind?: GuardConfig['shiftKind']): GuardVerdict =>
   refuse(
     'frozen_branch',
-    `Branch "${b}" is the release branch of this release prep and may not be pushed, reset, moved, checked out or deleted here. Release prep never pushes: write your files and finish with \`aom prep done\`.`,
+    shiftKind === 'release_prep'
+      ? `Branch "${b}" is the release branch of this release prep and may not be pushed, reset, moved, checked out or deleted here. Release prep never pushes: write your files and finish with \`aom prep done\`.`
+      : `Branch "${b}" may not be pushed, reset, moved, checked out or deleted in this request. Resolve on your conflict/ branch in a scratch worktree and finish with \`aom devops-done --summary "Resolved: ..."\`: the runner then moves ${b} forward itself.`,
   );
 
 /** Commands that move the branch checked out in their directory. */
@@ -652,15 +878,16 @@ function frozenGit(words: string[], c: Ctx): GuardVerdict | null {
   };
 
   if (sub === 'push') {
-    if (flags.some((f) => f === '--all' || f === '--mirror' || f === '--prune')) return frozenRefusal(first);
+    if (flags.some((f) => f === '--all' || f === '--mirror' || f === '--prune'))
+      return frozenRefusal(first, c.cfg.shiftKind);
     const refspecs = positional.slice(1);
-    if (refspecs.length === 0) return frozenRefusal(first);
+    if (refspecs.length === 0) return frozenRefusal(first, c.cfg.shiftKind);
     for (const spec of refspecs) {
       const s = spec.replace(/^\+/, '');
       const dst = (s.includes(':') ? s.slice(s.lastIndexOf(':') + 1) : s).replace(/^refs\/heads\//, '');
-      if (dst === 'HEAD' || dst === '') return frozenRefusal(first);
+      if (dst === 'HEAD' || dst === '') return frozenRefusal(first, c.cfg.shiftKind);
       const h = hit(dst);
-      if (h) return frozenRefusal(h);
+      if (h) return frozenRefusal(h, c.cfg.shiftKind);
     }
     return null;
   }
@@ -671,14 +898,14 @@ function frozenGit(words: string[], c: Ctx): GuardVerdict | null {
     if (!changes) return null;
     for (const p of positional) {
       const h = hit(p);
-      if (h) return frozenRefusal(h);
+      if (h) return frozenRefusal(h, c.cfg.shiftKind);
     }
     return null;
   }
   if (sub === 'update-ref') {
     for (const a of args) {
       const h = hit(a);
-      if (h) return frozenRefusal(h);
+      if (h) return frozenRefusal(h, c.cfg.shiftKind);
     }
     return null;
   }
@@ -690,7 +917,7 @@ function frozenGit(words: string[], c: Ctx): GuardVerdict | null {
       if (/^(-b|-B|-c|-C|--orphan)$/.test(a)) {
         creating = true;
         const h = hit(beforeDd[i + 1] ?? '');
-        if (h) return frozenRefusal(h);
+        if (h) return frozenRefusal(h, c.cfg.shiftKind);
         i++;
       } else if (a === '--detach' || a === '-d') creating = true;
       else if (a.startsWith('-') && a !== '-') continue;
@@ -698,7 +925,7 @@ function frozenGit(words: string[], c: Ctx): GuardVerdict | null {
     }
     // `git checkout <branch> -- <paths>` only reads the branch
     const h = target === undefined ? null : hit(target);
-    if (h && !creating && !(sub === 'checkout' && dd !== -1)) return frozenRefusal(h);
+    if (h && !creating && !(sub === 'checkout' && dd !== -1)) return frozenRefusal(h, c.cfg.shiftKind);
     return null;
   }
   if (sub === 'worktree') {
@@ -706,11 +933,11 @@ function frozenGit(words: string[], c: Ctx): GuardVerdict | null {
     const named = beforeDd.findIndex((a) => a === '-b' || a === '-B');
     if (named !== -1) {
       const h = hit(beforeDd[named + 1] ?? '');
-      return h ? frozenRefusal(h) : null;
+      return h ? frozenRefusal(h, c.cfg.shiftKind) : null;
     }
     for (const p of positional.slice(1)) {
       const h = hit(p);
-      if (h) return frozenRefusal(h);
+      if (h) return frozenRefusal(h, c.cfg.shiftKind);
     }
     return null;
   }
@@ -726,8 +953,8 @@ function frozenGit(words: string[], c: Ctx): GuardVerdict | null {
   // null (detached) must stay null: only a missing lookup counts as unknown
   const head = dir === null || !c.deps.headBranch ? 'unknown' : c.deps.headBranch(dir);
   if (head === null) return null;
-  if (head === 'unknown') return frozenRefusal(first);
-  return frozen.has(head) ? frozenRefusal(head) : null;
+  if (head === 'unknown') return frozenRefusal(first, c.cfg.shiftKind);
+  return frozen.has(head) ? frozenRefusal(head, c.cfg.shiftKind) : null;
 }
 
 const CARD_FENCE_TEXT =
@@ -819,12 +1046,7 @@ function cardFence(cmd: string, words: string[], seg: Segment, c: Ctx): GuardVer
     const flags = args.filter((a) => a.startsWith('-'));
     const positional = args.filter((a) => !a.startsWith('-'));
     const head = dir === null ? 'unknown' : (c.deps.headBranch?.(dir) ?? 'unknown');
-    const conflictFf =
-      !!c.cfg.conflictBranch &&
-      sub === 'merge' &&
-      flags.includes('--ff-only') &&
-      head === c.cfg.conflictBranch;
-    if (conflictFf) return null;
+    // T7: no exception for a conflict request any more; the runner moves the card branch after "Resolved:"
     // a card branch named anywhere (the clone too): pushed, moved, deleted or re-pointed
     if (
       sub === 'push' &&
@@ -880,6 +1102,115 @@ function cardFence(cmd: string, words: string[], seg: Segment, c: Ctx): GuardVer
     const v = w.includes('=') && w.startsWith('-') ? w.slice(w.indexOf('=') + 1) : w;
     if (!v.startsWith('-') && inCard(resolveArg(v, c.cwd, c.cfg.home)))
       return refuseFence(`\`${cmd}\` on ${v} (a card worktree)`);
+  }
+  return null;
+}
+
+const INSTALL_SCRIPTS_TEXT =
+  'Install scripts are off in DevOps sessions on this workstation (a builder may have written them). Add the script-free flag';
+
+/** Bun subcommands that install, update or link packages (and so run lifecycle scripts unless `--ignore-scripts`). */
+const BUN_INSTALLING = new Set(['install', 'i', 'add', 'a', 'update', 'upgrade', 'remove', 'rm', 'link']);
+/** Yarn subcommands that install (a bare `yarn` installs too). */
+const YARN_INSTALLING = new Set(['install', 'add', 'upgrade', 'up', 'upgrade-interactive', 'import', 'link']);
+const COMPOSER_INSTALLING = new Set([
+  'install',
+  'update',
+  'upgrade',
+  'require',
+  'create-project',
+  'reinstall',
+]);
+
+/**
+ * T4 (S-A, S-B): while install scripts are off, the package managers without a safe environment switch must carry the
+ * script-free flag: Bun `--ignore-scripts` (and never `bun pm trust`, which runs dependency scripts on purpose), Yarn 1
+ * `--ignore-scripts` or Yarn 2+ `--mode=skip-build`, Composer `--no-scripts --no-plugins`. npm and pnpm are covered by
+ * the environment. Bundler and pip still run code (residual, stated in the design).
+ */
+function installScriptGuard(cmd: string, words: string[]): GuardVerdict | null {
+  const args = words.slice(1);
+  const sub = args.find((a) => !a.startsWith('-'));
+  if (cmd === 'bun') {
+    if (sub === 'pm' && args[args.indexOf('pm') + 1] === 'trust')
+      return refuse(
+        'install_scripts',
+        '`bun pm trust` runs dependency install scripts, which are off in DevOps sessions on this workstation.',
+      );
+    if (sub && BUN_INSTALLING.has(sub) && !args.includes('--ignore-scripts'))
+      return refuse('install_scripts', `${INSTALL_SCRIPTS_TEXT}: \`bun ${sub} --ignore-scripts ...\`.`);
+    return null;
+  }
+  if (cmd === 'yarn') {
+    const installing =
+      sub === undefined || YARN_INSTALLING.has(sub) || (sub === 'global' && args.includes('add'));
+    if (installing && !args.includes('--ignore-scripts') && !args.includes('--mode=skip-build'))
+      return refuse(
+        'install_scripts',
+        `${INSTALL_SCRIPTS_TEXT}: \`yarn ${sub ?? 'install'} --ignore-scripts\` (Yarn 1) or \`--mode=skip-build\` (Yarn 2+).`,
+      );
+    return null;
+  }
+  if (cmd === 'composer' || cmd === 'composer.phar') {
+    if (
+      sub &&
+      COMPOSER_INSTALLING.has(sub) &&
+      !(args.includes('--no-scripts') && args.includes('--no-plugins'))
+    )
+      return refuse(
+        'install_scripts',
+        `${INSTALL_SCRIPTS_TEXT}: \`composer ${sub} --no-scripts --no-plugins\`.`,
+      );
+  }
+  return null;
+}
+
+/** The runner CLI's verbs that only read (T2, S3): `policy` prints (`policy accept` is refused), the rest list. */
+const RUNNER_CLI_READ_ONLY = new Set([
+  'policy',
+  'pending',
+  'status',
+  'version',
+  'help',
+  '--version',
+  '--help',
+  '-h',
+  '-V',
+]);
+const RUNNER_CLIS = new Set(['guildwise-runner', 'aom-runner']);
+const POLICY_FENCE_TEXT =
+  "The local approval settings of this computer are the owner's alone: no agent reads, changes or approves them, whatever it is asked. Tell the requester the owner must do it on this computer.";
+
+/**
+ * T2: refuses a command that reads, writes or runs in the local authority's folder, or runs the runner CLI beyond its
+ * read-only verbs (`guildwise-runner approve`, `policy accept`, `devops grant`, `approvals pair`, ...). Direct commands
+ * only: a script the agent wrote is the recorded D1 leftover.
+ */
+function policyFence(cmd: string, words: string[], seg: Segment, c: Ctx): GuardVerdict | null {
+  const root = c.cfg.policyRoot;
+  if (RUNNER_CLIS.has(cmd)) {
+    const args = words.slice(1);
+    const verb = args[0];
+    const printOnly =
+      verb !== undefined && RUNNER_CLI_READ_ONLY.has(verb) && (verb !== 'policy' || args.length === 1);
+    if (!printOnly)
+      return refuse(
+        'policy_fence',
+        `\`${cmd} ${args.join(' ')}\` changes or approves local settings. ${POLICY_FENCE_TEXT}`,
+      );
+  }
+  if (!root) return null;
+  const r = resolve(root);
+  const inPolicy = (p: string | null): boolean => p !== null && (p === r || inside(p, r));
+  for (const t of seg.redirects)
+    if (inPolicy(resolveArg(t, c.cwd, c.cfg.home)))
+      return refuse('policy_fence', `Writing ${t} (the local approval settings). ${POLICY_FENCE_TEXT}`);
+  if (inPolicy(resolve(c.cwd)))
+    return refuse('policy_fence', `\`${cmd}\` in the local approval settings folder. ${POLICY_FENCE_TEXT}`);
+  for (const w of words.slice(1)) {
+    const v = w.includes('=') ? w.slice(w.indexOf('=') + 1) : w;
+    if (v && !v.startsWith('-') && inPolicy(resolveArg(v, c.cwd, c.cfg.home)))
+      return refuse('policy_fence', `\`${cmd}\` on ${v} (the local approval settings). ${POLICY_FENCE_TEXT}`);
   }
   return null;
 }
@@ -958,8 +1289,17 @@ function judgeSegment(seg: Segment, c: Ctx): GuardVerdict {
     cmd = baseName(words[0] as string);
   }
 
+  const policyFenced = policyFence(cmd, words, seg, c);
+  if (policyFenced) return policyFenced;
   const fenced = cardFence(cmd, words, seg, c);
   if (fenced) return fenced;
+  if (c.cfg.installScriptsOff) {
+    const scripts = installScriptGuard(cmd, words);
+    if (scripts) return scripts;
+  }
+  // T10: the owner's switches (installs, Docker, paths); a refusal asks
+  const switched = switchVerdict(cmd, words, c, seg);
+  if (switched && switched.decision === 'refused') return switched;
 
   // `aom sudo` was removed in 1.10.0 (no standing root path): refused like raw sudo
   if (cmd === 'aom') {
@@ -1141,16 +1481,34 @@ export function classifyCommand(
     const scan = scanVerdict(command, cfg, cwd);
     if (scan) return scan;
   }
-  // a whole-command approval matches however the line is built
+  // T10 (R3-B2): `curl ... | sh` installs
+  if (
+    cfg.access &&
+    !cfg.access.allowInstall &&
+    /\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(ba|z|da|k)?sh\b/.test(command)
+  ) {
+    const whole = normWs(command);
+    if (!cfg.approvedCommands.some((a) => normWs(a) === whole))
+      return switchRefusal(
+        { cfg, cwd, usedApproval: false, deps },
+        { words: [], raw: command, redirects: [] },
+        'install_off',
+        'Running a downloaded installer (`curl | sh`)',
+      );
+  }
+  // a whole-command approval matches however the line is built: the line is judged again with only the lift-able rules
+  // lifted, and passes only when nothing else refuses it
   const c: Ctx = { cfg, cwd, usedApproval: false, deps };
   const whole = normWs(command);
   const v = judgeLine(command, c);
   if (
     v.decision === 'refused' &&
-    v.rule === 'off_workstation' &&
+    APPROVAL_LIFTS.has(v.rule) &&
     cfg.approvedCommands.some((a) => normWs(a) === whole)
-  )
-    return ok('off_workstation_approved');
+  ) {
+    const again = judgeLine(command, { cfg, cwd, usedApproval: false, deps, lift: true });
+    return again.decision === 'allowed' ? ok(`${v.rule}_approved`) : again;
+  }
   return v;
 }
 
@@ -1970,6 +2328,7 @@ export function auditEntry(
     decision: v.decision,
     rule: v.rule,
     command: redactCommand(command),
+    ...(v.target ? { target: v.target.slice(0, 4000) } : {}),
   };
 }
 

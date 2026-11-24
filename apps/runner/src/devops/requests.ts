@@ -58,11 +58,40 @@ export function devopsGuardFor(
       (b): b is string => !!b,
     ),
     approvedCommands: msg.devops?.approval?.commands ?? [],
-    ...(msg.devops?.conflictCard?.branch ? { conflictBranch: msg.devops.conflictCard.branch } : {}),
-    ...(msg.devops?.scan || msg.devops?.scanKind ? { readOnlyScan: true as const } : {}),
+    // T10: the switches the owner turned off are enforced by the guard (the access is already narrowed by policy.json)
+    ...(msg.devops?.access
+      ? {
+          access: {
+            allowInstall: msg.devops.access.allowInstall,
+            allowDocker: msg.devops.access.allowDocker,
+            allowedPaths: msg.devops.access.allowedPaths,
+          },
+        }
+      : {}),
+    // T7: a working-branch conflict request may not change the working branch at all (the runner moves it)
+    ...(msg.devops?.conflictRepo?.workingBranch
+      ? { frozenBranches: [msg.devops.conflictRepo.workingBranch] }
+      : {}),
+    ...(isReadOnlyScan(msg) ? { readOnlyScan: true as const } : {}),
     ...appRepoGuard(msg, identityEmail),
   };
 }
+
+/** A "Scan with DevOps" request: read-only, at the guard and at the runner's IPC boundary (T3). */
+export const isReadOnlyScan = (msg: ShiftStartMsg): boolean =>
+  msg.kind === 'devops' && !!(msg.devops?.scan || msg.devops?.scanKind);
+
+/**
+ * The runner verbs a read-only scan may call (T3): the same set the guard's `AOM_SPECS` lets its shell run
+ * (`aom setup propose`, `aom deploy probe|status`), plus the guard hook's own audit. Anything else (`toolchain.add`,
+ * `git.push`, `hygiene.run`, ...) is refused at the supervisor, whatever the shell did to reach it.
+ */
+export const SCAN_RPC_ALLOWED: ReadonlySet<string> = new Set([
+  'setup.propose',
+  'deploy.probe',
+  'deploy.status',
+  'devops.audit',
+]);
 
 /** The app repositories of a DevOps shift's plan for the guard (no secret); nothing when no repository is on an app. */
 function appRepoGuard(

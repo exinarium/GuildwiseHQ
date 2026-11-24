@@ -68,8 +68,10 @@ export interface DevopsGuardInput {
   appRepos?: Array<{ remote: string; label: string; botEmail: string }>;
   /** The commit e-mail of the session's environment. */
   identityEmail?: string;
-  /** A conflict request the server filed: the one card branch DevOps may fast-forward (`git merge --ff-only`). */
-  conflictBranch?: string;
+  /** T4: the session's installs run with scripts off; the guard refuses the managers that have no safe env switch. */
+  installScriptsOff?: boolean;
+  /** T10: the DevOps access switches (narrowed by the local policy) the guard enforces; absent: not enforced (release prep). */
+  access?: { allowInstall: boolean; allowDocker: boolean; allowedPaths: string[] };
 }
 
 /**

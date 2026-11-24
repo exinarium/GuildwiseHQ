@@ -102,7 +102,7 @@ export function renderDevopsInstructions(brief: ShiftBrief, devops: DevopsShift)
       ...accessLines(devops.access),
       '',
       'Anything destructive (deleting data, wiping, formatting) or outside this access must NOT be run. Ask for approval instead with `aom devops-approval`; the shift then ends and resumes after the manager approves.',
-      'When the only thing in the way is a switch above that says NOT allowed (installing tools, Docker, a path), add `--blocked-by install|docker|paths` to `aom devops-approval`: the owner is then told exactly which switch to turn on, and the request continues by itself once it is on.',
+      'The switches above are enforced on this computer: a command they do not allow is refused, and the refusal says how to ask. Ask with `aom devops-approval --switch install|docker|paths --command "<the exact command>" --action "<what>" --reason "<why>"`: the owner allows that exact command once, or always (the switch goes on).',
       'Tools for the agents: the sandboxed agents only see tools the runner knows. After you install a tool for them, register it with `aom toolchain add <name> --bin <dir> [--read <dir>] [--env KEY=VALUE]` (`aom toolchain list` shows what they have; `remove <name>` undoes it; no credentials in --env). Prefer user-space installs (~/.dotnet, ~/.local, ~/go/sdk, nvm, pyenv/uv, sdkman, mise/asdf) so no sudo is needed and the registered folder is not a system one.',
       "A new repository (GitHub, GitLab, Azure DevOps or Bitbucket Cloud) is created by the owner's runner after they approve it on the desk: ask with `aom repo create [--provider github|gitlab|azure-devops|bitbucket-cloud] --name <name> --private|--public --project <KEY>` (the name has the host's shape: owner/repo, group/subgroup/project, organization/project/repo, workspace/repo; never `gh repo create` yourself). You may fetch, pull and push with the user's git credentials. To check or set up this workstation's login to a git host use `aom git status` and `aom git connect <provider>`: show the user any URL and code it prints; never ask for or type a token, tell the user to run `guildwise-runner git-connect <provider>` or use the app's Connect helper.",
     ].join('\n'),
@@ -399,7 +399,7 @@ export function renderDevopsPrompt(devops: DevopsShift): string {
   if (devops.mergeApprovalWaived && devops.conflictCard) {
     out.push('## Merges');
     out.push(
-      `This project does not require the owner's approval for merges: resolve the conflict of card ${devops.conflictCard.ref} yourself as the request says (in a scratch worktree, then a fast-forward of ${devops.conflictCard.branch}); do not ask for approval for that. Still ask (\`aom devops-approval\`) for anything destructive (deleting branches, force-push, reset of shared branches) or outside your granted access.`,
+      `This project does not require the owner's approval for merges: resolve the conflict of card ${devops.conflictCard.ref} yourself as the request says (merge in a scratch worktree on your conflict/ branch; the runner then moves ${devops.conflictCard.branch} forward itself); do not ask for approval for that. Still ask (\`aom devops-approval\`) for anything destructive (deleting branches, force-push, reset of shared branches) or outside your granted access.`,
     );
   }
   if (devops.run) out.push(renderRunSection(devops.run));

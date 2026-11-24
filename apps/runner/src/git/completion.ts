@@ -9,6 +9,8 @@ import {
 } from '@aom/shared';
 import { statusLinesWithoutStubs } from '../adapters/sandbox-placeholders.ts';
 import type { BranchRules } from '../forge/types.ts';
+import { type BranchLedger, ledgerRepoKey } from './branch-ledger.ts';
+import { recordCardConflict } from './conflict-record.ts';
 import { describePushRejection, isProtectedBranchRejection, type PrCreator } from './gh.ts';
 import { advanceLocalBranch, git, gitOk, hasRemote, revParse } from './git.ts';
 import {
@@ -49,6 +51,8 @@ export interface CompletionInput {
    * DevOps, Bitbucket). Null: unknown (not connected, no permission, plain git); the merge is then tried and a
    * rejected push still falls back to a pull request.
    */
+  /** The runner's card branch ledger (T1): a branch it pushed is recorded there. */
+  ledger?: BranchLedger;
   rules?: (
     cwd: string,
     branch: string,
@@ -218,10 +222,12 @@ async function openChangePath(input: CompletionInput, wt: string): Promise<Final
   const { payload: p } = input;
   const action = p.action;
   // A pull request goes out under <prefix>/<ticket>.
-  const head = await remoteBranchFor(input, wt);
+  const target = await remoteBranchFor(input, wt);
+  const head = target.name;
   const push = await pushBranch(input, wt, head);
   if (push.exitCode !== 0)
     return fail(action, pushFailure(p, 'git push failed', (push.stderr || push.stdout).trim()));
+  await recordPush(input, wt, target);
 
   try {
     const r = await input.pr.create({
@@ -270,10 +276,10 @@ async function internalRefPreflight(p: FinalizeExecutePayload, wt: string): Prom
  * pull request) wins; else `<prefix>/<ticket>`, with `-2`, `-3` ... when origin already has a branch of that name. Old
  * servers send neither: the card branch name, as before.
  */
-async function remoteBranchFor(input: CompletionInput, wt: string): Promise<string> {
+async function remoteBranchFor(input: CompletionInput, wt: string): Promise<{ name: string; free: boolean }> {
   const { payload: p } = input;
-  if (p.remoteBranch) return p.remoteBranch;
-  if (!p.prBranchPrefix || !p.ticket) return p.branchName;
+  if (p.remoteBranch) return { name: p.remoteBranch, free: false };
+  if (!p.prBranchPrefix || !p.ticket) return { name: p.branchName, free: false };
   const base = `${p.prBranchPrefix}/${p.ticket}`;
   const url = (await git(wt, ['remote', 'get-url', 'origin'])).stdout.trim();
   const a = input.auth && url ? await input.auth(url, p.forge) : { args: [], env: {} };
@@ -288,10 +294,28 @@ async function remoteBranchFor(input: CompletionInput, wt: string): Promise<stri
       },
     );
     // 2: no such ref (free). Any other failure (offline, auth): keep the first name, the push reports the problem.
-    if (r.exitCode === 2) return name;
-    if (r.exitCode !== 0) return base;
+    if (r.exitCode === 2) return { name, free: true };
+    if (r.exitCode !== 0) return { name: base, free: false };
   }
-  return base;
+  return { name: base, free: false };
+}
+
+/**
+ * T1 (S-C): after a successful push the runner records the branch as its own, with the sha it pushed, only when the
+ * name was free on origin before the push or is already in its ledger. A name a person uses (or reused after the forge
+ * deleted the runner's copy) never becomes deletable through a server-chosen push.
+ */
+async function recordPush(input: CompletionInput, wt: string, target: { name: string; free: boolean }) {
+  const ledger = input.ledger;
+  if (!ledger) return;
+  try {
+    const repo = await ledgerRepoKey(input.repoPath);
+    if (!target.free && !ledger.has(repo, target.name)) return;
+    const sha = (await git(wt, ['rev-parse', `refs/heads/${input.payload.branchName}`])).stdout.trim();
+    if (/^[0-9a-f]{40,64}$/.test(sha)) ledger.record(repo, target.name, 'pushed', sha);
+  } catch {
+    // a failed ledger write never fails finalize: the branch is only kept by the tidy-up
+  }
 }
 
 /** `git push origin <local>:<remote>` (never -u: it writes .git/config, which the sandbox locks) with the host's credentials when the runner has any. */
@@ -361,6 +385,9 @@ async function mergeLocked(input: CompletionInput, wt: string): Promise<Finalize
         await git(integration, ['merge', '--abort']);
         // No conflicted file: git failed for another reason (a lock, a missing ref, the identity...). That is not a
         // conflict for the builder to fix: report git's own words so the owner sees what happened.
+        // T7: the runner saw this conflict itself (the card branch at its head)
+        if (files.length > 0)
+          await recordCardConflict(wt, (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim());
         if (files.length === 0)
           return fail(
             'merge',
@@ -408,10 +435,12 @@ async function viaChange(
   reason?: string,
 ): Promise<FinalizeResult> {
   const { payload: p } = input;
-  const head = await remoteBranchFor(input, wt);
+  const target = await remoteBranchFor(input, wt);
+  const head = target.name;
   const push = await pushBranch(input, wt, head);
   if (push.exitCode !== 0)
     return fail('pr', pushFailure(p, 'git push failed', (push.stderr || push.stdout).trim()));
+  await recordPush(input, wt, target);
   const why = reason ? `${base} refused a direct push` : `${base} is protected on the git host`;
   try {
     const r = await input.pr.create({

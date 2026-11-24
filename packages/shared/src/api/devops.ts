@@ -91,5 +91,10 @@ export type PatchDevOpsAccessRequest = z.infer<typeof PatchDevOpsAccessRequestSc
 export const ResolveDevOpsApprovalRequestSchema = z.object({
   resolution: z.enum(['approved', 'rejected']),
   note: z.string().max(2000).optional(),
+  /**
+   * runner-authority-fixes T10: for a request blocked by a switch, `once` allows the exact command for this request and
+   * `always` also turns the switch on for the workstation (for paths: adds the folder shown). Absent: once.
+   */
+  scope: z.enum(['once', 'always']).optional(),
 });
 export type ResolveDevOpsApprovalRequest = z.infer<typeof ResolveDevOpsApprovalRequestSchema>;

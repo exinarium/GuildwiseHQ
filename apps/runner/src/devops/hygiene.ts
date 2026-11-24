@@ -8,11 +8,14 @@ import {
   type HygieneSpec,
   isSafeGitRef,
 } from '@aom/shared';
+import { type BranchLedger, ledgerRepoKey } from '../git/branch-ledger.ts';
+import { recordWorkingConflict } from '../git/conflict-record.ts';
 import { currentBranch, git, hasRemote, revParse } from '../git/git.ts';
 import { AppIdentityError, committerEnv, inContext } from '../git/identity.ts';
 import { changedFiles } from '../git/sweep.ts';
 import { type ChangeStateLookup, cleanFinishedCards } from './branch-cleanup.ts';
 import { migrateSavedWorkBranches, saveCommitsStash, saveUncommittedWork } from './saved-work.ts';
+import { mayDeleteLocal } from './tidy-up-rules.ts';
 
 /**
  * Repository hygiene of one workstation (docs/design/phases.md, "DevOps repository hygiene and the working branch").
@@ -261,6 +264,8 @@ export interface HygieneDeps {
    * it as committer; a repository not on an app keeps that committer for the commits a pull rewrites.
    */
   identity?: { name: string; email: string };
+  /** The card branches this runner created or pushed (T1): absent, nothing is deleted on origin. */
+  ledger?: BranchLedger;
 }
 
 export async function hygieneRepo(
@@ -459,9 +464,20 @@ export async function hygieneRepo(
   const target = hasRemoteRef ? `refs/remotes/origin/${wb}` : `refs/heads/${wb}`;
   const busy = await checkedOut(repo);
   const handled = new Set(spec.finishedCards.map((c) => c.branch));
+  // The runner's own rules decide (T1): a server prefix such as "mai" never makes `main` deletable.
+  const originHeadRef = (
+    await repo.git(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'])
+  ).stdout.trim();
+  const tidyCtx = {
+    wb,
+    mainBranch: spec.mainBranch,
+    current: cur,
+    originHead: originHeadRef.startsWith('origin/') ? originHeadRef.slice('origin/'.length) : null,
+  };
+  const repoKey = spec.finishedBranches.length ? await ledgerRepoKey(spec.localPath) : '';
   for (const b of spec.finishedBranches) {
     if (handled.has(b)) continue;
-    if (!spec.branchPrefix || !b.startsWith(spec.branchPrefix) || !isSafeGitRef(b) || busy.has(b)) continue;
+    if (!isSafeGitRef(b) || busy.has(b) || !mayDeleteLocal(deps.ledger, repoKey, b, tidyCtx)) continue;
     if (!(await revParse(spec.localPath, `refs/heads/${b}`))) continue;
     if (!(await isAncestor(repo, `refs/heads/${b}`, target))) continue;
     if ((await repo.git(['branch', '-D', '--', b], true)).exitCode === 0) res.removedBranches.push(b);
@@ -477,6 +493,7 @@ export async function hygieneRepo(
       remote,
       fetched,
       busy: busyWorktrees,
+      ...(deps.ledger ? { ledger: deps.ledger } : {}),
       ...(deps.changeState ? { changeState: deps.changeState } : {}),
       ...(repo.net ? { auth: repo.net } : {}),
       log: (c) => repo.commands.push(c),
@@ -520,6 +537,9 @@ export async function runHygiene(
   const commands: string[] = [];
   for (const r of spec.repos) {
     const { result, commands: cmds } = await hygieneRepo(r, busyWorktrees, deps);
+    // T7: the runner saw this conflict itself; a DevOps resolution may later be moved onto the working branch by it
+    if (result.problem?.kind === 'conflict' && r.workingBranch && isSafeGitRef(r.workingBranch))
+      await recordWorkingConflict(r.localPath, r.workingBranch);
     result.uncommitted = result.uncommitted.slice(0, MAX_FILES);
     repos.push(result);
     commands.push(...cmds);

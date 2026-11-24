@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { assertNotAgentSession, checkSeal, type SealCheck, sealIfKeyed } from './integrity.ts';
 import { policyDir, writeFileAtomic } from './store.ts';
 
 /**
@@ -69,8 +70,14 @@ export const newHeldId = (): string => randomBytes(5).toString('hex');
 
 export class HeldStore {
   readonly dir: string;
-  constructor(root: string = policyDir()) {
+  /** T2 (S2): held records whose seal is missing or wrong are moved here, logged, and never listed or approved. */
+  readonly quarantineDir: string;
+  constructor(
+    readonly root: string = policyDir(),
+    private readonly warn: (m: string) => void = () => {},
+  ) {
     this.dir = join(root, 'held');
+    this.quarantineDir = join(this.dir, 'quarantine');
   }
 
   private file(id: string): string {
@@ -79,17 +86,66 @@ export class HeldStore {
   }
 
   put(r: HeldRecord): void {
+    assertNotAgentSession();
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
-    writeFileAtomic(this.file(r.id), `${JSON.stringify(HeldRecordSchema.parse(r))}\n`, 0o600);
+    writeFileAtomic(
+      this.file(r.id),
+      `${JSON.stringify(sealIfKeyed(this.root, HeldRecordSchema.parse(r)))}\n`,
+      0o600,
+    );
   }
 
+  /**
+   * A readable record with a good seal. Without a key on this machine (before the policy was adopted) an unsealed
+   * record is read as before; the adoption refuses those (`unsealed`). With a key, a missing or wrong seal quarantines it.
+   */
   get(id: string): HeldRecord | null {
+    let raw: unknown;
     try {
-      const parsed = HeldRecordSchema.safeParse(JSON.parse(readFileSync(this.file(id), 'utf8')));
-      return parsed.success ? parsed.data : null;
+      raw = JSON.parse(readFileSync(this.file(id), 'utf8'));
     } catch {
       return null;
     }
+    const { check, body } = checkSeal(this.root, raw);
+    if (check === 'bad' || check === 'unsealed') {
+      this.quarantine(id, check);
+      return null;
+    }
+    const parsed = HeldRecordSchema.safeParse(body);
+    return parsed.success ? parsed.data : null;
+  }
+
+  private quarantine(id: string, why: SealCheck): void {
+    try {
+      mkdirSync(this.quarantineDir, { recursive: true, mode: 0o700 });
+      renameSync(this.file(id), join(this.quarantineDir, `${id}.json`));
+      this.warn(
+        `held item ${id} was quarantined: its seal is ${why === 'bad' ? 'wrong' : 'missing'} (changed outside the runner)`,
+      );
+    } catch {
+      // already moved by another process
+    }
+  }
+
+  /** T2 (S2): ids of records written before the seal (no key yet); the runner refuses them when it adopts the policy. */
+  unsealed(): string[] {
+    let names: string[];
+    try {
+      names = readdirSync(this.dir);
+    } catch {
+      return [];
+    }
+    const out: string[] = [];
+    for (const n of names) {
+      if (!n.endsWith('.json')) continue;
+      try {
+        const raw = JSON.parse(readFileSync(join(this.dir, n), 'utf8')) as Record<string, unknown>;
+        if (typeof raw.integrity !== 'string') out.push(n.slice(0, -5));
+      } catch {
+        // unreadable: never listed anyway
+      }
+    }
+    return out;
   }
 
   /** Every readable item (of one pairing when given), oldest first. Unreadable files are skipped. */

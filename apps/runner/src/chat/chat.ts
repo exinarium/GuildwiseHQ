@@ -1,14 +1,16 @@
-import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { delimiter, isAbsolute, join, relative, resolve } from 'node:path';
 import {
   type ChatContext,
   type ChatSegment,
   capChatSegments,
   chatSegmentsText,
   chatToolsFor,
+  DEFAULT_DEVOPS_ACCESS,
   DELEGATE_RPC,
+  type DevOpsAccess,
   type IpcReportRequest,
   type IpcReportResponse,
   type IpcRpcRequest,
@@ -30,7 +32,7 @@ import {
   type Usage,
 } from '@aom/shared';
 import { formatLimitTime } from '../adapters/claude-usage-limit.ts';
-import { holdWorktree } from '../adapters/sandbox-placeholders.ts';
+import { holdWorktree, usedSince } from '../adapters/sandbox-placeholders.ts';
 import type { RuntimeAdapter, RuntimeSession } from '../adapters/types.ts';
 import {
   allowedJiraKeys,
@@ -56,7 +58,14 @@ import {
   stopDelegate,
 } from '../delegate/delegate.ts';
 import { recordDevopsAudit } from '../devops/audit.ts';
+import {
+  type CardWorktreeSnapshot,
+  enforceCardFence,
+  fenceViolation,
+  snapshotCardWorktrees,
+} from '../devops/card-fence.ts';
 import { redactCommand } from '../devops/guard.ts';
+import { withInstallScriptsOff } from '../devops/install-env.ts';
 import { type ExternalAdapters, formatSource, readScopedJira } from '../external/index.ts';
 import { confine } from '../fs-safe.ts';
 import { resolveCommitIdentity } from '../git/identity.ts';
@@ -95,6 +104,8 @@ export interface ChatDeps {
   liveUsage?: () => boolean;
   /** The server accepts the live usage of a delegate (it announced `DELEGATE_GRANTS_FEATURE`). */
   delegateUsage?: () => boolean;
+  /** T10: narrows the server's DevOps access by policy.json (Docker); absent: Docker counts as off. */
+  narrowAccess?: (a: DevOpsAccess) => DevOpsAccess;
   /** The local opt-in `aom-runner ceo full-power on`, read fresh at each turn (default: off). */
   ceoFullPower?: () => boolean;
   /** R18-S: consumes the one CEO owner turn a local action opened (`guildwise-runner ceo turn`); absent: none. */
@@ -144,6 +155,8 @@ interface ActiveChat {
   turnDir?: string;
   /** What a delegate that reads shares with this turn (its working directory and read folders). */
   delegateWork?: DelegateWork;
+  /** T9: the card worktrees when this unsandboxed turn (DevOps chat, CEO full power) started. */
+  cardFence?: { before: CardWorktreeSnapshot; startedAtMs: number };
   /** The runtime's session id, once it said (a Claude Code transcript folder is named after it). */
   runtimeSessionId?: string;
   /** The dispatch the frames of this turn answer (`chat.start.attemptId`); a re-dispatch of a running turn replaces it. */
@@ -189,6 +202,29 @@ const DEPLOY_CHAT_RPC = new Set(['deploy.run', 'deploy.status']);
 const GRAPH_CHAT_RPC = new Set(['graph.query', 'graph.explain']);
 /** G-Q1: the DevOps agent's chat can also turn an instruction into a DevOps task (`aom devops "<text>"`). */
 const DEVOPS_CHAT_RPC = new Set(['devops.request']);
+
+/** T10: the access a DevOps chat's guard enforces: absent means every switch off; Docker only where policy.json allows. */
+export function chatDevopsAccess(
+  a: DevOpsAccess | undefined,
+  narrow?: (a: DevOpsAccess) => DevOpsAccess,
+): { allowInstall: boolean; allowDocker: boolean; allowedPaths: string[] } {
+  const base = a ?? DEFAULT_DEVOPS_ACCESS;
+  const n = narrow ? narrow(base) : { ...base, allowDocker: false };
+  return { allowInstall: n.allowInstall, allowDocker: n.allowDocker, allowedPaths: n.allowedPaths };
+}
+
+/** `dir` is the folder `root` or inside it (real paths when they exist). */
+function insideDir(root: string, dir: string): boolean {
+  const real = (p: string) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return resolve(p);
+    }
+  };
+  const r = relative(real(root), real(dir));
+  return r === '' || (!r.startsWith('..') && !isAbsolute(r));
+}
 
 const zeroUsage = (): Usage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
 
@@ -762,6 +798,15 @@ export class ChatManager {
         msg,
         `runtime ${msg.agent.runtime} is not available for the CEO's full-power turns on this workstation`,
       );
+    // T8: a server-chosen folder inside the card worktrees is refused (relative paths there would escape the floor)
+    const inCards = [msg.cwd, ...(msg.addDirs ?? [])].find(
+      (d): d is string => typeof d === 'string' && insideDir(paths.worktrees, d),
+    );
+    if (inCards)
+      return this.error(
+        msg,
+        `a full-power turn never works in a card's folder (${inCards}); ask the card's own agents, or read it from elsewhere`,
+      );
     chat.fullPower = mode;
     const permissionMode = this.deps.ceoOwnerPermissions?.() ?? 'auto';
     const effective = mode === 'owner' && permissionMode === 'bypass' ? 'bypass' : 'auto';
@@ -779,6 +824,7 @@ export class ChatManager {
       clones: this.deps.guardClones?.() ?? [],
     });
     const cwd = msg.cwd && existsSync(msg.cwd) ? msg.cwd : homedir();
+    await this.fenceStart(chat);
     chat.session = await adapter.startOwnerTurn({
       chatId: msg.chatId,
       mode,
@@ -802,14 +848,78 @@ export class ChatManager {
     });
   }
 
+  /**
+   * T9: a DevOps chat turn or a CEO full-power turn runs unsandboxed: the card worktrees are snapshotted at its start
+   * (`fenceStart`) and checked when it ends, whichever way (`fenceEnd`, from a `finally`). What it changed is reverted
+   * (commits kept under refs/guildwise/refused/, files under a kept commit), logged at WARN and audited; the reply or
+   * the error says so in one sentence. A worktree a shift used meanwhile is left alone.
+   */
+  private async fenceStart(chat: ActiveChat): Promise<void> {
+    if (!(chat.msg.agent.isDevops === true || chat.fullPower)) return;
+    try {
+      chat.cardFence = {
+        before: await snapshotCardWorktrees(this.deps.paths.worktrees),
+        startedAtMs: Date.now(),
+      };
+    } catch (err) {
+      this.log.warn(`chat ${chat.msg.chatId}: the card worktrees could not be recorded: ${String(err)}`);
+    }
+  }
+
+  private async fenceEnd(chat: ActiveChat): Promise<string> {
+    const fence = chat.cardFence;
+    if (!fence) return '';
+    chat.cardFence = undefined;
+    try {
+      const findings = await enforceCardFence({
+        root: this.deps.paths.worktrees,
+        before: fence.before,
+        shiftId: chat.msg.chatId,
+        usedByOthers: (p) => usedSince(p, fence.startedAtMs),
+      });
+      if (findings.length === 0) return '';
+      const v = fenceViolation(findings);
+      this.log.warn(`chat ${chat.msg.chatId.slice(0, 8)}: ${v.detail}`);
+      const who = chat.fullPower ? 'CEO full-power turn' : 'DevOps chat';
+      this.deps.send('devops.audit', {
+        entries: findings.map((f) => ({
+          at: new Date().toISOString(),
+          sessionRef: chat.msg.chatId.slice(0, 100),
+          kind: 'chat',
+          decision: 'refused',
+          rule: 'card_worktree',
+          command: redactCommand(`# ${who} changed ${f.path}: ${f.changed}`).slice(0, 2000),
+        })),
+      });
+      const all = findings.every((f) => f.reverted);
+      return `This ${chat.fullPower ? 'turn' : 'chat'} changed a card's folder, which it never may; the runner ${all ? 'put it back' : 'put back what it could (check it)'}: ${findings.map((f) => f.path).join(', ')}.`;
+    } catch (err) {
+      this.log.warn(`chat ${chat.msg.chatId}: the card worktree check failed: ${String(err)}`);
+      return '';
+    }
+  }
+
   /** Reads a session to its end and reports it: `chat.done` (or `chat.error`). */
   private async finishTurn(
     chat: ActiveChat,
     o: { fullPower: boolean; degraded?: string; permissionMode?: 'bypass' | 'auto' },
   ): Promise<void> {
+    try {
+      await this.readTurn(chat, o, () => this.fenceEnd(chat));
+    } finally {
+      // every exit, a thrown error and a stop included: the card worktrees are checked once
+      if (chat.cardFence) await this.fenceEnd(chat);
+    }
+  }
+
+  private async readTurn(
+    chat: ActiveChat,
+    o: { fullPower: boolean; degraded?: string; permissionMode?: 'bypass' | 'auto' },
+    fence: () => Promise<string>,
+  ): Promise<string> {
     const { msg } = chat;
     const session = chat.session;
-    if (!session) return;
+    if (!session) return '';
     let sessionId: string | undefined;
     let streamed = '';
     let finalText: string | undefined;
@@ -843,48 +953,54 @@ export class ChatManager {
       usageLimit?: { until: string };
     } = { code: null };
     let usageSentAt = 0;
-    for await (const ev of session.events()) {
-      if (ev.kind === 'usage' && this.deps.liveUsage?.() && Date.now() - usageSentAt >= 3000) {
-        // live usage for the provider caps (cumulative; the server stops the turn when the cap is reached)
-        usageSentAt = Date.now();
-        this.deps.send('run.usage', { kind: 'chat', id: msg.chatId, usage: ev.usage });
-      }
-      if (ev.kind === 'session') {
-        sessionId = ev.runtimeSessionId;
-        chat.runtimeSessionId = ev.runtimeSessionId;
-      } else if (ev.kind === 'delta') {
-        streamed += ev.text;
-        if (segments[segments.length - 1]?.type !== 'text') startText();
-        const last = segments[segments.length - 1];
-        if (last?.type === 'text') last.text += ev.text;
-        this.deps.send('chat.delta', { chatId: msg.chatId, threadId: msg.threadId, text: ev.text });
-      } else if (ev.kind === 'textstart') startText();
-      else if (ev.kind === 'thinking') {
-        segments.push({ type: 'thinking' });
-        activity(segments.length - 1, { type: 'thinking' });
-      } else if (ev.kind === 'final') finalText = ev.text;
-      else if (ev.kind === 'tool') {
-        this.countTool(ev, counts, commands);
-        // the segment is stored and shown: every tool summary goes through the same redaction as the audit
-        const summary = redactCommand(ev.summary).slice(0, 500);
-        const seg: ChatSegment = {
-          type: 'tool',
-          ...(ev.id ? { id: ev.id } : {}),
-          name: ev.name,
-          ...(summary ? { summary } : {}),
-          status: 'running',
-        };
-        segments.push(seg);
-        if (ev.id) toolAt.set(ev.id, segments.length - 1);
-        activity(segments.length - 1, seg);
-      } else if (ev.kind === 'toolresult') {
-        const i = toolAt.get(ev.id);
-        const seg = i === undefined ? undefined : segments[i];
-        if (i !== undefined && seg?.type === 'tool') {
-          seg.status = ev.refused ? 'refused' : ev.isError ? 'error' : 'ok';
-          activity(i, seg, true);
+    let fenceNote = '';
+    const withFence = (text: string): string => (fenceNote ? `${text}\n\n${fenceNote}` : text);
+    try {
+      for await (const ev of session.events()) {
+        if (ev.kind === 'usage' && this.deps.liveUsage?.() && Date.now() - usageSentAt >= 3000) {
+          // live usage for the provider caps (cumulative; the server stops the turn when the cap is reached)
+          usageSentAt = Date.now();
+          this.deps.send('run.usage', { kind: 'chat', id: msg.chatId, usage: ev.usage });
         }
-      } else if (ev.kind === 'exit') exit = ev;
+        if (ev.kind === 'session') {
+          sessionId = ev.runtimeSessionId;
+          chat.runtimeSessionId = ev.runtimeSessionId;
+        } else if (ev.kind === 'delta') {
+          streamed += ev.text;
+          if (segments[segments.length - 1]?.type !== 'text') startText();
+          const last = segments[segments.length - 1];
+          if (last?.type === 'text') last.text += ev.text;
+          this.deps.send('chat.delta', { chatId: msg.chatId, threadId: msg.threadId, text: ev.text });
+        } else if (ev.kind === 'textstart') startText();
+        else if (ev.kind === 'thinking') {
+          segments.push({ type: 'thinking' });
+          activity(segments.length - 1, { type: 'thinking' });
+        } else if (ev.kind === 'final') finalText = ev.text;
+        else if (ev.kind === 'tool') {
+          this.countTool(ev, counts, commands);
+          // the segment is stored and shown: every tool summary goes through the same redaction as the audit
+          const summary = redactCommand(ev.summary).slice(0, 500);
+          const seg: ChatSegment = {
+            type: 'tool',
+            ...(ev.id ? { id: ev.id } : {}),
+            name: ev.name,
+            ...(summary ? { summary } : {}),
+            status: 'running',
+          };
+          segments.push(seg);
+          if (ev.id) toolAt.set(ev.id, segments.length - 1);
+          activity(segments.length - 1, seg);
+        } else if (ev.kind === 'toolresult') {
+          const i = toolAt.get(ev.id);
+          const seg = i === undefined ? undefined : segments[i];
+          if (i !== undefined && seg?.type === 'tool') {
+            seg.status = ev.refused ? 'refused' : ev.isError ? 'error' : 'ok';
+            activity(i, seg, true);
+          }
+        } else if (ev.kind === 'exit') exit = ev;
+      }
+    } finally {
+      fenceNote = await fence();
     }
 
     // Native subagents this turn ran (Claude Code): booked as delegates of the turn from their transcripts.
@@ -892,19 +1008,31 @@ export class ChatManager {
       await this.delegates
         .bookNative(this.delegateCaller(chat), session.nativeSubagentUsage())
         .catch((err) => this.log.warn(`could not book the subagents of chat ${msg.chatId}: ${String(err)}`));
-    if (chat.stopReason) return this.error(msg, chat.stopReason);
+    if (chat.stopReason) {
+      this.error(msg, withFence(chat.stopReason));
+      return fenceNote;
+    }
     if (exit.code !== 0) {
       if (exit.authFailed)
-        return this.error(
+        this.error(
           msg,
-          'The Claude login on this workstation has expired. On that machine run `claude`, then `/login`; this conversation works again once you have.',
+          withFence(
+            'The Claude login on this workstation has expired. On that machine run `claude`, then `/login`; this conversation works again once you have.',
+          ),
         );
-      if (exit.usageLimit)
-        return this.error(
+      else if (exit.usageLimit)
+        this.error(
           msg,
-          `The Claude usage limit on this workstation has been reached. Conversations and agents work again at ${formatLimitTime(new Date(exit.usageLimit.until))}; nothing is lost, please try again then.`,
+          withFence(
+            `The Claude usage limit on this workstation has been reached. Conversations and agents work again at ${formatLimitTime(new Date(exit.usageLimit.until))}; nothing is lost, please try again then.`,
+          ),
         );
-      return this.error(msg, exit.error ?? `the ${msg.agent.runtime} process exited with code ${exit.code}`);
+      else
+        this.error(
+          msg,
+          withFence(exit.error ?? `the ${msg.agent.runtime} process exited with code ${exit.code}`),
+        );
+      return fenceNote;
     }
     for (const seg of segments) if (seg.type === 'tool' && seg.status === 'running') seg.status = 'ok';
     const turn = segments.filter((x) => x.type !== 'text' || x.text.trim());
@@ -917,7 +1045,7 @@ export class ChatManager {
       this.deps.send('chat.done', {
         chatId: msg.chatId,
         threadId: msg.threadId,
-        messageText: finalText ?? (chatSegmentsText(turn) || streamed),
+        messageText: withFence(finalText ?? (chatSegmentsText(turn) || streamed)),
         // Additive: the whole turn in order (older servers ignore it).
         ...(turn.length ? { segments: capChatSegments(turn) } : {}),
         usage,
@@ -934,6 +1062,7 @@ export class ChatManager {
         ...(usage.model ? { model: usage.model } : {}),
       }),
     );
+    return fenceNote;
   }
 
   /**
@@ -1260,11 +1389,14 @@ export class ChatManager {
       )}`,
     );
     const tc = this.deps.toolchains?.resolve();
-    const env = {
+    const baseEnv = {
       ...sandboxEnv(sandbox, undefined, tc?.env),
       ...this.issueCredential(chat),
       PATH: tc ? agentPath(tc, paths.bin) : `${paths.bin}${delimiter}${process.env.PATH ?? ''}`,
     };
+    // T4: a DevOps chat always runs installs with scripts off (it names no repository the owner allowed)
+    const env = devops ? withInstallScriptsOff(baseEnv) : baseEnv;
+    await this.fenceStart(chat);
     chat.session = await adapter.startChat({
       chatId: msg.chatId,
       message: msg.ceoMode ? composeOwnerMessage(msg) : msg.message,
@@ -1284,7 +1416,16 @@ export class ChatManager {
       ...(msg.resumeSessionId ? { resumeSessionId: msg.resumeSessionId } : {}),
       // the account the server chose for a chat about a project's card (absent: main)
       ...(msg.account && msg.account.key !== 'main' ? { account: msg.account.key } : {}),
-      ...(devops ? { devopsGuard: { sessionRef: msg.chatId } } : {}),
+      ...(devops
+        ? {
+            devopsGuard: {
+              sessionRef: msg.chatId,
+              installScriptsOff: true,
+              // T10: the workstation's switches, narrowed by policy.json; an older server sends none: all off
+              access: chatDevopsAccess(msg.devopsAccess, this.deps.narrowAccess),
+            },
+          }
+        : {}),
       ...(subagents.length ? { subagents } : {}),
       logFile: `${paths.shiftLogs}/chat-${msg.chatId}.jsonl`,
     });

@@ -252,6 +252,19 @@ describe('the conflict brief', () => {
     );
     expect(text).toContain('aom git fetch --repo <the scratch worktree>');
   });
+
+  it('T7 (AC9): DevOps merges the base into its scratch branch and leaves the card branch to the runner', () => {
+    const text = cardConflictBrief(
+      { ref: 'GWP-1', title: 'T', branch_name: 'aom/gwp-1', worktree_path: '/w' },
+      1,
+      'build',
+      'main',
+      ['a.ts'],
+    );
+    expect(text).toContain('MERGE origin/main into conflict/GWP-1-a1 (never rebase');
+    expect(text).toContain('the runner then moves aom/gwp-1 forward');
+    expect(text).not.toMatch(/merge --ff-only/);
+  });
 });
 
 describe('the app alert for repository commands and DevOps hygiene', () => {

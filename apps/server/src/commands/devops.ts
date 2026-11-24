@@ -675,8 +675,30 @@ export function blockedText(
   workstationName: string,
   agentName: string,
   command: string | null,
+  ask?: { command: string; alwaysOffered: boolean; alwaysPath?: string },
 ): { title: string; body: string } {
   const label = DEVOPS_SWITCH_LABEL[sw];
+  // runner-authority-fixes T10: the guard refused this exact command; the owner allows it once or always
+  if (ask) {
+    const off = {
+      allowInstall: 'installs are off',
+      allowDocker: 'Docker is off',
+      allowedPaths: 'writing there is off',
+    }[sw];
+    return {
+      title: `DevOps wants to run ${ask.command}; ${off} on this computer`,
+      body: [
+        `${agentName} wants to run this on ${workstationName}:`,
+        ask.command,
+        `"${label}" is off for this workstation, so the runner stopped it.`,
+        ask.alwaysOffered
+          ? `Allow once runs exactly this command for this request. Always allow also turns "${label}" on${ask.alwaysPath ? ` for ${ask.alwaysPath}` : ''} for this workstation.`
+          : 'Allow once runs exactly this command for this request. It cannot be allowed always: the folder is, or holds, something sensitive (the home folder, credentials or settings).',
+        'Your yes never opens the card folders, the approval settings, secrets or protected branches.',
+        'If you do not want this, reject the request here.',
+      ].join('\n\n'),
+    };
+  }
   return {
     title: `DevOps is waiting: "${label}" is off on ${workstationName}`,
     body: [
@@ -708,9 +730,10 @@ export async function resolveDevOpsApproval(
   requestId: string,
   resolution: 'approved' | 'rejected',
   note?: string,
+  scope?: 'once' | 'always',
 ): Promise<void> {
   await withAppendTx(ctx.pool, async (tx) => {
-    const r = await resolveDevOpsApprovalIn(ctx, tx, user, requestId, resolution, note);
+    const r = await resolveDevOpsApprovalIn(ctx, tx, user, requestId, resolution, note, scope);
     if (r.final) await closeDeskItemIn(ctx, tx, r.deskItemId, { userId: user.id }, resolution, note);
   });
   ctx.services.dispatcher.trigger();
@@ -727,6 +750,7 @@ export async function resolveDevOpsApprovalIn(
   requestId: string,
   resolution: 'approved' | 'rejected',
   note?: string,
+  scope?: 'once' | 'always',
 ): Promise<{ deskItemId: string; final: boolean }> {
   const r = await one(
     tx,
@@ -748,18 +772,18 @@ export async function resolveDevOpsApprovalIn(
     throw conflict('not_awaiting_approval', 'this request is not waiting for approval');
   if ((ap as { question?: boolean }).question)
     throw conflict('is_question', 'the DevOps engineer asked a question: answer it on the desk');
-  // UAT 1.10.0 finding 3: approving while the switch is still off would only start the same request and stop again
+  // runner-authority-fixes T10 (D5): a request blocked by a switch is allowed once (the exact command, for this request:
+  // the guard lifts only the switch rules for it) or always (the switch is turned on as well). "Always" is offered for
+  // paths only for the folder the runner said may be allowed for good.
   const blockedBy = (ap as { blockedBy?: DevopsSwitch }).blockedBy;
-  if (resolution === 'approved' && blockedBy) {
-    const wsRow = await one(tx, 'SELECT name, devops_access FROM workstations WHERE id=$1', [
-      r.workstation_id,
-    ]);
-    if (!devopsSwitchOn(DevOpsAccessSchema.parse(wsRow?.devops_access ?? {}), blockedBy))
-      throw conflict(
-        'switch_off',
-        `"${DEVOPS_SWITCH_LABEL[blockedBy]}" is still off for ${String(wsRow?.name ?? 'this workstation')}. Turn it on (Workstations page, DevOps engineer); the request then continues by itself.`,
-      );
-  }
+  const alwaysPath = (ap as { alwaysPath?: string }).alwaysPath;
+  if (scope === 'always' && !blockedBy)
+    throw conflict('always_not_offered', 'only a request blocked by a switch can be allowed always');
+  if (scope === 'always' && blockedBy === 'allowedPaths' && !alwaysPath)
+    throw conflict(
+      'always_not_offered',
+      'this folder can only be allowed once (it is, or holds, a sensitive folder such as the home folder, credentials or settings)',
+    );
 
   const message = (text: string, data?: Record<string, unknown>) =>
     threadMessage(r.thread_id, r.org_id, { kind: 'user', userId: user.id }, 'answer', text, data);
@@ -778,7 +802,13 @@ export async function resolveDevOpsApprovalIn(
             streamId: streamId.thread(requestId),
             event: {
               type: 'DevOpsApprovalAgreed',
-              payload: { requestId, deskItemId: ap.deskItemId, party, by: user.id },
+              payload: {
+                requestId,
+                deskItemId: ap.deskItemId,
+                party,
+                by: user.id,
+                ...(scope === 'always' && blockedBy ? { always: true } : {}),
+              },
             },
             actor: userActor(user.id),
             scope: orgScope(r.org_id),
@@ -794,6 +824,42 @@ export async function resolveDevOpsApprovalIn(
       );
       return { deskItemId: ap.deskItemId, final: false };
     }
+  }
+  // T10: "Always allow": the switch goes on for this workstation only when every required approver chose it (G-Q8): a
+  // party that agreed earlier with "once" makes the result "Allow once"
+  const apAlways = ap as { managerAlways?: boolean; workstationUserAlways?: boolean };
+  const earlierOnce =
+    (ap.managerApproved === true && !isManager && apAlways.managerAlways !== true) ||
+    (ap.workstationUserAgreed === true && !isWsUser && apAlways.workstationUserAlways !== true);
+  if (resolution === 'approved' && scope === 'always' && blockedBy && !earlierOnce) {
+    const wsRow = await one(tx, 'SELECT devops_access FROM workstations WHERE id=$1 FOR UPDATE', [
+      r.workstation_id,
+    ]);
+    const before = DevOpsAccessSchema.parse(wsRow?.devops_access ?? {});
+    const access = DevOpsAccessSchema.parse({
+      ...before,
+      ...(blockedBy === 'allowInstall' ? { allowInstall: true } : {}),
+      ...(blockedBy === 'allowDocker' ? { allowDocker: true } : {}),
+      ...(blockedBy === 'allowedPaths' && alwaysPath
+        ? { allowedPaths: [...new Set([...before.allowedPaths, alwaysPath])] }
+        : {}),
+      sudo: false,
+    });
+    await ctx.store.append(
+      [
+        {
+          streamId: streamId.workstation(r.workstation_id),
+          event: {
+            type: 'DevOpsAccessChanged',
+            payload: { workstationId: r.workstation_id, access, changedBy: user.id },
+          },
+          actor: userActor(user.id),
+          scope: userScope(r.ws_user_id),
+        },
+      ],
+      { tx },
+    );
+    await afterAccessChangedIn(ctx, tx, r.workstation_id, access);
   }
   await ctx.store.append(
     [
@@ -954,16 +1020,23 @@ export async function applyDevopsReport(
     // turn it on; the request waits for the switch (an approval cannot help while it is off) instead of looping.
     const wsRow = await one(tx, 'SELECT name, devops_access FROM workstations WHERE id=$1', [ws.id]);
     const access = DevOpsAccessSchema.parse(wsRow?.devops_access ?? {});
-    const sw = blockedSwitch(access, data.data);
+    // Rework 1 (B1): the "Allow once / Always allow" item is for at most one command, shown in full; more than one is an
+    // ordinary approval that lists every command
+    const sw = data.data.commands.length <= 1 ? blockedSwitch(access, data.data) : null;
     if (sw) {
       const agentRow = await one(tx, 'SELECT name FROM agents WHERE id=$1', [shift.agent_id]);
       const cli = ctx.services.runners.get(ws.id)?.local?.cli;
       const command = cli && localCommandOk(`${cli} devops install on`) ? `${cli} devops install on` : null;
+      // T10: the exact command the guard refused, and whether "Always allow" may be offered (paths: the runner's folder)
+      const exact = data.data.commands[0];
+      const alwaysPath = sw === 'allowedPaths' ? data.data.alwaysPath : undefined;
+      const alwaysOffered = sw !== 'allowedPaths' || !!alwaysPath;
       const text = blockedText(
         sw,
         String(wsRow?.name ?? 'this workstation'),
         String(agentRow?.name ?? 'The DevOps engineer'),
         command,
+        exact ? { command: exact, alwaysOffered, ...(alwaysPath ? { alwaysPath } : {}) } : undefined,
       );
       const { deskItemId } = await raiseDeskItem(ctx, tx, {
         kind: 'approval',
@@ -982,6 +1055,11 @@ export async function applyDevopsReport(
           switchLabel: DEVOPS_SWITCH_LABEL[sw],
           workstationId: ws.id,
           workstationName: String(wsRow?.name ?? ''),
+          requestId: req.id,
+          ...(exact ? { exactCommand: exact } : {}),
+          allowOnce: true,
+          allowAlways: alwaysOffered,
+          ...(alwaysPath ? { alwaysPath } : {}),
           ...(command && sw === 'allowInstall' ? { command, stepKind: 'devops.install' } : {}),
         },
       });
@@ -998,6 +1076,7 @@ export async function applyDevopsReport(
                 reason: data.data.reason,
                 commands: data.data.commands,
                 blockedBy: sw,
+                ...(alwaysPath ? { alwaysPath } : {}),
               },
             },
             actor: agentActor(shift.agent_id),
@@ -1147,8 +1226,10 @@ export async function endDevopsShift(
 
 /**
  * uat-runner-fixes-3 Rework 2 (R2-S1): the runner refused what a DevOps shift changed in a card worktree but could not undo
- * all of it. The violation alone reached nobody who can act, so the organization's owners get one alert with the runner's
- * account (worktree, what changed, what was not reverted, where the refused work is kept).
+ * all of it. The violation alone reached nobody who can act, so the organization gets one alert with the runner's account
+ * (worktree, what changed, what was not reverted, where the refused work is kept). It has no addressee, so every member of
+ * the organization sees it on the Desk (not only its owners): it names folders and refs, never a secret
+ * (runner-authority-fixes, nit N4). Also raised when the shift was put back on a usage limit or an expired login (T9).
  */
 export function cardFenceNotice(shift: Row, violations: { rule: string; detail: string }[]): AppendInput[] {
   const v = violations.find((x) => x.rule === 'devops_card_worktree' && /NOT fully reverted/.test(x.detail));

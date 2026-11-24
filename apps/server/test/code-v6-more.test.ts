@@ -197,7 +197,9 @@ describe('merge conflicts at Finalize in the lean team flow', () => {
     const req = (await q('SELECT * FROM devops_requests WHERE id=$1', [row.parked_request_id]))[0]!;
     expect(req.origin).toBe('conflict');
     expect(req.summary).toMatch(/SCRATCH worktree/);
-    expect(req.summary).toMatch(/--ff-only/);
+    // runner-authority-fixes T7: DevOps merges on its scratch branch and never moves the card branch; the runner does
+    expect(req.summary).toMatch(/MERGE origin\/main into conflict\//);
+    expect(req.summary).not.toMatch(/--ff-only/);
 
     await q(
       `UPDATE devops_requests SET status='done', result_summary='Resolved: kept both sides' WHERE id=$1`,

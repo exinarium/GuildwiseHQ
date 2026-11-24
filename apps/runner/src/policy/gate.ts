@@ -429,6 +429,8 @@ export interface DevopsShiftInput {
   /** The shift kind and the DevOps access the server asks for, shown as they will apply (narrowed to local grants). */
   kind?: string;
   access?: DevOpsAccess;
+  /** Rework 1 (B1): the commands the Desk approval allows in this shift, shown in full (they pass the guard's switch rules). */
+  approvedCommands?: string[];
 }
 
 /**
@@ -479,6 +481,13 @@ export function gateDevopsShift(
               line('paths', s.access.allowedPaths.join(', ')),
             ];
           })()
+        : []),
+      ...(s.approvedCommands?.length
+        ? [
+            '',
+            'approved on the Desk for this request (each runs past the switches, exactly as written):',
+            ...s.approvedCommands.map((c) => `  ${c}`),
+          ]
         : []),
       ...(s.request ? ['', 'request (as received, untrusted):', s.request] : []),
       '',

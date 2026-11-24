@@ -12,6 +12,7 @@ import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync 
 import { join } from 'node:path';
 import { PAIR_CODE_RE } from '@aom/shared';
 import { z } from 'zod';
+import { assertNotAgentSession, checkSeal, sealIfKeyed } from '../policy/integrity.ts';
 import { writeFileAtomic } from '../policy/store.ts';
 import { APPROVALS_PORT_MAX, APPROVALS_PORT_MIN } from '../sandbox/test-services.ts';
 
@@ -78,7 +79,7 @@ const DeviceSchema = z.object({
   pairedAt: z.iso.datetime(),
 });
 export type PairedDevice = z.infer<typeof DeviceSchema>;
-const DevicesSchema = z.object({ devices: z.array(DeviceSchema).max(100).default([]) });
+export const DevicesFileSchema = z.object({ devices: z.array(DeviceSchema).max(100).default([]) });
 
 /** Strips control characters (a user agent is shown in the terminal). */
 const plain = (s: string): string => s.replace(/\p{Cc}/gu, '').slice(0, 300);
@@ -90,7 +91,7 @@ export class DeviceStore {
   readonly devicesFile: string;
 
   constructor(
-    policyRoot: string,
+    readonly policyRoot: string,
     private readonly now: () => number = Date.now,
   ) {
     this.dir = windowDir(policyRoot);
@@ -196,7 +197,11 @@ export class DeviceStore {
 
   devices(): PairedDevice[] {
     try {
-      const r = DevicesSchema.safeParse(JSON.parse(readFileSync(this.devicesFile, 'utf8')));
+      // T2 (S1): a devices file without a good seal pairs no browser (one planted outside the runner never counts)
+      const { check, body } = checkSeal(this.policyRoot, JSON.parse(readFileSync(this.devicesFile, 'utf8')));
+      // no key yet: the runner has not adopted the policy (a CLI pairing before its first start); it seals them then
+      if (check !== 'ok' && check !== 'no_key') return [];
+      const r = DevicesFileSchema.safeParse(body);
       return r.success ? r.data.devices : [];
     } catch {
       return [];
@@ -208,8 +213,13 @@ export class DeviceStore {
   }
 
   writeDevices(devices: PairedDevice[]): void {
+    assertNotAgentSession();
     this.ensure(this.dir);
-    writeFileAtomic(this.devicesFile, `${JSON.stringify({ devices }, null, 2)}\n`, 0o600);
+    writeFileAtomic(
+      this.devicesFile,
+      `${JSON.stringify(sealIfKeyed(this.policyRoot, { devices }), null, 2)}\n`,
+      0o600,
+    );
   }
 
   /** Forgets the browsers with this fingerprint (or every one). Returns those removed. */

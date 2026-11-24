@@ -4,6 +4,7 @@ import type { CommitAs, RebaseErrorInfo } from '@aom/shared';
 import { isSafeGitRef, REBASE_ERROR_STDERR_MAX } from '@aom/shared';
 import { restoreTrackedSandboxStubs, withWorktreeHeld } from '../adapters/sandbox-placeholders.ts';
 import { redactSecrets } from '../secrets/redact.ts';
+import { recordCardConflict } from './conflict-record.ts';
 import { type GitResult, git, hasRemote, originAuth, type RemoteAuth, revParse } from './git.ts';
 import { type BoundPostAs, committerEnv, requireCommitIdentity } from './identity.ts';
 
@@ -171,6 +172,16 @@ async function rebaseOntoBaseUnheld(
   if (anc.exitCode === 0) return 'up_to_date';
   if (anc.exitCode !== 1) throw rebaseError(target, ancestorArgs, anc);
   const renv = await rebaseEnv(worktree, commitAs, postAs);
+  // T7: a conflict the runner saw itself is recorded with the head it had, for the later runner-run fast-forward
+  const headBefore = (await git(worktree, ['rev-parse', 'HEAD'])).stdout.trim();
+  const failAndRecord = async (args: string[], res: Awaited<ReturnType<typeof git>>): Promise<never> => {
+    try {
+      return await failRebase(worktree, target, args, res);
+    } catch (err) {
+      if (err instanceof RebaseConflictError) await recordCardConflict(worktree, headBefore);
+      throw err;
+    }
+  };
   // A card branch with merge commits of its own is brought up to date with a merge: a plain rebase would drop those
   // merges and replay the card's commits, hitting the conflicts their resolution already settled.
   const mergeBase = (await git(worktree, ['merge-base', target, 'HEAD'])).stdout.trim();
@@ -181,10 +192,10 @@ async function rebaseOntoBaseUnheld(
     const mergeArgs = ['merge', '--no-edit', '--', target];
     const m = await git(worktree, mergeArgs, { env: { ...renv, ...authorEnv(renv) } });
     if (m.exitCode === 0) return 'merged';
-    return failRebase(worktree, target, mergeArgs, m);
+    return failAndRecord(mergeArgs, m);
   }
   const rebaseArgs = ['rebase', target];
   const r = await git(worktree, rebaseArgs, { env: renv });
   if (r.exitCode === 0) return 'rebased';
-  return failRebase(worktree, target, rebaseArgs, r);
+  return failAndRecord(rebaseArgs, r);
 }
