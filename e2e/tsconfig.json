@@ -8,6 +8,7 @@
     "with-tls-proxy.ts",
     "support",
     "tests",
+    "combined",
     "video"
   ]
 }
