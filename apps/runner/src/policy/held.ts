@@ -55,7 +55,8 @@ export const HeldRecordSchema = z.object({
   /**
    * quiet-approvals S2: the version of what this item shows and will run, set at every hold and in-place update. A
    * decision names the version it was shown; `decide` is a compare-and-set on it, so a newer shift of the same request
-   * that replaced the replay meanwhile is never approved unseen (Found T11). For a held shift start it is the R2 key.
+   * that replaced the replay meanwhile is never approved unseen (Found T11). For a held shift start it ignores only the
+   * IDENTITY ids (e2e-found-fixes S2: separate from the R2 key, so a new system entry still changes it).
    */
   version: z
     .string()
@@ -88,8 +89,8 @@ export function capDetail(text: string, max: number = HELD_DETAIL_MAX): string {
 export const newHeldId = (): string => randomBytes(5).toString('hex');
 
 /**
- * quiet-approvals [B3]: the dispatch ids of a `shift.start` that change with every dispatch of the same job. The R2 key
- * leaves exactly these out, so a re-dispatch of the identical job matches and anything else does not.
+ * quiet-approvals [B3]: the top-level dispatch ids of a `shift.start` that change with every dispatch. The record keeps
+ * the approved body without them (`withoutDispatchIds`); the R2 key and the S2 version use the finer lists below.
  */
 export const DISPATCH_IDS: readonly string[] = [
   'shiftId',
@@ -109,12 +110,194 @@ export function withoutDispatchIds(body: unknown): Record<string, unknown> {
   return out;
 }
 
-/** [B3] The R2 key of a `shift.start` body: sha256 of its canonical JSON without the dispatch ids. */
-export const r2Key = (body: unknown): string => sha256Hex(canonicalJson(withoutDispatchIds(body)));
+type Obj = Record<string, unknown>;
+const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);
 
-/** S2: the version of a held item (the R2 key for a shift start; otherwise everything it shows and replays). */
+/**
+ * e2e-found-fixes D2: the IDENTITY of a DevOps `shift.start` (DESIGN "Every field of the real DevOps shift.start"). These
+ * values name the dispatch, never what the job may do: they are left out of the R2 key and the S2 version, and on a
+ * match they are the ONLY values taken from the new message (`rebind`). The request id is not inert (it picks the
+ * request folder): a match under a new one runs outside only through the runner's cross-request guard (B1).
+ */
+export const IDENTITY: readonly (readonly string[])[] = [
+  ['v'],
+  ['id'],
+  ['type'],
+  ['ts'],
+  ['shiftId'],
+  ['claimId'],
+  ['brief', 'shift', 'id'],
+  ['brief', 'card', 'id'],
+  ['brief', 'project', 'id'],
+  ['devops', 'requestId'],
+  ['devops', 'threadId'],
+];
+
+/**
+ * D2: what decides what a DevOps job may do, as an ALLOWLIST: the R2 key is computed over these fields only.
+ * - `top`: the top-level fields of `ShiftStartSchema` in the key;
+ * - `brief`: the whole brief except the IDENTITY ids of its `shift`, `card` and `project` (every `ShiftBriefSchema` key);
+ * - `devops`: the fields of `DevopsShiftSchema` in the key; `history` is reduced to `{authorName, kind, body}` of its
+ *   non-system entries (bookkeeping: `workstationName`, each entry's `at`, and the server's `system` entries).
+ * A field missing here can never widen a yes: on a match the APPROVED body runs, with only the IDENTITY values new.
+ */
+export const JOB_KEY_FIELDS = {
+  top: [
+    'kind',
+    'account',
+    'agent',
+    'worktree',
+    'prepare',
+    'orgId',
+    'maxShiftMinutes',
+    'vault',
+    'vaults',
+    'graph',
+    'orgGraph',
+    'readRepos',
+    'localReadRepos',
+    'mcpServers',
+    'commitAs',
+    'postAs',
+    'trackerApp',
+    'testServices',
+    'playbookGrants',
+    'delegation',
+    'resumeSessionId',
+    'resumeMessage',
+    'question',
+    'baTask',
+    'releasePrep',
+    'ceo',
+  ],
+  brief: 'all but the IDENTITY ids',
+  devops: [
+    'summary',
+    'requestedBy',
+    'card',
+    'fromWorkstationOwner',
+    'contextOrders',
+    'access',
+    'approval',
+    'mergeApprovalWaived',
+    'conflictCard',
+    'conflictRepo',
+    'hygiene',
+    'run',
+    'scan',
+    'scanKind',
+    'history',
+  ],
+} as const;
+
+/** D2: the fields of `devops` and of its history entries that are bookkeeping (out of the key; the approved value runs). */
+export const BOOKKEEPING = {
+  devops: ['workstationName'],
+  historyEntry: ['at'],
+  historyKind: 'system',
+} as const;
+
+function cloneJson<T>(v: T): T {
+  return v === undefined ? v : (JSON.parse(JSON.stringify(v)) as T);
+}
+
+/**
+ * REVIEW B-1: the IDENTITY values that change with every dispatch of ONE request (the envelope, the shift and claim ids,
+ * the brief's shift id). The request, thread, card and project ids are left in: within a request they never change.
+ */
+export const DISPATCH_IDENTITY: readonly (readonly string[])[] = IDENTITY.filter(
+  (p) => !['devops', 'brief'].includes(p[0] as string) || (p[0] === 'brief' && p[1] === 'shift'),
+);
+
+function without(body: unknown, paths: readonly (readonly string[])[]): Obj {
+  if (!isObj(body)) return {};
+  const out = cloneJson(body);
+  for (const path of paths) {
+    let o: unknown = out;
+    for (const k of path.slice(0, -1)) o = isObj(o) ? o[k] : undefined;
+    if (isObj(o)) delete o[path[path.length - 1] as string];
+  }
+  return out;
+}
+
+/** The body without the IDENTITY values (a deep copy): what the R2 key's brief and a rebind compare. */
+export const withoutIdentity = (body: unknown): Obj => without(body, IDENTITY);
+
+/**
+ * REVIEW B-1: the body without the per-dispatch ids only (a deep copy). The S2 version and the C2 comparison use it, so the
+ * request, thread, card and project ids stay pinned there (the project id picks skills and recipe approvals).
+ */
+export const withoutDispatchIdentity = (body: unknown): Obj => without(body, DISPATCH_IDENTITY);
+
+/** D2: the projection of a `shift.start` the R2 key is computed over (JOB_KEY_FIELDS only). */
+export function jobProjection(body: unknown): Obj {
+  if (!isObj(body)) return {};
+  const out: Obj = {};
+  for (const k of JOB_KEY_FIELDS.top) if (body[k] !== undefined) out[k] = body[k];
+  if (body.brief !== undefined) out.brief = withoutIdentity({ brief: body.brief }).brief;
+  if (isObj(body.devops)) {
+    const d = body.devops;
+    const devops: Obj = {};
+    for (const k of JOB_KEY_FIELDS.devops) {
+      if (d[k] === undefined) continue;
+      devops[k] =
+        k === 'history' && Array.isArray(d.history)
+          ? d.history
+              .filter((h) => !(isObj(h) && h.kind === BOOKKEEPING.historyKind))
+              .map((h) => (isObj(h) ? { authorName: h.authorName, kind: h.kind, body: h.body } : h))
+          : d[k];
+    }
+    out.devops = devops;
+  } else if (body.devops !== undefined) out.devops = body.devops;
+  return out;
+}
+
+/** D2 (quiet-approvals R2): the key of a `shift.start`: sha256 of the canonical `{v: 2, job: jobProjection(body)}`. */
+export const r2Key = (body: unknown): string => sha256Hex(canonicalJson({ v: 2, job: jobProjection(body) }));
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const at = (o: unknown, path: readonly string[]): unknown => {
+  let v: unknown = o;
+  for (const k of path) v = isObj(v) ? v[k] : undefined;
+  return v;
+};
+
+/**
+ * D2: the APPROVED body (`approved`, as recorded) with only the IDENTITY values of `next`. Nothing outside IDENTITY ever
+ * comes from `next`, so the server's new texts (a "lost" note, a new workstation name, new timestamps) never reach the
+ * session. N1: null (the job then goes into the box) unless every IDENTITY id of `next` is a uuid (the envelope's `v`,
+ * `id`, `type` and `ts` aside), the brief's card and project id are the request id (as the server builds a DevOps brief)
+ * and the brief's shift id is the shift id.
+ */
+export function rebind(approved: Obj, next: unknown): Obj | null {
+  if (!isObj(next) || !isObj(approved)) return null;
+  for (const path of IDENTITY) {
+    if (path.length === 1 && ['v', 'id', 'type', 'ts'].includes(path[0] as string)) continue;
+    const v = at(next, path);
+    if (typeof v !== 'string' || !UUID.test(v)) return null;
+  }
+  const requestId = at(next, ['devops', 'requestId']);
+  if (at(next, ['brief', 'card', 'id']) !== requestId || at(next, ['brief', 'project', 'id']) !== requestId)
+    return null;
+  if (at(next, ['brief', 'shift', 'id']) !== next.shiftId) return null;
+  const out = cloneJson(approved);
+  if (!isObj(out.brief) || !isObj(out.devops)) return null;
+  for (const path of IDENTITY) {
+    let o: unknown = out;
+    for (const k of path.slice(0, -1)) o = isObj(o) ? o[k] : undefined;
+    if (!isObj(o)) return null;
+    const v = at(next, path);
+    if (v === undefined) delete o[path[path.length - 1] as string];
+    else o[path[path.length - 1] as string] = v;
+  }
+  return out;
+}
+
+/** S2: the version of a held item (what it runs, ids aside, for a shift start; otherwise everything it shows and replays). */
 export function heldVersion(r: Pick<HeldRecord, 'kind' | 'summary' | 'detail' | 'replay'>): string {
-  if (r.replay.type === 'shift.start') return r2Key(r.replay.body);
+  if (r.replay.type === 'shift.start')
+    return sha256Hex(canonicalJson({ v: 2, start: withoutDispatchIdentity(r.replay.body) }));
   return sha256Hex(canonicalJson({ kind: r.kind, summary: r.summary, detail: r.detail, replay: r.replay }));
 }
 

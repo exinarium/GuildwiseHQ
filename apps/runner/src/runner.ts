@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir, hostname, platform } from 'node:os';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import {
@@ -161,7 +169,12 @@ import { DeployMover } from './delivery/move.ts';
 import { DeployPreparer } from './delivery/prepare.ts';
 import { runDeployProbe } from './delivery/probe.ts';
 import { DeliveryService } from './delivery/service.ts';
-import { installCacheRoot, runDependencyChange, sweepInstallCaches } from './devops/dependency-install.ts';
+import {
+  installCacheRoot,
+  runDependencyChange,
+  sweepInstallCaches,
+  type ToolGate,
+} from './devops/dependency-install.ts';
 import { boxRefusal, type DevopsMode } from './devops/requests.ts';
 import { verifyRights } from './devops/rights.ts';
 import { ProviderStore } from './direct/store.ts';
@@ -279,14 +292,25 @@ import { sweepReviewRuns } from './review/reviewer-sandbox.ts';
 import { FileReviewerTokenStore, reviewerTokenFact } from './review/reviewer-tokens.ts';
 import { RunManager } from './runs/manager.ts';
 import { ServiceLauncher } from './runs/sandbox.ts';
-import { removeOrphanAgentTmps, sharedCacheRoot, sweepAgentTmps, wipeAgent } from './sandbox/sandbox.ts';
+import {
+  removeOrphanAgentTmps,
+  sandboxFor,
+  sharedCacheRoot,
+  sweepAgentTmps,
+  wipeAgent,
+} from './sandbox/sandbox.ts';
 import { sweepAgentScratch } from './sandbox/scratch.ts';
 import { DeploySecrets } from './secrets/deploy.ts';
 import { RunnerKeys } from './secrets/keys.ts';
 import { TargetSecrets } from './secrets/targets.ts';
 import { sweepSessionEnvFiles } from './session/shift-credential.ts';
 import { clearServerLimit, loadServerLimit, saveServerLimit } from './shifts/server-limit.ts';
-import { type ShiftCap, ShiftSupervisor, type SupervisorDeps } from './shifts/supervisor.ts';
+import {
+  devopsRequestDir,
+  type ShiftCap,
+  ShiftSupervisor,
+  type SupervisorDeps,
+} from './shifts/supervisor.ts';
 import { writeShims } from './shims.ts';
 import { insideRoot, type PrepareExec, prepareRelease, RELEASE_PREP_DIR } from './signing/release-prepare.ts';
 import {
@@ -581,6 +605,11 @@ export class Runner {
    * A new shift of such a request is now refused at once, as refused locally, for 24 hours.
    */
   private refusedRequests = new Map<string, number>();
+  /**
+   * e2e-found-fixes B1 (b): every DevOps request id this runner saw in a shift start, on any route (memory, capped at
+   * 5000). A request seen before never runs an exact job approved under another request outside the box.
+   */
+  private readonly seenDevopsRequests = new Set<string>();
   /** quiet-approvals phase B: the content pins of the box-writable tool folders. */
   private treePins!: TreePins;
   /** quiet-approvals R2: the exact DevOps jobs approved on this computer (sealed, `<dataDir>/approved-requests.json`). */
@@ -1074,6 +1103,8 @@ export class Runner {
           tmpRoot: join(this.paths.root, 'install-stage'),
           // a package manager DevOps installed and registered as an agent toolchain (uat-runner-fixes-3 finding 1)
           toolchainDirs: this.toolchains.resolve().pathDirs,
+          // e2e-found-fixes B2: the agents' PATH pin check, read when the tool is looked up
+          toolGate: () => this.toolGate(),
           log: (l) => process.stderr.write(`[devops] ${r.shiftId.slice(0, 8)} ${l}\n`),
         }),
       git: this.agentGit,
@@ -2944,11 +2975,22 @@ export class Runner {
         `DevOps request ${msg.devops?.requestId?.slice(0, 8)}: ${beyond.join(', ')} needs a change on this computer (Approvals on this computer, "The most DevOps may get"); it runs without it`,
       );
     msg = this.narrowShift(msg);
+    // e2e-found-fixes B1 (b): first sight, recorded synchronously before routing (two starts never both pass)
+    const requestId = msg.kind === 'devops' ? msg.devops?.requestId : undefined;
+    const firstSight = !!requestId && !this.seenDevopsRequests.has(requestId);
+    if (requestId) {
+      this.seenDevopsRequests.add(requestId);
+      while (this.seenDevopsRequests.size > 5000)
+        this.seenDevopsRequests.delete(this.seenDevopsRequests.values().next().value as string);
+    }
+    // e2e-found-fixes S4: one active shift per DevOps request: a second one (box or outside) would share its folder
+    if (this.busyRequest(msg)) return;
     const route = routeDevopsShift(policy, msg, {
       granted,
       approved: this.approved(),
       boxMissing: this.boxMissing(msg),
       boxBroken: this.boxBroken(msg),
+      crossRequestOk: (id, agentId) => firstSight && id === requestId && this.crossRequestOk(id, agentId),
     });
     if (route.route === 'refuse') {
       const broken = this.boxBroken(msg) ? this.boxMissing(msg) : null;
@@ -2986,12 +3028,27 @@ export class Runner {
         void this.supervisor.handleStart(this.narrowShift(msg));
         return;
       case 'box':
+        // REVIEW B-2: a box run writes the request folder an outside run would work in: it voids the request's remembered yes
+        if (requestId)
+          try {
+            this.approved().drop(requestId);
+          } catch (err) {
+            this.log.warn(
+              `could not forget the approved DevOps job of a request that ran in the box: ${String(err)}`,
+            );
+          }
         void this.supervisor.handleStart(this.narrowShift(msg), undefined, { devopsMode: 'box' });
         return;
       case 'outside':
         this.log.info(
           `DevOps shift ${msg.shiftId.slice(0, 8)} runs outside the box: ${route.why === 'r2' ? 'the exact job approved on this computer' : 'the resume of a job approved on this computer, for commands its session asked for'}`,
         );
+        if (route.adopt && requestId)
+          try {
+            this.approved().adopt(route.adopt, requestId, route.msg);
+          } catch (err) {
+            this.log.warn(`could not note the approved DevOps job under its new request: ${String(err)}`);
+          }
         this.outsideRuns.set(msg.shiftId, route.key);
         void this.supervisor.handleStart(this.narrowShift(route.msg), undefined, { devopsMode: 'outside' });
         return;
@@ -3026,6 +3083,75 @@ export class Runner {
       worktrees: this.paths.worktrees,
       runnerRoot: this.paths.root,
     }).ok;
+
+  /**
+   * e2e-found-fixes B1 (a) and (c): an exact job approved under another request may run outside under `requestId` only
+   * when the owner did not refuse this request here (24 h) and its request folder is new: the folder is created here,
+   * without `recursive`, at the path the supervisor uses (an existing one, or an existing temp folder, means the box).
+   * (b), first sight, is checked by the caller before this. The folder is claimed last, so a refused request never
+   * claims one.
+   */
+  private crossRequestOk(requestId: string, agentId: string): boolean {
+    const refusedAt = this.refusedRequests.get(requestId);
+    if (refusedAt !== undefined && Date.now() - refusedAt < 24 * 3_600_000) return false;
+    if (!/^[0-9a-f-]{36}$/i.test(requestId) || !agentId) return false;
+    try {
+      const sb = sandboxFor(this.paths, agentId);
+      if (existsSync(join(sb.tmp, requestId))) return false;
+      const dir = devopsRequestDir(sb.root, requestId);
+      mkdirSync(dirname(dir), { recursive: true, mode: 0o700 });
+      mkdirSync(dir, { mode: 0o700 });
+      return true;
+    } catch {
+      // EEXIST (the request ran here before) or any other failure: the box
+      return false;
+    }
+  }
+
+  /**
+   * e2e-found-fixes B2: the pin check of the agents' PATH, for `aom devops install`: the toolchains DevOps registered that
+   * wait for the owner's yes, the tree pin of the box-writable tool folders, and which of those roots a path lies under.
+   */
+  private toolGate(): ToolGate {
+    const roots = toolBoxWritable(homedir(), toolchainsRoot()).flatMap((r) => {
+      try {
+        return [realpathSync(r)];
+      } catch {
+        return [];
+      }
+    });
+    return {
+      waiting: this.toolchains.waiting().map(({ entry, hash }) => ({
+        name: entry.name,
+        hash,
+        dirs: [...entry.binDirs, ...entry.readDirs],
+      })),
+      treeOk: (d) => (this.toolchains.treeOk ? this.toolchains.treeOk(d) : true),
+      guardedRootOf: (p) => {
+        let real: string;
+        try {
+          real = realpathSync(p);
+        } catch {
+          return null;
+        }
+        return roots.find((r) => underRoot(real, r)) ?? null;
+      },
+    };
+  }
+
+  /**
+   * e2e-found-fixes S4 (REVIEW S-1): one active shift per DevOps request, also on the paths that start a shift after a
+   * hold. True when it answered busy.
+   */
+  private busyRequest(msg: Extract<ServerToRunner, { type: 'shift.start' }>): boolean {
+    const requestId = msg.kind === 'devops' ? msg.devops?.requestId : undefined;
+    if (!requestId || !this.supervisor.devopsRequestActive(requestId, msg.shiftId)) return false;
+    this.supervisor.refuseBusy(
+      msg.shiftId,
+      `another shift of DevOps request ${requestId.slice(0, 8)} is still running on this workstation`,
+    );
+    return true;
+  }
 
   /** The exact-job memory (R2), created on first use. */
   private approved(): ApprovedRequests {
@@ -3111,6 +3237,7 @@ export class Runner {
       return;
     }
     if (d.action === 'run' || this.authority.autoApprove?.(d.kind)) {
+      if (this.busyRequest(msg)) return;
       void this.supervisor.handleStart(this.narrowShift(msg), undefined, {
         devopsMode: 'outside',
         startedSent: true,
@@ -3452,6 +3579,9 @@ export class Runner {
       }
       // quiet-approvals R2: a LOCAL yes for a DevOps request remembers exactly this job (never a passkey decision)
       const request = msg.kind === 'devops' && msg.agent?.isDevops ? msg.devops?.requestId : undefined;
+      // REVIEW S-1/B-3: a shift of the same request started while this one waited for the yes: answered busy BEFORE the
+      // yes is remembered, so the yes is spent and a re-send asks again or goes into the box (that shift wrote its folder)
+      if (request && this.busyRequest(msg)) return;
       if (request && r.decidedBy === 'local')
         try {
           this.outsideRuns.set(msg.shiftId, this.approved().record(request, msg).key);

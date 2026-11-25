@@ -177,7 +177,12 @@ describe('O5: the session seal', () => {
       const sent: string[] = [];
       const real = t.app.ctx.mailer;
       t.app.ctx.mailer = { send: async (m) => void sent.push(m.subject), close() {} };
-      return { sent, restore: () => void (t.app.ctx.mailer = real) };
+      return {
+        sent,
+        restore: () => {
+          t.app.ctx.mailer = real;
+        },
+      };
     };
 
     it('a super admin session from before migration 3025: deleted, one info line, no event, no alarm mail', async () => {

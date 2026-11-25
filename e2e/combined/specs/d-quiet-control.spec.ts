@@ -8,9 +8,8 @@ import { newOwner, person, sendDevopsRequest, shiftsOfRequest } from '../support
 import { type Host, release, setBoxState, startHost, waitReached } from '../support/host.ts';
 
 // The no-change control of D3. D3 shows that a changed job asks again and names the change; this shows the OTHER half: the same
-// job, stopped and sent again with NOTHING changed, is not held. It asserts the intended behaviour and is red together with D2
-// (same cause: the remembered job includes ids that differ per dispatch) until the runner fix of e2e-found-fixes lands. It has its own
-// runner so a red D2 in d-quiet.spec.ts cannot hide it by skipping it.
+// job, stopped and sent again with NOTHING changed, is not held (e2e-found-fixes D2: the remembered job leaves out the ids that differ
+// per dispatch). It has its own runner so a failing D2 in d-quiet.spec.ts cannot hide it by skipping it.
 test.describe.configure({ mode: 'serial' });
 
 const OWNER = person('d3cowner');
@@ -23,7 +22,7 @@ test.afterAll(async () => {
   await host?.stop();
 });
 
-test('[D3] control: the same job sent again with no change is not held (red with D2 until the runner fix)', async () => {
+test('[D3] control: the same job sent again with no change is not held', async () => {
   const { mkdirSync } = await import('node:fs');
   mkdirSync(scratch, { recursive: true });
   api = await newOwner(OWNER);

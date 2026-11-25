@@ -95,6 +95,8 @@ export function makeDevopsStart(
       outcomes: devopsBriefOutcomes(),
     },
     card: { ...base.brief.card, id: requestId, ref: 'DEVOPS', title: o.summary ?? 'start the app' },
+    // the server's DevOps brief: the placeholder project carries the request id too (brief.ts buildDevopsShiftStart)
+    project: { ...base.brief.project, id: requestId },
   };
   return {
     ...base,
@@ -113,5 +115,55 @@ export function makeDevopsStart(
       history: [],
     },
     vault: null,
+  };
+}
+
+/**
+ * e2e-found-fixes D2: the same DevOps job dispatched again, shaped the way the real server does it (brief.ts
+ * buildDevopsShiftStart; the field diff the combined harness captured, combined-e2e-cd BUILD.md Defect 1):
+ * - `newRequest`: the owner sends the identical request again: new request and thread ids, the brief's card and project
+ *   ids follow the request id, a new shift (top level and `brief.shift.id`), claim and envelope, and the owner's comment
+ *   in `devops.history` gets a new `at`;
+ * - `lost`: the server re-sends the SAME request after its shift was lost: a new shift, claim and envelope, and a system
+ *   entry appended to `devops.history` (commands/devops.ts devopsShiftEndEvents).
+ */
+export function serverShapedRedispatch(
+  msg: Record<string, any>,
+  how: 'newRequest' | 'lost',
+  at = new Date(Date.parse('2026-11-25T08:00:00.000Z') + Math.floor(Math.random() * 1e6)).toISOString(),
+  // biome-ignore lint/suspicious/noExplicitAny: a wire-shaped test body
+): { shiftId: string; claimId: string; brief: any; devops: any; [k: string]: any } {
+  const shiftId = uuidv7();
+  const requestId = how === 'newRequest' ? uuidv7() : msg.devops.requestId;
+  const history: Array<Record<string, unknown>> = msg.devops.history ?? [];
+  return {
+    ...msg,
+    id: uuidv7(),
+    ts: at,
+    shiftId,
+    claimId: uuidv7(),
+    brief: {
+      ...msg.brief,
+      shift: { ...msg.brief.shift, id: shiftId },
+      card: { ...msg.brief.card, id: requestId },
+      project: { ...msg.brief.project, id: requestId },
+    },
+    devops: {
+      ...msg.devops,
+      requestId,
+      threadId: how === 'newRequest' ? uuidv7() : msg.devops.threadId,
+      history:
+        how === 'newRequest'
+          ? history.map((h) => ({ ...h, at }))
+          : [
+              ...history,
+              {
+                authorName: 'system',
+                kind: 'system',
+                body: 'The DevOps shift did not complete (lost); the request is back in the queue.',
+                at,
+              },
+            ],
+    },
   };
 }

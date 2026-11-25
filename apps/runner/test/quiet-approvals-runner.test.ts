@@ -1,18 +1,19 @@
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUILTIN_ROLES, uuidv7 } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ShiftStartInput } from '../src/adapters/types.ts';
-import { APPROVED_REQUESTS_FILE } from '../src/policy/approved-requests.ts';
+import { APPROVED_REQUESTS_FILE, ApprovedRequests } from '../src/policy/approved-requests.ts';
 import { FileAuthority } from '../src/policy/authority.ts';
 import { approve, defaultCliDeps } from '../src/policy/cli.ts';
 import { HeldStore } from '../src/policy/held.ts';
 import { PolicyStore } from '../src/policy/store.ts';
+import { sandboxFor } from '../src/sandbox/sandbox.ts';
 import { type Harness, startHarness } from './harness.ts';
 import { tmp, waitUntil } from './helpers.ts';
 import { type Ctl, ScriptedAdapter } from './scripted-adapter.ts';
-import { makeDevopsStart } from './vault-fixtures.ts';
+import { makeDevopsStart, serverShapedRedispatch } from './vault-fixtures.ts';
 
 /**
  * quiet-approvals phase A end to end (DESIGN test plan, integration): the runner with the REAL local authority and a
@@ -149,9 +150,15 @@ describe('phase A: DevOps work starts inside the box', () => {
     expect(env.adapter.inputs[1]?.devopsGuard).toBeDefined();
     expect(existsSync(join(env.harness.dataDir, APPROVED_REQUESTS_FILE))).toBe(true);
 
-    // R2: the identical job, re-dispatched, runs outside the box without a hold
+    // R2: the identical job, re-dispatched (new shift ids, nested brief.shift.id too), runs outside without a hold
     await env.harness.runner.supervisor.whenSettled(msg.shiftId);
-    const again = { ...msg, shiftId: uuidv7(), claimId: uuidv7() };
+    const again = {
+      ...msg,
+      shiftId: uuidv7(),
+      claimId: uuidv7(),
+      brief: { ...msg.brief, shift: { ...msg.brief.shift, id: uuidv7() } },
+    };
+    again.brief.shift.id = again.shiftId;
     env.harness.server.send('shift.start', again);
     await env.harness.server.waitFor('shift.ended', (m) => m.shiftId === again.shiftId, 60_000);
     expect(env.adapter.inputs).toHaveLength(3);
@@ -514,5 +521,214 @@ describe('REVIEW S7: devops-outside with devopsRequests auto', () => {
       await h?.stop();
       h = undefined;
     }
+  }, 120_000);
+});
+
+describe('e2e-found-fixes D2: the same job sent again by the real server, end to end', () => {
+  const LOST = /did not complete \(lost\)/;
+  const owner = (agentId: string, summary: string) =>
+    devopsMsg(agentId, summary, {
+      history: [
+        { authorName: 'Pieter', kind: 'comment', body: `please: ${summary}`, at: '2026-11-25T06:00:00.000Z' },
+      ],
+    });
+
+  /** A runner where `msg` was held once (`aom devops-outside`) and approved locally; later starts run `script`. */
+  async function approvedOnce(
+    summary: string,
+    later: (input: ShiftStartInput, ctl: Ctl) => Promise<unknown>,
+  ) {
+    let calls = 0;
+    const env = await withRealAuthority(async (input, ctl) => {
+      calls++;
+      if (calls === 1) {
+        await ctl.post('/v1/rpc', { method: 'devops.outside', params: { needs: 'docker', why: 'compose' } });
+        await new Promise<void>((r) => ctl.signal.addEventListener('abort', () => r()));
+        return;
+      }
+      return later(input, ctl);
+    });
+    const agentId = uuidv7();
+    env.store.update((p) => ({ ...p, devops: { agents: { [ORG]: agentId } } }));
+    const msg = owner(agentId, summary);
+    env.harness.server.send('shift.start', msg);
+    const heldMsg = await env.harness.server.waitFor('approvals.held', (m) =>
+      m.items.some((i) => i.kind === 'devops.task'),
+    );
+    const item = heldMsg.items.find((i) => i.kind === 'devops.task');
+    await approve(
+      { ...defaultCliDeps(env.dir), ask: async () => 'yes', out: () => undefined },
+      item?.id as string,
+    );
+    await env.harness.server.waitFor('shift.ended', (m) => m.shiftId === msg.shiftId, 60_000);
+    await env.harness.runner.supervisor.whenSettled(msg.shiftId);
+    return { env, msg, agentId };
+  }
+  const requestDir = (env: { harness: Harness }, agentId: string, requestId: string) =>
+    join(env.harness.runner.paths.agentDir(agentId), 'devops', requestId);
+  const ends = (env: { harness: Harness }, shiftId: string) =>
+    env.harness.server.waitFor('shift.ended', (m) => m.shiftId === shiftId, 60_000);
+
+  it('the lost re-send and the identical new request run outside with no hold; the session never sees the "lost" text', async () => {
+    const { env, msg } = await approvedOnce('start the app', (_i, ctl) => done(ctl));
+    expect(env.adapter.inputs).toHaveLength(2);
+    expect(env.adapter.inputs[1]?.prompt).toContain('please: start the app');
+    const lost = serverShapedRedispatch(msg, 'lost');
+    env.harness.server.send('shift.start', lost);
+    await ends(env, lost.shiftId);
+    await env.harness.runner.supervisor.whenSettled(lost.shiftId);
+    expect(env.adapter.inputs).toHaveLength(3);
+    expect(env.adapter.inputs[2]?.devopsBox).toBeUndefined();
+    expect(env.adapter.inputs[2]?.devopsGuard).toBeDefined();
+    expect(env.adapter.inputs[2]?.prompt).toContain('please: start the app');
+    expect(env.adapter.inputs[2]?.prompt).not.toMatch(LOST);
+    expect(`${env.adapter.instructions.at(-1)}`).not.toMatch(LOST);
+    const fresh = serverShapedRedispatch(msg, 'newRequest');
+    env.harness.server.send('shift.start', fresh);
+    await ends(env, fresh.shiftId);
+    expect(env.adapter.inputs).toHaveLength(4);
+    expect(env.adapter.inputs[3]?.devopsBox).toBeUndefined();
+    expect(env.adapter.inputs[3]?.cwd).toContain(join('devops', fresh.devops.requestId));
+    expect(new HeldStore(env.dir).list().filter((r) => r.state === 'held')).toEqual([]);
+    expect(env.harness.server.of('approvals.held').filter((m) => m.items.length > 0)).toHaveLength(1);
+  }, 120_000);
+
+  it('B1: under a new request id it goes into the box when that request folder exists, the request was refused, or was seen before', async () => {
+    const { env, msg, agentId } = await approvedOnce('start the app', (_i, ctl) => done(ctl));
+    // an existing request folder (the request ran here before)
+    const b = serverShapedRedispatch(msg, 'newRequest');
+    mkdirSync(requestDir(env, agentId, b.devops.requestId), { recursive: true });
+    env.harness.server.send('shift.start', b);
+    await ends(env, b.shiftId);
+    expect(env.adapter.inputs.at(-1)?.devopsBox).toBe(true);
+    // an existing temp folder of the request
+    const t = serverShapedRedispatch(msg, 'newRequest');
+    mkdirSync(join(sandboxFor(env.harness.runner.paths, agentId).tmp, t.devops.requestId), {
+      recursive: true,
+    });
+    env.harness.server.send('shift.start', t);
+    await ends(env, t.shiftId);
+    expect(env.adapter.inputs.at(-1)?.devopsBox).toBe(true);
+    // a request refused on this computer
+    const c = serverShapedRedispatch(msg, 'newRequest');
+    (env.harness.runner as unknown as { refusedRequests: Map<string, number> }).refusedRequests.set(
+      c.devops.requestId,
+      Date.now(),
+    );
+    env.harness.server.send('shift.start', c);
+    await ends(env, c.shiftId);
+    expect(env.adapter.inputs.at(-1)?.devopsBox).toBe(true);
+    // a request seen before (a box shift of another job under it), then the approved body under it
+    const d = serverShapedRedispatch(msg, 'newRequest');
+    const other = { ...d, devops: { ...d.devops, summary: 'something else' } };
+    env.harness.server.send('shift.start', other);
+    await ends(env, other.shiftId);
+    await env.harness.runner.supervisor.whenSettled(other.shiftId);
+    const again = serverShapedRedispatch(d, 'lost');
+    rmSync(requestDir(env, agentId, d.devops.requestId), { recursive: true, force: true });
+    env.harness.server.send('shift.start', again);
+    await ends(env, again.shiftId);
+    expect(env.adapter.inputs.at(-1)?.devopsBox).toBe(true);
+    expect(new HeldStore(env.dir).list().filter((r) => r.state === 'held')).toEqual([]);
+  }, 180_000);
+
+  it('S4: while the approved job runs outside under a request, a second shift of that request is answered busy', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let started!: () => void;
+    const running = new Promise<void>((r) => (started = r));
+    let later = 0;
+    const { env, msg } = await approvedOnce('start the app', async (_i, ctl) => {
+      // the approved run itself ends at once; the next one stays running until released
+      if (later++ > 0) {
+        started();
+        await gate;
+      }
+      await done(ctl);
+    });
+    const outside = serverShapedRedispatch(msg, 'lost');
+    env.harness.server.send('shift.start', outside);
+    await running;
+    const box = {
+      ...serverShapedRedispatch(msg, 'lost'),
+      devops: { ...outside.devops, summary: 'other work' },
+    };
+    env.harness.server.send('shift.start', box);
+    const rejected = await env.harness.server.waitFor('shift.rejected', (m) => m.shiftId === box.shiftId);
+    expect(rejected.reason).toBe('busy');
+    expect(env.adapter.inputs).toHaveLength(3);
+    release();
+    await ends(env, outside.shiftId);
+  }, 120_000);
+
+  it('REVIEW B-2: after a box shift of the request (another job), the approved job sent again under it goes into the box', async () => {
+    const { env, msg } = await approvedOnce('start the app', (_i, ctl) => done(ctl));
+    const box = {
+      ...serverShapedRedispatch(msg, 'lost'),
+      devops: { ...msg.devops, summary: 'write a script there' },
+    };
+    box.devops.history = msg.devops.history;
+    env.harness.server.send('shift.start', box);
+    await ends(env, box.shiftId);
+    await env.harness.runner.supervisor.whenSettled(box.shiftId);
+    expect(env.adapter.inputs.at(-1)?.devopsBox).toBe(true);
+    const again = serverShapedRedispatch(msg, 'lost');
+    env.harness.server.send('shift.start', again);
+    await ends(env, again.shiftId);
+    expect(env.adapter.inputs.at(-1)?.devopsBox).toBe(true);
+  }, 120_000);
+
+  it('REVIEW S-1: a held shift approved while another shift of its request runs is answered busy, not started', async () => {
+    let calls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let started!: () => void;
+    const running = new Promise<void>((r) => (started = r));
+    const env = await withRealAuthority(async (_input, ctl) => {
+      calls++;
+      if (calls === 1) {
+        await ctl.post('/v1/rpc', { method: 'devops.outside', params: { needs: 'docker', why: 'compose' } });
+        await new Promise<void>((r) => ctl.signal.addEventListener('abort', () => r()));
+        return;
+      }
+      started();
+      await gate;
+      await done(ctl);
+    });
+    const agentId = uuidv7();
+    env.store.update((p) => ({ ...p, devops: { agents: { [ORG]: agentId } } }));
+    const msg = owner(agentId, 'start the app');
+    env.harness.server.send('shift.start', msg);
+    const heldMsg = await env.harness.server.waitFor('approvals.held', (m) =>
+      m.items.some((i) => i.kind === 'devops.task'),
+    );
+    const item = heldMsg.items.find((i) => i.kind === 'devops.task');
+    // while it waits for the yes, a box shift of the same request starts (the held one is not active)
+    const box = { ...serverShapedRedispatch(msg, 'lost'), devops: { ...msg.devops, summary: 'other work' } };
+    env.harness.server.send('shift.start', box);
+    await running;
+    await approve(
+      { ...defaultCliDeps(env.dir), ask: async () => 'yes', out: () => undefined },
+      item?.id as string,
+    );
+    const rejected = await env.harness.server.waitFor(
+      'shift.rejected',
+      (m) => m.shiftId === msg.shiftId && m.reason === 'busy',
+      30_000,
+    );
+    expect(rejected.reason).toBe('busy');
+    expect(env.adapter.inputs).toHaveLength(2);
+    // REVIEW B-3: the busy answer came before the yes was remembered: nothing is kept for the request
+    expect(ApprovedRequests.forRoot(env.harness.dataDir, env.dir).ofRequest(msg.devops.requestId)).toEqual(
+      [],
+    );
+    release();
+    await ends(env, box.shiftId);
+    await env.harness.runner.supervisor.whenSettled(box.shiftId);
+    // ... so the same job sent again under that request does not run outside without a yes
+    const again = serverShapedRedispatch(msg, 'lost');
+    env.harness.server.send('shift.start', again);
+    await waitUntil(() => env.adapter.inputs.length === 3, 30_000, 'the re-sent job starts');
+    expect(env.adapter.inputs[2]?.devopsBox).toBe(true);
   }, 120_000);
 });

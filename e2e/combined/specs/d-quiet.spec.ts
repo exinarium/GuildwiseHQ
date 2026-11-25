@@ -440,6 +440,8 @@ test('[D2] after one yes, the owner sends the identical request again (a new req
     await page.deny(seen.w[0]?.id as string);
   }
   expect(seen.w.length, 'holds for the identical request').toBe(0);
+  // e2e-found-fixes D2 (a): it ran outside the box because it is the exact job approved (B1: a request new on this computer)
+  expect(hostLog()).toContain('runs outside the box: the exact job approved on this computer');
 });
 
 test('[D2] with no box on this runtime the request is held ONCE; the yes covers that exact job: when the server sends the same job again it runs outside with no new yes', async () => {
@@ -462,13 +464,27 @@ test('[D2] with no box on this runtime the request is held ONCE; the yes covers 
     (n) => n >= 2,
     120_000,
   );
-  // give the runner the moment it needs to either start it or hold it
+  // give the runner the moment it needs to either start it or hold it. e2e-found-fixes S4: while the approved shift still runs here
+  // (at its gate), a second shift of the same request is answered busy; the server sends it again once the first one ended
+  const BUSY = /another shift of DevOps request [0-9a-f]{8} is still running/;
   const again = await waitFor(
-    'the runner started it or held it',
+    'the runner started it, held it or answered busy',
     async () => ({ w: await waiting(), shifts: (await shiftsOfRequest(first)).length }),
-    (r) => r.w.length > 0 || hostLog().includes('runs outside the box: the exact job approved'),
+    (r) =>
+      r.w.length > 0 ||
+      hostLog().includes('runs outside the box: the exact job approved') ||
+      BUSY.test(hostLog()),
     60_000,
   );
+  if (again.w.length === 0 && !hostLog().includes('runs outside the box: the exact job approved')) {
+    release(host.gateDir, 'd2');
+    await waitFor(
+      'the same job sent again after the first shift ended',
+      async () => ({ w: await waiting(), log: hostLog() }),
+      (r) => r.w.length > 0 || r.log.includes('runs outside the box: the exact job approved'),
+      180_000,
+    );
+  }
   if (again.w.length > 0) {
     const body2 = heldBodyOf(again.w[0]?.id as string);
     test.info().annotations.push({

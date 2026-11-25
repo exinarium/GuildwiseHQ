@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { uuidv7 } from '@aom/shared';
+import { DevopsShiftSchema, PROTOCOL_VERSION, ShiftBriefSchema, ShiftStartSchema, uuidv7 } from '@aom/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { sessionEnv } from '../src/adapters/claude-code.ts';
 import { buildDevopsBoxSettings } from '../src/adapters/claude-policy.ts';
@@ -15,9 +15,21 @@ import {
   renderedResume,
 } from '../src/policy/approved-requests.ts';
 import { approve, type PolicyCliDeps } from '../src/policy/cli.ts';
+import { canonicalJson } from '../src/policy/deploy-pin.ts';
 import { routeDevopsShift } from '../src/policy/devops-route.ts';
 import { gateCommand, gateEnvEnsure, gateHygiene } from '../src/policy/gate.ts';
-import { HeldStore, HeldVersionMismatch, heldVersion, r2Key } from '../src/policy/held.ts';
+import {
+  BOOKKEEPING,
+  HeldStore,
+  HeldVersionMismatch,
+  heldVersion,
+  IDENTITY,
+  JOB_KEY_FIELDS,
+  r2Key,
+  rebind,
+  withoutDispatchIds,
+  withoutIdentity,
+} from '../src/policy/held.ts';
 import { ensurePolicyKey, KEY_SEEN_FILE, POLICY_KEY_FILE } from '../src/policy/integrity.ts';
 import { PasskeyStore } from '../src/policy/passkey-store.ts';
 import { DEFAULT_POLICY, type Policy, PolicySchema } from '../src/policy/schema.ts';
@@ -28,7 +40,7 @@ import { renderScreen } from '../src/setup/screen.ts';
 import { applyChange, type WindowContext } from '../src/window/api.ts';
 import { DeviceStore } from '../src/window/pairing.ts';
 import { cleanupTmp, sh, tmp } from './helpers.ts';
-import { makeDevopsStart } from './vault-fixtures.ts';
+import { makeDevopsStart, serverShapedRedispatch } from './vault-fixtures.ts';
 
 /**
  * quiet-approvals phase A (DESIGN rounds 1-3, approved): the runner decides locally where a DevOps request runs (R1 box,
@@ -95,13 +107,18 @@ describe('S2: a decision approves the version shown', () => {
       requestKey: `devops:${msg.devops.requestId}`,
     });
 
-  it('every hold sets the version (the R2 key for a shift start); a newer shift of the request changes it', () => {
+  it('every hold sets the version (ids aside, for a shift start); a newer shift of the request changes it', () => {
     const a = approvalsEnv();
     const first = devopsMsg();
     const r = holdShift(a, first);
-    expect(r.version).toBe(r2Key(first));
-    // the same job re-dispatched (new shift and claim ids) keeps the version
-    const again = holdShift(a, { ...first, shiftId: uuidv7(), claimId: uuidv7() });
+    expect(r.version).toBe(heldVersion(r));
+    // the same job re-dispatched (new shift and claim ids, nested brief.shift.id included) keeps the version
+    const again = holdShift(a, {
+      ...first,
+      shiftId: uuidv7(),
+      claimId: uuidv7(),
+      brief: { ...first.brief, shift: { ...first.brief.shift, id: uuidv7() } },
+    });
     expect(again.id).toBe(r.id);
     expect(again.version).toBe(r.version);
     // a different job of the same request replaces the replay and the version
@@ -406,9 +423,9 @@ describe('R1-R3: the local routing of a DevOps shift', () => {
     const m = devopsMsg();
     const store = ApprovedRequests.forRoot(tmp('aom-qa-data-'), keyedDir(), quiet.warn);
     store.record(m.devops.requestId, m);
-    expect(routeDevopsShift(policyOf(), { ...m, shiftId: uuidv7() }, deps({ approved: store })).route).toBe(
-      'outside',
-    );
+    expect(
+      routeDevopsShift(policyOf(), serverShapedRedispatch(m, 'lost') as any, deps({ approved: store })).route,
+    ).toBe('outside');
     expect(
       routeDevopsShift(
         policyOf(),
@@ -736,5 +753,327 @@ describe('S3: after a lost seal key, unsealed items no longer count', () => {
     });
     expect(held.get('abcdef1235')?.id).toBe('abcdef1235');
     expect(heldVersion(held.get('abcdef1235') as never)).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+// ---------------------------------------------------------------- e2e-found-fixes D2
+
+describe('e2e-found-fixes D2: one yes covers the same job as the real server sends it again', () => {
+  /** A DevOps shift start with the real server's shape: envelope, the owner's comment in history, a card. */
+  const realShaped = () => {
+    const m = devopsMsg(
+      {},
+      {
+        fromWorkstationOwner: true,
+        card: {
+          ref: 'TOY-7',
+          title: 'Start the app',
+          repo: 'toy',
+          remoteUrlNormalized: 'github.com/acme/toy',
+        },
+        history: [
+          { authorName: 'Pieter', kind: 'comment', body: 'start the app', at: '2026-11-25T06:00:00.000Z' },
+        ],
+      },
+    );
+    return { v: PROTOCOL_VERSION, id: uuidv7(), type: 'shift.start', ts: '2026-11-25T06:00:01.000Z', ...m };
+  };
+  const recorded = (m: any) => {
+    const store = ApprovedRequests.forRoot(tmp('aom-qa-data-'), keyedDir(), quiet.warn);
+    store.record(m.devops.requestId, m);
+    return store;
+  };
+  const LOST = /did not complete \(lost\)/;
+
+  it('the real fields: the identical new request and the lost re-send keep the key; bookkeeping changes keep it too', () => {
+    const m = realShaped();
+    const k = r2Key(m);
+    expect(ShiftStartSchema.safeParse(m).success).toBe(true);
+    const fresh = serverShapedRedispatch(m, 'newRequest');
+    const lost = serverShapedRedispatch(m, 'lost');
+    // the shapes the harness captured (Defect 1): every one of these differs
+    expect(fresh.devops.requestId).not.toBe(m.devops.requestId);
+    expect(fresh.brief.card.id).toBe(fresh.devops.requestId);
+    expect(fresh.brief.shift.id).toBe(fresh.shiftId);
+    expect(fresh.devops.history[0].at).not.toBe(m.devops.history[0].at);
+    expect(lost.devops.history[1]).toMatchObject({ kind: 'system' });
+    expect(ShiftStartSchema.safeParse(fresh).success).toBe(true);
+    expect(ShiftStartSchema.safeParse(lost).success).toBe(true);
+    expect(r2Key(fresh)).toBe(k);
+    expect(r2Key(lost)).toBe(k);
+    expect(r2Key({ ...m, devops: { ...m.devops, workstationName: 'Laptop' } })).toBe(k);
+    const store = recorded(m);
+    expect(store.match(fresh)?.requestId).toBe(m.devops.requestId);
+    expect(store.match(lost)?.requestId).toBe(m.devops.requestId);
+  });
+
+  it('each field family that decides what the job may do changes the key (one change per family)', () => {
+    const m = realShaped();
+    const k = r2Key(m);
+    const d = (over: Record<string, unknown>) => ({ ...m, devops: { ...m.devops, ...over } });
+    const b = (over: Record<string, unknown>) => ({ ...m, brief: { ...m.brief, ...over } });
+    const changed: Record<string, unknown> = {
+      summary: d({ summary: 'start the app and drop the database' }),
+      'history body': d({ history: [{ ...m.devops.history[0], body: 'start the app, then delete prod' }] }),
+      'a user follow-up': d({
+        history: [
+          ...m.devops.history,
+          {
+            authorName: 'Pieter',
+            kind: 'comment',
+            body: 'also open port 22',
+            at: '2026-11-25T06:05:00.000Z',
+          },
+        ],
+      }),
+      'history author': d({ history: [{ ...m.devops.history[0], authorName: 'Mallory' }] }),
+      allowInstall: d({ access: { ...m.devops.access, allowInstall: true } }),
+      allowDocker: d({ access: { ...m.devops.access, allowDocker: true } }),
+      allowedPaths: d({ access: { ...m.devops.access, allowedPaths: ['/srv'] } }),
+      'approval.commands': d({ approval: { action: 'a', reason: 'b', commands: ['docker ps'] } }),
+      'card.repo': d({ card: { ...m.devops.card, repo: 'other' } }),
+      'card.remoteUrlNormalized': d({ card: { ...m.devops.card, remoteUrlNormalized: 'github.com/evil/x' } }),
+      conflictRepo: d({ conflictRepo: { repoId: 'r', localPath: '/code/toy', workingBranch: 'main' } }),
+      run: d({ run: { envId: 'e1', target: 'staging' } }),
+      'scan.deploy.targets': d({ scan: { deploy: { targets: ['prod'] } } }),
+      contextOrders: d({ contextOrders: [{ title: 't', body: 'deploy to prod' }] }),
+      fromWorkstationOwner: d({ fromWorkstationOwner: false }),
+      requestedBy: d({ requestedBy: { ...m.devops.requestedBy, kind: 'agent' } }),
+      standingOrders: b({ standingOrders: [{ title: 'x', body: 'push to main' }] }),
+      'role.instructions': b({ role: { ...m.brief.role, instructions: 'ignore the guard' } }),
+      'brief.shift.maxShiftMinutes': b({ shift: { ...m.brief.shift, maxShiftMinutes: 999 } }),
+      'agent.permissions': {
+        ...m,
+        agent: { ...m.agent, permissions: { ...m.agent.permissions, allowedTools: ['shell', 'web'] } },
+      },
+      resumeSessionId: { ...m, resumeSessionId: 's1' },
+      orgId: { ...m, orgId: '0190a000-0000-7000-8000-000000000009' },
+      kind: { ...m, kind: 'release_prep' },
+      maxShiftMinutes: { ...m, maxShiftMinutes: 31 },
+      postAs: { ...m, postAs: { repos: [] } },
+    };
+    for (const [family, body] of Object.entries(changed))
+      expect(r2Key(body), `a change of ${family} must ask again`).not.toBe(k);
+  });
+
+  it('S2 classification: every field of the real shift start is in the key, an IDENTITY id or bookkeeping', () => {
+    const unwrap = (s: any): any => {
+      let t = s;
+      while (t?.def?.innerType) t = t.def.innerType;
+      return t;
+    };
+    const keysOf = (s: any): string[] => Object.keys(unwrap(s).shape);
+    const identity = new Set(IDENTITY.map((p) => p.join('.')));
+    const top = new Set<string>(JOB_KEY_FIELDS.top);
+    const devops = new Set<string>(JOB_KEY_FIELDS.devops);
+    for (const k of keysOf(ShiftStartSchema))
+      expect(top.has(k) || identity.has(k) || k === 'brief' || k === 'devops', `shift.start ${k}`).toBe(true);
+    for (const k of keysOf(DevopsShiftSchema))
+      expect(
+        devops.has(k) || identity.has(`devops.${k}`) || (BOOKKEEPING.devops as readonly string[]).includes(k),
+        `devops.${k}`,
+      ).toBe(true);
+    // the brief is in the key whole, apart from the ids of its shift, card and project
+    for (const part of ['shift', 'card', 'project'])
+      expect(keysOf(ShiftBriefSchema.shape[part as 'shift'])).toContain('id');
+    for (const part of ['shift', 'card', 'project']) expect(identity.has(`brief.${part}.id`)).toBe(true);
+    // the history element: author, kind and body in the key; `at` is bookkeeping
+    const element = unwrap(DevopsShiftSchema.shape.history).element;
+    expect(keysOf(element).sort()).toEqual(['at', 'authorName', 'body', 'kind']);
+    const m = realShaped();
+    const key = r2Key(m);
+    for (const f of ['authorName', 'kind', 'body'])
+      expect(
+        r2Key({ ...m, devops: { ...m.devops, history: [{ ...m.devops.history[0], [f]: 'x' }] } }),
+      ).not.toBe(key);
+    // the schema rejects a non-uuid at each IDENTITY id (so the rebind checks only ever see uuids from the wire)
+    for (const path of IDENTITY.filter((p) => !['v', 'id', 'type', 'ts'].includes(p[0] as string))) {
+      const bad = JSON.parse(JSON.stringify(m));
+      let o = bad;
+      for (const k of path.slice(0, -1)) o = o[k];
+      o[path[path.length - 1] as string] = 'not-a-uuid';
+      expect(ShiftStartSchema.safeParse(bad).success, path.join('.')).toBe(false);
+    }
+  });
+
+  it('rebind: the APPROVED body with only the new ids; the "lost" text never comes along; N1 checks', () => {
+    const m = realShaped();
+    const approved = withoutDispatchIds(m);
+    const lost = serverShapedRedispatch(m, 'lost');
+    const r = rebind(approved, lost) as any;
+    expect(r).not.toBeNull();
+    expect(canonicalJson(withoutIdentity(r))).toBe(canonicalJson(withoutIdentity(m)));
+    expect(JSON.stringify(r)).not.toMatch(LOST);
+    expect(r.shiftId).toBe(lost.shiftId);
+    expect(r.claimId).toBe(lost.claimId);
+    expect(r.brief.shift.id).toBe(lost.shiftId);
+    const fresh = serverShapedRedispatch(m, 'newRequest');
+    const f = rebind(approved, { ...fresh, devops: { ...fresh.devops, workstationName: 'Other' } }) as any;
+    expect(f.devops.requestId).toBe(fresh.devops.requestId);
+    expect(f.devops.threadId).toBe(fresh.devops.threadId);
+    expect(f.brief.card.id).toBe(fresh.devops.requestId);
+    expect(f.brief.project.id).toBe(fresh.devops.requestId);
+    // bookkeeping runs as approved
+    expect(f.devops.workstationName).toBe(m.devops.workstationName);
+    expect(f.devops.history[0].at).toBe(m.devops.history[0].at);
+    // N1: a non-uuid, or ids that do not agree, give null
+    expect(rebind(approved, { ...fresh, claimId: 'x' })).toBeNull();
+    expect(rebind(approved, { ...fresh, devops: { ...fresh.devops, threadId: 'x' } })).toBeNull();
+    expect(
+      rebind(approved, { ...fresh, brief: { ...fresh.brief, card: { ...fresh.brief.card, id: uuidv7() } } }),
+    ).toBeNull();
+    expect(
+      rebind(approved, {
+        ...fresh,
+        brief: { ...fresh.brief, project: { ...fresh.brief.project, id: uuidv7() } },
+      }),
+    ).toBeNull();
+    expect(rebind(approved, { ...fresh, shiftId: uuidv7() })).toBeNull();
+  });
+
+  it('the route: the lost re-send runs the approved body outside; a new request only through the B1 guard', () => {
+    const m = realShaped();
+    const store = recorded(m);
+    const lost = serverShapedRedispatch(m, 'lost');
+    let asked = 0;
+    const guard = (ok: boolean) => () => {
+      asked++;
+      return ok;
+    };
+    const r = routeDevopsShift(policyOf(), lost as any, {
+      granted: true,
+      boxMissing: null,
+      approved: store,
+      crossRequestOk: guard(false),
+    });
+    expect(r.route).toBe('outside');
+    if (r.route === 'outside') {
+      expect(r.why).toBe('r2');
+      expect(JSON.stringify(r.msg)).not.toMatch(LOST);
+      expect(r.msg.shiftId).toBe(lost.shiftId);
+      expect(r.adopt).toBeUndefined();
+    }
+    // the same request skips the guard
+    expect(asked).toBe(0);
+    const fresh = serverShapedRedispatch(m, 'newRequest');
+    const no = routeDevopsShift(policyOf(), fresh as any, {
+      granted: true,
+      boxMissing: null,
+      approved: store,
+      crossRequestOk: guard(false),
+    });
+    expect(no.route).toBe('box');
+    expect(asked).toBe(1);
+    // without a guard at all: the box (fail closed)
+    expect(
+      routeDevopsShift(policyOf(), fresh as any, { granted: true, boxMissing: null, approved: store }).route,
+    ).toBe('box');
+    // no box on this computer and the guard says no: one local yes, never outside
+    expect(
+      routeDevopsShift(policyOf(), fresh as any, {
+        granted: true,
+        boxMissing: 'no bwrap',
+        approved: store,
+        crossRequestOk: guard(false),
+      }).route,
+    ).toBe('hold');
+    const yes = routeDevopsShift(policyOf(), fresh as any, {
+      granted: true,
+      boxMissing: null,
+      approved: store,
+      crossRequestOk: guard(true),
+    });
+    expect(yes.route).toBe('outside');
+    if (yes.route === 'outside') {
+      expect(yes.adopt?.requestId).toBe(m.devops.requestId);
+      expect(yes.msg.devops?.requestId).toBe(fresh.devops.requestId);
+    }
+    // a failing rebind (N1) never asks the guard, so it never claims a folder
+    const before = asked;
+    routeDevopsShift(policyOf(), { ...fresh, claimId: 'x' } as any, {
+      granted: true,
+      boxMissing: null,
+      approved: store,
+      crossRequestOk: guard(true),
+    });
+    expect(asked).toBe(before);
+  });
+
+  it('S3: approving the same job under request B keeps request A’s entry, its session and asked commands; match prefers the same request', () => {
+    const a = realShaped();
+    const store = recorded(a);
+    store.noteSession(a.devops.requestId, r2Key(a), 'sess-a');
+    store.noteAsked(a.devops.requestId, r2Key(a), ['docker ps']);
+    const b = serverShapedRedispatch(a, 'newRequest');
+    store.record(b.devops.requestId, b);
+    const ea = store.ofRequest(a.devops.requestId);
+    expect(ea).toHaveLength(1);
+    expect(ea[0]).toMatchObject({ sessionId: 'sess-a', asked: ['docker ps'] });
+    expect(store.ofRequest(b.devops.requestId)).toHaveLength(1);
+    expect(store.match(serverShapedRedispatch(a, 'lost'))?.requestId).toBe(a.devops.requestId);
+    expect(store.match(serverShapedRedispatch(b, 'lost'))?.requestId).toBe(b.devops.requestId);
+    // adopt keeps the ORIGINAL time (a match never extends the 24 hours), with no session or asked commands
+    const c = serverShapedRedispatch(a, 'newRequest');
+    store.adopt(ea[0] as NonNullable<(typeof ea)[0]>, c.devops.requestId, rebind(ea[0]?.body as never, c));
+    expect(store.ofRequest(c.devops.requestId)[0]).toMatchObject({ at: ea[0]?.at, asked: [] });
+    // REVIEW B-1: the adopted entry carries the new request's ids, so its own resumes compare against them
+    expect((store.ofRequest(c.devops.requestId)[0]?.body as any)?.brief.project.id).toBe(c.devops.requestId);
+    expect(store.ofRequest(c.devops.requestId)[0]?.sessionId).toBeUndefined();
+  });
+
+  it('REVIEW B-1: a C2 resume or a held version never lets the project, card, request or thread id change', () => {
+    const m = realShaped();
+    const store = recorded(m);
+    store.noteSession(m.devops.requestId, r2Key(m), 'sess-1');
+    store.noteAsked(m.devops.requestId, r2Key(m), ['docker compose up -d']);
+    const lost = serverShapedRedispatch(m, 'lost');
+    const resume = {
+      ...lost,
+      resumeSessionId: 'sess-1',
+      devops: { ...lost.devops, approval: { action: 'a', reason: 'b', commands: ['docker compose up -d'] } },
+    };
+    const entry = store.ofRequest(m.devops.requestId)[0] as never;
+    expect(c2Resume(entry, resume).ok).toBe(true);
+    const other = uuidv7();
+    for (const changed of [
+      { ...resume, brief: { ...resume.brief, project: { ...resume.brief.project, id: other } } },
+      { ...resume, brief: { ...resume.brief, card: { ...resume.brief.card, id: other } } },
+      { ...resume, devops: { ...resume.devops, threadId: other } },
+    ])
+      expect(c2Resume(entry, changed).ok).toBe(false);
+    const v = (body: unknown) =>
+      heldVersion({ kind: 'devops.task', summary: 's', detail: 'd', replay: { type: 'shift.start', body } });
+    expect(v({ ...m, brief: { ...m.brief, project: { ...m.brief.project, id: other } } })).not.toBe(v(m));
+    expect(v({ ...m, brief: { ...m.brief, card: { ...m.brief.card, id: other } } })).not.toBe(v(m));
+  });
+
+  it('S2: a real re-send keeps the held version; a new system entry changes it', () => {
+    const m = realShaped();
+    const v = (body: unknown) =>
+      heldVersion({ kind: 'devops.task', summary: 's', detail: 'd', replay: { type: 'shift.start', body } });
+    const re = { ...m, id: uuidv7(), shiftId: uuidv7(), claimId: uuidv7() };
+    re.brief = { ...m.brief, shift: { ...m.brief.shift, id: re.shiftId } };
+    expect(v(re)).toBe(v(m));
+    expect(v(serverShapedRedispatch(m, 'lost'))).not.toBe(v(m));
+  });
+
+  it('C2: a resume with a new nested brief.shift.id passes (it never did before)', () => {
+    const m = realShaped();
+    const store = recorded(m);
+    store.noteSession(m.devops.requestId, r2Key(m), 'sess-1');
+    store.noteAsked(m.devops.requestId, r2Key(m), ['docker compose up -d']);
+    const lost = serverShapedRedispatch(m, 'lost');
+    const resume = {
+      ...lost,
+      resumeSessionId: 'sess-1',
+      devops: { ...lost.devops, approval: { action: 'a', reason: 'b', commands: ['docker compose up -d'] } },
+    };
+    const r = c2Resume(store.ofRequest(m.devops.requestId)[0] as never, resume);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect((r.body as any).devops.requestId).toBe(m.devops.requestId);
+      expect((r.body as any).brief.shift.id).toBe(lost.shiftId);
+      expect(JSON.stringify(r.body)).not.toMatch(LOST);
+    }
   });
 });

@@ -1,14 +1,15 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { canonicalJson } from './deploy-pin.ts';
-import { r2Key, withoutDispatchIds } from './held.ts';
+import { r2Key, withoutDispatchIdentity, withoutDispatchIds } from './held.ts';
 import { assertNotAgentSession, checkSeal, readPolicyKey, seal } from './integrity.ts';
 import { policyDir, writeFileAtomic } from './store.ts';
 
 /**
  * quiet-approvals R2 [B3]: the exact DevOps jobs the owner approved on this computer (`<dataDir>/approved-requests.json`,
- * mode 600, in `RUNNER_PRIVATE` and the CEO turn's private entries). One entry per approved `shift.start`, keyed by
- * `r2Key` (sha256 of the canonical body without the dispatch ids), which is also the held item's version (S2).
+ * mode 600, in `RUNNER_PRIVATE` and the CEO turn's private entries). One entry per approved `shift.start` and request,
+ * keyed by `r2Key` (e2e-found-fixes D2: sha256 over the fields that decide what the job may do, `JOB_KEY_FIELDS`). The
+ * held item's version (S2) is separate: it ignores only the IDENTITY ids.
  *
  * - Recorded only for a local decision (`decidedBy === 'local'`: the CLI or the paired page), never a passkey one.
  * - Sealed with the policy key (T2). Without a key nothing is remembered or matched; a seal that is missing or wrong
@@ -103,7 +104,10 @@ export class ApprovedRequests {
     writeFileAtomic(this.file, `${JSON.stringify(seal(key, { entries: kept }))}\n`, 0o600);
   }
 
-  /** After a LOCAL approval of a held DevOps shift start: remember exactly that job. */
+  /**
+   * After a LOCAL approval of a held DevOps shift start: remember exactly that job. S3: deduped by (request, key), so
+   * approving the same job under another request keeps the first request's entry (its session and asked commands).
+   */
   record(requestId: string, body: unknown): ApprovedRequest {
     const e: ApprovedRequest = {
       key: r2Key(body),
@@ -112,14 +116,31 @@ export class ApprovedRequests {
       at: new Date(this.now()).toISOString(),
       asked: [],
     };
-    this.write([...this.entries().filter((x) => x.key !== e.key), e]);
+    this.write([...this.entries().filter((x) => !(x.key === e.key && x.requestId === requestId)), e]);
     return e;
   }
 
-  /** The entry an identical job matches (R2). */
+  /**
+   * B1: a match under a new request id passed the runner's cross-request guard and runs outside. The new request gets
+   * its own entry for its session and asked commands (C2): the rebound body (`bound`, the approved job with only the new
+   * ids), the same key, the ORIGINAL approval time
+   * (a match never extends the 24 hours), no session and no asked commands yet.
+   */
+  adopt(entry: ApprovedRequest, requestId: string, bound: unknown): void {
+    if (entry.requestId === requestId) return;
+    const all = this.entries();
+    if (all.some((x) => x.key === entry.key && x.requestId === requestId)) return;
+    // the rebound body (the approved job with the new request's ids): its C2 resumes compare against these ids
+    const body = withoutDispatchIds(bound);
+    this.write([...all, { key: entry.key, requestId, body, at: entry.at, asked: [] }]);
+  }
+
+  /** The entry an identical job matches (R2): the one of the same request first, otherwise the newest. */
   match(body: unknown): ApprovedRequest | undefined {
     const key = r2Key(body);
-    return this.entries().find((e) => e.key === key);
+    const hits = this.entries().filter((e) => e.key === key);
+    const requestId = (body as { devops?: { requestId?: unknown } } | null)?.devops?.requestId;
+    return hits.find((e) => e.requestId === requestId) ?? hits.at(-1);
   }
 
   /** The entries of one request, newest last. */
@@ -180,7 +201,7 @@ export type C2Result = { ok: true; body: Obj; commands: string[] } | { ok: false
 
 /**
  * C2 (S11): may this `shift.start` run outside the box as the resume of the approved job `entry`? Compared with the
- * APPROVED body (so a chain of resumes stays bound to it), apart from the dispatch ids it may differ only in
+ * APPROVED body (so a chain of resumes stays bound to it), apart from the IDENTITY ids it may differ only in
  * `devops.approval`, appended `devops.history` entries (earlier ones unchanged), `resumeSessionId` (which must equal the
  * session the approved run created) and `resumeMessage`. Its `approval.commands` must be a non-empty subset of the
  * commands this request's outside-box sessions asked for. On success the runner's own rendering replaces
@@ -188,8 +209,10 @@ export type C2Result = { ok: true; body: Obj; commands: string[] } | { ok: false
  * session.
  */
 export function c2Resume(entry: ApprovedRequest, next: unknown): C2Result {
-  const n = withoutDispatchIds(next);
-  const a = entry.body;
+  // e2e-found-fixes C2: compared without the per-dispatch ids only (a resume has a new nested `brief.shift.id` too);
+  // REVIEW B-1: the request, thread, card and project ids must stay the approved ones
+  const n = withoutDispatchIdentity(next);
+  const a = withoutDispatchIdentity(entry.body);
   if (canonicalJson(resumeInvariant(n)) !== canonicalJson(resumeInvariant(a)))
     return { ok: false, reason: 'the job changed beyond an approval resume' };
   const nd = obj(n.devops);
@@ -214,7 +237,8 @@ export function c2Resume(entry: ApprovedRequest, next: unknown): C2Result {
     ...obj(next),
     ...(n.resumeMessage !== undefined || n.resumeSessionId !== undefined ? { resumeMessage: text } : {}),
     devops: {
-      ...nd,
+      // the new message's own devops (its request and thread ids); equal to the approved one outside the resume fields
+      ...obj(obj(next).devops),
       approval: { action: 'approved on the Desk', reason: '', commands },
       // REVIEW S6: an appended entry carries no server text at all: the runner's own author, kind and text
       history: [

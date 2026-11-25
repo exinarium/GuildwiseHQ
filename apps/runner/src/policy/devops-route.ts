@@ -1,7 +1,8 @@
 import type { ServerToRunnerOf } from '@aom/shared';
 import { isReadOnlyScan } from '../devops/requests.ts';
-import { type ApprovedRequests, c2Resume } from './approved-requests.ts';
+import { type ApprovedRequest, type ApprovedRequests, c2Resume } from './approved-requests.ts';
 import { type DevopsShiftInput, type GateDecision, gateDevopsShift, gateHygiene } from './gate.ts';
+import { rebind } from './held.ts';
 import type { Policy } from './schema.ts';
 
 type ShiftStartMsg = ServerToRunnerOf<'shift.start'>;
@@ -14,7 +15,8 @@ type ShiftStartMsg = ServerToRunnerOf<'shift.start'>;
  * - a read-only scan: runs as today in its own read-only sandbox (stricter than the box), no hold;
  * - a hygiene request: the fixed routine (`gateHygiene`: run, or one local yes);
  * - a conflict request (C3): one local yes, as today; release prep: exactly as before;
- * - an exact job approved locally (R2), or its resume within C2: outside the box, no hold;
+ * - an exact job approved locally (R2; under a new request id only through the B1 guard), or its resume within C2:
+ *   outside the box, no hold;
  * - the box cannot start on this computer: one local yes (fail closed: never outside without it);
  * - everything else: inside the box, no hold.
  */
@@ -24,7 +26,11 @@ export type DevopsRoute =
   | { route: 'asBefore' }
   | { route: 'scan' }
   | { route: 'hygiene'; decision: GateDecision }
-  | { route: 'outside'; why: 'r2' | 'c2'; msg: ShiftStartMsg; key: string }
+  /**
+   * `msg` is what runs: for R2 the APPROVED body with only the new ids (`rebind`); for C2 the runner's rendering.
+   * `adopt`: an R2 match under a new request id (B1 passed): the runner gives that request its own entry.
+   */
+  | { route: 'outside'; why: 'r2' | 'c2'; msg: ShiftStartMsg; key: string; adopt?: ApprovedRequest }
   | { route: 'box' }
   | { route: 'hold'; decision: Extract<GateDecision, { action: 'hold' }> };
 
@@ -39,6 +45,12 @@ export interface RouteDeps {
    * the yes). Absent or false: the runtime has no box at all, and the held request runs as before after a yes.
    */
   boxBroken?: boolean;
+  /**
+   * e2e-found-fixes B1: may an exact job approved under ANOTHER request run outside under this request id? The runner
+   * answers: not refused here, first sight of the request, and a request folder it could create new (that claim is made
+   * only when everything else already passed, so it is asked last). Absent: never (the job goes into the box).
+   */
+  crossRequestOk?: (requestId: string, agentId: string) => boolean;
 }
 
 export function devopsShiftInput(msg: ShiftStartMsg): DevopsShiftInput {
@@ -101,11 +113,18 @@ export function routeDevopsShift(policy: Policy, msg: ShiftStartMsg, deps: Route
     );
     return d.action === 'refuse' ? { route: 'refuse', reason: d.reason } : { route: 'hold', decision: d };
   }
-  // R2: exactly the job the owner approved on this computer
-  const exact = deps.approved?.match(msg);
-  if (exact) return { route: 'outside', why: 'r2', msg, key: exact.key };
-  // C2: the resume of an approved job, within the allowed differences, for commands its session asked for
+  // R2: exactly the job the owner approved on this computer, run as approved (only the ids are new)
   const requestId = msg.devops?.requestId;
+  const exact = deps.approved?.match(msg);
+  const bound = exact ? rebind(exact.body, msg) : null;
+  if (exact && bound && requestId) {
+    if (exact.requestId === requestId)
+      return { route: 'outside', why: 'r2', msg: bound as ShiftStartMsg, key: exact.key };
+    // B1: the request id picks the request folder, its temp folder and environment ownership: a new one only when fresh
+    if (deps.crossRequestOk?.(requestId, msg.agent.agentId) === true)
+      return { route: 'outside', why: 'r2', msg: bound as ShiftStartMsg, key: exact.key, adopt: exact };
+  }
+  // C2: the resume of an approved job, within the allowed differences, for commands its session asked for
   if (requestId && msg.devops?.approval?.commands?.length)
     for (const e of [...(deps.approved?.ofRequest(requestId) ?? [])].reverse()) {
       const r = c2Resume(e, msg);

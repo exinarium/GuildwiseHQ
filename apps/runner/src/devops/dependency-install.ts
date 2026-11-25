@@ -11,6 +11,7 @@ import {
 import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, delimiter, dirname, join, resolve, sep } from 'node:path';
 import { type IpcRpcResponse, parseYamlLimited } from '@aom/shared';
+import { underRoot } from '../box/folder-check.ts';
 import { allowScriptsHint } from '../policy/installs.ts';
 import { maskedPaths, SERVICE_HOME, sandboxCommand } from '../runs/sandbox.ts';
 import { startEgressProxy } from '../sandbox/egress-proxy.ts';
@@ -502,37 +503,124 @@ export function exactReopens(o: {
 }
 
 /**
+ * e2e-found-fixes B2: the agents' PATH pin check, both halves, as `aom devops install` needs it when it looks a tool up
+ * (S1: a getter, read at lookup time). `waiting`: DevOps-registered toolchains not approved on this computer yet (their
+ * bin and read folders); `treeOk`: the tree pin of the box-writable tool folders (`ToolchainRegistry.treeOk`);
+ * `guardedRootOf`: the box-writable root a path lies under (real paths), or null.
+ */
+export interface ToolGate {
+  waiting: ReadonlyArray<{ name: string; hash: string; dirs: readonly string[] }>;
+  treeOk(dir: string): boolean;
+  guardedRootOf(path: string): string | null;
+}
+
+export type FoundPackageManager =
+  /** `real`: the checked real path of the tool, which is what runs. */
+  | { toolPath: string; real: string; nodeExec?: string }
+  /** Nothing allowed was found, but a tool that waits for the owner (or changed) was: the plain reason. */
+  | { refusal: string };
+
+const realOf = (p: string): string | null => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return null;
+  }
+};
+
+type Skip = { kind: 'waiting'; name: string; hash: string } | { kind: 'changed'; dir: string };
+
+/**
+ * B2: may the tool `file` found in `candDir` run? (1) neither the folder, the tool's real path nor its folder lies under a
+ * toolchain that waits for the owner; (2) the folder passes the tree pin; (3) the real path's folder passes it too, or
+ * the real path lies under the SAME guarded root as the pinned folder (a pinned `bin/npm -> ../lib/...` link fixes its
+ * target; both roots must be known, never two nulls).
+ */
+function toolDirAllowed(candDir: string, real: string, gate: ToolGate): Skip | null {
+  const cand = realOf(candDir) ?? resolve(candDir);
+  for (const w of gate.waiting)
+    for (const d of w.dirs) {
+      const root = realOf(d) ?? resolve(d);
+      if ([candDir, cand, real, dirname(real)].some((p) => underRoot(p, root)))
+        return { kind: 'waiting', name: w.name, hash: w.hash };
+    }
+  if (!gate.treeOk(candDir)) return { kind: 'changed', dir: candDir };
+  if (gate.treeOk(dirname(real))) return null;
+  const a = gate.guardedRootOf(cand);
+  const b = gate.guardedRootOf(real);
+  return a !== null && b !== null && a === b ? null : { kind: 'changed', dir: dirname(real) };
+}
+
+const OPEN_GATE: ToolGate = { waiting: [], treeOk: () => true, guardedRootOf: () => null };
+
+/**
  * Where the package manager is, and which Node runs it: the registered agent toolchains first (a tool DevOps installed
  * at user level and registered with `aom toolchain add`; its own Node, from the same bin folder or another toolchain bin
  * folder, then runs it), else the user bin folders, the runner's PATH and Homebrew with the runner's own Node.
+ * e2e-found-fixes B2: every candidate passes `toolDirAllowed` (`gate` is read now, at lookup time); a tool only a waiting
+ * toolchain (or a changed folder) has is refused with the step that fixes it.
  */
 export function findPackageManager(
   cmd: string,
-  o: { toolchainDirs: readonly string[]; realHome: string; path: string },
-): { toolPath: string; nodeExec?: string } | null {
+  o: { toolchainDirs: readonly string[]; realHome: string; path: string; gate?: () => ToolGate },
+): FoundPackageManager | null {
+  const gate = o.gate ? o.gate() : OPEN_GATE;
+  const skipped: Skip[] = [];
+  const pick = (name: string, path: string): { file: string; real: string } | null => {
+    for (const d of path.split(delimiter)) {
+      const f = whichIn(name, d);
+      if (!f) continue;
+      const real = realOf(f);
+      if (!real) continue;
+      const skip = toolDirAllowed(d, real, gate);
+      if (!skip) return { file: f, real };
+      skipped.push(skip);
+    }
+    return null;
+  };
   const toolchains = o.toolchainDirs.filter((x, i, a) => x && a.indexOf(x) === i).join(delimiter);
-  const fromToolchain = toolchains ? whichOn(cmd, toolchains) : null;
+  const fromToolchain = toolchains ? pick(cmd, toolchains) : null;
   if (fromToolchain) {
-    const node = whichOn('node', [dirname(fromToolchain), toolchains].join(delimiter));
-    return { toolPath: fromToolchain, ...(node ? { nodeExec: node } : {}) };
+    const node = pick('node', [dirname(fromToolchain.file), toolchains].join(delimiter));
+    return {
+      toolPath: fromToolchain.file,
+      real: fromToolchain.real,
+      // the checked real path of the toolchain Node is what runs (PREREVIEW 1)
+      ...(node ? { nodeExec: node.real } : {}),
+    };
   }
   const searchPath = [...userBinDirs(o.realHome), ...o.path.split(delimiter), ...BREW_BIN_DIRS]
     .filter((x, i, a) => x && a.indexOf(x) === i)
     .join(delimiter);
-  const toolPath = whichOn(cmd, searchPath);
-  return toolPath ? { toolPath } : null;
+  const found = pick(cmd, searchPath);
+  if (found) return { toolPath: found.file, real: found.real };
+  // nothing allowed: say why, when a waiting toolchain or a changed folder has the tool
+  const waiting =
+    skipped.find((x) => x.kind === 'waiting') ??
+    gate.waiting
+      .filter((w) => w.dirs.some((d) => whichIn(cmd, d)))
+      .map((w): Skip => ({ kind: 'waiting', name: w.name, hash: w.hash }))[0];
+  if (waiting?.kind === 'waiting')
+    return {
+      refusal: `\`${cmd}\` is in the tool "${waiting.name}" DevOps registered, which waits for your yes on this computer: run \`guildwise-runner toolchain approve ${waiting.hash}\` (it is on the Desk), then ask again`,
+    };
+  const changed = skipped.find((x) => x.kind === 'changed');
+  if (changed?.kind === 'changed')
+    return {
+      refusal: `\`${cmd}\` in ${changed.dir} changed since it was installed; approve it on this computer (\`guildwise-runner pending\`) or ask DevOps to reinstall it`,
+    };
+  return null;
 }
 
-/** Finds `cmd` on `path` (no shell): the first executable file. */
-function whichOn(cmd: string, path: string): string | null {
-  for (const d of path.split(delimiter)) {
-    if (!d) continue;
-    const f = join(d, cmd);
-    try {
-      if (statSync(f).isFile()) return f;
-    } catch {}
+/** `cmd` in folder `d` when it is a file there, else null. */
+function whichIn(cmd: string, d: string): string | null {
+  if (!d) return null;
+  const f = join(d, cmd);
+  try {
+    return statSync(f).isFile() ? f : null;
+  } catch {
+    return null;
   }
-  return null;
 }
 
 /**
@@ -675,6 +763,11 @@ export async function runDependencyChange(o: {
    * installed and registered (`aom toolchain add`) is looked for there first, and then runs with that toolchain's Node.
    */
   toolchainDirs?: readonly string[];
+  /**
+   * e2e-found-fixes B2: the agents' PATH pin check (waiting toolchains, tree pins), read when the tool is looked up.
+   * Absent: no check (tests of the install mechanics only; the runner always passes it).
+   */
+  toolGate?: () => ToolGate;
 }): Promise<IpcRpcResponse> {
   const plan = planDependencyChange(o.change, o.dir, o.repo, o.scriptsAllowed);
   if (!plan.ok) return { ok: false, error: `DevOps did not run it: ${plan.reason}` };
@@ -742,13 +835,17 @@ export async function runDependencyChange(o: {
     await mkdir(join(cacheDir, 'bun'), { recursive: true });
     await mkdir(join(cacheDir, 'corepack'), { recursive: true });
     const parent = o.parentEnv ?? process.env;
+    // B2 (S1): the pin check is read here, after the staging and scan awaits, at the moment the tool is looked up
     const found = findPackageManager(plan.cmd, {
       toolchainDirs: o.toolchainDirs ?? [],
       realHome: o.realHome,
       path: parent.PATH ?? '',
+      ...(o.toolGate ? { gate: o.toolGate } : {}),
     });
     if (!found) return refuse(`${plan.cmd} is not installed on this workstation`);
-    const toolPath = found.toolPath;
+    if ('refusal' in found) return refuse(found.refusal);
+    // the checked real path is what runs (and what is re-opened in the box)
+    const toolPath = found.real;
     const nodeExec = found.nodeExec ?? process.execPath;
     const spec = {
       runnerRoot: o.runnerRoot,
@@ -763,7 +860,8 @@ export async function runDependencyChange(o: {
     };
     const masked = maskedPaths(spec);
     const readOnly = exactReopens({ toolPath, nodeExec, realHome: o.realHome, masked });
-    const nodeBin = join(dirname(dirname(realpathSync(nodeExec))), 'bin');
+    const nodeReal = realpathSync(nodeExec);
+    const nodeBin = join(dirname(dirname(nodeReal)), 'bin');
     const boxPath = [nodeBin, '/usr/local/bin', '/usr/bin', '/bin'].join(delimiter);
     const socketPath = join(runTmp, 'egress.sock');
     proxy = await (o.startProxy ?? startEgressProxy)({
@@ -775,10 +873,9 @@ export async function runDependencyChange(o: {
     });
     const port = 18080;
     const env = installEnv({ path: boxPath, cacheRoot: cacheDir, parent, extra: plan.env, proxyPort: port });
-    const real = realpathSync(toolPath);
-    const argv = /\.(c|m)?js$/.test(real)
-      ? [join(nodeBin, 'node'), real, ...plan.args]
-      : [real, ...plan.args];
+    // REVIEW nit: `toolPath` is already the checked real path; argv, the `.js` test and `exactReopens` name this one string
+    const real = toolPath;
+    const argv = /\.(c|m)?js$/.test(real) ? [nodeReal, real, ...plan.args] : [real, ...plan.args];
     // the bridge: 127.0.0.1:<port> in the box -> the proxy's Unix socket (/tmp is the box's private /tmp = runTmp)
     const bridge = `socat TCP-LISTEN:${port},bind=127.0.0.1,fork,reuseaddr UNIX-CONNECT:/tmp/egress.sock >/dev/null 2>&1 & sleep 0.2; exec "$@"`;
     const c = sandboxCommand({ ...spec, readOnly }, ['sh', '-c', bridge, 'sh', ...argv]);

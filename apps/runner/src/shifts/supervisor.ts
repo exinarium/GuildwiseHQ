@@ -672,6 +672,14 @@ export interface IdleLimits {
   graceMs: number;
   checkMs: number;
 }
+/**
+ * quiet-approvals [B2]: the folder a DevOps request works in (box or outside). e2e-found-fixes B1: the runner's
+ * cross-request guard claims this exact path, so it is built here only.
+ */
+export function devopsRequestDir(sandboxRoot: string, requestId: string): string {
+  return join(sandboxRoot, 'devops', requestId);
+}
+
 export const IDLE_LIMITS: IdleLimits = {
   turnMs: 20 * 60_000,
   doneMs: 8 * 60_000,
@@ -764,6 +772,18 @@ export class ShiftSupervisor {
 
   get size(): number {
     return this.active.size;
+  }
+
+  /** e2e-found-fixes S4: another shift of this DevOps request is active here (being prepared or running). */
+  devopsRequestActive(requestId: string, exceptShiftId: string): boolean {
+    for (const a of this.active.values())
+      if (a.msg.shiftId !== exceptShiftId && a.msg.devops?.requestId === requestId) return true;
+    return false;
+  }
+
+  /** e2e-found-fixes S4: answers `busy` before anything is prepared (the server retries the shift later). */
+  refuseBusy(shiftId: string, detail: string): void {
+    this.reject(shiftId, 'busy', detail);
   }
 
   /** Shifts that take a slot of the shift limit (`takesShiftSlot`: the CEO shift does not; chats run elsewhere). */
@@ -1429,7 +1449,7 @@ export class ShiftSupervisor {
         this.reject(msg.shiftId, 'internal', 'a DevOps request without a valid request id');
         return;
       }
-      cwd = join(sandbox.root, 'devops', msg.devops.requestId);
+      cwd = devopsRequestDir(sandbox.root, msg.devops.requestId);
       mkdirSync(cwd, { recursive: true, mode: 0o700 });
       // S7: conflict work happens in a scratch clone the runner makes in the request's folder (hardened git)
       if (s.devopsMode === 'box' && s.conflictFf && !s.scratchClone) {
@@ -2770,7 +2790,7 @@ export class ShiftSupervisor {
               error: 'test services from a recipe start only in an approved DevOps request',
             };
           const rel = typeof req.params.recipe === 'string' ? req.params.recipe : '';
-          const base = join(s.sandbox.root, 'devops', s.msg.devops.requestId);
+          const base = devopsRequestDir(s.sandbox.root, s.msg.devops.requestId);
           const file = resolve(base, rel);
           if (!rel || !underRoot(file, base))
             return { ok: false, error: 'the recipe must be a file in your working folder' };

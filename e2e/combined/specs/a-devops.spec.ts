@@ -62,6 +62,8 @@ const alerts = async () =>
   (await deskItems(undefined, undefined)).filter(
     (d) => d.title === 'DevOps changed a card worktree: check it by hand',
   );
+/** The made-up integrity the stub npm writes for left-pad@1.3.0 (fixtures/toolchain.ts): a real npm never writes it. */
+const STUB_INTEGRITY = `sha512-${Buffer.from('left-pad1.3.0').toString('base64')}`;
 const TERMINAL = (s?: string) => s === 'done' || s === 'failed';
 const devopsRequestRow = devopsRequest;
 
@@ -122,6 +124,18 @@ test('[C4] a toolchain Forge registers waits for the owner: a Desk step names th
   const early = await createCard(api, { projectId, repoId, title: 'PATH before approval [scn:path]' });
   await waitBuilt(early);
   expect(pathOf(early), 'PATH before the approval').not.toContain(tc.bin);
+  // e2e-found-fixes B2 (Observation 2): before the approval `aom devops install` does not use the registered (stub) toolchain
+  const pending = await createCard(api, { projectId, repoId, title: 'Deps before approval [scn:deps]' });
+  await waitBuilt(pending);
+  const depsEarly = readFileSync(join(worktreeOf(pending), '.guildwise-mock', 'deps-install.txt'), 'utf8');
+  const lockEarly = join(worktreeOf(pending), 'package-lock.json');
+  test.info().annotations.push({ type: 'deps-before-approval', description: depsEarly.slice(0, 600) });
+  // the stub writes a lockfile with its own made-up integrity; the approve step is named when no other npm is allowed here
+  expect(
+    existsSync(lockEarly) ? readFileSync(lockEarly, 'utf8') : '',
+    'the waiting stub toolchain ran',
+  ).not.toContain(STUB_INTEGRITY);
+  if (depsEarly.split('\n')[0] !== '0') expect(depsEarly).toContain(`toolchain approve ${hash}`);
   // the owner approves at the keyboard (the real CLI, in a terminal, typing yes)
   const cli = runnerCli(host, ['toolchain', 'approve', hash], ['yes']);
   expect(cli.code, cli.out).toBe(0);
@@ -142,6 +156,8 @@ test('[A1] a builder runs `aom devops install npm add` through the registered to
   const wt = worktreeOf(card1);
   const note = readFileSync(join(wt, '.guildwise-mock', 'deps-install.txt'), 'utf8');
   expect(note.split('\n')[0], `install result: ${note}`).toBe('0');
+  // e2e-found-fixes B2: after the approval it is the registered stub that ran
+  expect(readFileSync(join(wt, 'package-lock.json'), 'utf8')).toContain(STUB_INTEGRITY);
   const changed = git(wt, 'diff', '--name-only', 'main...HEAD').split('\n').filter(Boolean).sort();
   expect(changed.filter((f) => !f.startsWith('.guildwise-mock/'))).toEqual([
     'package-lock.json',
