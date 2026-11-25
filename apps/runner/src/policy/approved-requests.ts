@@ -122,15 +122,16 @@ export class ApprovedRequests {
 
   /**
    * B1: a match under a new request id passed the runner's cross-request guard and runs outside. The new request gets
-   * its own entry for its session and asked commands (C2): the rebound body (`bound`, the approved job with only the new
-   * ids), the same key, the ORIGINAL approval time
+   * its own entry: the rebound body (`bound`: the approved job with the new request id and the approved card, project
+   * and thread ids), the same key, the ORIGINAL approval time
    * (a match never extends the 24 hours), no session and no asked commands yet.
    */
   adopt(entry: ApprovedRequest, requestId: string, bound: unknown): void {
     if (entry.requestId === requestId) return;
     const all = this.entries();
     if (all.some((x) => x.key === entry.key && x.requestId === requestId)) return;
-    // the rebound body (the approved job with the new request's ids): its C2 resumes compare against these ids
+    // the rebound body: the approved job with the new request, shift and claim ids, and the APPROVED card, project and
+    // thread ids (cross-request-ids). Its C2 resumes carry the server's ids for this request, so they miss and go into the box
     const body = withoutDispatchIds(bound);
     this.write([...all, { key: entry.key, requestId, body, at: entry.at, asked: [] }]);
   }

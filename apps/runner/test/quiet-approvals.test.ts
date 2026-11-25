@@ -25,8 +25,11 @@ import {
   heldVersion,
   IDENTITY,
   JOB_KEY_FIELDS,
+  REBIND_FROM_APPROVED,
+  REBIND_FROM_NEXT,
   r2Key,
   rebind,
+  withoutDispatchIdentity,
   withoutDispatchIds,
   withoutIdentity,
 } from '../src/policy/held.ts';
@@ -910,9 +913,10 @@ describe('e2e-found-fixes D2: one yes covers the same job as the real server sen
     const fresh = serverShapedRedispatch(m, 'newRequest');
     const f = rebind(approved, { ...fresh, devops: { ...fresh.devops, workstationName: 'Other' } }) as any;
     expect(f.devops.requestId).toBe(fresh.devops.requestId);
-    expect(f.devops.threadId).toBe(fresh.devops.threadId);
-    expect(f.brief.card.id).toBe(fresh.devops.requestId);
-    expect(f.brief.project.id).toBe(fresh.devops.requestId);
+    // cross-request-ids: the card, project and thread ids stay the approved ones
+    expect(f.devops.threadId).toBe(m.devops.threadId);
+    expect(f.brief.card.id).toBe(m.brief.card.id);
+    expect(f.brief.project.id).toBe(m.brief.project.id);
     // bookkeeping runs as approved
     expect(f.devops.workstationName).toBe(m.devops.workstationName);
     expect(f.devops.history[0].at).toBe(m.devops.history[0].at);
@@ -929,6 +933,99 @@ describe('e2e-found-fixes D2: one yes covers the same job as the real server sen
       }),
     ).toBeNull();
     expect(rebind(approved, { ...fresh, shiftId: uuidv7() })).toBeNull();
+  });
+
+  it('cross-request-ids: which id comes from where on a rebind, and each N1 null case', () => {
+    const m = realShaped();
+    const approved = withoutDispatchIds(m);
+    const fresh = serverShapedRedispatch(m, 'newRequest');
+    const r = rebind(approved, fresh) as any;
+    // from the new message: the shift, claim and request ids (and the envelope)
+    expect([r.shiftId, r.claimId, r.brief.shift.id, r.devops.requestId, r.id]).toEqual([
+      fresh.shiftId,
+      fresh.claimId,
+      fresh.shiftId,
+      fresh.devops.requestId,
+      fresh.id,
+    ]);
+    // from the approved body: the card, project and thread ids
+    expect([r.brief.card.id, r.brief.project.id, r.devops.threadId]).toEqual([
+      m.brief.card.id,
+      m.brief.project.id,
+      m.devops.threadId,
+    ]);
+    // a same-request re-send is unchanged: its ids equal the approved ones anyway
+    const lost = serverShapedRedispatch(m, 'lost');
+    const same = rebind(approved, lost) as any;
+    expect(canonicalJson(withoutDispatchIdentity(same))).toBe(canonicalJson(withoutDispatchIdentity(m)));
+    expect(same.shiftId).toBe(lost.shiftId);
+    // the two lists together are exactly IDENTITY
+    const key = (ps: readonly (readonly string[])[]) => ps.map((p) => p.join('.')).sort();
+    expect(key([...REBIND_FROM_NEXT, ...REBIND_FROM_APPROVED])).toEqual(key(IDENTITY));
+    expect(key(REBIND_FROM_APPROVED)).toEqual(['brief.card.id', 'brief.project.id', 'devops.threadId']);
+    // N1 on the new message
+    const other = uuidv7();
+    expect(
+      rebind(approved, { ...fresh, brief: { ...fresh.brief, card: { ...fresh.brief.card, id: other } } }),
+    ).toBeNull();
+    expect(
+      rebind(approved, {
+        ...fresh,
+        brief: {
+          ...fresh.brief,
+          card: { ...fresh.brief.card, id: other },
+          project: { ...fresh.brief.project, id: other },
+        },
+      }),
+    ).toBeNull();
+    expect(
+      rebind(approved, { ...fresh, brief: { ...fresh.brief, shift: { ...fresh.brief.shift, id: other } } }),
+    ).toBeNull();
+    expect(rebind(approved, { ...fresh, claimId: 'x' })).toBeNull();
+    // N1 on the approved body
+    const ab = approved as any;
+    expect(
+      rebind({ ...ab, brief: { ...ab.brief, card: { ...ab.brief.card, id: other } } }, fresh),
+    ).toBeNull();
+    const bad = {
+      ...ab.brief,
+      card: { ...ab.brief.card, id: 'x' },
+      project: { ...ab.brief.project, id: 'x' },
+    };
+    expect(rebind({ ...ab, brief: bad }, fresh)).toBeNull();
+    expect(rebind({ ...ab, devops: { ...ab.devops, threadId: 'x' } }, fresh)).toBeNull();
+  });
+
+  it('cross-request-ids: an adopted entry keeps the approved ids; its own re-send keeps them; its C2 resume misses; a same-request resume still passes', () => {
+    const a = realShaped();
+    const store = recorded(a);
+    store.noteSession(a.devops.requestId, r2Key(a), 'sess-a');
+    store.noteAsked(a.devops.requestId, r2Key(a), ['docker ps']);
+    const entry = store.ofRequest(a.devops.requestId)[0] as NonNullable<
+      ReturnType<typeof store.ofRequest>[0]
+    >;
+    const b = serverShapedRedispatch(a, 'newRequest');
+    const bound = rebind(entry.body, b) as any;
+    store.adopt(entry, b.devops.requestId, bound);
+    store.noteSession(b.devops.requestId, entry.key, 'sess-b');
+    store.noteAsked(b.devops.requestId, entry.key, ['docker ps']);
+    const adopted = store.ofRequest(b.devops.requestId)[0] as NonNullable<
+      ReturnType<typeof store.ofRequest>[0]
+    >;
+    expect((adopted.body as any).brief.project.id).toBe(a.brief.project.id);
+    // B's lost re-send matches as the same request, and the rebind keeps the approved ids
+    const bLost = serverShapedRedispatch(b, 'lost');
+    expect(store.match(bLost)?.requestId).toBe(b.devops.requestId);
+    expect((rebind(adopted.body, bLost) as any).brief.project.id).toBe(a.brief.project.id);
+    // a C2 resume of B carries the server's B ids: it misses (box)
+    const resumeOf = (msg: any, session: string) => ({
+      ...msg,
+      resumeSessionId: session,
+      devops: { ...msg.devops, approval: { action: 'a', reason: 'b', commands: ['docker ps'] } },
+    });
+    expect(c2Resume(adopted, resumeOf(bLost, 'sess-b')).ok).toBe(false);
+    // a resume of the original request still passes
+    expect(c2Resume(entry, resumeOf(serverShapedRedispatch(a, 'lost'), 'sess-a')).ok).toBe(true);
   });
 
   it('the route: the lost re-send runs the approved body outside; a new request only through the B1 guard', () => {
@@ -1016,8 +1113,10 @@ describe('e2e-found-fixes D2: one yes covers the same job as the real server sen
     const c = serverShapedRedispatch(a, 'newRequest');
     store.adopt(ea[0] as NonNullable<(typeof ea)[0]>, c.devops.requestId, rebind(ea[0]?.body as never, c));
     expect(store.ofRequest(c.devops.requestId)[0]).toMatchObject({ at: ea[0]?.at, asked: [] });
-    // REVIEW B-1: the adopted entry carries the new request's ids, so its own resumes compare against them
-    expect((store.ofRequest(c.devops.requestId)[0]?.body as any)?.brief.project.id).toBe(c.devops.requestId);
+    // cross-request-ids: the adopted entry carries the new request id with the APPROVED project id
+    const adopted = store.ofRequest(c.devops.requestId)[0]?.body as any;
+    expect(adopted?.devops.requestId).toBe(c.devops.requestId);
+    expect(adopted?.brief.project.id).toBe(a.brief.project.id);
     expect(store.ofRequest(c.devops.requestId)[0]?.sessionId).toBeUndefined();
   });
 

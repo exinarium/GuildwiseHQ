@@ -264,11 +264,38 @@ const at = (o: unknown, path: readonly string[]): unknown => {
 };
 
 /**
- * D2: the APPROVED body (`approved`, as recorded) with only the IDENTITY values of `next`. Nothing outside IDENTITY ever
- * comes from `next`, so the server's new texts (a "lost" note, a new workstation name, new timestamps) never reach the
- * session. N1: null (the job then goes into the box) unless every IDENTITY id of `next` is a uuid (the envelope's `v`,
- * `id`, `type` and `ts` aside), the brief's card and project id are the request id (as the server builds a DevOps brief)
- * and the brief's shift id is the shift id.
+ * cross-request-ids: the IDENTITY values a rebind takes from the new message: the ones that name the dispatch (the
+ * envelope, the shift and claim ids, the brief's shift id) and the request id (the request folder, temp folder,
+ * environment ownership and the server reply; a new one is guarded by B1). The same rule for every match.
+ */
+export const REBIND_FROM_NEXT: readonly (readonly string[])[] = [
+  ['v'],
+  ['id'],
+  ['type'],
+  ['ts'],
+  ['shiftId'],
+  ['claimId'],
+  ['brief', 'shift', 'id'],
+  ['devops', 'requestId'],
+];
+
+/**
+ * cross-request-ids: the rest of IDENTITY (the brief's card and project ids, the thread id) always stays as APPROVED. The
+ * project id selects project-scoped skills and recipe internet approvals, so the server never chooses it on a reused yes.
+ */
+export const REBIND_FROM_APPROVED: readonly (readonly string[])[] = IDENTITY.filter(
+  (p) => !REBIND_FROM_NEXT.some((q) => q.join('.') === p.join('.')),
+);
+
+/**
+ * D2: the APPROVED body (`approved`, as recorded) with only the `REBIND_FROM_NEXT` values of `next`. Nothing else ever comes
+ * from `next`, so the server's new texts (a "lost" note, a new workstation name, new timestamps) and its card, project
+ * and thread ids never reach the session. N1 (null: the job then goes into the box):
+ * - `next`: every IDENTITY id (the envelope aside) is a uuid, the brief's shift id is the shift id, and the card id, the
+ *   project id and the request id are one value (the shape the server builds for a DevOps brief);
+ * - `approved`: the card and project ids are equal uuids and the thread id is a uuid. They are NOT required to equal the
+ *   approved request id: an adopted entry (B1) deliberately stores a new request id with the original card and project
+ *   ids, and its own lost re-send must still match.
  */
 export function rebind(approved: Obj, next: unknown): Obj | null {
   if (!isObj(next) || !isObj(approved)) return null;
@@ -281,9 +308,14 @@ export function rebind(approved: Obj, next: unknown): Obj | null {
   if (at(next, ['brief', 'card', 'id']) !== requestId || at(next, ['brief', 'project', 'id']) !== requestId)
     return null;
   if (at(next, ['brief', 'shift', 'id']) !== next.shiftId) return null;
+  const card = at(approved, ['brief', 'card', 'id']);
+  const thread = at(approved, ['devops', 'threadId']);
+  if (typeof card !== 'string' || !UUID.test(card) || at(approved, ['brief', 'project', 'id']) !== card)
+    return null;
+  if (typeof thread !== 'string' || !UUID.test(thread)) return null;
   const out = cloneJson(approved);
   if (!isObj(out.brief) || !isObj(out.devops)) return null;
-  for (const path of IDENTITY) {
+  for (const path of REBIND_FROM_NEXT) {
     let o: unknown = out;
     for (const k of path.slice(0, -1)) o = isObj(o) ? o[k] : undefined;
     if (!isObj(o)) return null;

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUILTIN_ROLES, uuidv7 } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -730,5 +730,113 @@ describe('e2e-found-fixes D2: the same job sent again by the real server, end to
     env.harness.server.send('shift.start', again);
     await waitUntil(() => env.adapter.inputs.length === 3, 30_000, 'the re-sent job starts');
     expect(env.adapter.inputs[2]?.devopsBox).toBe(true);
+  }, 120_000);
+});
+
+describe('cross-request-ids: a yes reused under a new request keeps the approved project and card ids', () => {
+  it("AC1: a re-send whose request id is another project's id runs outside with the APPROVED project's skills and recipe approvals, in the new request's folder", async () => {
+    const { parseRecipe, recipeDigests, RecipeApprovals } = await import('../src/box/test-services.ts');
+    const recipeOf = (name: string) =>
+      JSON.stringify({
+        services: [{ name, image: `postgres@sha256:${'a'.repeat(64)}`, port: 5432, hostPort: 25432 }],
+        egress: true,
+      });
+    const R0 = recipeOf('p0db');
+    const R1 = recipeOf('p1db');
+    const seen: Record<string, any> = {};
+    let calls = 0;
+    const env = await withRealAuthority(
+      async (input, ctl) => {
+        calls++;
+        if (calls === 1) {
+          await ctl.post('/v1/rpc', {
+            method: 'devops.outside',
+            params: { needs: 'docker', why: 'compose' },
+          });
+          await new Promise<void>((r) => ctl.signal.addEventListener('abort', () => r()));
+          return;
+        }
+        if (calls === 3) {
+          seen.cwd = input.cwd;
+          seen.list = await ctl.post('/v1/rpc', { method: 'skill.list', params: {} });
+          writeFileSync(join(input.cwd, 'r0.json'), R0);
+          writeFileSync(join(input.cwd, 'r1.json'), R1);
+          seen.up0 = await ctl.post('/v1/rpc', { method: 'test.services.up', params: { recipe: 'r0.json' } });
+          seen.up1 = await ctl.post('/v1/rpc', { method: 'test.services.up', params: { recipe: 'r1.json' } });
+        }
+        await done(ctl);
+      },
+      {
+        allowDocker: true,
+        docker: 'shared',
+        // no daemon there: the services cannot start, but the egress decision (approval lookup) happens first
+        dockerHost: 'unix:///run/aom-no-such-daemon/docker.sock',
+        ceiling: { docker: true, mountRoots: [], containerEgress: true },
+      },
+    );
+    (
+      env.harness.runner as unknown as { opts: { config: Record<string, unknown> } }
+    ).opts.config.testServicesBridgeImage = `node@sha256:${'b'.repeat(64)}`;
+    const agentId = uuidv7();
+    env.store.update((p) => ({ ...p, devops: { agents: { [ORG]: agentId } } }));
+    const msg = devopsMsg(agentId, 'start the app');
+    const P0 = msg.brief.project.id as string;
+    expect(P0).toBe(msg.devops.requestId);
+    env.harness.server.send('shift.start', msg);
+    const heldMsg = await env.harness.server.waitFor('approvals.held', (m) =>
+      m.items.some((i) => i.kind === 'devops.task'),
+    );
+    const item = heldMsg.items.find((i) => i.kind === 'devops.task');
+    await approve(
+      { ...defaultCliDeps(env.dir), ask: async () => 'yes', out: () => undefined },
+      item?.id as string,
+    );
+    await env.harness.server.waitFor('shift.ended', (m) => m.shiftId === msg.shiftId, 60_000);
+    await env.harness.runner.supervisor.whenSettled(msg.shiftId);
+    // the server re-sends the same job as a NEW request whose id is another real project's id (P1)
+    const fresh = serverShapedRedispatch(msg, 'newRequest');
+    const P1 = fresh.devops.requestId as string;
+    expect(fresh.brief.project.id).toBe(P1);
+    // both projects have a project-scoped skill and an approved test recipe on this computer
+    const caps = (
+      env.harness.runner as unknown as { capabilities: { indexProject(id: string, dir: string): unknown } }
+    ).capabilities;
+    for (const [pid, key] of [
+      [P0, 'p0-only-skill'],
+      [P1, 'p1-only-skill'],
+    ] as const) {
+      const repo = tmp('aom-proj-');
+      mkdirSync(join(repo, '.claude', 'skills', key), { recursive: true });
+      writeFileSync(
+        join(repo, '.claude', 'skills', key, 'SKILL.md'),
+        `---\nname: ${key}\ndescription: only for ${key}\n---\nB\n`,
+      );
+      caps.indexProject(pid, repo);
+    }
+    const approvals = new RecipeApprovals(env.dir);
+    approvals.approve(P0, R0, recipeDigests(parseRecipe(R0)));
+    approvals.approve(P1, R1, recipeDigests(parseRecipe(R1)));
+    env.harness.server.send('shift.start', fresh);
+    await env.harness.server.waitFor('shift.ended', (m) => m.shiftId === fresh.shiftId, 60_000);
+    // it ran outside (B1 passed), in the NEW request's folder
+    expect(env.adapter.inputs).toHaveLength(3);
+    expect(env.adapter.inputs[2]?.devopsBox).toBeUndefined();
+    expect(seen.cwd).toContain(join('devops', P1));
+    // the approved project's skill is there (positive control), the other project's is not
+    const text = String(seen.list?.json?.result?.text ?? JSON.stringify(seen.list?.json));
+    expect(text).toContain('p0-only-skill');
+    expect(text).not.toContain('p1-only-skill');
+    // recipe approvals: P0's (R0) is found, so no internet click is asked for it; P1's (R1) is not, so R1 asks, under P0
+    const recipeHolds = () =>
+      new HeldStore(env.dir)
+        .list()
+        .filter((r) => r.replay.type === 'test.recipe')
+        .map((r) => r.replay.body as { projectId: string; text: string });
+    expect(recipeHolds().some((b) => b.text === R0)).toBe(false);
+    expect(
+      recipeHolds()
+        .filter((b) => b.text === R1)
+        .map((b) => b.projectId),
+    ).toEqual([P0]);
   }, 120_000);
 });
