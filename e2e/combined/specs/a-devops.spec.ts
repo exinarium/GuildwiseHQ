@@ -19,13 +19,14 @@ import {
   hire,
   newOwner,
   person,
+  progressOfRequest,
   sendDevopsRequest,
   shiftsOfRequest,
   waitBuilt,
   waitCard,
   waitRequest,
 } from '../support/flow.ts';
-import { type Host, release, startHost, waitReached } from '../support/host.ts';
+import { type Host, release, runnerCli, startHost, waitReached } from '../support/host.ts';
 
 // Round 3 items 1-6: the DevOps engineer and the card worktrees. The scripted/mock engineer plays what the UAT showed
 // (installs, the CEO override, sabotage, a half-undone change, a long request, a stop); the runner's after-shift check,
@@ -40,7 +41,6 @@ let remote: Remote;
 let page: ApprovalsPage;
 let projectId: string;
 let repoId: string;
-let orgId = '';
 let card1 = '';
 
 test.afterAll(async () => {
@@ -65,30 +65,18 @@ const alerts = async () =>
 const TERMINAL = (s?: string) => s === 'done' || s === 'failed';
 const devopsRequestRow = devopsRequest;
 
-/** Approves whatever the runner holds locally while `until` is false (a later build may hold a step A1 did not hold). */
-async function settleHolds(until: () => Promise<boolean>, approved: string[]): Promise<void> {
-  const deadline = Date.now() + 120_000;
-  while (Date.now() < deadline) {
-    if (await until()) return;
-    const st = await page.state();
-    for (const w of st.waiting) {
-      approved.push(w.kind);
-      await page.approve(w.id);
-    }
-    await new Promise((r) => setTimeout(r, 300));
-  }
-  throw new Error('timed out settling local holds');
-}
-
 test('[A1] setup: a runner that may install, the project DVO, a builder', async () => {
   api = await newOwner(OWNER);
   remote = makeRemote('devops', { 'README.md': '# toy\n', 'index.js': "console.log('toy');\n" });
-  host = await startHost(api, { password: OWNER.password, name: 'a16-box', repoRoot: remote.repoRoot });
+  host = await startHost(api, {
+    password: OWNER.password,
+    name: 'a16-box',
+    repoRoot: remote.repoRoot,
+    // row 8 of the setup page (quiet-approvals D3): checksum-verified tool downloads without a yes per request
+    policy: { extra: { toolInstall: true } },
+  });
   page = new ApprovalsPage(host.approvalsPort, host.policyDir);
-  const { agentId, orgId: org } = await devopsAgentOf(host.workstationId);
-  orgId = org;
-  // the local grant (policy.json, written on the machine, never by the server) and the website's "Install" switch
-  host.writePolicy({ devopsRequests: 'auto', grant: { orgId, agentId } });
+  // the website's "Install" switch (the local grant went into policy.json before the first start: the runner seals it)
   await stepUp(api, { password: OWNER.password });
   const patch = await api.patch(`/api/workstations/${host.workstationId}/devops-access`, {
     data: { allowInstall: true },
@@ -105,22 +93,49 @@ test('[A1] setup: a runner that may install, the project DVO, a builder', async 
   );
 });
 
-test('[A1] Forge registers a user-level Node; a builder runs `aom devops install npm add`: only package.json and the lockfile change', async () => {
+test('[C4] a toolchain Forge registers waits for the owner: a Desk step names the exact approve command, agents get the tool only after it', async () => {
   const tc = makeStubToolchain();
-  const held: string[] = [];
   const reqId = await sendDevopsRequest(
     api,
     host.workstationId,
     `register the user-level Node [scn:toolchain=${tc.bin}]`,
   );
-  await settleHolds(
-    async () =>
-      TERMINAL(
-        (await q<{ status: string }>(`SELECT status FROM devops_requests WHERE id=$1`, [reqId]))[0]?.status,
-      ),
-    held,
+  // Inside the box `toolchain.add` is refused and the agent asks to work outside (`aom devops-outside`). With "Ask me first" that is
+  // ONE local hold (D1/D2 below); this host has devopsRequests auto, so the same request runs outside at once. Either way it ends done.
+  expect((await waitRequest(reqId, 'done', (r) => TERMINAL(r?.status), 180_000))?.status).toBe('done');
+  expect(await progressOfRequest(reqId)).toContain('asked to work outside the box: toolchain.add');
+  // one Desk step names the exact command, hash included
+  const stepOf = (d: { title: string; body: string; data: unknown }) =>
+    /toolchain approve [0-9a-f]{64}/.test(`${d.title} ${d.body} ${JSON.stringify(d.data)}`);
+  const step = await waitFor(
+    'the toolchain approve Desk step',
+    () => deskItems().then((d) => d.filter(stepOf)),
+    (r) => r.length >= 1,
+    60_000,
   );
-  expect((await waitRequest(reqId, 'done', (r) => TERMINAL(r?.status)))?.status).toBe('done');
+  expect(step).toHaveLength(1);
+  const hash = /toolchain approve ([0-9a-f]{64})/.exec(
+    `${step[0]?.title} ${step[0]?.body} ${JSON.stringify(step[0]?.data)}`,
+  )?.[1] as string;
+  // not approved yet: the agents' shells do not get the registered toolchain on their PATH
+  const pathOf = (ref: string) => readFileSync(join(worktreeOf(ref), '.guildwise-mock', 'path.txt'), 'utf8');
+  const early = await createCard(api, { projectId, repoId, title: 'PATH before approval [scn:path]' });
+  await waitBuilt(early);
+  expect(pathOf(early), 'PATH before the approval').not.toContain(tc.bin);
+  // the owner approves at the keyboard (the real CLI, in a terminal, typing yes)
+  const cli = runnerCli(host, ['toolchain', 'approve', hash], ['yes']);
+  expect(cli.code, cli.out).toBe(0);
+  expect(cli.out).toContain('Approved');
+  // new shifts get it
+  const late = await createCard(api, { projectId, repoId, title: 'PATH after approval [scn:path]' });
+  await waitBuilt(late);
+  expect(pathOf(late), 'PATH after the approval').toContain(tc.bin);
+  // a hash that waits for nothing pins nothing
+  const no = runnerCli(host, ['toolchain', 'approve', '0'.repeat(64)], ['yes']);
+  expect(no.code).not.toBe(0);
+});
+
+test('[A1] a builder runs `aom devops install npm add` through the registered toolchain (approved): only package.json and the lockfile change', async () => {
   const before = git(remote.clone, 'status', '--porcelain', '--untracked-files=all');
   card1 = await createCard(api, { projectId, repoId, title: 'Needs left-pad [scn:deps]' });
   await waitBuilt(card1);
@@ -138,7 +153,6 @@ test('[A1] Forge registers a user-level Node; a builder runs `aom devops install
   expect(existsSync(join(wt, 'node_modules'))).toBe(false);
   // the main checkout of the repository was not touched
   expect(git(remote.clone, 'status', '--porcelain', '--untracked-files=all')).toBe(before);
-  test.info().annotations.push({ type: 'holds-approved', description: held.join(',') || 'none' });
 });
 
 test('[A2] the CEO override: Forge asks, the owner approves on the website, the write is refused and reverted, kept off the branch', async () => {

@@ -9,8 +9,14 @@ import { DeviceStore, signedText } from '../../../apps/runner/src/window/pairing
  */
 export interface PageState {
   header: { instance: string };
-  status: { connected: boolean };
-  waiting: Array<{ id: string; kind: string; summary: string; detail: string; note?: string }>;
+  waiting: Array<{
+    id: string;
+    version: string;
+    kind: string;
+    summary: string;
+    detail: string;
+    note?: string;
+  }>;
   blocked: Array<{
     requestId: string;
     switch: string;
@@ -19,7 +25,14 @@ export interface PageState {
     summary: string;
     command?: string;
   }>;
-  allows: { devopsInstall: boolean; devopsRequests: string };
+  status: { connected: boolean; policyError?: string };
+  allows: {
+    devopsInstall: boolean;
+    devopsRequests: string;
+    toolInstall: boolean;
+    hygiene: boolean;
+    ceiling: { docker: boolean; containerEgress: boolean; mountRoots: string[] };
+  };
 }
 
 export class ApprovalsPage {
@@ -84,6 +97,10 @@ export class ApprovalsPage {
     return this.call('POST', '/api/change', body);
   }
 
-  approve = (id: string) => this.change({ action: 'held.approve', id });
+  /** Approves the version of the item as the page shows it now (a yes is bound to what was shown), or `version` when given. */
+  approve = async (id: string, version?: string) => {
+    const v = version ?? (await this.state()).waiting.find((w) => w.id === id)?.version ?? '';
+    return this.change({ action: 'held.approve', id, version: v });
+  };
   deny = (id: string) => this.change({ action: 'held.deny', id });
 }

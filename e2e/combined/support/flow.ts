@@ -176,7 +176,12 @@ export async function waitRequest(
     // later. The next scenario must not start (or write in a worktree) before that, or it would be swept into this shift.
     await waitFor(
       'every devops shift ended',
-      () => q<{ n: number }>(`SELECT count(*)::int AS n FROM shifts WHERE kind='devops' AND status<>'ended'`),
+      () =>
+        q<{ n: number }>(
+          `SELECT count(*)::int AS n FROM shifts WHERE kind='devops' AND status<>'ended'
+            AND workstation_id = (SELECT workstation_id FROM devops_requests WHERE id=$1)`,
+          [id],
+        ),
       (x) => x[0]?.n === 0,
       ms,
     );
@@ -267,4 +272,18 @@ export async function advanceClock(ms: number): Promise<void> {
     body: JSON.stringify({ advanceMs: ms }),
   });
   expect(res.ok).toBe(true);
+}
+
+/** What the shifts of a DevOps request said while they ran (progress tails, oldest shift first). */
+export async function progressOfRequest(reqId: string): Promise<string> {
+  const ids = await shiftsOfRequest(reqId);
+  const out: string[] = [];
+  for (const id of ids) {
+    const r = await q<{ progress_tail: Array<{ text: string }> }>(
+      `SELECT progress_tail FROM shifts WHERE id=$1`,
+      [id],
+    );
+    out.push(...(r[0]?.progress_tail ?? []).map((t) => t.text));
+  }
+  return out.join('\n');
 }

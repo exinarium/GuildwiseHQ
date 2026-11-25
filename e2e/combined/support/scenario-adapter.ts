@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { MockAdapter } from '../../../apps/runner/src/adapters/mock.ts';
 import type { RuntimeSession, ShiftStartInput } from '../../../apps/runner/src/adapters/types.ts';
@@ -87,16 +87,50 @@ const part = (token: string, key: string): string | undefined => {
 };
 
 export class ScenarioAdapter extends MockAdapter {
+  private readonly runnerRoot: string;
+
   constructor(
     cfg: ConstructorParameters<typeof MockAdapter>[0],
     paths: ConstructorParameters<typeof MockAdapter>[1],
     private readonly gateDir: string,
   ) {
     super(cfg, paths);
+    this.runnerRoot = paths.root;
+  }
+
+  /**
+   * quiet-approvals [B2]: a runtime that builds the DevOps safety box answers "why it cannot start here, or null"; a runtime
+   * WITHOUT that answer (the plain mock runtime) never runs a DevOps request in the box, and the runner HOLDS it for one local
+   * yes. This adapter stands in for either, switched per spec through a file in the gate dir (`setBoxState`):
+   *   absent            a runtime whose box can start: requests are routed into the inner box with no question
+   *   `none`            a runtime with no box at all: every request is held for a local yes (fail closed)
+   *   `broken:<reason>` a runtime whose box cannot start here: the request is refused, and the `devops.box` step says how to fix it
+   * The mock agent does not really sit in a box (bwrap, the egress proxy and the model proxy need real Claude and are owner/machine
+   * items); what is real is the runner's routing, holds, approvals memory, refusals and steps around it.
+   */
+  get boxMissing(): (() => string | null) | undefined {
+    const mode = this.boxState();
+    if (mode === 'none') return undefined;
+    return () => (mode.startsWith('broken:') ? mode.slice(7) || 'the safety box cannot start (test)' : null);
+  }
+
+  private boxState(): string {
+    try {
+      const f = join(this.gateDir, 'box-state');
+      return existsSync(f) ? readFileSync(f, 'utf8').trim() : 'ok';
+    } catch {
+      return 'ok';
+    }
   }
 
   override async start(input: ShiftStartInput): Promise<RuntimeSession> {
     const brief = await briefOf(input);
+    // what the runner told the runtime about the box for this DevOps shift (D1 reads it): `devopsBox: true` only inside the inner box
+    if (brief?.devops)
+      appendFileSync(
+        join(this.gateDir, 'box-seen.log'),
+        `${input.shiftId} box=${input.devopsBox === true}\n`,
+      );
     const token = brief ? tokenOf(brief) : null;
     if (!brief || !token) return super.start(input);
     // Pre-actions, then the product's own mock agent does the rest of the shift (hand-off, `aom devops-done`, the
@@ -123,6 +157,17 @@ export class ScenarioAdapter extends MockAdapter {
       const r = await aomIn(input, ['devops', 'install', 'npm', 'add', 'left-pad@1.3.0', '--dev']);
       mkdirSync(join(input.cwd, '.guildwise-mock'), { recursive: true });
       writeFileSync(join(input.cwd, '.guildwise-mock', 'deps-install.txt'), `${r.code}\n${r.out}${r.err}`);
+      return super.start(input);
+    }
+    if (
+      part(token, 'path') !== undefined &&
+      !brief.devops &&
+      role === 'builder' &&
+      brief.shift?.stage === 'build'
+    ) {
+      // what the agent's shell would have on PATH (the registered toolchains the owner approved are on it, the others are not)
+      mkdirSync(join(input.cwd, '.guildwise-mock'), { recursive: true });
+      writeFileSync(join(input.cwd, '.guildwise-mock', 'path.txt'), `${input.env.PATH ?? ''}\n`);
       return super.start(input);
     }
     if (
@@ -168,9 +213,22 @@ export class ScenarioAdapter extends MockAdapter {
     }
     const tool = part(token, 'toolchain');
     if (brief.devops && tool) {
-      // Forge registers the user-level toolchain it "installed" (aom toolchain add), then reports
+      // Forge registers the user-level toolchain it "installed" (aom toolchain add), then reports. Inside the DevOps box the
+      // runner refuses `toolchain.add` and says to ask for the outside: the agent does exactly that (quiet-approvals R1), the
+      // owner says yes once, and the same request runs again outside the box.
       const add = await aomIn(input, ['toolchain', 'add', 'stubnode', '--bin', tool]);
       note(`scn: toolchain add -> ${add.code} ${(add.err || add.out).trim().slice(0, 160)}`);
+      if (add.code !== 0 && /devops-outside/.test(add.err + add.out)) {
+        const ask = await aomIn(input, [
+          'devops-outside',
+          '--needs',
+          'toolchain.add',
+          '--why',
+          'register the user-level Node as a toolchain',
+        ]);
+        note(`scn: asked to work outside the box -> ${ask.code}`);
+        return { exitCode: 0, finalText: 'scn: asked for the outside' };
+      }
       const done = await aomIn(input, [
         'devops-done',
         '--summary',
@@ -181,6 +239,17 @@ export class ScenarioAdapter extends MockAdapter {
         finalText: `scn: toolchain ${add.code}/${done.code}`,
       };
     }
+    if (brief.devops && part(token, 'access') !== undefined) {
+      // what access the shift was really given (the server's switches narrowed by the local limit)
+      note(`scn: access ${JSON.stringify((brief.devops as { access?: unknown }).access ?? null)}`);
+      await aomIn(input, ['devops-done', '--summary', 'scn: access reported']);
+      return { finalText: 'scn: access reported' };
+    }
+    if (brief.devops && part(token, 'switchblock') !== undefined) return this.switchBlock(brief, input, note);
+    if (brief.devops && part(token, 'guard') !== undefined)
+      return this.guardProbes(brief, input, token, note);
+    if (brief.devops && part(token, 'movebranch') !== undefined)
+      return this.moveBranch(brief, input, token, note);
     const a2 = part(token, 'a2');
     if (brief.devops && a2) return this.ceoOverride(brief, input, a2, note);
     if (part(token, 'stubs') !== undefined) return this.architectWithStubs(brief, input, note);
@@ -269,6 +338,18 @@ export class ScenarioAdapter extends MockAdapter {
         '--command',
         'edit package.json in the card worktree',
       ]);
+      // quiet-approvals R1: inside the box there is no approval report, leaving the box is one local yes (devops-outside)
+      if (r.code !== 0 && /devops-outside/.test(r.err + r.out)) {
+        const ask = await aomIn(input, [
+          'devops-outside',
+          '--needs',
+          'a write in the card worktree',
+          '--why',
+          'the CEO asked me to add the dependency in the card worktree',
+        ]);
+        note(`scn: asked to work outside the box -> ${ask.code}`);
+        return { exitCode: 0, finalText: 'scn: asked for the outside' };
+      }
       note(`scn: asked for approval -> ${r.code}`);
       return { exitCode: 0, finalText: `scn: approval asked (${r.code})` };
     }
@@ -307,5 +388,211 @@ export class ScenarioAdapter extends MockAdapter {
         : await aomIn(input, ['devops-done', '--summary', 'scn: refused, the card worktree is not mine']);
     note(`scn: first=${first.code} again=${again.code}`);
     return { exitCode: 0, finalText: `scn: first=${first.code} again=${again.code}` };
+  }
+
+  /**
+   * runner-authority-fixes T10/T2/T9 (C12): the DevOps command guard, driven through the REAL hook command (`aom devops-guard`:
+   * hook JSON on stdin, the classifier, the audit call to the runner over IPC). The guard configuration is assembled here the way
+   * ClaudeCodeAdapter.devopsGuard does (access switches from the brief, the card worktrees folder, the policy folder), because the
+   * mock runtime has no Claude to attach the hook to. Results (one line per command) go to `<gate dir>/guard-<name>.json`.
+   * Tokens: `guard;path=<card worktree>[;on]` (`on` turns the install and Docker switches on in the config).
+   */
+  private async guardProbes(
+    brief: Brief & {
+      devops?: {
+        summary: string;
+        access?: { allowInstall: boolean; allowDocker: boolean; allowedPaths: string[] };
+      };
+    },
+    input: ShiftStartInput,
+    token: string,
+    note: (t: string) => void,
+  ): Promise<ScriptResult> {
+    const wt = part(token, 'path') as string;
+    const on = part(token, 'on') !== undefined;
+    const access = {
+      allowInstall: on || brief.devops?.access?.allowInstall === true,
+      allowDocker: on || brief.devops?.access?.allowDocker === true,
+      allowedPaths: brief.devops?.access?.allowedPaths ?? [],
+    };
+    const root = this.runnerRoot;
+    const policyRoot = process.env.AOM_RUNNER_POLICY_DIR as string;
+    const cfg = {
+      sessionRef: `combined-${on ? 'on' : 'off'}`,
+      kind: 'shift',
+      deleteRoots: [join(root, 'worktrees'), join(root, 'agents'), '/tmp'],
+      home: process.env.HOME,
+      protectedBranches: [],
+      approvedCommands: [],
+      shiftKind: 'devops',
+      frozenBranches: [],
+      cardWorktreesRoot: join(root, 'worktrees'),
+      installScriptsOff: true,
+      policyRoot,
+      access,
+      writeRoots: [input.sandbox.home, input.sandbox.scratch, input.sandbox.tmp, '/tmp'],
+      secretRoots: ['secrets', 'keys', 'config.json'].map((d) => join(root, d)),
+      auditFile: join(root, 'logs', 'devops-audit.jsonl'),
+    };
+    const cfgFile = join(this.gateDir, `guard-config-${on ? 'on' : 'off'}.json`);
+    writeFileSync(cfgFile, JSON.stringify(cfg));
+    const probes = [
+      'pipx install yt-dlp',
+      'docker run --rm alpine true',
+      'touch /etc/combined-probe',
+      `cat ${policyRoot}/policy.json`,
+      'guildwise-runner approve abc123',
+      `git -C ${wt} commit --allow-empty -m probe`,
+      'ls',
+    ];
+    const results: Array<{
+      command: string;
+      decision: 'allowed' | 'denied';
+      rule: string | null;
+      reason: string;
+    }> = [];
+    const [bin, ...pre] = selfCommand('aom') as [string, ...string[]];
+    for (const command of probes) {
+      const out = await new Promise<string>((resolve) => {
+        const c = spawn(bin, [...pre, 'devops-guard'], {
+          cwd: input.cwd,
+          env: { ...input.env, AOM_DEVOPS_GUARD: cfgFile },
+        });
+        let o = '';
+        c.stdout.on('data', (d: Buffer) => {
+          o += d.toString();
+        });
+        c.once('error', () => resolve(o));
+        c.once('close', () => resolve(o));
+        c.stdin.end(JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: input.cwd }));
+      });
+      const reason = /"permissionDecisionReason":"([^"]*)"/.exec(out)?.[1] ?? '';
+      const rule = /Refused by the DevOps guard \(([a-z_]+)\)/.exec(reason)?.[1] ?? null;
+      results.push({ command, decision: out.includes('"deny"') ? 'denied' : 'allowed', rule, reason });
+    }
+    writeFileSync(join(this.gateDir, `guard-${on ? 'on' : 'off'}.json`), JSON.stringify(results, null, 1));
+    note(
+      `scn: guard probes ${on ? 'with' : 'without'} the switches: ${results.map((r) => `${r.rule ?? r.decision}`).join(',')}`,
+    );
+    await aomIn(input, ['devops-done', '--summary', 'scn: guard probes done']);
+    return { finalText: 'scn: guard probes done' };
+  }
+
+  /**
+   * runner-authority-fixes T7 (C9): a DevOps shift that moves a CARD branch (update-ref in the clone, no worktree command): the
+   * runner puts it back and keeps the work. Tokens: `movebranch;path=<card worktree>;clone=<the clone>`.
+   */
+  private async moveBranch(
+    _brief: Brief,
+    input: ShiftStartInput,
+    token: string,
+    note: (t: string) => void,
+  ): Promise<ScriptResult> {
+    const wt = part(token, 'path') as string;
+    const clone = part(token, 'clone') as string;
+    const git = (cwd: string, ...args: string[]) =>
+      new Promise<string>((resolve) => {
+        const c = spawn('git', ['-C', cwd, ...args], { env: input.env });
+        let o = '';
+        c.stdout.on('data', (d: Buffer) => {
+          o += d.toString();
+        });
+        c.once('error', () => resolve(''));
+        c.once('close', () => resolve(o.trim()));
+      });
+    const branch = await git(wt, 'rev-parse', '--abbrev-ref', 'HEAD');
+    const target = await git(clone, 'rev-parse', 'main');
+    await git(clone, 'update-ref', `refs/heads/${branch}`, target);
+    note(`scn: moved ${branch} to ${target.slice(0, 7)} in the clone`);
+    const first = await aomIn(input, ['devops-done', '--summary', `scn: moved the card branch ${branch}`]);
+    if (first.code !== 0)
+      await aomIn(input, ['devops-done', '--summary', 'scn: refused, the card branch is not mine']);
+    note(`scn: first report ${first.code}`);
+    return { finalText: `scn: first=${first.code}` };
+  }
+
+  /**
+   * What a real DevOps engineer does when a switch is off (T10): the command is refused by the guard hook (the runner records the
+   * refusal), then it asks with `aom devops-approval --switch install`, which the runner checks against that recorded refusal
+   * before the owner sees it. Only then does the server treat the request as "waiting for the switch".
+   */
+  private async switchBlock(
+    brief: Brief & {
+      devops?: { access?: { allowInstall: boolean; allowDocker: boolean; allowedPaths: string[] } };
+    },
+    input: ShiftStartInput,
+    note: (t: string) => void,
+  ): Promise<ScriptResult> {
+    const approved = (brief.devops as { approval?: unknown } | undefined)?.approval;
+    const access = brief.devops?.access ?? { allowInstall: false, allowDocker: false, allowedPaths: [] };
+    if (approved || access.allowInstall) {
+      // the switch is on (or the owner approved): the same work now just happens
+      await aomIn(input, ['devops-done', '--summary', 'scn: installed the tools']);
+      return { finalText: 'scn: done' };
+    }
+    const root = this.runnerRoot;
+    const cfgFile = join(this.gateDir, 'guard-config-switch.json');
+    writeFileSync(
+      cfgFile,
+      JSON.stringify({
+        sessionRef: 'combined-switch',
+        kind: 'shift',
+        deleteRoots: [join(root, 'worktrees'), '/tmp'],
+        home: process.env.HOME,
+        protectedBranches: [],
+        approvedCommands: [],
+        shiftKind: 'devops',
+        frozenBranches: [],
+        cardWorktreesRoot: join(root, 'worktrees'),
+        policyRoot: process.env.AOM_RUNNER_POLICY_DIR,
+        access,
+        writeRoots: [input.sandbox.home, input.sandbox.scratch, input.sandbox.tmp, '/tmp'],
+        secretRoots: ['secrets', 'keys', 'config.json'].map((d) => join(root, d)),
+        auditFile: join(root, 'logs', 'devops-audit.jsonl'),
+      }),
+    );
+    const command = 'pipx install yt-dlp';
+    const [bin, ...pre] = selfCommand('aom') as [string, ...string[]];
+    const out = await new Promise<string>((resolve) => {
+      const c = spawn(bin, [...pre, 'devops-guard'], {
+        cwd: input.cwd,
+        env: { ...input.env, AOM_DEVOPS_GUARD: cfgFile },
+      });
+      let o = '';
+      c.stdout.on('data', (d: Buffer) => {
+        o += d.toString();
+      });
+      c.once('error', () => resolve(o));
+      c.once('close', () => resolve(o));
+      c.stdin.end(JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: input.cwd }));
+    });
+    note(
+      `scn: the guard said ${out.includes('install_off') ? 'install_off' : out.slice(0, 80) || 'allowed'}`,
+    );
+    const r = await aomIn(input, [
+      'devops-approval',
+      '--switch',
+      'install',
+      '--action',
+      command,
+      '--reason',
+      'installs are off on this computer',
+      '--command',
+      command,
+    ]);
+    if (r.code !== 0 && /devops-outside/.test(r.err + r.out)) {
+      // inside the box there is no approval report: the owner is asked once to run the request outside, where the guard applies
+      const ask = await aomIn(input, [
+        'devops-outside',
+        '--needs',
+        'installing a tool',
+        '--why',
+        'the request needs pipx install',
+      ]);
+      note(`scn: asked to work outside the box -> ${ask.code}`);
+      return { exitCode: 0, finalText: 'scn: asked for the outside' };
+    }
+    note(`scn: asked with --switch install -> ${r.code}`);
+    return { finalText: `scn: asked (${r.code})` };
   }
 }

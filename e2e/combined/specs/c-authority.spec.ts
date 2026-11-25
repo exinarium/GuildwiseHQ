@@ -1,0 +1,174 @@
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { type APIRequestContext, expect, test } from '@playwright/test';
+import { q, waitFor } from '../../support/db.ts';
+import { git, makeRemote, type Remote } from '../fixtures/remotes.ts';
+import { ApprovalsPage } from '../support/approvals-page.ts';
+import {
+  addRepo,
+  advanceClock,
+  createCard,
+  createProject,
+  devopsRequest,
+  hire,
+  newOwner,
+  person,
+  progressOfRequest,
+  sendDevopsRequest,
+  shiftsOfRequest,
+  waitBuilt,
+  waitRequest,
+} from '../support/flow.ts';
+import { type Host, runnerCli, startHost } from '../support/host.ts';
+
+// Group C: runner-authority-fixes wiring on the combined build (AC3, AC9, AC12; AC4 is in a-devops.spec.ts next to A1).
+// The scripted DevOps engineer drives the real runner paths: the real `aom devops-guard` hook command (its classifier and the
+// audit call to the runner), the card-folder fence, and the real `guildwise-runner` CLI for the sealed policy.
+test.describe.configure({ mode: 'serial' });
+
+const OWNER = person('c3owner');
+let api: APIRequestContext;
+let host: Host;
+let remote: Remote;
+let page: ApprovalsPage;
+let projectId: string;
+let repoId: string;
+let card = '';
+const TERMINAL = (s?: string) => s === 'done' || s === 'failed';
+
+test.afterAll(async () => {
+  await host?.stop();
+});
+
+const worktreeOf = (ref: string): string => {
+  const root = join(host.home, 'worktrees');
+  const dir = existsSync(root) ? readdirSync(root).find((d) => d.startsWith('CAU-')) : undefined;
+  return join(root, dir ?? 'CAU', ref);
+};
+const guardResults = (name: 'on' | 'off') =>
+  JSON.parse(readFileSync(join(host.gateDir, `guard-${name}.json`), 'utf8')) as Array<{
+    command: string;
+    decision: 'allowed' | 'denied';
+    rule: string | null;
+  }>;
+
+test('[C12] setup: a runner with a local grant, a project, one built card that waits in review', async () => {
+  api = await newOwner(OWNER);
+  remote = makeRemote('c-authority', { 'README.md': '# toy\n', 'index.js': "console.log('toy');\n" });
+  host = await startHost(api, { password: OWNER.password, name: 'c3-box', repoRoot: remote.repoRoot });
+  page = new ApprovalsPage(host.approvalsPort, host.policyDir);
+  projectId = await createProject(api, 'CAU', 'Authority project');
+  repoId = await addRepo(api, projectId, remote.origin, 'c-authority');
+  await hire(api, { name: 'Bo', roleKey: 'builder', workstationId: host.workstationId, projectId });
+  await waitFor(
+    'the workstation holds the repo',
+    async () => (await (await api.get('/api/workstations')).json()).workstations[0].repos.length,
+    (n) => n === 1,
+    60_000,
+  );
+  card = await createCard(api, { projectId, repoId, title: 'Card to guard' });
+  await waitBuilt(card);
+});
+
+test('[C12] the runner guard (the real hook command, given a test-built config) refuses installs, Docker, outside folders, the policy folder and card worktrees by rule; the Install and Docker switches lift only their own rules', async () => {
+  const wt = worktreeOf(card);
+  // switches off
+  const offId = await sendDevopsRequest(api, host.workstationId, `probe the guard [scn:guard;path=${wt}]`);
+  await waitRequest(offId, 'finished', (r) => TERMINAL(r?.status), 180_000);
+  const off = guardResults('off');
+  const rule = (needle: string) => off.find((r) => r.command.includes(needle));
+  const exact = (cmd: string) => off.find((r) => r.command === cmd);
+  expect(rule('pipx install')).toMatchObject({ decision: 'denied', rule: 'install_off' });
+  expect(rule('docker run')).toMatchObject({ decision: 'denied', rule: 'docker_off' });
+  expect(rule('/etc/combined-probe')?.decision).toBe('denied');
+  expect(rule('policy.json')).toMatchObject({ decision: 'denied', rule: 'policy_fence' });
+  expect(rule('guildwise-runner approve')).toMatchObject({ decision: 'denied', rule: 'policy_fence' });
+  expect(rule('commit --allow-empty')).toMatchObject({ decision: 'denied', rule: 'card_worktree' });
+  expect(exact('ls')?.decision, 'a harmless read is allowed').toBe('allowed');
+  // the shell's audit reached the runner (the hook's report call)
+  const audit = readFileSync(join(host.home, 'logs', 'devops-audit.jsonl'), 'utf8');
+  expect(audit).toContain('pipx install yt-dlp');
+  // switches ON (Install and Docker): those two commands pass, the fences stay
+  const onId = await sendDevopsRequest(
+    api,
+    host.workstationId,
+    `probe the guard again [scn:guard;path=${wt};on]`,
+  );
+  await waitRequest(onId, 'finished', (r) => TERMINAL(r?.status), 180_000);
+  const on = guardResults('on');
+  const ruleOn = (needle: string) => on.find((r) => r.command.includes(needle));
+  expect(ruleOn('pipx install')?.decision).toBe('allowed');
+  expect(ruleOn('docker run')?.decision).toBe('allowed');
+  expect(ruleOn('policy.json')).toMatchObject({ decision: 'denied', rule: 'policy_fence' });
+  expect(ruleOn('guildwise-runner approve')).toMatchObject({ decision: 'denied', rule: 'policy_fence' });
+  expect(ruleOn('commit --allow-empty')).toMatchObject({ decision: 'denied', rule: 'card_worktree' });
+});
+
+test('[C9] a DevOps shift that moves a card branch (update-ref in the clone) is put back and kept off the branch', async () => {
+  const wt = worktreeOf(card);
+  const branch = git(wt, 'rev-parse', '--abbrev-ref', 'HEAD').trim();
+  const before = git(remote.clone, 'rev-parse', `refs/heads/${branch}`).trim();
+  const main = git(remote.clone, 'rev-parse', 'main').trim();
+  expect(before).not.toBe(main);
+  const id = await sendDevopsRequest(
+    api,
+    host.workstationId,
+    `tidy the card branches [scn:movebranch;path=${wt};clone=${remote.clone}]`,
+  );
+  await waitRequest(id, 'finished', (r) => TERMINAL(r?.status), 180_000);
+  const progress = await progressOfRequest(id);
+  expect(progress, 'the script really moved it').toContain(`scn: moved ${branch}`);
+  expect(
+    git(remote.clone, 'rev-parse', `refs/heads/${branch}`).trim(),
+    'the card branch is back where it was',
+  ).toBe(before);
+  expect(git(wt, 'rev-parse', 'HEAD').trim()).toBe(before);
+  // the runner told the shift it was refused (its first report failed)
+  expect(progress).toMatch(/first report [1-9]/);
+  const shift = ((await shiftsOfRequest(id)).slice(-1)[0] ?? '').slice(0, 8);
+  const kept = git(remote.clone, 'for-each-ref', '--format=%(refname)', `refs/guildwise/refused/${shift}`);
+  expect(kept.trim().length, 'the moved state is kept off the branch').toBeGreaterThan(0);
+});
+
+test('[C3] the approval settings are sealed: an edit made outside the runner makes everything ask, the page says so, and `policy accept` is the way back', async () => {
+  const sealed = runnerCli(host, ['policy']);
+  expect(sealed.out, sealed.out).toContain('sealed with');
+  // someone (or an agent) edits policy.json directly
+  const file = join(host.policyDir, 'policy.json');
+  const obj = JSON.parse(readFileSync(file, 'utf8'));
+  obj.tampered = true;
+  writeFileSync(file, JSON.stringify(obj, null, 2));
+  const bad = runnerCli(host, ['policy']);
+  expect(bad.out, bad.out).toMatch(/INVALID|changed outside the runner/i);
+  await waitFor(
+    'the page shows the policy problem',
+    async () => (await page.state()).status.policyError ?? '',
+    (e) => /outside the runner|seal/i.test(e),
+    30_000,
+  );
+  // the local grant is gone while it is unsealed: the runner turns the DevOps shift away and the request waits
+  const id = await sendDevopsRequest(api, host.workstationId, 'look at the disk');
+  const rejected = await waitFor(
+    'the DevOps shift was turned away',
+    async () => {
+      const ids = await shiftsOfRequest(id);
+      return q<{ outcome: string | null }>(`SELECT outcome FROM shifts WHERE id = ANY($1::uuid[])`, [ids]);
+    },
+    (r) => r.some((x) => x.outcome === 'rejected'),
+    120_000,
+  );
+  expect(rejected.length).toBeGreaterThan(0);
+  expect((await devopsRequest(id))?.status, 'not done while nothing is granted').not.toBe('done');
+  // the owner reads the file and seals it as it is (typed yes at the keyboard)
+  const accept = runnerCli(host, ['policy', 'accept'], ['yes']);
+  expect(accept.code, accept.out).toBe(0);
+  await waitFor(
+    'the page is clean again',
+    async () => (await page.state()).status.policyError ?? '',
+    (e) => e === '',
+    30_000,
+  );
+  // the server sends the waiting request again once its back-off is over: with the policy sealed again it runs
+  await advanceClock(10 * 60_000);
+  expect((await waitRequest(id, 'done', (r) => TERMINAL(r?.status), 180_000))?.status).toBe('done');
+});

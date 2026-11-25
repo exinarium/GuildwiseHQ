@@ -58,9 +58,9 @@ export const SCENARIOS: Record<string, Handling> = {
   B2: { kind: 'auto', title: 'Local No ends the request: no retry, no second hold' },
   B3: { kind: 'auto', title: 'vault.configure held item names its target' },
   C1: {
-    kind: 'covered',
-    title: 'AC1 hygiene refuses non-card branches',
-    by: 'runner unit tests of runner-authority-fixes (not repeated here)',
+    kind: 'auto',
+    title:
+      'AC1 the tidy-up examines the repository and leaves main, develop, release and unpushed branches alone (a server NAMING a protected branch is a unit-test item)',
   },
   C2: {
     kind: 'covered',
@@ -68,14 +68,14 @@ export const SCENARIOS: Record<string, Handling> = {
     by: 'runner unit tests of runner-authority-fixes',
   },
   C3: {
-    kind: 'pending',
-    title: 'AC3 DevOps cannot write the policy dir; tamper detected',
-    build: 'runner-authority-fixes',
+    kind: 'auto',
+    title:
+      'AC3 the approval settings are sealed: an outside edit makes everything ask, policy accept is the way back',
   },
   C4: {
-    kind: 'pending',
-    title: 'AC4 toolchain.add by DevOps is held or refused',
-    build: 'runner-authority-fixes',
+    kind: 'auto',
+    title:
+      'AC4 a toolchain DevOps registers waits for the owner (Desk step with the exact command); agents get it only after',
   },
   C5: {
     kind: 'covered',
@@ -93,26 +93,66 @@ export const SCENARIOS: Record<string, Handling> = {
     title: 'AC8 no widening of sandbox, guard or authority',
     by: 'existing runner/server/shared suites',
   },
-  C9: { kind: 'pending', title: 'AC9 DevOps never moves a card branch', build: 'runner-authority-fixes' },
+  C9: {
+    kind: 'auto',
+    title: 'AC9 a DevOps shift that moves a card branch is put back and kept off the branch',
+  },
   C10: {
-    kind: 'pending',
-    title: 'AC10 CEO full-power write in a card worktree refused',
-    build: 'runner-authority-fixes',
+    kind: 'owner',
+    title: 'AC10 a CEO full-power turn cannot write in a card worktree, or start inside one',
+    reason:
+      'the full-power turn is a real Claude turn in the outer box (needs a Claude login); steps in COMBINED-QA.md',
   },
   C11: {
-    kind: 'pending',
-    title: 'AC11 DevOps chat change in a card worktree reverted and reported',
-    build: 'runner-authority-fixes',
+    kind: 'owner',
+    title: 'AC11 a DevOps chat change in a card worktree is reverted and reported',
+    reason:
+      'a DevOps chat turn is a real Claude turn; the same after-shift fence is proven on shifts by A2-A4 and C9; steps in COMBINED-QA.md',
   },
   C12: {
-    kind: 'pending',
-    title: 'AC12 each DevOps access switch enforced at the runner',
-    build: 'runner-authority-fixes',
+    kind: 'auto',
+    title:
+      'AC12 each DevOps switch (install, Docker, paths) and the policy and card-folder fences are enforced by the runner guard',
   },
-  D: {
-    kind: 'pending',
-    title: 'quiet-approvals AC (approvals-page assertions + re-run of A2, A3, B)',
-    build: 'quiet-approvals',
+  D1: {
+    kind: 'auto',
+    title: 'DevOps in the inner box needs no click: a request runs, nothing waits on this computer',
+  },
+  D2: {
+    kind: 'auto',
+    title: 'One yes covers one exact job: the identical request runs outside the box with no new yes',
+  },
+  D3: {
+    kind: 'auto',
+    title:
+      'A changed job asks again (and names the change); an unchanged re-dispatch does not; a local No ends it; a stale yes is refused (409)',
+  },
+  D4: {
+    kind: 'auto',
+    title:
+      'The tidy-up is a fixed routine: no question when ticked, one yes when not; protected branches untouched',
+  },
+  D5: {
+    kind: 'auto',
+    title:
+      'The local limit caps every Desk grant (Docker, folders); private folders refused; raising it locally gives Docker',
+  },
+  D6: {
+    kind: 'auto',
+    title:
+      'When the box cannot start: refused with a plain reason and one devops.box step; works again after the fix',
+  },
+  D7: {
+    kind: 'auto',
+    title:
+      'The tool-download tick (row 8): without it an environment prepare with installs asks once, with it nothing asks',
+  },
+  'D-box': {
+    kind: 'owner',
+    title:
+      'The real box: Docker through the gatekeeper, the outer box network, relayed subscription login, CEO full power outside',
+    reason:
+      'bwrap, the egress and model proxies and Docker need a real Claude login and the real machine; steps in COMBINED-QA.md',
   },
   E1: {
     kind: 'auto',

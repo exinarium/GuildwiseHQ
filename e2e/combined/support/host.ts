@@ -1,12 +1,12 @@
-import { type ChildProcess, spawn } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import type { APIRequestContext } from '@playwright/test';
 import { q, waitFor } from '../../support/db.ts';
 import { BASE_URL, E2E_DIR, paths, ROOT } from '../../support/env.ts';
 import { addRepoRoot, pairRunner } from '../../support/runner.ts';
-import { pairingCode } from './flow.ts';
+import { devopsAgentOf, pairingCode } from './flow.ts';
 import { gateDirOf, initGates, release, waitReached } from './gates.ts';
 import { assertLoopback } from './guards.ts';
 
@@ -27,8 +27,6 @@ export interface Host {
   approvalsPort: number;
   child: ChildProcess;
   logFile: string;
-  /** Rewrites policy.json (the running runner re-reads it when the file changes). */
-  writePolicy(p: HostPolicy & { grant?: { orgId: string; agentId: string } }): void;
   stop(): Promise<void>;
 }
 
@@ -83,6 +81,8 @@ export async function startHost(
     name: string;
     repoRoot: string;
     policy?: HostPolicy;
+    /** Grant the workstation's DevOps engineer locally (default). The grant is written BEFORE the first start so the runner seals it. */
+    grant?: boolean;
     identity?: boolean;
     extraEnv?: Record<string, string>;
   },
@@ -103,7 +103,20 @@ export async function startHost(
   addRepoRoot(o.repoRoot, home);
   const write = (p: HostPolicy & { grant?: { orgId: string; agentId: string } }) =>
     writeFileSync(join(policyDir, 'policy.json'), policyJson(p, p.grant), { mode: 0o600 });
-  write(o.policy ?? {});
+  // The runner SEALS policy.json at its first start (it adopts what is there once); later plain writes are tamper and are
+  // ignored. So everything the policy must say is written here, before the start, the DevOps grant included; after the start only the
+  // approvals page changes it (ApprovalsPage.change).
+  let grant: { orgId: string; agentId: string } | undefined;
+  if (o.grant !== false) {
+    const wsRow = await waitFor(
+      `workstation ${o.name} row`,
+      () => q<{ id: string }>(`SELECT id FROM workstations WHERE name=$1`, [o.name]),
+      (r) => r.length === 1,
+      30_000,
+    );
+    grant = await devopsAgentOf(wsRow[0]?.id as string);
+  }
+  write({ ...(o.policy ?? {}), ...(grant ? { grant } : {}) });
   initGates(gateDirOf(home));
   const logFile = join(home, 'host.out.log');
   const out = openSync(logFile, 'a');
@@ -168,7 +181,6 @@ export async function startHost(
     approvalsPort: info.approvalsPort,
     child,
     logFile,
-    writePolicy: write,
     async stop() {
       try {
         process.kill(-(child.pid as number), 'SIGTERM');
@@ -181,3 +193,42 @@ export async function startHost(
 }
 
 export { release, waitReached };
+
+/** What the scripted runtime says about the DevOps safety box (see ScenarioAdapter.boxMissing); read on every shift start. */
+export function setBoxState(h: { gateDir: string }, state: 'ok' | 'none' | `broken:${string}`): void {
+  const f = join(h.gateDir, 'box-state');
+  if (state === 'ok') rmSync(f, { force: true });
+  else writeFileSync(f, state);
+}
+
+/**
+ * Runs the REAL `guildwise-runner` CLI (apps/runner/dist/aom-runner.mjs) against this host's folders, the way the person at the
+ * machine does: in a terminal (a pty from `script`, because the approving commands refuse to run without one) with `answers`
+ * typed. Same environment rules as the host: the allowlist, a fake HOME, the host's data and policy folders.
+ */
+export function runnerCli(
+  h: { home: string; policyDir: string; name: string },
+  args: string[],
+  answers: string[] = [],
+): { out: string; code: number } {
+  const fakeHome = join(E2E_DIR, `home-${h.name}`);
+  const env: NodeJS.ProcessEnv = {};
+  for (const k of HOST_ENV_ALLOWLIST) if (process.env[k] !== undefined) env[k] = process.env[k];
+  Object.assign(env, {
+    HOME: fakeHome,
+    XDG_CONFIG_HOME: join(fakeHome, '.config'),
+    AOM_RUNNER_HOME: h.home,
+    AOM_RUNNER_POLICY_DIR: h.policyDir,
+    AOM_RUNNER_MOCK: '1',
+    NO_COLOR: '1',
+  });
+  const quote = (w: string) => `'${w.replace(/'/g, `'\\''`)}'`;
+  const cmd = [process.execPath, paths.runnerBin, ...args].map(quote).join(' ');
+  const r = spawnSync('script', ['-qec', cmd, '/dev/null'], {
+    env,
+    input: answers.map((a) => `${a}\n`).join(''),
+    encoding: 'utf8',
+    timeout: 60_000,
+  });
+  return { out: `${r.stdout ?? ''}${r.stderr ?? ''}`.replace(/\r/g, ''), code: r.status ?? 1 };
+}
