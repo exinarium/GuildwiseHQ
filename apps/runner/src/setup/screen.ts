@@ -63,6 +63,26 @@ export function renderScreen(c: Choices): string[] {
       c.devopsInstallChosen ? (c.devopsInstall ? 'Yes' : 'No') : 'As set on the website',
     ),
   );
+  // quiet-approvals: row 8 is this computer's own downloads, kept apart from row 7 (the website's switch)
+  out.push(
+    row(
+      ' ',
+      '8',
+      "DevOps may download the tools projects need (checksum-checked, into the runner's own folder)",
+      c.toolInstall ? 'Yes' : 'No',
+    ),
+  );
+  out.push(
+    row(
+      ' ',
+      '9',
+      'Tidy the code folders every day (fixed routine, only branches this computer pushed)',
+      c.hygiene ? 'Yes' : 'No',
+    ),
+  );
+  out.push(' 10  The most DevOps may get from a click on the website');
+  out.push(row('      ', '10a', 'Docker (only Guildwise’s own containers)', c.ceilingDocker ? 'Yes' : 'No'));
+  out.push(row('      ', '10b', 'Internet for test containers', c.containerEgress ? 'Yes' : 'No'));
   out.push('');
   return out;
 }
@@ -110,7 +130,7 @@ export async function editItem(
   switch (key) {
     case '2': {
       const a = await p.choose(
-        '1) Ask me first (safe)  2) Let them start without asking',
+        '1) Ask me first (safe)  2) Let them start without asking (helpers may then leave the inner safety box without asking; they still stay in the outer box)',
         ['1', '2'] as const,
         c.devopsRequests === 'auto' ? '2' : '1',
       );
@@ -143,6 +163,42 @@ export async function editItem(
         await p.confirm(
           "May the DevOps helpers install the tools your projects need (Node, Python and the like), in the runner's own folder and never system-wide? With No, a request that needs a tool waits until you allow it.",
           c.devopsInstall,
+        ),
+      );
+    case '8':
+      return applyEdit(
+        c,
+        '8',
+        await p.confirm(
+          "May DevOps download the tools your projects need without asking you each time? Only downloads with a published checksum, into the runner's own folder, never system-wide. Anything else still asks you first.",
+          c.toolInstall,
+        ),
+      );
+    case '10a':
+      return applyEdit(
+        c,
+        '10a',
+        await p.confirm(
+          'May a click on the website give DevOps Docker? Only Guildwise’s own containers, through a gatekeeper on this computer.',
+          c.ceilingDocker,
+        ),
+      );
+    case '10b':
+      return applyEdit(
+        c,
+        '10b',
+        await p.confirm(
+          'May a click on the website give test containers the internet? Most test services need none. With No, a recipe that needs it asks for a change on this computer.',
+          c.containerEgress,
+        ),
+      );
+    case '9':
+      return applyEdit(
+        c,
+        '9',
+        await p.confirm(
+          'Tidy the code folders every day without asking? It is a fixed routine (no AI): it saves unfinished work and removes only branches this computer pushed itself.',
+          c.hygiene,
         ),
       );
     default:

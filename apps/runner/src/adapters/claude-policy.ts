@@ -333,6 +333,8 @@ export const RUNNER_PRIVATE = [
   'toolchains.json',
   'card-branches.json',
   'conflicts.json',
+  // quiet-approvals R2: the exact DevOps jobs approved on this computer
+  'approved-requests.json',
 ];
 
 /**
@@ -1009,6 +1011,62 @@ export function buildShiftSettings(
   );
   if (sb) out.sandbox = sb;
   return out;
+}
+
+/**
+ * quiet-approvals R1 [B2]: the DevOps engineer INSIDE the box. The builder branch of `buildShiftSettings` (never
+ * `buildDevopsSettings`) with fixed tools `read`, `edit`, `shell` and no `web`, whatever the role grants: Edit and Write in
+ * the request folder (cwd) and scratch only; Read blocked outside the working dirs plus `commonDenies` and the T2
+ * policy-dir deny; the project's clones read-only (`readDirs`); WebFetch and WebSearch denied; builder network plus the
+ * IPC port; the container sockets masked. The OS sandbox is `required` (fail closed): the adapter refuses to start when
+ * it is not enforced.
+ */
+export function buildDevopsBoxSettings(
+  p: AgentPermissions,
+  ctx: ClaudePolicyContext,
+  paths: { home: string; configDir: string; scratch: string; tmp: string },
+): ClaudeSettings {
+  const fixed: AgentPermissions = {
+    ...p,
+    allowedTools: ['read', 'edit', 'shell'],
+    writableGlobs: null,
+    browser: false,
+    readOrgRepos: false,
+  };
+  const s = buildShiftSettings(
+    fixed,
+    { ...ctx, mode: 'required', testServiceDomains: [] },
+    paths,
+    'devops-box',
+  );
+  s.permissions.deny = [
+    ...new Set([
+      ...s.permissions.deny,
+      'WebFetch',
+      'WebSearch',
+      'NotebookEdit',
+      'mcp__*',
+      ...SESSION_TOOLS_DENIED,
+      ...(ctx.policyDir ? policyDirDenies(ctx.policyDir) : []),
+      // the user's own Claude login and accounts: never readable from the box
+      ...['.claude', '.claude.json'].flatMap((f) => {
+        const a = ruleAbs(join(ctx.realHome, f));
+        return [`Read(${a}/**)`, `Read(${a})`];
+      }),
+    ]),
+  ];
+  if (s.sandbox) {
+    s.sandbox.failIfUnavailable = true;
+    s.sandbox.allowUnsandboxedCommands = false;
+    s.sandbox.filesystem.denyRead = [
+      ...new Set([
+        ...s.sandbox.filesystem.denyRead,
+        ...containerRuntimeMasks(),
+        ...(ctx.uid !== undefined || process.getuid ? [`/run/user/${ctx.uid ?? process.getuid?.()}`] : []),
+      ]),
+    ];
+  }
+  return s;
 }
 
 /**

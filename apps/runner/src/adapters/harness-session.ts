@@ -49,6 +49,8 @@ export interface HarnessLaunch {
   cmd: { bin: string; args: string[]; env: Record<string, string> };
   /** The workstation owner's private-endpoint allow-list (exact host:port entries); empty by default. */
   privateEndpoints?: string[];
+  /** quiet-approvals Rework 2: exact `host:port` entries reached by name, public addresses only. */
+  publicEndpoints?: string[];
   /**
    * The shift's local test services: exact loopback `host:port` entries (`testServiceDomain` form), kept apart from
    * `privateEndpoints`. Empty or absent: nothing is opened.
@@ -94,6 +96,7 @@ export async function launchInHarnessSandbox(l: HarnessLaunch): Promise<Launched
     ...(l.routes ? { routes: l.routes } : {}),
     ...(l.onDeny ? { onDeny: l.onDeny } : {}),
     ...(l.privateEndpoints?.length ? { privateEndpoints: l.privateEndpoints } : {}),
+    ...(l.publicEndpoints?.length ? { publicEndpoints: l.publicEndpoints } : {}),
     ...(l.testServices?.length ? { testServices: l.testServices } : {}),
     ...(l.proxyTest ?? {}),
   });

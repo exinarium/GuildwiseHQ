@@ -162,8 +162,12 @@ At the end of the installer, `guildwise-runner setup` shows **one screen** with 
 4. **Publishing your apps**: Ask me first, or never.
 5. **Install scripts** of each code project. Starts at No.
 6. **Video transcripts**: yt-dlp in the runner's own folder (Yes). Later: `guildwise-runner extras install yt-dlp`.
+7. **DevOps helpers may install tools**: mirrors the website's "Install packages and tools" switch.
+8. **DevOps may download the tools projects need** without asking (checksum-checked, runner's own folder). Yes where never chosen.
+9. **Tidy the code folders every day** as a fixed routine without asking. Yes where never chosen.
+10. **The most DevOps may get from a click on the website**: 10a Docker (Yes), 10b internet for test containers (No). Extra folders: on the Approvals page only (none).
 
-Lines 1 and 5 are left out when the server offers nothing. You can change all of this later on the [Approvals page of the computer](#approvals-page), except Docker, which needs a terminal. Scripted installs use `--devops-orgs`, `--devops-requests ask|auto`, `--allow-scripts`, `--with-ytdlp` or `--no-ytdlp`.
+Lines 1 and 5 are left out when the server offers nothing. You can change all of this later on the [Approvals page of the computer](#approvals-page), except Docker, which needs a terminal. Scripted installs use `--devops-orgs`, `--devops-requests ask|auto`, `--allow-scripts`, `--with-ytdlp` or `--no-ytdlp`, `--tool-install on|off`, `--hygiene run|ask`, `--ceiling-docker on|off`, `--container-egress on|off`.
 
 The rest of what setup settles:
 
@@ -198,7 +202,9 @@ Each workstation runs a small private page, **Approvals on this computer**, at a
 
 - **Pair the browser once.** Click **Pair this browser**, copy the command (like `guildwise-runner approvals pair K7M2-Q9`), paste it in a terminal on that computer, check the fingerprint matches, and type `yes`. The code works for 10 minutes. `guildwise-runner approvals devices` lists paired browsers; `approvals forget <fingerprint>` removes one.
 - **The top bar** names the instance and the server. It is yellow-orange for any instance other than prod, so a test window is never mistaken for the real one.
-- **The page** shows this computer's status, **Waiting for your yes** (one item at a time, with full detail; no approve-all), **What this computer allows** (tick boxes) and **Changed only in a terminal** (Docker mode, signing keys and the like, each with its command).
+- **The page** shows this computer's status, **Waiting for your yes** (one item at a time, with full detail; no approve-all), **What this computer allows** (tick boxes, including tool downloads and the daily tidy-up), **The most DevOps may get** (the limit a click on the website can give DevOps: Docker, test-container internet, extra folders checked by their real location) and **Changed only in a terminal** (Docker mode, signing keys and the like, each with its command).
+- **An item that changed** while you read it is not approved: the page says "This item changed; look again".
+- **"Needs a change on your computer"** on the Desk links to **The most DevOps may get**; the link fills in nothing.
 - If another program uses the page's port, the Desk says so. Run `guildwise-runner approvals port <new number>` and pair again.
 
 ## Passkey approvals {#passkeys}

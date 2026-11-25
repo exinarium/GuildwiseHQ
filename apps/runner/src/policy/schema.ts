@@ -182,6 +182,33 @@ export const PolicySchema = z
      * toolchain the DevOps engineer registered reaches other agents' PATH only once pinned here.
      */
     toolchainPins: z.array(Sha256Hex).max(1000).default([]),
+    /**
+     * quiet-approvals [D3]: DevOps may download the tools a project needs (checksum-verified recipes only, into the
+     * runner's own toolchains folder) without a local yes per request. Absent: ask (never chosen here). Separate from
+     * `devopsInstall`, which mirrors the website's "Install packages and tools" switch.
+     */
+    toolInstall: z.boolean().optional(),
+    /**
+     * quiet-approvals [B4]: the daily repository tidy-up runs as a fixed routine (`run`: no AI session, only branches
+     * this computer pushed) or waits for a local yes (`ask`). Absent: ask.
+     */
+    hygiene: z.enum(['run', 'ask']).optional(),
+    /**
+     * quiet-approvals phase B (D6/D9, D10 defaults): the most DevOps may ever be given from the Desk, set only on this
+     * computer (installer, Approvals on this computer). The effective box is the server's switches intersected with it:
+     * Docker (default yes: the hardened proxy), extra folders (default none; checked by their real location, R5-B1) and
+     * internet for test containers (default no).
+     */
+    ceiling: z
+      .object({
+        docker: z.boolean().default(true),
+        mountRoots: z
+          .array(z.string().regex(/^\/[^\0]{0,1000}$/))
+          .max(20)
+          .default([]),
+        containerEgress: z.boolean().default(false),
+      })
+      .default({ docker: true, mountRoots: [], containerEgress: false }),
   })
   .superRefine((p, ctx) => {
     if (p.docker === 'host' && !p.acceptRootEquivalent)

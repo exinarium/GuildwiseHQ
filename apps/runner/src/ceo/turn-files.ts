@@ -40,6 +40,8 @@ const PRIVATE_ENTRIES = [
   'worktrees',
   'conflicts.json',
   'card-branches.json',
+  // quiet-approvals R2 / C2: the approved DevOps jobs and the commands their sessions asked for
+  'approved-requests.json',
 ];
 
 /** The runner's own service units can be inspected (`systemctl status`, `journalctl`) but not stopped from inside a turn. */

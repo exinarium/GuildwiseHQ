@@ -184,3 +184,57 @@ export const cardPayload = (
   const question = questionOf(msg);
   return question ? { ...msg.brief, question } : msg.brief;
 };
+
+// ---------------------------------------------------------------- quiet-approvals R1: the inner box
+
+/**
+ * How the runner runs a DevOps request shift (quiet-approvals R1, decided locally in `runner.ts`):
+ * - `box`: inside the builder-like box, no click (every server DevOps shift starts here);
+ * - `outside`: the DevOps profile as before, after a local yes, an R2 exact-job match or a C2 resume;
+ * - `hygiene`: the deterministic tidy-up, no AI session at all ([B4]).
+ */
+export type DevopsMode = 'box' | 'outside' | 'hygiene';
+
+/**
+ * [B1] The runner verbs a DevOps shift keeps inside the box: only builder-equivalent reads, plus the two new verbs.
+ * Everything else (`DEVOPS_INSTALL_RPC`, `git.*`, `toolchain.add|remove`, `hygiene.run`, `recipe.save`,
+ * `deploy.probe`, `run.*`, `env.*`, `test.suite`, `runner.restart`, `ceo`, `delegate.guard`, and every server verb) is
+ * refused with the way out. Placed beside T3's scan allowlist; fails closed (an unknown verb is refused).
+ */
+export const INSIDE_BOX_RPC: ReadonlySet<string> = new Set([
+  'card.get',
+  'card.attachments',
+  'skill.list',
+  'skill.show',
+  'transcript.fetch',
+  'toolchain.list',
+  'devops.audit',
+  'toolchain.ensure',
+  'devops.outside',
+]);
+
+export const insideBoxRpc = (method: string): boolean =>
+  INSIDE_BOX_RPC.has(method) || method.startsWith('graph.');
+
+export const OUTSIDE_HINT = 'aom devops-outside --needs <what> --why <why>';
+
+/** The one sentence a refused verb gets in the box. */
+export const boxRefusal = (what: string): string =>
+  `\`${what}\` needs outside the box: \`${OUTSIDE_HINT}\` (the owner says yes once on this computer).`;
+
+/** The runner's own section for a DevOps shift inside the box (replaces nothing the server wrote; added last). */
+export const DEVOPS_BOX_NOTE = `# You work inside the safety box
+
+This request runs inside a sandbox like a builder's, without asking the owner:
+- You can read the project's clones (read-only), and write only in your working folder and your scratch folder.
+- You have a shell with package registries reachable, but no web tools, no Docker, no ssh keys and no publishing to a git host.
+- \`aom toolchain ensure <tool>\` downloads a tool the project needs (checksum-verified), when this computer allows it.
+- Inspections, reading logs and configuration, and preparing changes all work here.
+
+If the request needs something the box does not allow (Docker, a deploy, git writes in a clone, publishing a branch, an
+install outside your folders, a remote host), do not try to work around it. Run:
+
+    ${OUTSIDE_HINT}
+
+That ends this session and asks the owner once on this computer; after the yes the request continues outside the box.
+Report with \`aom devops-done\`, \`aom devops-question\` and \`aom devops-comment\` as usual; \`aom devops-approval\` is not used here.`;

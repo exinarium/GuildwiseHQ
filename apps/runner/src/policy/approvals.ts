@@ -16,7 +16,7 @@ import {
   SETUP_PENDING_NOTE,
   setupPending,
 } from './gate.ts';
-import { capDetail, HELD_TTL_MS, type HeldRecord, type HeldStore, newHeldId } from './held.ts';
+import { capDetail, HELD_TTL_MS, type HeldRecord, type HeldStore, heldVersion, newHeldId } from './held.ts';
 import { localCommand } from './local-command.ts';
 import { checkPasskeyAssertion, newPasskeyChallenge } from './passkey.ts';
 import { passkeyMayApprove } from './passkey-kinds.ts';
@@ -148,7 +148,7 @@ export class Approvals {
       const raw = this.summaryOf(r);
       const summary = raw === null ? null : plainText(raw);
       if (summary && summary !== r.summary) {
-        this.deps.held.put({ ...r, summary: summary.slice(0, 500) });
+        this.deps.held.update(r.id, (cur) => ({ ...cur, summary: summary.slice(0, 500) }));
         this.deps.log.info(`held ${r.kind} ${r.id} now reads: ${summary}`);
         changed = true;
       }
@@ -180,12 +180,12 @@ export class Approvals {
       if (dup) {
         if (dup.state !== 'held' || dup.summary === plainText(d.summary).slice(0, 500)) return dup;
         // the same command again: the item reads as this runner says it (never the text of an older runner)
-        const fresh = {
-          ...dup,
-          summary: plainText(d.summary).slice(0, 500),
-          detail: capDetail(plainDetail(d.detail)),
-        };
-        this.deps.held.put(fresh);
+        const fresh =
+          this.deps.held.update(dup.id, (cur) => ({
+            ...cur,
+            summary: plainText(d.summary).slice(0, 500),
+            detail: capDetail(plainDetail(d.detail)),
+          })) ?? dup;
         this.deps.log.info(this.holdLine(fresh));
         this.publish(true);
         return fresh;
@@ -195,14 +195,15 @@ export class Approvals {
       const same = this.list().find((r) => r.state === 'held' && requestKeyOf(r) === input.requestKey);
       if (same) {
         // REVIEW S2: the item reads as the shift it will now run (its request text and access), not as the older one
-        const next = {
-          ...same,
-          replay: input.replay,
-          commandHash: d.commandHash,
-          summary: plainText(d.summary).slice(0, 500),
-          detail: capDetail(plainDetail(d.detail)),
-        };
-        this.deps.held.put(next);
+        // S2: under the item's lock, with a new version, so a decision made on the older text cannot approve this one
+        const next =
+          this.deps.held.update(same.id, (cur) => ({
+            ...cur,
+            replay: input.replay,
+            commandHash: d.commandHash,
+            summary: plainText(d.summary).slice(0, 500),
+            detail: capDetail(plainDetail(d.detail)),
+          })) ?? same;
         this.deps.log.info(
           `held ${same.kind} ${same.id} still waits for your yes (the same request, a new shift)`,
         );
@@ -233,6 +234,7 @@ export class Approvals {
       ...(d.note ? { note: d.note } : {}),
       state: 'held',
     };
+    r.version = heldVersion(r);
     this.deps.held.put(r);
     this.deps.log.info(this.holdLine(r));
     this.publish(true);
@@ -304,9 +306,9 @@ export class Approvals {
 
   /** Adds text to a held item's detail (what `approve` prints), while it is still held. */
   annotate(id: string, extra: string): void {
-    const r = this.deps.held.get(id);
-    if (!r || r.state !== 'held') return;
-    this.deps.held.put({ ...r, detail: capDetail(plainDetail(`${r.detail}\n\n${extra}`)) });
+    this.deps.held.update(id, (r) =>
+      r.state !== 'held' ? r : { ...r, detail: capDetail(plainDetail(`${r.detail}\n\n${extra}`)) },
+    );
   }
 
   /** Drops held items the server withdrew (a stopped shift, a cancelled command). */

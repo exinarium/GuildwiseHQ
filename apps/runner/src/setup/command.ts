@@ -33,6 +33,19 @@ export function registerSetupCommand(program: Command): void {
       'ask|auto: DevOps tasks from the website wait for your yes (default ask)',
     )
     .option(
+      '--tool-install <on|off>',
+      "on|off: DevOps may download the tools projects need (checksum-checked, into the runner's own folder) without asking (default on)",
+    )
+    .option(
+      '--hygiene <run|ask>',
+      'run|ask: tidy the code folders every day as a fixed routine without asking (default run)',
+    )
+    .option('--ceiling-docker <on|off>', 'on|off: a click on the website may give DevOps Docker (default on)')
+    .option(
+      '--container-egress <on|off>',
+      'on|off: a click on the website may give test containers the internet (default off)',
+    )
+    .option(
       '--allow-scripts <repos>',
       'repository URLs or names, separated by commas, whose installs may run their scripts (each must be offered)',
     )

@@ -32,6 +32,10 @@ export interface RawSetupFlags {
   dataDir?: string;
   instance?: string;
   devopsRequests?: string;
+  toolInstall?: string;
+  hygiene?: string;
+  ceilingDocker?: string;
+  containerEgress?: string;
   allowScripts?: string;
   withYtdlp?: boolean;
   noYtdlp?: boolean;
@@ -62,6 +66,13 @@ export interface SetupOptions {
   devopsOrgs?: 'none' | string[];
   /** Item 2: DevOps tasks from the website wait for a local yes (`ask`) or start (`auto`). */
   devopsRequests?: 'ask' | 'auto';
+  /** quiet-approvals item 8: checksum-checked tool downloads without asking. */
+  toolInstall?: boolean;
+  /** quiet-approvals item 9: the daily tidy-up as a fixed routine without asking. */
+  hygiene?: 'run' | 'ask';
+  /** quiet-approvals item 10: the ceiling's Docker and test-container internet. */
+  ceilingDocker?: boolean;
+  containerEgress?: boolean;
   /** Item 5: offered repositories (URL or name) whose installs may run their scripts. */
   allowScripts?: string[];
   /** Item 6: install yt-dlp into the runner's own folder (default yes). */
@@ -168,6 +179,16 @@ export function parseSetupOptions(raw: RawSetupFlags, env: NodeJS.ProcessEnv = p
             ? false
             : undefined;
   const scriptsRaw = list(raw.allowScripts ?? e('ALLOW_SCRIPTS'));
+  const toolInstall = oneOf('tool-install', raw.toolInstall ?? e('TOOL_INSTALL'), ['on', 'off'] as const);
+  const hygiene = oneOf('hygiene', raw.hygiene ?? e('HYGIENE'), ['run', 'ask'] as const);
+  const ceilingDocker = oneOf('ceiling-docker', raw.ceilingDocker ?? e('CEILING_DOCKER'), [
+    'on',
+    'off',
+  ] as const);
+  const containerEgress = oneOf('container-egress', raw.containerEgress ?? e('CONTAINER_EGRESS'), [
+    'on',
+    'off',
+  ] as const);
   const distro = raw.wslDistroName ?? e('WSL_DISTRO_NAME');
   if (distro !== undefined && !/^[A-Za-z0-9._-]{1,64}$/.test(distro))
     throw new SetupError(
@@ -200,6 +221,10 @@ export function parseSetupOptions(raw: RawSetupFlags, env: NodeJS.ProcessEnv = p
       'ask',
       'auto',
     ] as const),
+    ...(toolInstall !== undefined ? { toolInstall: toolInstall === 'on' } : {}),
+    ...(hygiene !== undefined ? { hygiene } : {}),
+    ...(ceilingDocker !== undefined ? { ceilingDocker: ceilingDocker === 'on' } : {}),
+    ...(containerEgress !== undefined ? { containerEgress: containerEgress === 'on' } : {}),
     ...(scriptsRaw.length > 0 ? { allowScripts: [...new Set(scriptsRaw)] } : {}),
     ...(ytdlpRaw !== undefined ? { withYtdlp: ytdlpRaw } : {}),
     ...(distro !== undefined ? { wslDistroName: distro } : {}),

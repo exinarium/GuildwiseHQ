@@ -34,6 +34,8 @@ import {
   readAppKey,
   readHiddenPem,
 } from './apps/cli.ts';
+import { probeBwrap } from './box/bwrap.ts';
+import { t12Warning } from './box/t12.ts';
 import { loadConfig, type RunnerConfig, RunnerConfigSchema, saveConfig } from './config.ts';
 import { toWsUrl, UNPAIRED_MESSAGE } from './connection/client.ts';
 import { requestRotatedToken } from './connection/rotate.ts';
@@ -382,7 +384,8 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
           offers: () => localWindowOffers(paths.root),
           blocked: () => [...(hostRef?.running.values() ?? [])].flatMap((r) => r.runner.blockedDevops()),
           log,
-          decide: (id, state, extra) => new HeldStore(policyDir()).decide(id, state, 'local', extra),
+          decide: (id, state, extra, expectedVersion) =>
+            new HeldStore(policyDir()).decide(id, state, 'local', extra, expectedVersion),
         }).catch((err: unknown) => {
           log.warn(`approvals page not started: ${err instanceof Error ? err.message : String(err)}`);
           return undefined;
@@ -703,6 +706,25 @@ async function doctor(opts: { dataDir?: string; pairing?: string }): Promise<voi
     else if (pol.docker === 'host')
       line('warn', 'docker', 'the installed Docker daemon (root-equivalent, accepted)');
     else line(true, 'docker', 'none for this runner');
+    // quiet-approvals Rework 1 (REVIEW S4): DevOps needs its safety box; say plainly when it cannot start here
+    if (process.platform === 'linux') {
+      const bw = probeBwrap();
+      line(
+        bw.ok ? true : 'warn',
+        'devops box',
+        bw.ok
+          ? `${bw.reason} (the DevOps safety box can start)`
+          : `DevOps cannot work on this computer yet: ${bw.reason}`,
+      );
+    }
+    // quiet-approvals T12: the runner's daemon also runs a Guildwise server stack (accepted for a local UAT only)
+    if (pol.docker !== 'none') {
+      const t12 = t12Warning({
+        ...process.env,
+        ...(pol.dockerHost ? { DOCKER_HOST: pol.dockerHost } : {}),
+      });
+      if (t12) line('warn', 'docker', t12);
+    }
   }
   // The workstation sealing key (provider keys, target secrets are sealed with it): the Workstations page shows its id.
   try {

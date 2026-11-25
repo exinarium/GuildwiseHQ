@@ -39,6 +39,8 @@ describe('policy.json schema', () => {
       passkeys: [],
       signingKeys: [],
       toolchainPins: [],
+      // quiet-approvals phase B: the local ceiling's D10 defaults
+      ceiling: { docker: true, mountRoots: [], containerEgress: false },
     });
     expect(DEFAULT_POLICY.startupRefusal).toBeUndefined();
   });

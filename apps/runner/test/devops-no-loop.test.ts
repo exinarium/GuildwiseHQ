@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { FileAuthority } from '../src/policy/authority.ts';
 import { HeldStore } from '../src/policy/held.ts';
 import { PolicyStore } from '../src/policy/store.ts';
-import { type Harness, startHarness } from './harness.ts';
+import { type Harness, noBox, startHarness } from './harness.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
 import { ScriptedAdapter } from './scripted-adapter.ts';
 import { makeDevopsStart } from './vault-fixtures.ts';
@@ -41,6 +41,7 @@ describe('a DevOps request held for a local yes', () => {
     const agentId = uuidv7();
     const a = granted({ devops: { agents: { [ORG]: agentId } }, devopsRequests: 'ask' });
     h = await startHarness({}, { authority: a.authority, policyDir: a.dir, approvalsPollMs: 50 });
+    noBox(h);
     const first = devopsStart(agentId);
     h.server.send('shift.start', first);
     const held = await h.server.waitFor('approvals.held', (m) =>
@@ -72,6 +73,7 @@ describe('a local no (REVIEW S1)', () => {
     const agentId = uuidv7();
     const a = granted({ devops: { agents: { [ORG]: agentId } }, devopsRequests: 'ask' });
     h = await startHarness({}, { authority: a.authority, policyDir: a.dir, approvalsPollMs: 50 });
+    noBox(h);
     const start = devopsStart(agentId);
     h.server.send('shift.start', start);
     const held = await h.server.waitFor('approvals.held', (m) =>
@@ -87,6 +89,7 @@ describe('a local no (REVIEW S1)', () => {
     const agentId = uuidv7();
     const a = granted({ devops: { agents: { [ORG]: agentId } }, devopsRequests: 'ask' });
     h = await startHarness({}, { authority: a.authority, policyDir: a.dir, approvalsPollMs: 50 });
+    noBox(h);
     const start = devopsStart(agentId);
     h.server.send('shift.start', start);
     const held = await h.server.waitFor('approvals.held', (m) =>
@@ -183,6 +186,7 @@ describe('REVIEW S2 and S3', () => {
     const agentId = uuidv7();
     const a = granted({ devops: { agents: { [ORG]: agentId } }, devopsRequests: 'ask' });
     h = await startHarness({}, { authority: a.authority, policyDir: a.dir, approvalsPollMs: 50 });
+    noBox(h);
     const first = devopsStart(agentId);
     h.server.send('shift.start', first);
     await h.server.waitFor('approvals.held', (m) => m.items.some((i) => i.kind === 'devops.task'));

@@ -2,11 +2,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
-import type { HygieneRepoSpec, IpcRpcRequest, ShiftReport } from '@aom/shared';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { type AomContext, runAom } from '../src/aom/aom-cli.ts';
+import type { HygieneRepoSpec } from '@aom/shared';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { hygieneRepo, runHygiene } from '../src/devops/hygiene.ts';
-import { IpcServer } from '../src/ipc/server.ts';
 import { cleanupTmp, makeRepo, sh, type TestRepo, tmp } from './helpers.ts';
 
 cleanupTmp();
@@ -340,80 +338,6 @@ describe('repository hygiene: branches of finished cards', () => {
     const branches = sh(repo.clone, 'git', ['branch', '--format=%(refname:short)']).split('\n');
     expect(branches).toEqual(expect.arrayContaining(['aom/unmerged', 'aom/in-use', 'feature/merged']));
     expect(branches).not.toContain('aom/merged');
-  });
-});
-
-describe('aom hygiene run', () => {
-  const servers: IpcServer[] = [];
-  afterEach(async () => {
-    await Promise.all(servers.splice(0).map((s) => s.stop()));
-  });
-
-  async function cli(hygiene: unknown) {
-    const reports: ShiftReport[] = [];
-    const rpcs: IpcRpcRequest[] = [];
-    const ipc = new IpcServer();
-    servers.push(ipc);
-    await ipc.start();
-    const token = ipc.registerShift({
-      report: async (r) => {
-        reports.push(r.report);
-        return { accepted: true, message: 'Recorded.' } as never;
-      },
-      rpc: async (r) => {
-        rpcs.push(r);
-        // The runner runs hygiene (supervisor `hygiene.run`) from its own copy of the brief.
-        if (r.method === 'hygiene.run')
-          return hygiene
-            ? { ok: true, result: await runHygiene(hygiene as Parameters<typeof runHygiene>[0]) }
-            : { ok: false, error: 'this request is not a repository hygiene request: nothing to run' };
-        return { ok: true, result: { devops: { hygiene } } };
-      },
-    });
-    const out: string[] = [];
-    const ctx: AomContext = {
-      env: { AOM_IPC_URL: ipc.url, AOM_SHIFT_TOKEN: token },
-      io: { out: (s) => out.push(s), err: (s) => out.push(s) },
-      fetch,
-      readFile: () => '',
-    };
-    return { run: (...a: string[]) => runAom(a, ctx), reports, out };
-  }
-
-  it('does the work and ends the request with devops_done carrying the structured report', async () => {
-    const good = makeRepo();
-    write(good, 'wip.txt', 'unsaved');
-    const unset = makeRepo();
-    write(unset, 'other.txt', 'unsaved');
-    const repoB = '019e3f6a-7b1c-7a2d-8c3e-0123456789b2';
-    const t = await cli({
-      trigger: 'manual',
-      repos: [
-        spec(good),
-        spec(unset, { repoId: repoB, name: 'notes', workingBranch: null, branchSource: null }),
-      ],
-    });
-    expect(await t.run('hygiene', 'run')).toBe(0);
-    expect(t.reports).toHaveLength(1);
-    const rep = t.reports[0] as Extract<ShiftReport, { kind: 'outcome' }>;
-    expect(rep.outcomeId).toBe('devops_done');
-    const data = rep.data as {
-      summary: string;
-      commands: string[];
-      hygiene: { repos: Array<{ repoId: string; problem: { kind: string } | null; commit?: string }> };
-    };
-    expect(data.summary).toContain('1 need attention');
-    expect(data.commands.some((c) => c.includes('stash store'))).toBe(true);
-    expect(data.hygiene.repos[0]?.problem).toBeNull();
-    expect((data.hygiene.repos[0] as { savedWork?: unknown }).savedWork).toBeDefined();
-    expect(data.hygiene.repos[1]?.problem?.kind).toBe('needs_branch');
-    expect(sh(unset.clone, 'git', ['status', '--porcelain'])).toContain('other.txt');
-  });
-
-  it('refuses a request that is not a hygiene request', async () => {
-    const t = await cli(undefined);
-    expect(await t.run('hygiene', 'run')).toBe(1);
-    expect(t.reports).toHaveLength(0);
   });
 });
 

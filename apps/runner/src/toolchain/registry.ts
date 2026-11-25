@@ -418,6 +418,11 @@ export class ToolchainRegistry {
    * need no pin. Unset (unit tests of the registry alone): no gate.
    */
   pinned?: (hash: string) => boolean;
+  /**
+   * quiet-approvals phase B: may this bin folder go on a PATH (its content matches the runner's tree pin, and it is never
+   * the box-writable DevOps tool prefix)? Unset: no gate.
+   */
+  treeOk?: (dir: string) => boolean;
 
   constructor(
     private readonly file: string,
@@ -537,7 +542,8 @@ export class ToolchainRegistry {
     const readDirs: string[] = [];
     const env: Record<string, string> = {};
     for (const e of entries) {
-      for (const b of e.binDirs) if (existsSync(b) && !pathDirs.includes(b)) pathDirs.push(b);
+      for (const b of e.binDirs)
+        if (existsSync(b) && !pathDirs.includes(b) && (!this.treeOk || this.treeOk(b))) pathDirs.push(b);
       for (const r of [...e.binDirs, ...e.readDirs]) if (!readDirs.includes(r)) readDirs.push(r);
       for (const [k, v] of Object.entries(e.env)) {
         try {

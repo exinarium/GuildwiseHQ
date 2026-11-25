@@ -1157,6 +1157,30 @@ async function conflictCardOf(
     : {};
 }
 
+/**
+ * quiet-approvals S7: a conflict request carries the confirmed checks of the conflicted repository, so the runner runs them
+ * (in a box) on the resolution before it moves the real branch, and refuses the move when one fails.
+ */
+async function conflictChecksOf(ctx: Ctx, req: Row): Promise<Partial<ShiftBrief>> {
+  if (req.origin !== 'conflict') return {};
+  let repoId: string | undefined;
+  if (req.card_id) {
+    const c = await one(ctx.pool, 'SELECT repo_id FROM cards WHERE id = $1', [req.card_id]);
+    repoId = c?.repo_id ? String(c.repo_id) : undefined;
+  } else {
+    const c = (req.context ?? {}) as { repoId?: unknown };
+    repoId = typeof c.repoId === 'string' ? c.repoId : undefined;
+  }
+  if (!repoId) return {};
+  const project = await one(
+    ctx.pool,
+    'SELECT p.* FROM projects p JOIN project_repos r ON r.project_id = p.id WHERE r.id = $1',
+    [repoId],
+  );
+  if (!project) return {};
+  return { checks: { suites: checkSuites(integrationTestsOf(project), repoId), detect: false } };
+}
+
 export async function buildDevopsShiftStart(
   ctx: Ctx,
   requestId: string,
@@ -1256,6 +1280,7 @@ export async function buildDevopsShiftStart(
     // Binding: only the workstation owner's orders; the organization's and its projects' others travel as context.
     standingOrders: orders.binding,
     ledger: [],
+    ...(await conflictChecksOf(ctx, req)),
   };
   return {
     shiftId,

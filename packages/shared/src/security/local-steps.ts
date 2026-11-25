@@ -145,6 +145,10 @@ export const LOCAL_STEP_KINDS = [
   'extras.ytdlp',
   'devops.install',
   'toolchain.approve',
+  // quiet-approvals phase B: a Desk click asked for more than the limit set on this computer
+  'devops.ceiling',
+  // quiet-approvals Rework 1 (REVIEW S4): the safety box cannot start here (old bubblewrap, no model credential)
+  'devops.box',
 ] as const;
 export type LocalStepKind = (typeof LOCAL_STEP_KINDS)[number];
 
@@ -167,6 +171,10 @@ export const LOCAL_STEP_TEXT: Readonly<Record<LocalStepKind | 'held', string>> =
   'extras.ytdlp': 'This installs the video transcript tool (yt-dlp) in the runner’s own folder.',
   'toolchain.approve':
     'The DevOps helper installed a tool for the other helpers. Run this on the workstation to see exactly what it adds and allow it.',
+  'devops.ceiling':
+    'DevOps asked for more than the limit you set on this computer (Docker, a folder, or internet for test containers). It runs without it. This needs a change on your computer: open Approvals on this computer, section “The most DevOps may get”, or run this there.',
+  'devops.box':
+    'DevOps cannot work on this computer yet, because its safety box cannot start here. Nothing was run. The line above says why (often: bubblewrap is too old; Ubuntu 24.04 and newer have a recent enough one). Fix that on the computer, then run this there.',
   'devops.install':
     'This lets the DevOps helpers install the tools your projects need, in the runner’s own folder. It turns on “Install packages and tools” for this workstation.',
 };

@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, platform } from 'node:os';
-import { basename, delimiter, dirname, join } from 'node:path';
+import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import {
   APP_INTEGRATIONS_CAPABILITY,
   ApprovalPasskeyPayloadSchema,
@@ -33,6 +34,7 @@ import {
   DIRECT_MODEL_CAPABILITY,
   defaultHost,
   type EnvEnsurePayload,
+  EnvEnsurePayloadSchema,
   INTEGRATIONS_VERSION,
   type IntegrationKindId,
   type IpcRpcResponse,
@@ -128,6 +130,21 @@ import { appTokenProbe, checkAppAccess } from './apps/access-check.ts';
 import { AppTokenBroker } from './apps/broker.ts';
 import { AppKeyStore } from './apps/store.ts';
 import { ServerHttp } from './attachments/index.ts';
+import { probeBwrap } from './box/bwrap.ts';
+import { DeployHosts } from './box/egress-allow.ts';
+import { checkFolder, underRoot } from './box/folder-check.ts';
+import { recipeSha256 } from './box/recipe-approval.ts';
+import {
+  downTestServices,
+  parseRecipe,
+  planTestServices,
+  RECIPE_EGRESS_KIND,
+  RecipeApprovals,
+  recipeDigests,
+  runTestServices,
+  type TestRecipe,
+} from './box/test-services.ts';
+import { TREE_PINS_FILE, TreePins, toolBoxExecutor, toolBoxWritable } from './box/tool-box.ts';
 import { PackCredentialStore } from './capabilities/pack-credentials.ts';
 import { PackManager } from './capabilities/packs.ts';
 import { CapabilityRegistry } from './capabilities/registry.ts';
@@ -145,6 +162,7 @@ import { DeployPreparer } from './delivery/prepare.ts';
 import { runDeployProbe } from './delivery/probe.ts';
 import { DeliveryService } from './delivery/service.ts';
 import { installCacheRoot, runDependencyChange, sweepInstallCaches } from './devops/dependency-install.ts';
+import { boxRefusal, type DevopsMode } from './devops/requests.ts';
 import { verifyRights } from './devops/rights.ts';
 import { ProviderStore } from './direct/store.ts';
 import { type AppTokenSource, brokerTokenSource } from './external/app-token.ts';
@@ -224,9 +242,14 @@ import { JourneyWebhookCaller } from './outbound-delivery/journey-webhook.ts';
 import { OutboundDelivery } from './outbound-delivery/send.ts';
 import { type RunnerPaths, runnerPaths } from './paths.ts';
 import { Approvals } from './policy/approvals.ts';
+import { ApprovedRequests } from './policy/approved-requests.ts';
 import { defaultAuthority, FileAuthority, type LocalAuthority } from './policy/authority.ts';
 import { ApprovedBundles, describeBundle } from './policy/deploy-detail.ts';
+import { boxBrokenText, devopsShiftInput, routeDevopsShift } from './policy/devops-route.ts';
+import { daemonSocket } from './policy/docker-env.ts';
 import {
+  beyondCeiling,
+  type GateDecision,
   gateCommand,
   gateDevopsShift,
   localEnvEnsure,
@@ -280,6 +303,7 @@ import { type Executor, realExecutor } from './toolchain/exec.ts';
 import { toolchainPathDirs, toolchainPathValue } from './toolchain/path-env.ts';
 import { ToolchainRegistry, toolchainHash } from './toolchain/registry.ts';
 import type { Platform } from './toolchain/types.ts';
+import { toolchainsRoot } from './toolchain/user-install.ts';
 import { VaultManager } from './vaults/manager.ts';
 import { RUNNER_VERSION } from './version.ts';
 import { DeviceStore, DevicesFileSchema } from './window/pairing.ts';
@@ -557,6 +581,14 @@ export class Runner {
    * A new shift of such a request is now refused at once, as refused locally, for 24 hours.
    */
   private refusedRequests = new Map<string, number>();
+  /** quiet-approvals phase B: the content pins of the box-writable tool folders. */
+  private treePins!: TreePins;
+  /** quiet-approvals R2: the exact DevOps jobs approved on this computer (sealed, `<dataDir>/approved-requests.json`). */
+  private approvedRequests?: ApprovedRequests;
+  /** quiet-approvals R2/C2: outside-box runs by shift id -> the R2 key of the approved job they run (memory). */
+  private readonly outsideRuns = new Map<string, string>();
+  /** quiet-approvals R1: shifts whose box session already told the server they started (memory). */
+  private readonly leftBox = new Set<string>();
   /** The local install choice last sent to the server on this connection (undefined: not yet). */
   private sentInstall: boolean | undefined;
   /** R18-S: policy.json and the local actions; held items and their approvals. */
@@ -917,6 +949,12 @@ export class Runner {
     }));
     // T2 (D2): a toolchain the DevOps engineer registered reaches other agents only once the owner pinned it
     this.toolchains.pinned = (h) => this.authority.policy().toolchainPins.includes(h);
+    // quiet-approvals phase B: a box-writable tool folder goes on a PATH only while it matches the runner's tree pin, and the
+    // DevOps tool prefix never does
+    this.treePins = new TreePins(opts.policyDir ?? policyDir(), (m) => this.log.warn(m));
+    this.toolchains.treeOk = (d) =>
+      !underRoot(resolve(d), join(this.paths.root, 'devops-tools')) &&
+      this.treePins.ok(d, toolBoxWritable(homedir(), toolchainsRoot()));
     this.toolchains.onChange = () => {
       this.reportToolchains(false);
       this.askToolchainPins();
@@ -943,7 +981,26 @@ export class Runner {
       ...(opts.runTiming ? { timing: opts.runTiming } : {}),
     });
     this.supervisor = new ShiftSupervisor({
-      onDevopsApproval: (msg, data) => this.noteDevopsApproval(msg, data),
+      onDevopsApproval: (msg, data, mode) => {
+        this.noteDevopsApproval(msg, data);
+        this.noteAskedCommands(msg, data, mode);
+      },
+      onDevopsOutside: (msg, ask) => this.holdOutside(msg, ask),
+      onDevopsSession: (msg, sessionId, mode) => this.noteOutsideSession(msg, sessionId, mode),
+      toolchainEnsure: (msg, tool) => this.toolchainEnsure(msg, tool),
+      testServicesUp: (msg, text) => this.testServicesUp(msg, text),
+      deployHosts: () => new DeployHosts(this.paths.root).list(),
+      ceilingRoots: () => this.authority.policy().ceiling.mountRoots,
+      dockerGate: () => {
+        const p = this.authority.policy();
+        const upstream = daemonSocket(p, process.getuid?.() ?? null);
+        if (!upstream || !p.ceiling.docker || !p.allowDocker) return null;
+        return {
+          upstream,
+          instance: createHash('sha256').update(this.paths.root).digest('hex').slice(0, 16),
+          containerEgress: p.ceiling.containerEgress,
+        };
+      },
       windowPort: () => this.windowState?.port,
       capabilities: this.capabilities,
       onProjectCapabilities: (projectId, r) => {
@@ -1062,7 +1119,7 @@ export class Runner {
       capabilities: this.capabilities,
       restart: this.restartAfterReply,
       // R18-S: the opt-in must be in the local policy too, and each full-power turn needs a local action
-      narrowAccess: (a) => narrowAccess(this.authority.policy(), a),
+      narrowAccess: (a) => narrowAccess(this.authority.policy(), a, this.ceilingFolderOk),
       ceoFullPower: () => this.freshConfig().ceo.fullPower && this.authority.policy().ceo.fullPower,
       takeOwnerTurn: () => this.authority.takeOwnerTurn(),
       ceoOwnerPermissions: () => this.freshConfig().ceo.ownerPermissions,
@@ -1597,6 +1654,7 @@ export class Runner {
       return;
     }
     this.adoptPolicySeal();
+    this.adoptTreePins();
     await writeShims(this.paths.bin);
     await this.ipc.start();
     await this.ipc.startSocket().catch((err) => this.log.warn(`IPC socket unavailable: ${String(err)}`));
@@ -1772,6 +1830,24 @@ export class Runner {
    * registered are pinned (they stay on PATH), the paired browsers re-sealed, and held items written before the seal
    * are refused so whoever asked asks again. Any other unsealed state is refused by the store (everything asks).
    */
+  /**
+   * quiet-approvals phase B: once, on the first start of this version, the tool folders already installed are pinned as
+   * they are (like T2's one adoption); from then on only the runner's own installs re-pin them.
+   */
+  private adoptTreePins(): void {
+    try {
+      if (existsSync(join(this.treePins.policyDir, TREE_PINS_FILE))) return;
+      const dirs = toolBoxWritable(homedir(), toolchainsRoot())
+        .flatMap((w) => [w, join(w, 'bin')])
+        .filter((d) => existsSync(d));
+      this.treePins.pin(dirs);
+      if (dirs.length)
+        this.log.info(`pinned ${dirs.length} tool folder(s) as they are (first start of this version)`);
+    } catch (err) {
+      this.log.warn(`could not pin the tool folders: ${String(err)}`);
+    }
+  }
+
   private adoptPolicySeal(): void {
     const auth = this.authority;
     if (!(auth instanceof FileAuthority)) return;
@@ -2356,11 +2432,32 @@ export class Runner {
   }
 
   /** `env.ensure`: detect the stacks of the project's repositories, verify and install their tools. */
-  private ensureEnv(payload: EnvEnsurePayload) {
+  private async ensureEnv(
+    payload: EnvEnsurePayload,
+    opts: { toolsOnly?: boolean; onlyTools?: readonly string[] } = {},
+  ) {
     // R18-S: Docker only where granted locally, whatever the server's access says
     const p = localEnvEnsure(this.authority.policy(), payload);
-    return ensureEnvironment(p, {
-      exec: this.exec,
+    // quiet-approvals phase B: every check and install runs in the tool box (Linux; fail closed without bubblewrap), and
+    // the tool folders it wrote are pinned afterwards, so only the runner's own installs reach an unboxed PATH
+    const writable = toolBoxWritable(homedir(), toolchainsRoot());
+    let exec = this.exec;
+    if (this.platform() === 'linux') {
+      const bw = probeBwrap();
+      if (!bw.ok) throw new Error(`the tool box for preparing environments cannot start: ${bw.reason}`);
+      const repoDirs: string[] = [];
+      for (const r of p.repos) {
+        const found = await this.findRepo(r.remoteUrlNormalized).catch(() => undefined);
+        if (found) repoDirs.push(found.localPath);
+      }
+      const home = join(this.paths.root, 'toolbox-home');
+      mkdirSync(home, { recursive: true, mode: 0o700 });
+      exec = toolBoxExecutor(this.exec, { writable, repoDirs, home });
+    }
+    const report = await ensureEnvironment(p, {
+      exec,
+      ...(opts.toolsOnly ? { toolsOnly: true } : {}),
+      ...(opts.onlyTools ? { onlyTools: opts.onlyTools } : {}),
       platform: this.platform(),
       findRepo: (n) => this.findRepo(n),
       logFile: join(this.paths.envLogs, `${p.projectId}.log`),
@@ -2374,6 +2471,12 @@ export class Runner {
       repoState: (localPath, workingBranch) =>
         repoStartState(localPath, workingBranch, (url) => gitAuthFor(this.forgeEnv, url)),
     });
+    try {
+      this.treePins.pin(writable.flatMap((w) => [w, join(w, 'bin')]).filter((d) => existsSync(d)));
+    } catch (err) {
+      this.log.warn(`could not pin the tool folders: ${String(err)}`);
+    }
+    return report;
   }
 
   /** `repo.initial_commit`: the owner's one click for an empty repository (an empty first commit, pushed, never forced). */
@@ -2686,6 +2789,11 @@ export class Runner {
     this.learnRepo(payload.repoId, payload.remoteUrlNormalized);
     const policy = this.authority.policy();
     const d = gateCommand(policy, command, payload, { remoteOf: (id) => this.remoteOfRepo(id) });
+    // quiet-approvals [D3]: the checksum-verified tool downloads run now; anything else waits for one local yes
+    if (d.action === 'run' && d.toolsOnly && command === 'env.ensure') {
+      void this.ensureToolsOnly(commandId, payload);
+      return;
+    }
     if (d.action === 'run' || (d.action === 'hold' && this.authority.autoApprove?.(d.kind))) {
       // only a deploy waits for its bundle snapshot; every other command is dispatched at once, in arrival order
       if (command === 'deploy.exec')
@@ -2723,6 +2831,48 @@ export class Runner {
     this.holdOrAnswer(commandId, { decision: d, commandId, replay: { type: 'command', body } });
   }
 
+  /**
+   * quiet-approvals [D3]: `env.ensure` under the local `toolInstall` tick. The checksum-verified downloads run at once;
+   * when the project also needs a dependency step or a tool without a checksum, the same command is then held for one
+   * local yes (listing those), exactly as without the tick.
+   */
+  private async ensureToolsOnly(commandId: string, payload: Record<string, unknown>): Promise<void> {
+    let p: EnvEnsurePayload;
+    try {
+      p = CommandPayloadSchemas['env.ensure'].parse(payload);
+    } catch (err) {
+      this.client.send('command.result', { commandId, ok: false, error: String(err).slice(0, 500) });
+      return;
+    }
+    try {
+      const report = await this.ensureEnv(p, { toolsOnly: true });
+      if (!report.deferred?.length) {
+        const { deferred: _d, ...result } = report;
+        this.client.send('command.result', { commandId, ok: true, result });
+        return;
+      }
+      const held = gateCommand({ ...this.authority.policy(), toolInstall: false }, 'env.ensure', payload);
+      if (held.action !== 'hold') {
+        this.client.send('command.result', { commandId, ok: true, result: report });
+        return;
+      }
+      this.holdOrAnswer(commandId, {
+        decision: {
+          ...held,
+          detail: `${held.detail}\n\nThe checksum-verified tool downloads already ran. Still waiting for your yes:\n${report.deferred.map((x) => `  ${x}`).join('\n')}`,
+        },
+        commandId,
+        replay: { type: 'command', body: { commandId, command: 'env.ensure', payload } },
+      });
+    } catch (err) {
+      this.client.send('command.result', {
+        commandId,
+        ok: false,
+        error: (err instanceof Error ? err.message : String(err)).slice(0, 500),
+      });
+    }
+  }
+
   /** Holds a command; if it cannot be held, the server gets an error answer instead of silence (Follow-up 3). */
   private holdOrAnswer(commandId: string, input: Parameters<Approvals['hold']>[0]): void {
     try {
@@ -2753,6 +2903,12 @@ export class Runner {
   /** The bundle a deploy runs with, kept for the next approval's diff. Best effort; never blocks the run. */
   private async recordApprovedBundle(command: string, payload: Record<string, unknown>): Promise<void> {
     if (command !== 'deploy.exec') return;
+    // REVIEW S3: a deploy the local gate let run makes its target reachable from the outer box
+    try {
+      new DeployHosts(this.paths.root).record(DeployExecPayloadSchema.parse(payload).target.host);
+    } catch {
+      // advisory
+    }
     try {
       const p = DeployExecPayloadSchema.parse(payload);
       const snap = await this.deployExec.snapshot(p);
@@ -2771,24 +2927,32 @@ export class Runner {
     }
     const policy = this.authority.policy();
     const orgId = msg.orgId ?? '';
-    const d = gateDevopsShift(
-      policy,
-      {
-        orgId,
-        agentId: msg.agent.agentId,
-        agentName: msg.agent.name,
+    const granted = this.authority.devopsGranted(orgId, msg.agent.agentId);
+    // quiet-approvals R1-R3: decided here, locally; the server can ask, never choose. Routed (and remembered, R2) as it
+    // will run: with the access narrowed to the local grants, so a box shift handed back is the same job
+    const beyond = msg.devops?.access ? beyondCeiling(policy, msg.devops.access, this.ceilingFolderOk) : [];
+    if (beyond.length && msg.devops?.requestId)
+      this.approvals.needStep({
+        key: `devops.ceiling:${msg.devops.requestId}`,
+        kind: 'devops.ceiling',
+        summary: `DevOps asked for ${beyond.join(', ')}, above the limit set on this computer`,
+        verb: 'setup',
         shiftId: msg.shiftId,
-        ...(msg.devops?.summary
-          ? { request: msg.devops.summary, cardTitle: msg.devops.summary.slice(0, 120) }
-          : {}),
-        ...(msg.devops?.requestedBy?.name ? { requester: msg.devops.requestedBy.name } : {}),
-        kind: msg.kind,
-        ...(msg.devops?.access ? { access: msg.devops.access } : {}),
-        ...(msg.devops?.approval?.commands?.length ? { approvedCommands: msg.devops.approval.commands } : {}),
-      },
-      this.authority.devopsGranted(orgId, msg.agent.agentId),
-    );
-    if (d.action === 'refuse') {
+      });
+    if (beyond.length)
+      this.log.info(
+        `DevOps request ${msg.devops?.requestId?.slice(0, 8)}: ${beyond.join(', ')} needs a change on this computer (Approvals on this computer, "The most DevOps may get"); it runs without it`,
+      );
+    msg = this.narrowShift(msg);
+    const route = routeDevopsShift(policy, msg, {
+      granted,
+      approved: this.approved(),
+      boxMissing: this.boxMissing(msg),
+      boxBroken: this.boxBroken(msg),
+    });
+    if (route.route === 'refuse') {
+      const broken = this.boxBroken(msg) ? this.boxMissing(msg) : null;
+      if (broken) this.askBoxFix(broken);
       // what the server offers becomes a suggestion for `guildwise-runner setup` (W9), never a grant
       // easy-runner-setup: the exact command that gives this grant, by name in the summary
       if (orgId && msg.agent.agentId && /^[0-9a-f-]{36}$/i.test(orgId)) {
@@ -2813,16 +2977,98 @@ export class Runner {
         } catch (err) {
           this.log.warn(`could not record the DevOps offer for setup: ${String(err)}`);
         }
-      this.supervisor.refuseStart(msg.shiftId, d.reason);
+      this.supervisor.refuseStart(msg.shiftId, route.reason);
       return;
     }
-    if (d.action === 'run' || (d.action === 'hold' && this.authority.autoApprove?.(d.kind))) {
-      void this.supervisor.handleStart(this.narrowShift(msg));
-      return;
+    switch (route.route) {
+      case 'asBefore':
+      case 'scan':
+        void this.supervisor.handleStart(this.narrowShift(msg));
+        return;
+      case 'box':
+        void this.supervisor.handleStart(this.narrowShift(msg), undefined, { devopsMode: 'box' });
+        return;
+      case 'outside':
+        this.log.info(
+          `DevOps shift ${msg.shiftId.slice(0, 8)} runs outside the box: ${route.why === 'r2' ? 'the exact job approved on this computer' : 'the resume of a job approved on this computer, for commands its session asked for'}`,
+        );
+        this.outsideRuns.set(msg.shiftId, route.key);
+        void this.supervisor.handleStart(this.narrowShift(route.msg), undefined, { devopsMode: 'outside' });
+        return;
+      case 'hygiene':
+        if (
+          route.decision.action === 'run' ||
+          (route.decision.action === 'hold' && this.authority.autoApprove?.(route.decision.kind))
+        ) {
+          void this.supervisor.handleStart(msg, undefined, { devopsMode: 'hygiene' });
+          return;
+        }
+        if (route.decision.action === 'hold') this.holdDevopsShift(msg, route.decision);
+        return;
+      case 'hold':
+        if (this.authority.autoApprove?.(route.decision.kind)) {
+          void this.supervisor.handleStart(this.narrowShift(msg));
+          return;
+        }
+        this.holdDevopsShift(msg, route.decision);
+        return;
     }
-    // UAT 1.10.0 finding 3: a held DevOps shift is accepted (it waits here, for the person at the machine). Without that
-    // the server released it after 30 s, put the request back in the queue and sent a new shift a minute later, each
-    // held again. One held item per request: a new shift of a request already held updates that item.
+  }
+
+  /**
+   * quiet-approvals R5-B1: a folder a Desk click asks for passes only by its real location under a ceiling root, never on
+   * the never-list.
+   */
+  private readonly ceilingFolderOk = (path: string, roots: readonly string[]): boolean =>
+    checkFolder(path, roots, {
+      home: homedir(),
+      policyRoot: this.opts.policyDir ?? policyDir(),
+      worktrees: this.paths.worktrees,
+      runnerRoot: this.paths.root,
+    }).ok;
+
+  /** The exact-job memory (R2), created on first use. */
+  private approved(): ApprovedRequests {
+    this.approvedRequests ??= ApprovedRequests.forRoot(
+      this.paths.root,
+      this.opts.policyDir ?? policyDir(),
+      (m) => this.log.warn(m),
+    );
+    return this.approvedRequests;
+  }
+
+  /** quiet-approvals [B2] (fail closed): why the DevOps box cannot start for this shift here, or null. */
+  /** REVIEW S4: the runtime builds the box but cannot here (an approved run would fail the same way). */
+  private boxBroken(msg: { agent: { runtime: string } }): boolean {
+    const adapter = this.adapters.get(msg.agent.runtime);
+    return !!adapter?.boxMissing && adapter.boxMissing() !== null;
+  }
+
+  /** REVIEW S4: one Desk step that says why DevOps cannot work here and how to fix it. */
+  private askBoxFix(reason: string): void {
+    this.approvals.needStep({
+      key: 'devops.box',
+      kind: 'devops.box',
+      summary: `DevOps cannot work on this computer yet: ${reason}`.slice(0, 300),
+      verb: 'setup',
+    });
+  }
+
+  private boxMissing(msg: { agent: { runtime: string } }): string | null {
+    const adapter = this.adapters.get(msg.agent.runtime);
+    if (!adapter) return `the ${msg.agent.runtime} runtime is not set up on this computer`;
+    if (!adapter.boxMissing) return `the ${msg.agent.runtime} runtime has no safety box`;
+    return adapter.boxMissing();
+  }
+
+  /**
+   * One held `devops.task` for a DevOps shift (UAT 1.10.0 finding 3): accepted (it waits here, for the person at the
+   * machine), one held item per request, and a request refused here stays refused for 24 hours.
+   */
+  private holdDevopsShift(
+    msg: Extract<ServerToRunner, { type: 'shift.start' }>,
+    d: Extract<GateDecision, { action: 'hold' }>,
+  ): void {
     const requestId = msg.devops?.requestId;
     const refusedAt = requestId ? this.refusedRequests.get(requestId) : undefined;
     if (requestId && refusedAt !== undefined) {
@@ -2841,6 +3087,208 @@ export class Runner {
       replay: { type: 'shift.start', body: msg },
       ...(requestId ? { requestKey: `devops:${requestId}` } : {}),
     });
+  }
+
+  /**
+   * quiet-approvals R1: a box session asked to work outside the box (`aom devops-outside`). The same shift start is held
+   * as one `devops.task` naming what it needs and why; `devopsRequests: auto` runs it outside at once (the owner's
+   * opt-out). Approving runs it outside the box and remembers the exact job (R2).
+   */
+  private holdOutside(
+    msg: Extract<ServerToRunner, { type: 'shift.start' }>,
+    ask: { why: string; needs: string },
+  ): void {
+    this.leftBox.add(msg.shiftId);
+    const policy = this.authority.policy();
+    const orgId = msg.orgId ?? '';
+    const d = gateDevopsShift(
+      policy,
+      devopsShiftInput(msg),
+      this.authority.devopsGranted(orgId, msg.agent.agentId),
+    );
+    if (d.action === 'refuse') {
+      this.supervisor.refuseStart(msg.shiftId, d.reason);
+      return;
+    }
+    if (d.action === 'run' || this.authority.autoApprove?.(d.kind)) {
+      void this.supervisor.handleStart(this.narrowShift(msg), undefined, {
+        devopsMode: 'outside',
+        startedSent: true,
+      });
+      return;
+    }
+    this.holdDevopsShift(msg, {
+      ...d,
+      summary: `DevOps helper ${msg.agent.name} needs to work outside the safety box: ${ask.needs}`.slice(
+        0,
+        300,
+      ),
+      detail: `asks to work outside the safety box (as received from the helper, untrusted):\n  needs: ${ask.needs}\n  why:   ${ask.why}\n\n${d.detail}`,
+    });
+  }
+
+  /**
+   * quiet-approvals S6/D9: test services from a recipe, on the runner's own Docker (never from a box). No internet unless
+   * the local ceiling allows it AND this exact recipe (sha256 + image digests) was approved by a Desk click (the passkey
+   * kind `test.recipe_egress`); a recipe that asks for it otherwise raises the matching step and runs without it.
+   */
+  private async testServicesUp(
+    msg: Extract<ServerToRunner, { type: 'shift.start' }>,
+    text: string,
+  ): Promise<IpcRpcResponse> {
+    const policy = this.authority.policy();
+    const socket = daemonSocket(policy, process.getuid?.() ?? null);
+    const bridgeImage = this.opts.config.testServicesBridgeImage;
+    if (!socket || !policy.allowDocker || !policy.ceiling.docker)
+      return { ok: false, error: 'Docker is not allowed for DevOps on this computer' };
+    if (!bridgeImage)
+      return {
+        ok: false,
+        error: 'no port bridge image is set on this computer (config.json testServicesBridgeImage)',
+      };
+    let recipe: TestRecipe;
+    try {
+      recipe = parseRecipe(text);
+    } catch (err) {
+      return {
+        ok: false,
+        error: `the recipe is not valid: ${err instanceof SyntaxError ? 'not JSON' : err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+    const projectKey = msg.brief?.project?.key ?? 'project';
+    const projectId = msg.brief?.project?.id ?? projectKey;
+    const approvals = new RecipeApprovals(this.opts.policyDir ?? policyDir());
+    const plan = planTestServices({
+      instance: createHash('sha256').update(this.paths.root).digest('hex').slice(0, 16),
+      projectKey,
+      recipe,
+      recipeText: text,
+      bridgeImage,
+      ceilingEgress: policy.ceiling.containerEgress,
+      ...(approvals.get(projectId) ? { approved: approvals.get(projectId) } : {}),
+    });
+    let note = '';
+    if (recipe.egress && !plan.egress) {
+      if (!policy.ceiling.containerEgress) {
+        this.approvals.needStep({
+          key: `devops.ceiling:recipe:${projectId}`,
+          kind: 'devops.ceiling',
+          summary: `the test services of ${projectKey} ask for internet, above the limit set on this computer`,
+          verb: 'setup',
+        });
+        note =
+          ' The recipe asked for internet: that needs a change on this computer; the services run without it.';
+      } else {
+        this.approvals.hold({
+          decision: {
+            action: 'hold',
+            kind: RECIPE_EGRESS_KIND,
+            summary: `internet for the test services of ${projectKey} (exactly this recipe)`.slice(0, 300),
+            detail: `test services recipe of ${projectKey}\n  sha256 ${recipeSha256(text)}\n  images ${recipe.services.map((s) => s.image).join(', ')}\n\nApproving lets these containers reach the internet. Any change to the recipe or an image asks again.`,
+            commandHash: recipeSha256(text),
+          },
+          replay: { type: 'test.recipe', body: { projectId, text, digests: recipeDigests(recipe) } },
+        });
+        note =
+          ' The recipe asked for internet: approve it on the Desk (passkey); the services run without it until then.';
+      }
+    }
+    try {
+      const services = await runTestServices(socket, plan);
+      return {
+        ok: true,
+        result: { message: `Test services up at ${services.join(', ')}.${note}`, services },
+      };
+    } catch (err) {
+      await downTestServices(socket, plan).catch(() => undefined);
+      return {
+        ok: false,
+        error: `the test services could not start: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  /** quiet-approvals C2: commands an OUTSIDE-box session asked for (after the guard's R4-S3 check), for its resume. */
+  private noteAskedCommands(
+    msg: Extract<ServerToRunner, { type: 'shift.start' }>,
+    data: Record<string, unknown>,
+    mode: DevopsMode | undefined,
+  ): void {
+    if (mode !== 'outside') return;
+    const key = this.outsideRuns.get(msg.shiftId);
+    const requestId = msg.devops?.requestId;
+    const parsed = DevopsApprovalDataSchema.safeParse(data);
+    if (!key || !requestId || !parsed.success || !parsed.data.blockedBy) return;
+    try {
+      this.approved().noteAsked(requestId, key, parsed.data.commands);
+    } catch (err) {
+      this.log.warn(`could not record the commands a DevOps session asked for: ${String(err)}`);
+    }
+  }
+
+  /** quiet-approvals C2: the Claude session an approved outside-box run created (a resume must name exactly it). */
+  private noteOutsideSession(
+    msg: Extract<ServerToRunner, { type: 'shift.start' }>,
+    sessionId: string,
+    mode: DevopsMode | undefined,
+  ): void {
+    if (mode !== 'outside') return;
+    const key = this.outsideRuns.get(msg.shiftId);
+    const requestId = msg.devops?.requestId;
+    if (!key || !requestId) return;
+    try {
+      this.approved().noteSession(requestId, key, sessionId);
+    } catch (err) {
+      this.log.warn(`could not record the session of an approved DevOps run: ${String(err)}`);
+    }
+  }
+
+  /**
+   * quiet-approvals [B1]: `aom toolchain ensure <tool>` inside the box. Only with the local `toolInstall` tick and setup
+   * done; only a tool the request's project needs, by its signed checksum recipe (`toolsOnly`); no dependency step.
+   * Without the tick it is refused with the way out (one local yes through `aom devops-outside`).
+   */
+  private async toolchainEnsure(
+    msg: Extract<ServerToRunner, { type: 'shift.start' }>,
+    tool: string,
+  ): Promise<IpcRpcResponse> {
+    const policy = this.authority.policy();
+    if (policy.toolInstall !== true || setupPending(policy))
+      return {
+        ok: false,
+        error: `Downloading tools is not allowed without asking on this computer. ${boxRefusal(`toolchain ensure ${tool}`)}`,
+      };
+    const urls = new Set<string>();
+    if (msg.devops?.card?.remoteUrlNormalized) urls.add(msg.devops.card.remoteUrlNormalized);
+    for (const r of msg.postAs?.repos ?? []) if (r.remoteUrlNormalized) urls.add(r.remoteUrlNormalized);
+    if (urls.size === 0) return { ok: false, error: 'this request names no project repository to prepare' };
+    const repos = [...urls].map((u, i) => ({
+      repoId: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+      name: u.split('/').pop() ?? u,
+      remoteUrlNormalized: u,
+      projectPath: '',
+    }));
+    try {
+      const report = await this.ensureEnv(
+        EnvEnsurePayloadSchema.parse({
+          requestId: msg.shiftId,
+          projectId: msg.brief?.project?.id ?? '00000000-0000-4000-8000-000000000000',
+          repos,
+          access: { allowInstall: true, allowDocker: false, sudo: false, allowedPaths: [] },
+        }),
+        { toolsOnly: true, onlyTools: [tool] },
+      );
+      const t = report.tools.find((x) => x.stack !== 'repository');
+      if (!t) return { ok: false, error: `the project needs no tool "${tool}" (${report.summary})` };
+      if (t.status === 'ok' || t.status === 'installed')
+        return { ok: true, result: { message: `${t.tool}: ${t.status}${t.version ? ` ${t.version}` : ''}` } };
+      return {
+        ok: false,
+        error: `${t.tool}: ${t.detail ?? t.status}${t.fix ? ` (${t.fix})` : ''}`.slice(0, 1500),
+      };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   /** The DevOps requests waiting for a switch of this workstation (Approvals on this computer). */
@@ -2918,12 +3366,46 @@ export class Runner {
       this.chat.refuseStart(msg, d.reason);
       return;
     }
-    if (d.action === 'run' || (d.action === 'hold' && this.authority.autoApprove?.(d.kind))) {
+    // quiet-approvals R1: every DevOps chat turn runs inside the box, without asking
+    const missing = this.boxMissing(msg);
+    if (!missing) {
+      void this.chat.handleStart(msg, { devopsBox: true });
+      return;
+    }
+    // REVIEW S4: a runtime that builds the box but cannot here: refused with the reason (an approved run would fail too)
+    if (this.boxBroken(msg)) {
+      this.askBoxFix(missing);
+      this.chat.refuseStart(msg, boxBrokenText(missing));
+      return;
+    }
+    // fail closed: a runtime without a box: the turn waits for one local yes (and then runs as before, outside it)
+    const held = gateDevopsShift(
+      { ...this.authority.policy(), devopsRequests: 'ask' },
+      {
+        orgId,
+        agentId: msg.agent.agentId,
+        agentName: msg.agent.name,
+        shiftId: msg.chatId,
+        cardTitle: 'DevOps chat turn',
+        request: msg.message.slice(0, 4000),
+      },
+      this.authority.devopsGranted(orgId, msg.agent.agentId),
+    );
+    if (held.action === 'refuse') {
+      this.chat.refuseStart(msg, held.reason);
+      return;
+    }
+    if (held.action !== 'hold') return;
+    if (this.authority.autoApprove?.(held.kind)) {
       void this.chat.handleStart(msg);
       return;
     }
     this.approvals.hold({
-      decision: { ...d, summary: `DevOps chat turn for ${msg.agent.name}: ${msg.message}`.slice(0, 300) },
+      decision: {
+        ...held,
+        summary: `DevOps chat turn for ${msg.agent.name}: ${msg.message}`.slice(0, 300),
+        detail: `${held.detail}\n\nThe safety box cannot start on this computer (${missing}): approving runs this turn outside it.`,
+      },
       replay: { type: 'chat.start', body: msg },
     });
   }
@@ -2933,7 +3415,10 @@ export class Runner {
     if (!msg.devops) return msg;
     return {
       ...msg,
-      devops: { ...msg.devops, access: narrowAccess(this.authority.policy(), msg.devops.access) },
+      devops: {
+        ...msg.devops,
+        access: narrowAccess(this.authority.policy(), msg.devops.access, this.ceilingFolderOk),
+      },
     };
   }
 
@@ -2951,9 +3436,34 @@ export class Runner {
 
   /** Runs a held item once it was approved (locally, or by a passkey for the two routine kinds). */
   private async runApproved(r: HeldRecord): Promise<void> {
+    // quiet-approvals D9: a Desk click (verified passkey) or a local yes approved exactly this recipe's internet
+    if (r.replay.type === 'test.recipe') {
+      const b = r.replay.body as { projectId: string; text: string; digests: string[] };
+      new RecipeApprovals(this.opts.policyDir ?? policyDir()).approve(b.projectId, b.text, b.digests);
+      this.log.info(`internet approved for exactly this test-services recipe of ${b.projectId}`);
+      return;
+    }
     if (r.replay.type === 'shift.start') {
       const msg = r.replay.body as Extract<ServerToRunner, { type: 'shift.start' }>;
-      await this.supervisor.handleStart(this.narrowShift(msg));
+      // quiet-approvals [B4]: an approved tidy-up is still the fixed routine, never an AI session
+      if (msg.kind === 'devops' && msg.agent?.isDevops && msg.devops?.hygiene) {
+        await this.supervisor.handleStart(msg, undefined, { devopsMode: 'hygiene' });
+        return;
+      }
+      // quiet-approvals R2: a LOCAL yes for a DevOps request remembers exactly this job (never a passkey decision)
+      const request = msg.kind === 'devops' && msg.agent?.isDevops ? msg.devops?.requestId : undefined;
+      if (request && r.decidedBy === 'local')
+        try {
+          this.outsideRuns.set(msg.shiftId, this.approved().record(request, msg).key);
+        } catch (err) {
+          this.log.warn(`could not remember the approved DevOps job: ${String(err)}`);
+        }
+      const startedSent = this.leftBox.delete(msg.shiftId);
+      await this.supervisor.handleStart(
+        this.narrowShift(msg),
+        undefined,
+        request ? { devopsMode: 'outside', ...(startedSent ? { startedSent: true } : {}) } : {},
+      );
       return;
     }
     if (r.replay.type === 'chat.start') {

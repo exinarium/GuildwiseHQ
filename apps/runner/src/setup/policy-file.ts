@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { assertNotAgentSession, checkSeal, readPolicyKey, seal } from '../policy/integrity.ts';
+import { assertNotAgentSession, checkSeal, keyLost, readPolicyKey, seal } from '../policy/integrity.ts';
 import {
   DEFAULT_POLICY,
   POLICY_FILE,
@@ -31,7 +31,9 @@ export function readPolicy(file: string, sealMarker?: string): Policy {
     check === 'no_key' &&
     ((!!body && 'toolchainPins' in body) ||
       (raw !== null && typeof raw === 'object' && 'integrity' in raw) ||
-      (!!sealMarker && existsSync(sealMarker)));
+      (!!sealMarker && existsSync(sealMarker)) ||
+      // quiet-approvals S3: a key was used here before and is gone now
+      keyLost(dirname(file)));
   if (check === 'bad' || check === 'unsealed' || sealedBefore)
     throw new Error(
       `${file} was changed outside the runner (its seal does not match): check it, then run \`guildwise-runner policy accept\` and setup again`,

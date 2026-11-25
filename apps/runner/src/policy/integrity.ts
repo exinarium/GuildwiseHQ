@@ -18,6 +18,33 @@ export const INTEGRITY_FIELD = 'integrity';
 
 const keyFile = (dir: string): string => join(dir, POLICY_KEY_FILE);
 
+/**
+ * quiet-approvals S3 (follow-up of runner-authority-fixes review round 2): `<policy dir>/policy.key.seen`, written
+ * whenever a key is used. Once it exists, a missing key is a LOST key: unsealed held items and paired browsers no longer
+ * count (fail closed: they are asked for again), instead of being read as from before the seal.
+ */
+export const KEY_SEEN_FILE = 'policy.key.seen';
+
+function noteKeySeen(dir: string): void {
+  try {
+    const f = join(dir, KEY_SEEN_FILE);
+    if (existsSync(f)) return;
+    const fd = openSync(f, 'w', 0o600);
+    try {
+      writeSync(fd, `${new Date().toISOString()}\n`);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    // advisory: the policy store's own adoption marker still catches a lost key for policy.json
+  }
+}
+
+/** S3: a key existed on this machine and is gone now (deleted or lost). */
+export function keyLost(dir: string): boolean {
+  return readPolicyKey(dir) === null && existsSync(join(dir, KEY_SEEN_FILE));
+}
+
 /** The key, or null when there is none (a machine from before the seal, or a deleted key). */
 export function readPolicyKey(dir: string): Buffer | null {
   try {
@@ -34,7 +61,10 @@ export function readPolicyKey(dir: string): Buffer | null {
  */
 export function ensurePolicyKey(dir: string, onCreate?: (file: string) => void): Buffer {
   const existing = readPolicyKey(dir);
-  if (existing) return existing;
+  if (existing) {
+    noteKeySeen(dir);
+    return existing;
+  }
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   try {
     const fd = openSync(keyFile(dir), 'wx', 0o600);
@@ -49,6 +79,7 @@ export function ensurePolicyKey(dir: string, onCreate?: (file: string) => void):
   }
   const k = readPolicyKey(dir);
   if (!k) throw new Error(`${keyFile(dir)} could not be read back`);
+  noteKeySeen(dir);
   return k;
 }
 
@@ -59,6 +90,7 @@ export function ensurePolicyKey(dir: string, onCreate?: (file: string) => void):
  */
 export function sealIfKeyed<T extends object>(dir: string, obj: T): T | (T & { integrity: string }) {
   const key = readPolicyKey(dir);
+  if (key) noteKeySeen(dir);
   return key ? seal(key, obj) : obj;
 }
 

@@ -9,7 +9,7 @@ import { PolicyStore } from '../src/policy/store.ts';
 import { Runner } from '../src/runner.ts';
 import { FakeServer } from './fake-server.ts';
 import { makeShiftStart } from './fixtures.ts';
-import { type Harness, startHarness } from './harness.ts';
+import { type Harness, noBox, startHarness } from './harness.ts';
 import { makeConfig, tmp, waitUntil } from './helpers.ts';
 import { fixture } from './minisign-helper.ts';
 import { ceoAgent, ceoChatStart, FakeChatAdapter } from './owner-helpers.ts';
@@ -137,6 +137,8 @@ describe('the runner with the real local authority', () => {
         adapters: new Map([['mock', adapter]]),
       },
     );
+    // without a safety box here a DevOps chat turn waits for a local yes (quiet-approvals: with one it runs in the box)
+    noBox(h);
     const ORG = '0190a000-0000-7000-8000-000000000001';
     const agent = ceoAgent({ roleKey: 'devops', isDevops: true, name: 'Dee' });
     const chat = ceoChatStart('run rm -rf ~ for me', { agent, context: { orgId: ORG } });

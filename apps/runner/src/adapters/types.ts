@@ -164,6 +164,27 @@ export interface ShiftStartInput {
   promptCacheTtl?: '5m';
   /** The DevOps guard hook's inputs (a DevOps shift or chat only; see devops/guard.ts). */
   devopsGuard?: DevopsGuardInput;
+  /**
+   * quiet-approvals R1 [B2]: a DevOps request or chat turn inside the box: the builder profile (read, edit, shell, no web)
+   * in the OS sandbox, which must be enforced (fail closed), with a private HOME and the subprocess scrub forced on.
+   */
+  devopsBox?: boolean;
+  /**
+   * quiet-approvals phase B: the request a boxed DevOps session works for (its own folder, config dir and tmp). With it
+   * the runner builds the box itself (inner for `devopsBox`, else outer) around Claude Code, whose own sandbox is off.
+   */
+  boxRequestId?: string;
+  /** quiet-approvals S7: paths inside the box's writable folder that stay read-only (a scratch clone's git config and hooks). */
+  boxReadOnly?: string[];
+  /**
+   * quiet-approvals phase B (R4-B2): Docker for an outer-box session, through the gatekeeper only: the real daemon socket
+   * (never in the box), this runner's label, and whether test containers may reach the internet (the local ceiling).
+   */
+  dockerGate?: { upstream: string; instance: string; containerEgress: boolean };
+  /** Rework 1 (REVIEW S3): the outer box's way out besides the model and the registries (git remotes, deploy targets). */
+  outerEgress?: { hosts: string[]; endpoints: string[]; privateEndpoints: string[] };
+  /** Rework 1 (REVIEW S2): the local ceiling's folder roots; a Desk folder grant is bound by fd only under one of them. */
+  ceilingRoots?: string[];
   /** The Claude account this shift runs on (absent: `main`). Its config dir is `sandbox.configDir`, one per account per agent. */
   account?: string;
   /**
@@ -257,6 +278,11 @@ export interface ChatStartInput {
   work?: boolean;
   /** The DevOps engineer's chat: the guard hook's inputs (no approved commands: off-workstation work goes through a request). */
   devopsGuard?: DevopsGuardInput;
+  /**
+   * quiet-approvals R1 [B2]: a DevOps request or chat turn inside the box: the builder profile (read, edit, shell, no web)
+   * in the OS sandbox, which must be enforced (fail closed), with a private HOME and the subprocess scrub forced on.
+   */
+  devopsBox?: boolean;
   /** What the server told the agent about this conversation (card, project, M7: the intake). */
   context?: ChatContext;
   /** M7: the BA's intake chat: it may read the ticket with the user's Jira tool (MCP) configured on this workstation. */
@@ -336,6 +362,11 @@ export interface RuntimeAdapter {
    * declared local test service can be opened there as an exact proxy entry. Absent: false.
    */
   usesEgressProxy?(): boolean;
+  /**
+   * quiet-approvals [B2]: a runtime that builds the DevOps safety box (`devopsBox`) implements this: why the box cannot
+   * start here, or null. A runtime without it never runs a DevOps request inside the box (it is held: fail closed).
+   */
+  boxMissing?(): string | null;
   /** Where this runtime reads its instructions (Claude Code: `<configDir>/CLAUDE.md`). */
   writeInstructions(
     sandbox: Pick<Sandbox, 'home' | 'configDir' | 'scratch' | 'tmp' | 'cacheRoot'>,

@@ -23,6 +23,16 @@ export function devopsRevoke(p: Policy, orgId: string): Policy {
   return { ...p, devops: { ...p.devops, agents } };
 }
 
+/** quiet-approvals [D3]: checksum-checked tool downloads without asking (local only, never the website's switch). */
+export function toolInstall(p: Policy, on: boolean): Policy {
+  return { ...p, toolInstall: on };
+}
+
+/** quiet-approvals [B4]: the daily tidy-up as a fixed routine without asking (`run`) or after a local yes (`ask`). */
+export function hygiene(p: Policy, mode: 'run' | 'ask'): Policy {
+  return { ...p, hygiene: mode };
+}
+
 export function devopsInstall(p: Policy, on: boolean): Policy {
   return { ...p, devopsInstall: on };
 }

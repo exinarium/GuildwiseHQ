@@ -12,7 +12,7 @@ import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync 
 import { join } from 'node:path';
 import { PAIR_CODE_RE } from '@aom/shared';
 import { z } from 'zod';
-import { assertNotAgentSession, checkSeal, sealIfKeyed } from '../policy/integrity.ts';
+import { assertNotAgentSession, checkSeal, keyLost, sealIfKeyed } from '../policy/integrity.ts';
 import { writeFileAtomic } from '../policy/store.ts';
 import { APPROVALS_PORT_MAX, APPROVALS_PORT_MIN } from '../sandbox/test-services.ts';
 
@@ -201,6 +201,8 @@ export class DeviceStore {
       const { check, body } = checkSeal(this.policyRoot, JSON.parse(readFileSync(this.devicesFile, 'utf8')));
       // no key yet: the runner has not adopted the policy (a CLI pairing before its first start); it seals them then
       if (check !== 'ok' && check !== 'no_key') return [];
+      // quiet-approvals S3: a key existed and is gone: an unsealed devices file pairs no browser (pair again)
+      if (check === 'no_key' && keyLost(this.policyRoot)) return [];
       const r = DevicesFileSchema.safeParse(body);
       return r.success ? r.data.devices : [];
     } catch {

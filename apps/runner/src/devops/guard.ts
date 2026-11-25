@@ -733,7 +733,7 @@ function appRepoGit(words: string[], c: Ctx): GuardVerdict | null {
       return appRepoRefusal(
         app.label,
         app.remote,
-        'commits here must be made as the app; ask for this as a card request (it runs as the app), or use `aom hygiene run`.',
+        'commits here must be made as the app; ask for this as a card request (it runs as the app); the daily tidy-up commits as the app by itself.',
       );
   }
   return null;

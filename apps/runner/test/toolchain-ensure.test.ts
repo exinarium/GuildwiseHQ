@@ -504,3 +504,63 @@ describe('env.ensure: project path (the project lives in a sub directory)', () =
     expect(m.calls.filter((c) => !c.endsWith('--version'))).toEqual([]);
   });
 });
+
+describe('quiet-approvals [D3]: a tools-only run (the local toolInstall tick)', () => {
+  it('a checksum-verified download runs; a tool without one is not run and is deferred for a local yes', async () => {
+    const { m, installer, deps, payload } = setup({
+      'package.json': '{}',
+      'pnpm-lock.yaml': '',
+      '.nvmrc': '22',
+    });
+    m.answers.set('node --version', ok('v18.19.0'));
+    installer.effects.set('node', { answers: { 'node --version': ok('v22.4.0') } });
+    m.installs.set(`npm install -g --prefix ${toolchainsRoot()} pnpm`, {
+      effect: { 'pnpm --version': ok('9.12.0') },
+    });
+    const r = await ensureEnvironment(payload(access()), { ...deps, toolsOnly: true });
+    expect(installer.calls).toEqual(['node']);
+    expect(r.tools.find((t) => t.tool.toLowerCase().includes('node'))?.status).toBe('installed');
+    // pnpm comes from an npm step (no published checksum): never run in a tools-only run
+    expect(m.calls.some((c) => c.startsWith('npm install -g'))).toBe(false);
+    expect(r.deferred?.some((d) => /pnpm/i.test(d))).toBe(true);
+  });
+
+  it('dependency steps never run in a tools-only run; each is listed for the local yes', async () => {
+    const { m, deps, payload } = setup(
+      { 'package.json': '{}', 'pnpm-lock.yaml': '', '.nvmrc': '20' },
+      { dependencies: true },
+    );
+    m.answers.set('node --version', ok('v22.1.0'));
+    m.answers.set('pnpm --version', ok('9.12.0'));
+    m.answers.set('pnpm install', ok('Done in 3s'));
+    const r = await ensureEnvironment(payload(access()), { ...deps, toolsOnly: true });
+    expect(m.calls).not.toContain('pnpm install');
+    expect(r.deferred).toContain('pnpm install');
+  });
+
+  it('a project with nothing to download needs no local yes (nothing deferred)', async () => {
+    const { m, deps, payload } = setup({ 'package.json': '{}', '.nvmrc': '22' });
+    m.answers.set('node --version', ok('v22.1.0'));
+    const r = await ensureEnvironment(payload(access()), { ...deps, toolsOnly: true });
+    expect(r.state).toBe('ready');
+    expect(r.deferred).toBeUndefined();
+  });
+
+  it('`onlyTools` prepares only the named tool (aom toolchain ensure in the box)', async () => {
+    const { m, installer, deps, payload } = setup({
+      'package.json': '{}',
+      'pnpm-lock.yaml': '',
+      '.nvmrc': '22',
+    });
+    m.answers.set('node --version', ok('v18.19.0'));
+    installer.effects.set('node', { answers: { 'node --version': ok('v22.4.0') } });
+    const r = await ensureEnvironment(payload(access()), {
+      ...deps,
+      toolsOnly: true,
+      onlyTools: ['node'],
+      installDependencies: false,
+    });
+    expect(installer.calls).toEqual(['node']);
+    expect(r.tools.map((t) => t.status)).toEqual(['installed']);
+  });
+});

@@ -13,7 +13,7 @@ import { ToolchainRegistry } from '../toolchain/registry.ts';
 import { openOwnerTurn } from './authority.ts';
 import { setupPending } from './gate.ts';
 import * as grants from './grants.ts';
-import { type HeldRecord, HeldStore } from './held.ts';
+import { type HeldRecord, HeldStore, HeldVersionMismatch, heldVersion } from './held.ts';
 import { POLICY_KEY_FILE, sealMarkerFor } from './integrity.ts';
 import { PasskeyStore } from './passkey-store.ts';
 import type { Policy } from './schema.ts';
@@ -128,6 +128,9 @@ export async function approve(
   d.out(`Held ${r.kind} ${r.id} (received ${r.createdAt}):`);
   d.out(r.detail);
   d.out(`command hash: ${r.commandHash}`);
+  // S2: the version printed here is the one approved; a newer shift of the same request after the yes aborts
+  const shown = r.version ?? heldVersion(r);
+  d.out(`version: ${shown}`);
   if (opts.pin)
     d.out(
       policy.policy.deployPinCommit
@@ -152,14 +155,26 @@ export async function approve(
     });
     signature = res.minisig;
   }
+  let done: HeldRecord;
+  try {
+    done = d.held.decide(
+      r.id,
+      'approved',
+      'local',
+      { ...(opts.pin ? { pinned: true } : {}), ...(signature ? { signature } : {}) },
+      shown,
+    );
+  } catch (err) {
+    if (err instanceof HeldVersionMismatch)
+      throw new Error(
+        `item ${r.id} changed after it was printed (a newer request replaced it); nothing was approved. Run approve again to see the new version.`,
+      );
+    throw err;
+  }
   if (opts.pin && r.pin) {
     const pin = r.pin;
     d.store.update((p) => grants.deployPinHeld(p, pin));
   }
-  const done = d.held.decide(r.id, 'approved', 'local', {
-    ...(opts.pin ? { pinned: true } : {}),
-    ...(signature ? { signature } : {}),
-  });
   d.out(`Approved ${r.id}; the runner starts it within a few seconds.`);
   return done;
 }

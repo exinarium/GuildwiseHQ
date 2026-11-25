@@ -248,6 +248,14 @@ export const UploadScanConfigSchema = z.object({
 export type UploadScanConfig = z.infer<typeof UploadScanConfigSchema>;
 
 export const RunnerConfigSchema = z.object({
+  /**
+   * quiet-approvals S6: the port bridge image for test services, pinned by its digest (`name@sha256:...`). Absent: test
+   * services from a recipe are not started on this computer.
+   */
+  testServicesBridgeImage: z
+    .string()
+    .regex(/^[a-z0-9./_-]+@sha256:[0-9a-f]{64}$/)
+    .optional(),
   serverUrl: z.string().min(1),
   workstationId: z.string().min(1),
   runnerToken: z.string().min(1),

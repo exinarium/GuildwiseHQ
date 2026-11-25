@@ -3,18 +3,33 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { CARD_ATTACHMENTS_DIR, type ClaudeAccountInfo, MAIN_ACCOUNT } from '@aom/shared';
 import { execa } from 'execa';
 import type { z } from 'zod';
+import { probeBwrap } from '../box/bwrap.ts';
+import { type BoxLevel, boxConfigDir, resetBoxConfigDir } from '../box/config-dir.ts';
+import { type DockerProxy, startDockerProxy } from '../box/docker-proxy.ts';
+import { sshThroughProxy } from '../box/egress-allow.ts';
+import { openCheckedFolder, openNamedFolder } from '../box/folder-check.ts';
+import {
+  boxedClaudeEnv,
+  boxSandbox,
+  MODEL_UPSTREAM,
+  type ModelCredential,
+  modelProxyPlan,
+} from '../box/launch.ts';
+import { launchMacBox, macBoxMissing } from '../box/macos-launch.ts';
 import { type GrantedSkill, materializeSkills, skillsDirOf } from '../capabilities/materialize.ts';
 import type { ClaudeRuntimeConfigSchema } from '../config.ts';
 import { alwaysPathRefusal, deleteRootsFor, type GuardConfig } from '../devops/guard.ts';
@@ -23,6 +38,26 @@ import { holdSandboxRepo } from '../git/config-lock.ts';
 import { discoverPluginMcpServers, mcpConfigFor, type PluginMcpServer } from '../mcp/plugins.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { policyDir as localPolicyDir } from '../policy/store.ts';
+import { BRIDGE_PORT, launchInHarnessSandbox, probeHarnessSandbox } from './harness-session.ts';
+
+/** The card worktrees (`worktrees/<project>/<card>`): the roots a container may bind as a whole. */
+export function cardWorktreeRoots(worktrees: string): string[] {
+  const out: string[] = [];
+  try {
+    for (const p of readdirSync(worktrees, { withFileTypes: true }))
+      if (p.isDirectory())
+        for (const c of readdirSync(join(worktrees, p.name), { withFileTypes: true }))
+          if (c.isDirectory()) out.push(join(worktrees, p.name, c.name));
+  } catch {
+    // no worktrees yet
+  }
+  return out;
+}
+
+/** The fallback message (S10): this computer has no credential the model proxy can carry for boxed DevOps work. */
+export const NEEDS_API_KEY =
+  'needs an API key for DevOps on this computer (the safety box never holds your Claude login, and none was found here)';
+
 import { reviewerPolicy } from '../review/reviewer-sandbox.ts';
 import {
   agentTmpDir,
@@ -59,6 +94,7 @@ import {
   agentEnv,
   buildCeoSettings,
   buildChatSettings,
+  buildDevopsBoxSettings,
   buildDevopsChatSettings,
   buildMentionWorkSettings,
   buildShiftSettings,
@@ -131,6 +167,8 @@ export function sessionEnv(
   input: Pick<ShiftStartInput, 'env' | 'sandbox'> & {
     agent?: Pick<ShiftStartInput['agent'], 'isDevops'>;
     devopsGuard?: Pick<NonNullable<ShiftStartInput['devopsGuard']>, 'readOnlyScan'>;
+    /** quiet-approvals [B2]: inside the box: a private HOME, no ssh agent or Docker, and the scrub forced on. */
+    devopsBox?: boolean;
     kind?: ShiftStartInput['kind'];
     promptCacheTtl?: ShiftStartInput['promptCacheTtl'];
     /** The agent loads its granted skills natively: Claude Code's own bundled skills are switched off. */
@@ -141,7 +179,8 @@ export function sessionEnv(
 ): Record<string, string> {
   // A scan is a DevOps shift but works inside the OS sandbox with the agent's private HOME: no ssh agent, Docker
   // socket or user runtime dir is handed to it (SSH_AUTH_SOCK would let the shell sign in to a server).
-  const devops = input.agent?.isDevops === true && input.devopsGuard?.readOnlyScan !== true;
+  const devops =
+    input.agent?.isDevops === true && input.devopsGuard?.readOnlyScan !== true && input.devopsBox !== true;
   const provider: Record<string, string> = {};
   if (cfg.authMode === 'oauth' && cfg.oauthToken) provider.CLAUDE_CODE_OAUTH_TOKEN = cfg.oauthToken;
   else if (cfg.authMode === 'api_key' && cfg.apiKey) provider.ANTHROPIC_API_KEY = cfg.apiKey;
@@ -175,7 +214,7 @@ export function sessionEnv(
       const v = parent[k];
       if (v !== undefined) extra[k] = v;
     }
-  } else if (cfg.scrubSubprocessEnv) extra.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = '1';
+  } else if (cfg.scrubSubprocessEnv || input.devopsBox === true) extra.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = '1';
   // input.env carries the agent's private HOME (sandboxEnv); the DevOps HOME above must win over it. DevOps also keeps
   // the user's own package caches: the shared sandbox caches and .NET settings are for sandboxed agents.
   const sessionVars = { ...input.env };
@@ -276,6 +315,7 @@ export function buildClaudeCommand(input: ShiftStartInput, cfg: ClaudeConfig): C
         sandbox: input.sandbox,
         agent: { isDevops: input.agent.isDevops },
         ...(input.devopsGuard?.readOnlyScan ? { devopsGuard: { readOnlyScan: true } } : {}),
+        ...(input.devopsBox ? { devopsBox: true } : {}),
         ...(nativeSkills(input) ? { nativeSkills: true } : {}),
         ...(input.kind ? { kind: input.kind } : {}),
         ...(input.promptCacheTtl ? { promptCacheTtl: input.promptCacheTtl } : {}),
@@ -331,6 +371,7 @@ export function buildClaudeChatCommand(input: ChatStartInput, cfg: ClaudeConfig)
         env: input.env,
         sandbox: input.sandbox,
         agent: { isDevops: input.agent.isDevops },
+        ...(input.devopsBox ? { devopsBox: true } : {}),
         ...(nativeSkills(input) ? { nativeSkills: true } : {}),
       },
       cfg,
@@ -405,6 +446,21 @@ export function buildClaudeOwnerTurnCommand(
   // them from the file named by AOM_SHIFT_ENV_FILE (see session/shift-credential.ts).
   if (ownerBypasses(input)) env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = '1';
   return { bin: cfg.bin, args, env, ...(viaStdin ? { stdin: input.message } : {}) };
+}
+
+/**
+ * quiet-approvals S12: the environment of a boxed full-power turn: the session's own variables and the private config dir and
+ * HOME; nothing inherited from the runner (its HOME, its credentials, its DOCKER_HOST, ...).
+ */
+export function ownerBoxEnv(
+  turnEnv: Record<string, string>,
+  dirs: { configDir: string; home: string },
+): Record<string, string> {
+  const keep: Record<string, string> = {};
+  for (const k of ['PATH', 'LANG', 'LC_ALL', 'TERM', 'TZ']) if (turnEnv[k]) keep[k] = turnEnv[k] as string;
+  for (const [k, v] of Object.entries(turnEnv)) if (k.startsWith('AOM_')) keep[k] = v;
+  if (turnEnv.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB) keep.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = '1';
+  return { ...keep, HOME: dirs.home, USERPROFILE: dirs.home, CLAUDE_CONFIG_DIR: dirs.configDir };
 }
 
 /** Only the Owner's own chat can run without prompts; a standing-order turn (nobody watching) keeps the classifier and the relay. */
@@ -596,6 +652,28 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       throw new Error(
         `A scan runs inside the OS sandbox and this computer cannot provide it: ${missing}. Install bubblewrap and socat (apt install bubblewrap socat), or run the runner in WSL2/Linux/macOS; then scan again.`,
       );
+  }
+
+  /**
+   * quiet-approvals [B2] (fail closed): a DevOps request inside the box needs the OS sandbox this platform provides,
+   * whatever the runner's sandbox mode says; otherwise it does not start (the runner holds it as `devops.task`).
+   */
+  boxMissing(): string | null {
+    // macOS: the boxes are Seatbelt profiles applied by the runner (S5)
+    if (this.host.platform === 'darwin')
+      return macBoxMissing() ?? (this.modelCredential() ? null : NEEDS_API_KEY);
+    const missing = sandboxMissing(this.host.platform, this.host.pathVar);
+    if (missing) return missing;
+    const bw = probeBwrap();
+    if (!bw.ok) return bw.reason;
+    const hs = probeHarnessSandbox(this.host.platform);
+    if (!hs.ok) return hs.reason;
+    return this.modelCredential() ? null : NEEDS_API_KEY;
+  }
+
+  private assertBox(): void {
+    const missing = this.boxMissing();
+    if (missing) throw new Error(`the safety box for DevOps cannot start on this computer: ${missing}`);
   }
 
   /** Effective OS-sandbox state of this runtime (see `sandboxState`). */
@@ -1025,7 +1103,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (realClaudeBlocked()) throw new RealClaudeBlockedError();
     // The DevOps engineer runs without the OS sandbox, so a missing bwrap/socat does not stop it. A scan is the exception:
     // it runs inside the sandbox or not at all (fail closed, whatever the runner's sandbox mode says).
-    if (input.agent.isDevops && input.devopsGuard?.readOnlyScan === true) this.assertScanSandbox();
+    if (input.devopsBox) this.assertBox();
+    else if (input.agent.isDevops && input.devopsGuard?.readOnlyScan === true) this.assertScanSandbox();
     else if (!input.agent.isDevops) this.assertCanRun();
     // a backend model (Bedrock, Vertex, a gateway) has no Claude login: its `account` names a credential of the backend, not a Claude account
     const account = this.account(backendOfModel(input.agent.model) ? undefined : input.account);
@@ -1041,16 +1120,342 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     }
   }
 
+  /**
+   * quiet-approvals phase B: the credential the model proxy adds for a boxed session (never put into the box), or null
+   * when this computer has none the proxy can carry.
+   */
+  modelCredential(accountKey?: string): ModelCredential | null {
+    const account = this.account(accountKey);
+    const cfg = this.liveFor(account);
+    if (cfg.authMode === 'api_key' && cfg.apiKey) return { kind: 'api_key', apiKey: cfg.apiKey };
+    if (cfg.authMode === 'oauth' && cfg.oauthToken) return { kind: 'oauth_token', token: cfg.oauthToken };
+    const file = account.main
+      ? join(this.realHome(), '.claude', '.credentials.json')
+      : account.canonicalFile();
+    return file && existsSync(file) ? { kind: 'login', credentialsFile: file } : null;
+  }
+
+  /**
+   * quiet-approvals phase B (D7 (b)): a DevOps session in a box the runner builds (inner: the builder-like profile; outer:
+   * the DevOps profile), Claude Code's own sandbox off, a fresh config dir per level and request (S9), the model through
+   * the proxy (S10). Fails closed: no bubblewrap, no harness sandbox or no credential the proxy can carry throws.
+   */
+  private async startBoxedSession(input: ShiftStartInput, account: ClaudeAccount): Promise<RuntimeSession> {
+    const level: BoxLevel = input.devopsBox ? 'inner' : 'outer';
+    if (this.host.platform === 'darwin') return this.startMacBoxedSession(input, account, level);
+    const bw = probeBwrap();
+    if (!bw.ok) throw new Error(`the DevOps safety box cannot start on this computer: ${bw.reason}`);
+    const hs = probeHarnessSandbox(this.host.platform);
+    if (!hs.ok) throw new Error(`the DevOps safety box cannot start on this computer: ${hs.reason}`);
+    const cred = this.modelCredential(input.account);
+    if (!cred) throw new Error(NEEDS_API_KEY);
+    const requestId = input.boxRequestId as string;
+    const agentDir = dirname(input.sandbox.home);
+    const configDir = boxConfigDir(agentDir, level, requestId);
+    const tmp = join(input.sandbox.tmp, requestId);
+    mkdirSync(tmp, { recursive: true, mode: 0o700 });
+    const root = this.paths?.root ?? dirname(dirname(agentDir));
+    // the outer box keeps the DevOps guard (T2, T9, T10 as built: defence in depth). Its file sits beside the config dir,
+    // read-only in the box, so the session cannot rewrite its own guard.
+    const guardDir = `${configDir}.guard`;
+    rmSync(guardDir, { recursive: true, force: true });
+    const guard =
+      level === 'outer' ? this.devopsGuard(guardDir, input.devopsGuard, 'shift', input.sandbox) : undefined;
+    if (level === 'outer' && !guard)
+      throw new Error('the DevOps guard could not be attached to the outer box');
+    if (guard) input = { ...input, env: { ...input.env, AOM_DEVOPS_GUARD: guard.file } };
+    const policyCtx = this.policy(input, input.cwd, false, guard?.command);
+    const settings =
+      level === 'inner'
+        ? buildDevopsBoxSettings(input.agent.permissions, policyCtx, { ...input.sandbox, configDir })
+        : buildShiftSettings(
+            input.agent.permissions,
+            policyCtx,
+            { ...input.sandbox, configDir },
+            'devops',
+            true,
+          );
+    // the box is the boundary: Claude Code's own sandbox is off inside it (never nested)
+    delete (settings as { sandbox?: unknown }).sandbox;
+    resetBoxConfigDir(configDir, {
+      settings,
+      mcp: { mcpServers: {} },
+      instructions: input.instructionsMarkdown,
+      ...(input.resumeSessionId ? { keepSession: input.resumeSessionId } : {}),
+    });
+    mkdirSync(join(configDir, 'home'), { recursive: true, mode: 0o700 });
+    const plan = modelProxyPlan(cred);
+    // R4-B2: Docker only through the gatekeeper; its socket sits in a runner-owned folder, read-only in the box
+    let docker: { proxy: DockerProxy; dir: string; socket: string } | undefined;
+    if (level === 'outer' && input.dockerGate) {
+      const gdir = mkdtempSync(join(tmpdir(), 'aom-dk-'));
+      chmodSync(gdir, 0o755);
+      const socket = join(gdir, 'docker.sock');
+      const bindRoots = [input.cwd];
+      // REVIEW S5: a card worktree is only ever bound read-only into a container
+      const roBindRoots = cardWorktreeRoots(join(root, 'worktrees'));
+      const proxy = await startDockerProxy({
+        socketPath: socket,
+        upstream: input.dockerGate.upstream,
+        policy: {
+          instance: input.dockerGate.instance,
+          bindRoots,
+          roBindRoots,
+          containerEgress: input.dockerGate.containerEgress,
+        },
+      });
+      docker = { proxy, dir: gdir, socket };
+    }
+    const boxSb = { ...input.sandbox, configDir, home: join(configDir, 'home'), tmp };
+    const cmd = buildClaudeCommand(
+      { ...input, sandbox: boxSb, readDirs: input.readDirs ?? [] },
+      this.noClaudeToken(this.liveFor(account)),
+    );
+    const env: Record<string, string> = {
+      ...cmd.env,
+      ...boxedClaudeEnv(plan, BRIDGE_PORT),
+      ...(docker ? { DOCKER_HOST: `unix://${docker.socket}` } : {}),
+    };
+    delete env.ANTHROPIC_API_KEY;
+    delete env.CLAUDE_CODE_OAUTH_TOKEN;
+    Object.assign(env, plan.env);
+    // REVIEW S3: git over ssh goes through the egress proxy too (only to the project's own remotes and deploy targets)
+    if (level === 'outer') env.GIT_SSH_COMMAND = sshThroughProxy(BRIDGE_PORT);
+    // REVIEW S2 (R5-B1 rule 4): a Desk folder grant inside the ceiling is bound by the fd the runner checked
+    const nl = {
+      home: this.realHome(),
+      policyRoot: localPolicyDir(),
+      worktrees: join(root, 'worktrees'),
+      runnerRoot: root,
+    };
+    const opened: Array<{ fd: number; real: string; close(): void }> = [];
+    if (level === 'outer')
+      for (const p of input.devopsGuard?.access?.allowedPaths ?? []) {
+        const r = openCheckedFolder(p, input.ceilingRoots ?? [], nl);
+        if (r.ok) opened.push(r.folder);
+        else process.stderr.write(`WARN DevOps box: ${r.reason}\n`);
+      }
+    const launch = await launchInHarnessSandbox({
+      routes: [plan.route],
+      cliHosts: [new URL(MODEL_UPSTREAM).hostname],
+      extraHosts: [
+        ...this.cfg.extraAllowedDomains,
+        ...(level === 'outer' ? (input.outerEgress?.hosts ?? []) : []),
+      ],
+      // Rework 2 (REVIEW B4): names only at public addresses (resolved at every connect); private only for literals
+      ...(level === 'outer' && input.outerEgress?.endpoints.length
+        ? { publicEndpoints: input.outerEgress.endpoints }
+        : {}),
+      ...(level === 'outer' && input.outerEgress?.privateEndpoints.length
+        ? { privateEndpoints: input.outerEgress.privateEndpoints }
+        : {}),
+      sandbox: boxSandbox({
+        level,
+        requestDir: input.cwd,
+        ...(opened.length
+          ? { fdBinds: opened.map((f, i) => ({ fdIndex: 3 + i, real: f.real, writable: true })) }
+          : {}),
+        configDir,
+        tmp,
+        aomReadPaths: [
+          ...policyCtx.aomReadPaths,
+          ...(guard ? [guardDir] : []),
+          ...(docker ? [docker.dir] : []),
+          ...(input.boxReadOnly ?? []),
+        ],
+        claudeBin: this.cfg.bin,
+        toolchainReadDirs: policyCtx.toolchainReadPaths ?? [],
+        cloneDirs: input.readDirs ?? [],
+        ...(input.env.AOM_IPC_SOCKET ? { ipcSocket: input.env.AOM_IPC_SOCKET } : {}),
+        ...(level === 'outer'
+          ? {
+              outer: {
+                devopsTools: join(root, 'devops-tools'),
+                cardWorktrees: join(root, 'worktrees'),
+                realHome: this.realHome(),
+              },
+            }
+          : {}),
+      }),
+      // the install is bound by its real folder: start it by its real path (a ~/.local/bin link is not in the box)
+      cmd: { bin: realpathSync(cmd.bin), args: cmd.args, env },
+    });
+    mkdirSync(join(root, 'devops-tools'), { recursive: true, mode: 0o700 });
+    const parser = new ClaudeStreamParser();
+    const closeFds = () => {
+      for (const f of opened) f.close();
+    };
+    try {
+      return spawnSession({
+        bin: launch.command.bin,
+        args: launch.command.args,
+        cwd: input.cwd,
+        env: launch.command.env,
+        inheritEnv: false,
+        ...(opened.length ? { extraFds: opened.map((f) => f.fd) } : {}),
+        ...(cmd.stdin !== undefined ? { input: cmd.stdin } : {}),
+        parseLine: (l) => parser.parseLine(l),
+        usage: () => parser.usage(),
+        contextTokens: () => parser.contextTokens(),
+        logFile: input.logFile,
+        exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
+        onExit: async () => {
+          // the per-session bearer dies with the proxy (revoked at the session's end)
+          await launch.cleanup();
+          if (docker) {
+            await docker.proxy.close().catch(() => undefined);
+            rmSync(docker.dir, { recursive: true, force: true });
+          }
+        },
+      });
+    } finally {
+      // the child holds its own copies of the fds after spawn
+      closeFds();
+    }
+  }
+
+  /** quiet-approvals S5: the same session on macOS, in the Seatbelt profile of its level (unit-tested; Mac QA required). */
+  private async startMacBoxedSession(
+    input: ShiftStartInput,
+    account: ClaudeAccount,
+    level: BoxLevel,
+  ): Promise<RuntimeSession> {
+    const missing = macBoxMissing();
+    if (missing) throw new Error(`the DevOps safety box cannot start on this computer: ${missing}`);
+    const cred = this.modelCredential(input.account);
+    if (!cred) throw new Error(NEEDS_API_KEY);
+    const requestId = input.boxRequestId as string;
+    const agentDir = dirname(input.sandbox.home);
+    const configDir = boxConfigDir(agentDir, level, requestId);
+    const tmp = join(input.sandbox.tmp, requestId);
+    mkdirSync(tmp, { recursive: true, mode: 0o700 });
+    const root = this.paths?.root ?? dirname(dirname(agentDir));
+    // the outer box keeps the DevOps guard, its file read-only beside the config dir (as on Linux)
+    const guardDir = `${configDir}.guard`;
+    rmSync(guardDir, { recursive: true, force: true });
+    const guard =
+      level === 'outer' ? this.devopsGuard(guardDir, input.devopsGuard, 'shift', input.sandbox) : undefined;
+    if (level === 'outer' && !guard)
+      throw new Error('the DevOps guard could not be attached to the outer box');
+    if (guard) input = { ...input, env: { ...input.env, AOM_DEVOPS_GUARD: guard.file } };
+    const policyCtx = this.policy(input, input.cwd, false, guard?.command);
+    const settings =
+      level === 'inner'
+        ? buildDevopsBoxSettings(input.agent.permissions, policyCtx, { ...input.sandbox, configDir })
+        : buildShiftSettings(
+            input.agent.permissions,
+            policyCtx,
+            { ...input.sandbox, configDir },
+            'devops',
+            true,
+          );
+    delete (settings as { sandbox?: unknown }).sandbox;
+    resetBoxConfigDir(configDir, {
+      settings,
+      mcp: { mcpServers: {} },
+      instructions: input.instructionsMarkdown,
+      ...(input.resumeSessionId ? { keepSession: input.resumeSessionId } : {}),
+    });
+    const home = join(configDir, 'home');
+    mkdirSync(home, { recursive: true, mode: 0o700 });
+    const plan = modelProxyPlan(cred);
+    const cmd = buildClaudeCommand(
+      { ...input, sandbox: { ...input.sandbox, configDir, home, tmp }, readDirs: input.readDirs ?? [] },
+      this.noClaudeToken(this.liveFor(account)),
+    );
+    const sb = boxSandbox({
+      level,
+      requestDir: input.cwd,
+      configDir,
+      tmp,
+      aomReadPaths: [...policyCtx.aomReadPaths, ...(guard ? [guardDir] : [])],
+      claudeBin: this.cfg.bin,
+      toolchainReadDirs: policyCtx.toolchainReadPaths ?? [],
+      cloneDirs: input.readDirs ?? [],
+      ...(level === 'outer'
+        ? {
+            outer: {
+              devopsTools: join(root, 'devops-tools'),
+              cardWorktrees: join(root, 'worktrees'),
+              realHome: this.realHome(),
+            },
+          }
+        : {}),
+    });
+    // R4-B2 on macOS too: Docker Desktop (or another daemon) only through the gatekeeper
+    let docker: { proxy: DockerProxy; dir: string; socket: string } | undefined;
+    if (level === 'outer' && input.dockerGate) {
+      const gdir = mkdtempSync(join(tmpdir(), 'aom-dk-'));
+      const socket = join(gdir, 'docker.sock');
+      const proxy = await startDockerProxy({
+        socketPath: socket,
+        upstream: input.dockerGate.upstream,
+        policy: {
+          instance: input.dockerGate.instance,
+          bindRoots: [input.cwd],
+          roBindRoots: cardWorktreeRoots(join(root, 'worktrees')),
+          containerEgress: input.dockerGate.containerEgress,
+        },
+      });
+      docker = { proxy, dir: gdir, socket };
+    }
+    const launch = await launchMacBox({
+      profile: {
+        ...(docker ? { dockerSocket: docker.socket } : {}),
+        level,
+        home: this.realHome(),
+        readPaths: [...sb.readonly, ...sb.readDirs],
+        writePaths: [sb.cwd, sb.home, sb.tmp, ...sb.writable],
+        ...(input.env.AOM_IPC_SOCKET ? { ipcSocket: input.env.AOM_IPC_SOCKET } : {}),
+      },
+      routes: [plan.route],
+      allowedHosts: [new URL(MODEL_UPSTREAM).hostname, ...this.cfg.extraAllowedDomains],
+      cmd: { bin: realpathSync(cmd.bin), args: cmd.args, env: cmd.env },
+    });
+    const env: Record<string, string> = {
+      ...launch.command.env,
+      ...boxedClaudeEnv(plan, launch.port),
+      ...(docker ? { DOCKER_HOST: `unix://${docker.socket}` } : {}),
+    };
+    delete env.ANTHROPIC_API_KEY;
+    delete env.CLAUDE_CODE_OAUTH_TOKEN;
+    Object.assign(env, plan.env);
+    const parser = new ClaudeStreamParser();
+    return spawnSession({
+      bin: launch.command.bin,
+      args: launch.command.args,
+      cwd: input.cwd,
+      env,
+      inheritEnv: false,
+      ...(cmd.stdin !== undefined ? { input: cmd.stdin } : {}),
+      parseLine: (l) => parser.parseLine(l),
+      usage: () => parser.usage(),
+      contextTokens: () => parser.contextTokens(),
+      logFile: input.logFile,
+      exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
+      onExit: async () => {
+        await launch.cleanup();
+        if (docker) {
+          await docker.proxy.close().catch(() => undefined);
+          rmSync(docker.dir, { recursive: true, force: true });
+        }
+      },
+    });
+  }
+
   private async startShiftSession(
     input: ShiftStartInput,
     account: ReturnType<ClaudeCodeAdapter['account']>,
     bk: ReturnType<ClaudeCodeAdapter['backendSession']>,
   ): Promise<RuntimeSession> {
+    // quiet-approvals phase B: a DevOps request session runs in the box the runner builds (fail closed)
+    if (input.boxRequestId && input.agent.isDevops && !bk) return this.startBoxedSession(input, account);
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
-    const guard = input.agent.isDevops
-      ? this.devopsGuard(dir, input.devopsGuard, 'shift', input.sandbox)
-      : undefined;
+    const guard =
+      input.agent.isDevops && !input.devopsBox
+        ? this.devopsGuard(dir, input.devopsGuard, 'shift', input.sandbox)
+        : undefined;
     if (input.agent.isDevops && input.kind === 'release_prep' && !guard)
       throw new Error(
         'the DevOps guard could not be attached to this release prep shift (no guard settings or no runner paths)',
@@ -1064,16 +1469,18 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       ownRepoDirs = split.ownRepoDirs;
       input = { ...input, readDirs: split.readDirs };
     }
-    const settings = buildShiftSettings(
-      input.agent.permissions,
-      {
-        ...this.policy(input, input.cwd, false, guard?.command, input.devopsGuard?.readOnlyScan === true),
-        ...(ownRepoDirs.length ? { ownRepoDirs } : {}),
-      },
-      input.sandbox,
-      input.agent.roleKey,
-      input.agent.isDevops,
-    );
+    const settings = input.devopsBox
+      ? buildDevopsBoxSettings(input.agent.permissions, this.policy(input, input.cwd, false), input.sandbox)
+      : buildShiftSettings(
+          input.agent.permissions,
+          {
+            ...this.policy(input, input.cwd, false, guard?.command, input.devopsGuard?.readOnlyScan === true),
+            ...(ownRepoDirs.length ? { ownRepoDirs } : {}),
+          },
+          input.sandbox,
+          input.agent.roleKey,
+          input.agent.isDevops,
+        );
     if (settings.sandbox)
       for (const d of shadowedWrites(settings.sandbox.filesystem, input.cwd))
         process.stderr.write(
@@ -1149,8 +1556,11 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
 
   async startChat(input: ChatStartInput): Promise<RuntimeSession> {
     if (realClaudeBlocked()) throw new RealClaudeBlockedError();
-    const devops = input.agent.isDevops === true;
-    if (!devops) this.assertCanRun();
+    // quiet-approvals [B2]: a DevOps chat turn inside the box is sandboxed like a builder (fail closed), not "devops"
+    const box = input.devopsBox === true;
+    const devops = input.agent.isDevops === true && !box;
+    if (box) this.assertBox();
+    else if (!devops) this.assertCanRun();
     // Read-only folders of the chat, plus the repository metadata of a card worktree it reads (stops the refused
     // Read/Grep of `<repo>/.git/worktrees/<card>/HEAD`). The DevOps engineer reads anywhere and needs none of it.
     const chatInput = {
@@ -1198,34 +1608,42 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       : this.writeMcpConfig(
           dir,
           input.agent.permissions.allowedTools,
-          devops || input.agent.roleKey === 'ceo' ? undefined : input.context?.mcpServers,
+          devops || input.devopsBox === true || input.agent.roleKey === 'ceo'
+            ? undefined
+            : input.context?.mcpServers,
           intakeMcp && existsSync(intakeMcp) ? intakeMcp : undefined,
         );
     const chatSettings: ClaudeSettings = review
       ? reviewerPolicy(review, this.policy(chatInput, input.cwd, true)).settings
-      : devops
-        ? buildDevopsChatSettings(
+      : input.devopsBox
+        ? buildDevopsBoxSettings(
             input.agent.permissions,
-            this.policy(input, input.cwd, false, guard?.command),
+            this.policy(chatInput, input.cwd, false),
             input.sandbox,
           )
-        : input.agent.roleKey === 'ceo'
-          ? buildCeoSettings(this.policy(chatInput, input.cwd, true), input.sandbox)
-          : input.work
-            ? buildMentionWorkSettings(
-                input.agent.permissions,
-                this.policy(chatInput, input.cwd, false),
-                input.sandbox,
-              )
-            : buildChatSettings(
-                input.readOnly,
-                [
-                  ...(input.intake ? (this.cfg.intake?.allowedTools ?? []) : []),
-                  ...used.map((u) => `mcp__${u.name}`),
-                ],
-                this.policy(chatInput, input.cwd, true),
-                input.sandbox,
-              );
+        : devops
+          ? buildDevopsChatSettings(
+              input.agent.permissions,
+              this.policy(input, input.cwd, false, guard?.command),
+              input.sandbox,
+            )
+          : input.agent.roleKey === 'ceo'
+            ? buildCeoSettings(this.policy(chatInput, input.cwd, true), input.sandbox)
+            : input.work
+              ? buildMentionWorkSettings(
+                  input.agent.permissions,
+                  this.policy(chatInput, input.cwd, false),
+                  input.sandbox,
+                )
+              : buildChatSettings(
+                  input.readOnly,
+                  [
+                    ...(input.intake ? (this.cfg.intake?.allowedTools ?? []) : []),
+                    ...used.map((u) => `mcp__${u.name}`),
+                  ],
+                  this.policy(chatInput, input.cwd, true),
+                  input.sandbox,
+                );
     const withSkills = review
       ? chatInput
       : this.prepareSubagents(dir, this.prepareSkills(dir, chatInput, chatSettings), chatSettings);
@@ -1278,21 +1696,162 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
   /** The CEO's full-power turn (see `buildClaudeOwnerTurnCommand`). Needs no OS sandbox. */
   async startOwnerTurn(input: OwnerTurnInput): Promise<RuntimeSession> {
     if (realClaudeBlocked()) throw new RealClaudeBlockedError();
-    const cmd = buildClaudeOwnerTurnCommand(input, this.live);
+    // quiet-approvals phase B (S12): a full-power turn runs in the outer box the runner builds (fail closed), with a private
+    // config dir: the owner's own Claude setup (plugins, MCP servers, skills) is not mounted, only what Guildwise gives it
+    const missing = this.boxMissing();
+    if (missing)
+      throw new Error(`the safety box for a full-power turn cannot start on this computer: ${missing}`);
+    const cred = this.modelCredential();
+    if (!cred) throw new Error(NEEDS_API_KEY);
+    const configDir = join(input.turnDir, 'config');
+    resetBoxConfigDir(configDir, { settings: {}, mcp: { mcpServers: {} } });
+    const home = join(configDir, 'home');
+    mkdirSync(home, { recursive: true, mode: 0o700 });
+    // Rework 1 (REVIEW B2): the turn works in its own empty folder; never the real home. A folder the server names (its
+    // cwd, its added folders) is mounted read-only, by its real location, only when not on the never-list
+    const work = join(input.turnDir, 'work');
+    const tmp = join(input.turnDir, 'tmp');
+    for (const d of [work, tmp]) mkdirSync(d, { recursive: true, mode: 0o700 });
+    const root = this.paths?.root ?? dirname(dirname(input.turnDir));
+    const nl = {
+      home: this.realHome(),
+      policyRoot: localPolicyDir(),
+      worktrees: join(root, 'worktrees'),
+      runnerRoot: root,
+    };
+    const named = [...new Set([input.cwd, ...(input.addDirs ?? [])])].filter(
+      (p) => p && resolve(p) !== resolve(work),
+    );
+    const plan = modelProxyPlan(cred);
+    const base = buildClaudeOwnerTurnCommand(input, this.noClaudeToken(this.live), {});
+    const aomRead = [
+      input.turnDir,
+      this.paths?.bin ?? join(root, 'bin'),
+      ...selfCommand('aom')
+        .slice(-1)
+        .map((p) => dirname(p)),
+    ];
+    const outer = {
+      devopsTools: join(root, 'devops-tools'),
+      cardWorktrees: join(root, 'worktrees'),
+      realHome: this.realHome(),
+    };
+    mkdirSync(join(root, 'devops-tools'), { recursive: true, mode: 0o700 });
     const parser = new ClaudeStreamParser();
-    return spawnSession({
-      bin: cmd.bin,
-      args: cmd.args,
-      cwd: input.cwd,
-      env: cmd.env,
-      inheritEnv: false,
-      ...(cmd.stdin !== undefined ? { input: cmd.stdin } : {}),
-      parseLine: (l) => parser.parseLine(l),
-      usage: () => parser.usage(),
-      logFile: input.logFile,
-      exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
-      ...this.ownerHooks(parser),
-    });
+    const hooks = this.ownerHooks(parser);
+    const baseEnv: Record<string, string> = ownerBoxEnv(base.env, { configDir, home });
+    // macOS (REVIEW S8): the same turn in the outer Seatbelt profile; Seatbelt checks resolved paths (no fd binds)
+    if (this.host.platform === 'darwin') {
+      const readable: string[] = [];
+      for (const p of named) {
+        const r = openNamedFolder(p, nl, { fdPath: () => realpathSync(p) });
+        if (r.ok) {
+          readable.push(r.folder.real);
+          r.folder.close();
+        }
+      }
+      const sb = boxSandbox({
+        level: 'outer',
+        requestDir: work,
+        configDir,
+        tmp,
+        aomReadPaths: aomRead,
+        claudeBin: this.cfg.bin,
+        toolchainReadDirs: [],
+        cloneDirs: [],
+        outer,
+      });
+      const launch = await launchMacBox({
+        profile: {
+          level: 'outer',
+          home: this.realHome(),
+          readPaths: [...sb.readonly, ...readable],
+          writePaths: [work, home, tmp, ...sb.writable],
+          ...(input.env.AOM_IPC_SOCKET ? { ipcSocket: input.env.AOM_IPC_SOCKET } : {}),
+        },
+        routes: [plan.route],
+        allowedHosts: [new URL(MODEL_UPSTREAM).hostname, ...this.cfg.extraAllowedDomains],
+        cmd: { bin: realpathSync(base.bin), args: base.args, env: baseEnv },
+      });
+      return spawnSession({
+        bin: launch.command.bin,
+        args: launch.command.args,
+        cwd: work,
+        env: { ...launch.command.env, ...boxedClaudeEnv(plan, launch.port) },
+        inheritEnv: false,
+        ...(base.stdin !== undefined ? { input: base.stdin } : {}),
+        parseLine: (l) => parser.parseLine(l),
+        usage: () => parser.usage(),
+        logFile: input.logFile,
+        exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
+        ...hooks,
+        onExit: async (r) => {
+          try {
+            await hooks.onExit?.(r);
+          } finally {
+            await launch.cleanup();
+          }
+        },
+      });
+    }
+    const opened: Array<{ fd: number; real: string; close(): void }> = [];
+    for (const p of named) {
+      const r = openNamedFolder(p, nl);
+      if (r.ok) opened.push(r.folder);
+      else process.stderr.write(`WARN full-power turn: ${r.reason}\n`);
+    }
+    const env: Record<string, string> = { ...baseEnv, ...boxedClaudeEnv(plan, BRIDGE_PORT) };
+    let launch: Awaited<ReturnType<typeof launchInHarnessSandbox>>;
+    try {
+      launch = await launchInHarnessSandbox({
+        routes: [plan.route],
+        cliHosts: [new URL(MODEL_UPSTREAM).hostname],
+        extraHosts: this.cfg.extraAllowedDomains,
+        sandbox: boxSandbox({
+          level: 'outer',
+          requestDir: work,
+          configDir,
+          tmp,
+          aomReadPaths: aomRead,
+          claudeBin: this.cfg.bin,
+          toolchainReadDirs: [],
+          cloneDirs: [],
+          ...(input.env.AOM_IPC_SOCKET ? { ipcSocket: input.env.AOM_IPC_SOCKET } : {}),
+          outer,
+          fdBinds: opened.map((f, i) => ({ fdIndex: 3 + i, real: f.real, writable: false })),
+        }),
+        cmd: { bin: realpathSync(base.bin), args: base.args, env },
+      });
+    } catch (err) {
+      for (const f of opened) f.close();
+      throw err;
+    }
+    try {
+      return spawnSession({
+        bin: launch.command.bin,
+        args: launch.command.args,
+        cwd: work,
+        env: launch.command.env,
+        inheritEnv: false,
+        ...(opened.length ? { extraFds: opened.map((f) => f.fd) } : {}),
+        ...(base.stdin !== undefined ? { input: base.stdin } : {}),
+        parseLine: (l) => parser.parseLine(l),
+        usage: () => parser.usage(),
+        logFile: input.logFile,
+        exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
+        ...hooks,
+        onExit: async (r) => {
+          try {
+            await hooks.onExit?.(r);
+          } finally {
+            await launch.cleanup();
+          }
+        },
+      });
+    } finally {
+      // the child holds its own copies of the fds after spawn
+      for (const f of opened) f.close();
+    }
   }
 
   /** Auth and usage-limit bookkeeping of a turn on the Owner's own login (no private credentials copy to harvest). */

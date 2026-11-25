@@ -533,3 +533,163 @@ describe('Rework 1 (B2): installs off, "npm ci" asks, the request resumes, then 
     expect(rev(repo.clone, `refs/heads/${CARD}`)).toBe(made?.tip);
   }, 120_000);
 });
+
+describe('quiet-approvals S7: conflict work in the box, in the runner-made scratch clone', () => {
+  let h: Harness | undefined;
+  afterEach(async () => {
+    await h?.stop();
+    h = undefined;
+  });
+
+  /** A scripted runtime that builds the box (like Claude Code with bubblewrap present). */
+  class BoxScripted extends ScriptedAdapter {
+    boxMissing(): string | null {
+      return null;
+    }
+  }
+
+  async function boxedConflict(o: {
+    summary: string;
+    resolve: (clone: string) => void;
+    checks?: Array<Record<string, unknown>>;
+  }) {
+    const repo = makeRepo();
+    let cwd = '';
+    const adapter = new BoxScripted(async (input, ctl) => {
+      cwd = input.cwd;
+      o.resolve(join(input.cwd, 'clone'));
+      await ctl.post('/v1/report', {
+        report: {
+          kind: 'outcome',
+          outcomeId: 'devops_done',
+          note: o.summary,
+          data: { summary: o.summary, commands: [] },
+        },
+      });
+    });
+    h = await startHarness({}, { adapters: new Map([['mock', adapter]]) }, repo);
+    const wt = join(tmp(), 'card-wt');
+    await ensureWorktree({
+      repoPath: repo.clone,
+      roots: ['/'],
+      spec: {
+        mode: 'create',
+        repoId: U,
+        remoteUrlNormalized: repo.remoteNormalized,
+        baseBranch: 'main',
+        branchName: CARD,
+      },
+      defaultPath: wt,
+    });
+    writeFileSync(join(wt, 'README.md'), '# toy (card)\n');
+    sh(wt, 'git', ['commit', '-am', 'card change']);
+    theirs(repo, 'README.md', '# toy (main)\n');
+    await expect(
+      rebaseOntoBase(wt, 'main', { name: 'Toy Dev', email: 'dev@toy.test' }),
+    ).rejects.toBeInstanceOf(RebaseConflictError);
+    const head = rev(wt);
+    const base = makeDevopsStart({ summary: 'resolve the conflict' }) as Record<string, any>;
+    const msg: Record<string, any> = {
+      ...base,
+      orgId: '0190a000-0000-7000-8000-000000000001',
+      brief: { ...base.brief, ...(o.checks ? { checks: { suites: o.checks, detect: false } } : {}) },
+      devops: {
+        ...base.devops,
+        card: { ref: 'TOY-1', title: 'Fix', remoteUrlNormalized: repo.remoteNormalized },
+        conflictCard: { ref: 'TOY-1', branch: CARD },
+      },
+    };
+    h.server.send('shift.start', msg);
+    await h.server.waitFor('shift.ended', (m) => m.shiftId === msg.shiftId, 90_000);
+    await h.runner.supervisor.whenSettled(msg.shiftId);
+    return { repo, head, cwd, input: adapter.inputs[0], h };
+  }
+
+  /** DevOps resolves the REAL conflict in the scratch clone: merge origin/main into conflict/TOY-1-a1. */
+  const resolveIn = (clone: string, text = '# toy (card and main)\n') => {
+    sh(clone, 'git', ['checkout', '-q', '-b', 'conflict/TOY-1-a1']);
+    let conflicted = false;
+    try {
+      sh(clone, 'git', ['merge', 'refs/remotes/origin/main']);
+    } catch {
+      conflicted = true;
+    }
+    expect(conflicted).toBe(true);
+    writeFileSync(join(clone, 'README.md'), text);
+    sh(clone, 'git', ['add', '-A']);
+    sh(clone, 'git', ['commit', '--no-edit']);
+  };
+
+  it('runs in the box without a hold, in its scratch clone; "Resolved:" makes the runner move the card branch', async () => {
+    let tip = '';
+    const r = await boxedConflict({
+      summary: 'Resolved: kept both headings',
+      resolve: (clone) => {
+        resolveIn(clone);
+        tip = rev(clone);
+      },
+    });
+    expect(r.input?.devopsBox).toBe(true);
+    expect(r.input?.boxReadOnly).toEqual([
+      join(r.cwd, 'clone', '.git', 'config'),
+      join(r.cwd, 'clone', '.git', 'hooks'),
+    ]);
+    expect(r.h.server.of('approvals.held').every((m) => m.items.length === 0)).toBe(true);
+    expect(rev(r.repo.clone, `refs/heads/${CARD}`)).toBe(tip);
+  }, 120_000);
+
+  it('a configured check that fails refuses the move (run before it, in the check sandbox)', async () => {
+    const r = await boxedConflict({
+      summary: 'Resolved: kept both headings',
+      resolve: (clone) => resolveIn(clone),
+      checks: [
+        {
+          name: 'lint',
+          repoId: U,
+          cwd: '.',
+          cmd: ['sh', '-c', 'grep -q "card and main" README.md && exit 3'],
+          kind: 'check',
+        },
+      ],
+    });
+    expect(rev(r.repo.clone, `refs/heads/${CARD}`)).toBe(r.head);
+    const notes = r.h.server
+      .of('shift.progress')
+      .flatMap((m) => (m as { items?: Array<{ text: string }> }).items ?? []);
+    expect(JSON.stringify(notes)).toMatch(/was not moved: the checks refused the resolution/);
+  }, 120_000);
+
+  it('a passing configured check lets the move go ahead', async () => {
+    let tip = '';
+    const r = await boxedConflict({
+      summary: 'Resolved: kept both headings',
+      resolve: (clone) => {
+        resolveIn(clone);
+        tip = rev(clone);
+      },
+      checks: [
+        {
+          name: 'lint',
+          repoId: U,
+          cwd: '.',
+          cmd: ['sh', '-c', 'grep -q "card and main" README.md'],
+          kind: 'check',
+        },
+      ],
+    });
+    expect(rev(r.repo.clone, `refs/heads/${CARD}`)).toBe(tip);
+  }, 120_000);
+
+  it('a resolution that restores an earlier tree (tree_revert) is not moved', async () => {
+    const r = await boxedConflict({
+      summary: 'Resolved: took main',
+      resolve: (clone) => {
+        // "resolve" by putting back the tree of the commit before the card change (it undoes the card's work)
+        sh(clone, 'git', ['checkout', '-q', '-b', 'conflict/TOY-1-a1']);
+        sh(clone, 'git', ['checkout', 'HEAD~1', '--', '.']);
+        sh(clone, 'git', ['commit', '-q', '-m', 'revert to before']);
+      },
+    });
+    expect(rev(r.repo.clone, `refs/heads/${CARD}`)).toBe(r.head);
+  }, 120_000);
+});

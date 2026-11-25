@@ -268,7 +268,12 @@ export const PasskeyAlgSchema = z.union([z.literal(-7), z.literal(-8), z.literal
  * The only held kinds a passkey may approve (the runner hard-codes the same list in `policy/passkey-kinds.ts`):
  * a deploy whose whole-command pin equals an approved pin except the commit, and a recipe write.
  */
-export const PASSKEY_APPROVABLE_KINDS = ['deploy.commit_redeploy', 'recipe.write'] as const;
+export const PASSKEY_APPROVABLE_KINDS = [
+  'deploy.commit_redeploy',
+  'recipe.write',
+  // quiet-approvals D9: internet for one exact test-services recipe (sha256 + image digests), only inside the local ceiling
+  'test.recipe_egress',
+] as const;
 /** How long a passkey challenge published by the runner stays valid. */
 export const PASSKEY_CHALLENGE_TTL_SEC = 300;
 

@@ -63,6 +63,16 @@ export interface HarnessSandboxInput {
   pnpmLockDirs?: string[];
   /** The `bwrap` binary (default: `bwrap` on PATH). */
   bwrap?: string;
+  /**
+   * quiet-approvals phase B: a DevOps box (inner or outer). No user namespace inside it (`--disable-userns`), no
+   * capabilities, and `/etc/ssh` left out; nothing in it may start a nested sandbox (no hidden-file shim with it).
+   */
+  devopsBox?: boolean;
+  /**
+   * quiet-approvals R5-B1: extra folders bound through an fd the runner opened and checked (`--bind-fd`/`--ro-bind-fd`); the
+   * fd is passed to bubblewrap at `fdIndex`.
+   */
+  fdBinds?: Array<{ fdIndex: number; real: string; writable: boolean }>;
 }
 
 /** System folders every program needs. Links (merged /usr) are recreated as links, real folders are bound read-only. */
@@ -114,6 +124,12 @@ export function harnessBwrapArgs(i: HarnessSandboxInput): string[] {
     '/etc',
     '/etc',
   ];
+  if (i.devopsBox) {
+    if (i.shimDir || i.shellOverride || i.hiddenFromShell.length)
+      throw new Error('a DevOps box starts no nested sandbox (no hidden-file shim)');
+    args.splice(1, 0, '--disable-userns', '--cap-drop', 'ALL');
+    if (exists('/etc/ssh')) args.push('--tmpfs', '/etc/ssh');
+  }
   for (const d of SYSTEM_DIRS) {
     try {
       if (lstatSync(d).isSymbolicLink()) args.push('--symlink', readlinkSync(d), d);
@@ -176,6 +192,12 @@ export function harnessBwrapArgs(i: HarnessSandboxInput): string[] {
       mounts.push({ kind: 'ro-bind', src: p, dest: p });
   // parents before children, so a read-only parent never hides a writable child bound earlier
   mounts.sort((a, b) => a.dest.length - b.dest.length);
+  // R5-B1: the checked folders last, by their fd (the inode the runner checked), never by a path bubblewrap resolves again
+  const fdArgs = (i.fdBinds ?? []).flatMap((f) => [
+    f.writable ? '--bind-fd' : '--ro-bind-fd',
+    String(f.fdIndex),
+    f.real,
+  ]);
   const seen = new Set<string>();
   for (const m of mounts) {
     const key = `${m.kind}:${m.dest}`;
@@ -186,6 +208,7 @@ export function harnessBwrapArgs(i: HarnessSandboxInput): string[] {
     else if (m.kind === 'ro-null') args.push('--ro-bind', '/dev/null', m.dest);
     else args.push('--tmpfs', m.dest);
   }
+  args.push(...fdArgs);
   return args;
 }
 

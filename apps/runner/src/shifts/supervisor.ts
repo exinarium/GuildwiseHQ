@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -87,6 +88,8 @@ import {
   type ServerHttp,
   syncCardAttachments,
 } from '../attachments/index.ts';
+import { outerEgress } from '../box/egress-allow.ts';
+import { readBoxFile, underRoot } from '../box/folder-check.ts';
 import {
   type CapabilityRegistry,
   makePackScriptGate,
@@ -130,10 +133,15 @@ import { alwaysPathRefusal, redactCommand } from '../devops/guard.ts';
 import { type HygieneDeps, runHygiene } from '../devops/hygiene.ts';
 import { installScriptsOffFor, withInstallScriptsOff } from '../devops/install-env.ts';
 import {
+  boxRefusal,
   cardPayload,
+  DEVOPS_BOX_NOTE,
+  type DevopsMode,
   devopsGuardFor,
   guardedShift,
+  insideBoxRpc,
   isReadOnlyScan,
+  OUTSIDE_HINT,
   SCAN_RPC_ALLOWED,
   shiftTexts,
 } from '../devops/requests.ts';
@@ -148,6 +156,7 @@ import {
 } from '../git/architect-git.ts';
 import { BranchLedger } from '../git/branch-ledger.ts';
 import { computeCardDiff } from '../git/card-diff.ts';
+import { resolutionGuards } from '../git/conflict-checks.ts';
 import { conflictRecords } from '../git/conflict-record.ts';
 import { baseRef, computeDiffStats, riskTier } from '../git/diffstat.ts';
 import { git, gitOk, originBranchNames } from '../git/git.ts';
@@ -168,6 +177,15 @@ import {
   type PrepTaskWorktree,
   removePrepTaskWorktree,
 } from '../git/release-prep-task.ts';
+import {
+  makeScratchClone,
+  promoteHandover,
+  quarantineResolution,
+  SAFE_GIT_ENV,
+  SCRATCH_CLONE_DIR,
+  type ScratchClone,
+  scratchCloneNote,
+} from '../git/scratch-clone.ts';
 import { resetSubmoduleDrift, submoduleResetNote } from '../git/submodule-drift.ts';
 import { redactGitError } from '../git/submodule-fill.ts';
 import {
@@ -340,7 +358,27 @@ export interface SupervisorDeps {
    * UAT 1.10.0 finding 3: a DevOps shift asks for approval (`aom devops-approval`); the runner checks whether a switch of
    * this workstation that is off explains it, to show that on Approvals on this computer.
    */
-  onDevopsApproval?: (msg: ShiftStartMsg, data: Record<string, unknown>) => void;
+  onDevopsApproval?: (msg: ShiftStartMsg, data: Record<string, unknown>, mode?: DevopsMode) => void;
+  /**
+   * quiet-approvals R1: a box shift asked to leave the box (`aom devops-outside`). Its session has ended; the runner holds
+   * the same shift start as one `devops.task` (no `shift.ended` is sent: the server keeps the claim).
+   */
+  onDevopsOutside?: (msg: ShiftStartMsg, ask: { why: string; needs: string }) => void;
+  /** quiet-approvals R2/C2: the Claude session of a DevOps shift, with how it runs (an outside run's session is recorded). */
+  onDevopsSession?: (msg: ShiftStartMsg, sessionId: string, mode: DevopsMode | undefined) => void;
+  /**
+   * quiet-approvals [B1]: `aom toolchain ensure <tool>` in the box: the signed, checksum-verified recipe of one tool of the
+   * request's project, under the local `toolInstall` tick (answered by the runner).
+   */
+  toolchainEnsure?: (msg: ShiftStartMsg, tool: string) => Promise<IpcRpcResponse>;
+  /** quiet-approvals R4-B2: the Docker gatekeeper's settings for an outer-box shift with Docker allowed (null: no Docker). */
+  dockerGate?: () => { upstream: string; instance: string; containerEgress: boolean } | null;
+  /** Rework 1 (REVIEW S3): the deploy target hosts this computer deployed to (the outer box may reach them). */
+  deployHosts?: () => string[];
+  /** Rework 1 (REVIEW S2): the local ceiling's folder roots. */
+  ceilingRoots?: () => string[];
+  /** quiet-approvals S6: `aom test-services up <recipe>` of an outer-box DevOps shift (the runner runs Docker itself). */
+  testServicesUp?: (msg: ShiftStartMsg, recipeText: string) => Promise<IpcRpcResponse>;
   /** The capability registry (`aom skill show|list`, and the index in the instructions of an agent whose role lists skills). */
   capabilities?: CapabilityRegistry;
   /** The capabilities found in a project's checkout changed: tell the server (metadata only). */
@@ -498,6 +536,14 @@ const ticketOf = (msg: ShiftStartMsg): string | null => {
 
 interface ActiveShift {
   msg: ShiftStartMsg;
+  /** quiet-approvals R1: how a DevOps request shift runs (absent: not decided here, the DevOps profile as before). */
+  devopsMode?: DevopsMode;
+  /** quiet-approvals R1: the box session asked to leave the box; at its end the runner holds the same shift. */
+  devopsOutside?: { why: string; needs: string };
+  /** Set at the end of such a session: the runner is told after the shift's cleanup. */
+  outsideHandover?: boolean;
+  /** quiet-approvals S7: the scratch clone of a conflict request in the box (the runner fetches its handover refs). */
+  scratchClone?: ScratchClone;
   /** What a delegate that works shares with this shift (its working directory and read folders). */
   delegateWork?: DelegateWork;
   startedAt: Date;
@@ -607,6 +653,8 @@ type ShiftStartedSyncMain = {
 interface PersistedShift {
   msg: ShiftStartMsg;
   startedSent: boolean;
+  /** quiet-approvals R1: how the shift ran; a DevOps request shift persisted without it resumes in the box. */
+  devopsMode?: DevopsMode;
   mainShas?: string[];
   baseTips?: string[];
   dirtyAtStart?: DirtySnapshot;
@@ -764,6 +812,7 @@ export class ShiftSupervisor {
   async handleStart(
     msg: ShiftStartMsg,
     resume?: { startedSent: boolean; mainShas?: string[]; baseTips?: string[]; dirtyAtStart?: DirtySnapshot },
+    opts: { devopsMode?: DevopsMode; startedSent?: boolean } = {},
   ): Promise<void> {
     if (this.active.has(msg.shiftId)) return; // redelivery
     // The CEO's management shift has a slot of its own (one at a time, outside the owner's limit like a chat): a
@@ -813,6 +862,9 @@ export class ShiftSupervisor {
       ...(resume?.dirtyAtStart ? { dirtyAtStart: { ...resume.dirtyAtStart } } : {}),
       autoCommitRefusals: new Set<string>(),
       ...(resume ? { resumed: true, startedSent: resume.startedSent } : {}),
+      ...(opts.devopsMode ? { devopsMode: opts.devopsMode } : {}),
+      // a shift that left the box: the server already saw it start
+      ...(opts.startedSent ? { startedSent: true } : {}),
     };
     this.active.set(msg.shiftId, shift);
     let settle!: () => void;
@@ -856,6 +908,12 @@ export class ShiftSupervisor {
       this.forget(msg.shiftId);
       if (this.settling.get(msg.shiftId) === settled) this.settling.delete(msg.shiftId);
       settle();
+      if (shift.outsideHandover && shift.devopsOutside)
+        try {
+          this.deps.onDevopsOutside?.(msg, shift.devopsOutside);
+        } catch (err) {
+          this.log.error(`shift ${msg.shiftId}: could not hold the outside-the-box request`, err);
+        }
     }
   }
 
@@ -875,12 +933,23 @@ export class ShiftSupervisor {
       try {
         const rec = JSON.parse(readFileSync(join(this.deps.paths.activeShifts, f), 'utf8')) as PersistedShift;
         this.log.info(`resuming shift ${rec.msg.shiftId} after runner restart`);
-        void this.handleStart(rec.msg, {
-          startedSent: rec.startedSent,
-          ...(rec.mainShas ? { mainShas: rec.mainShas } : {}),
-          ...(rec.baseTips ? { baseTips: rec.baseTips } : {}),
-          ...(rec.dirtyAtStart ? { dirtyAtStart: rec.dirtyAtStart } : {}),
-        });
+        // quiet-approvals R1 (fail closed): a DevOps request shift resumes as it ran; one persisted without a mode
+        // (before this version) resumes in the box, never outside it
+        const devopsMode: DevopsMode | undefined =
+          rec.devopsMode ??
+          (rec.msg.kind === 'devops' && rec.msg.agent.isDevops && !isReadOnlyScan(rec.msg)
+            ? 'box'
+            : undefined);
+        void this.handleStart(
+          rec.msg,
+          {
+            startedSent: rec.startedSent,
+            ...(rec.mainShas ? { mainShas: rec.mainShas } : {}),
+            ...(rec.baseTips ? { baseTips: rec.baseTips } : {}),
+            ...(rec.dirtyAtStart ? { dirtyAtStart: rec.dirtyAtStart } : {}),
+          },
+          devopsMode ? { devopsMode } : {},
+        );
       } catch (err) {
         this.log.warn(`ignoring unreadable persisted shift ${f}: ${String(err)}`);
         rmSync(join(this.deps.paths.activeShifts, f), { force: true });
@@ -915,6 +984,7 @@ export class ShiftSupervisor {
       const rec: PersistedShift = {
         msg: s.msg,
         startedSent: !!s.startedSent,
+        ...(s.devopsMode ? { devopsMode: s.devopsMode } : {}),
         ...(s.mainShas.length ? { mainShas: s.mainShas } : {}),
         ...(s.baseTips.length ? { baseTips: s.baseTips } : {}),
         ...(s.dirtyAtStart ? { dirtyAtStart: s.dirtyAtStart } : {}),
@@ -1172,6 +1242,11 @@ export class ShiftSupervisor {
   private async run(s: ActiveShift): Promise<void> {
     const { msg } = s;
     const { paths } = this.deps;
+    // quiet-approvals [B4]: the tidy-up is a fixed routine: no AI session, the server's text is not used
+    if (s.devopsMode === 'hygiene') {
+      await this.runHygieneShift(s);
+      return;
+    }
     const adapter = this.deps.adapters.get(msg.agent.runtime);
     // The Claude account this shift runs on (absent: main). It was chosen by the server for this shift; a shift that is
     // already running finishes on it, and a resumed one (after a runner restart) stays on it.
@@ -1341,6 +1416,41 @@ export class ShiftSupervisor {
       }
     s.releaseTmp = holdAgentTmp(sandbox);
     let cwd = sandbox.scratch;
+    // quiet-approvals [B2] (fail closed): only a runtime that builds the box runs a shift inside it
+    const boxGap =
+      s.devopsMode === 'box' ? (adapter.boxMissing ? adapter.boxMissing() : 'no safety box') : null;
+    if (boxGap) {
+      this.reject(msg.shiftId, 'internal', `the DevOps safety box cannot start: ${boxGap}`);
+      return;
+    }
+    // quiet-approvals [B2]: a DevOps shift in a box (inner, or outer after a yes) works in its own request folder
+    if ((s.devopsMode === 'box' || s.devopsMode === 'outside') && msg.devops) {
+      if (!/^[0-9a-f-]{36}$/i.test(msg.devops.requestId)) {
+        this.reject(msg.shiftId, 'internal', 'a DevOps request without a valid request id');
+        return;
+      }
+      cwd = join(sandbox.root, 'devops', msg.devops.requestId);
+      mkdirSync(cwd, { recursive: true, mode: 0o700 });
+      // S7: conflict work happens in a scratch clone the runner makes in the request's folder (hardened git)
+      if (s.devopsMode === 'box' && s.conflictFf && !s.scratchClone) {
+        rmSync(join(cwd, SCRATCH_CLONE_DIR), { recursive: true, force: true });
+        try {
+          s.scratchClone = await makeScratchClone({
+            mainRepo: s.conflictFf.target.repoPath,
+            requestDir: cwd,
+            branch: s.conflictFf.target.branch,
+            identity: s.identity ?? null,
+          });
+        } catch (err) {
+          this.reject(
+            msg.shiftId,
+            'internal',
+            `the scratch clone for the conflict could not be made: ${String(err)}`,
+          );
+          return;
+        }
+      }
+    }
 
     if (msg.kind === 'release_prep') {
       const rp = msg.releasePrep;
@@ -1728,6 +1838,10 @@ export class ShiftSupervisor {
       const areas = await e2eAreasSection(msg.brief, s.worktree?.path ?? null).catch(() => undefined);
       if (areas) texts.prompt += `\n${areas.text}\n`;
     }
+    // quiet-approvals R1: the box's own rules and the way out, from the runner (never from the server's text)
+    if (s.devopsMode === 'box') texts.instructions += `\n${DEVOPS_BOX_NOTE}\n`;
+    if (s.scratchClone && s.conflictFf)
+      texts.instructions += `\n${scratchCloneNote(s.scratchClone.dir, s.conflictFf.target.branch)}\n`;
     const tc = this.deps.toolchains?.resolve();
     if (tc && msg.kind !== 'devops')
       texts.instructions += `\n${toolchainNote(describeToolchains(tc.entries))}\n`;
@@ -1882,9 +1996,13 @@ export class ShiftSupervisor {
       msg.kind === 'ceo' ||
       msg.kind === 'devops' ||
       (msg.kind === 'card' && msg.brief.shift.stage === QA_STEPS_STAGE);
-    const guardFor = devopsGuardFor(msg, s.identity?.email);
+    // quiet-approvals [B2]: the box has no guard and no switches (its OS sandbox is the boundary)
+    const inBox = s.devopsMode === 'box';
+    const guardFor = inBox ? undefined : devopsGuardFor(msg, s.identity?.email);
     const devopsGuard = guardFor && installScriptsOff ? { ...guardFor, installScriptsOff: true } : guardFor;
-    if (guardedShift(msg) && !devopsGuard) {
+    const boxed = inBox || s.devopsMode === 'outside';
+    const boxReadDirs = boxed ? await this.devopsCloneDirs(msg) : [];
+    if (guardedShift(msg) && !devopsGuard && !inBox) {
       this.reject(msg.shiftId, 'internal', 'the DevOps guard could not be configured for this shift');
       return;
     }
@@ -1899,6 +2017,24 @@ export class ShiftSupervisor {
         ...(resumeSessionId ? { resumeSessionId } : {}),
         ...(accountKey !== 'main' ? { account: accountKey } : {}),
         ...(devopsGuard ? { devopsGuard } : {}),
+        ...(inBox ? { devopsBox: true } : {}),
+        // quiet-approvals phase B: the runner builds the box (inner, or outer after a local yes) around this session
+        ...(boxed && msg.devops ? { boxRequestId: msg.devops.requestId } : {}),
+        ...(s.scratchClone ? { boxReadOnly: s.scratchClone.protectedPaths } : {}),
+        ...(s.devopsMode === 'outside'
+          ? {
+              outerEgress: outerEgress(await this.remotesOf(boxReadDirs), this.deps.deployHosts?.() ?? []),
+              ceilingRoots: this.deps.ceilingRoots?.() ?? [],
+            }
+          : {}),
+        // the outer box reaches Docker only through the gatekeeper, and only when the (narrowed) access allows it
+        ...(s.devopsMode === 'outside' && msg.devops?.access.allowDocker && this.deps.dockerGate?.()
+          ? {
+              dockerGate: this.deps.dockerGate() as NonNullable<
+                ReturnType<NonNullable<SupervisorDeps['dockerGate']>>
+              >,
+            }
+          : {}),
         cwd,
         sandbox,
         agent: msg.agent as AgentRuntimeSpec,
@@ -1906,10 +2042,11 @@ export class ShiftSupervisor {
         grantedSkills,
         addDirs: scanDirs,
         readDirs: [
-          ...readFolders,
-          ...(msg.kind === 'ba_task' ? registeredFolders : []),
-          ...vaultReadFolder,
-        ].map((f) => f.path),
+          ...[...readFolders, ...(msg.kind === 'ba_task' ? registeredFolders : []), ...vaultReadFolder].map(
+            (f) => f.path,
+          ),
+          ...boxReadDirs,
+        ],
         ...(scopedVaults.length ? { scopedVaults } : {}),
         ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
         // plugin MCP servers: card shifts only (the DevOps engineer, questions and BA tasks keep their behaviour)
@@ -2138,6 +2275,15 @@ export class ShiftSupervisor {
     // before any early return below (usage limit, expired login: REVIEW B2)
     if (s.cardFence) await this.endCardFence(s);
 
+    // quiet-approvals R1: the box session asked to leave the box. No `shift.ended`: the server keeps the claim (it saw
+    // the shift start), and the runner holds the same shift start for one local yes.
+    if (s.devopsOutside && !s.stopReason && s.reportState === 'none') {
+      this.log.info(`shift ${msg.shiftId}: asked to work outside the box (${s.devopsOutside.needs})`);
+      // handed to the runner once this shift is fully cleaned up (handleStart's finally), so its replay can start again
+      s.outsideHandover = true;
+      return;
+    }
+
     // The Claude login does not work: not an agent crash. Whatever the agent left is committed above; the card goes back
     // to the queue without penalty and waits (the runtime is reported expired) until the login works again.
     if (exit.authFailed && s.reportState === 'none' && !s.stopReason) {
@@ -2243,6 +2389,12 @@ export class ShiftSupervisor {
   private onSession(s: ActiveShift, runtimeSessionId: string): void {
     if (s.runtimeSessionId === runtimeSessionId) return;
     s.runtimeSessionId = runtimeSessionId;
+    if (s.msg.kind === 'devops' && s.msg.agent.isDevops)
+      try {
+        this.deps.onDevopsSession?.(s.msg, runtimeSessionId, s.devopsMode);
+      } catch {
+        // advisory: an unrecorded session only means a later resume goes back into the box
+      }
     const cwd = s.worktree?.path ?? s.sandbox?.scratch ?? '';
     this.sessions.record({
       sessionId: runtimeSessionId,
@@ -2477,6 +2629,24 @@ export class ShiftSupervisor {
             ok: false,
             error: `\`${req.method}\` is not available in a read-only scan`,
           } as IpcRpcResponse;
+        // quiet-approvals [B1]: inside the box only builder-equivalent verbs, beside T3's scan allowlist (fail closed)
+        if (s.devopsMode === 'box') {
+          if (!insideBoxRpc(req.method))
+            return { ok: false, error: boxRefusal(req.method) } as IpcRpcResponse;
+          if (req.method === 'devops.outside') return this.devopsOutside(s, req.params);
+          if (req.method === 'toolchain.ensure') {
+            const tool = typeof req.params.tool === 'string' ? req.params.tool.trim() : '';
+            if (!/^[a-z0-9][a-z0-9._-]{0,60}$/.test(tool))
+              return { ok: false, error: 'usage: aom toolchain ensure <tool>' } as IpcRpcResponse;
+            return this.deps.toolchainEnsure
+              ? this.deps.toolchainEnsure(s.msg, tool)
+              : ({ ok: false, error: boxRefusal('toolchain ensure') } as IpcRpcResponse);
+          }
+        } else if (req.method === 'devops.outside' || req.method === 'toolchain.ensure')
+          return {
+            ok: false,
+            error: `\`${req.method}\` is only for a DevOps shift inside the box`,
+          } as IpcRpcResponse;
         if (req.method === 'skill.show' || req.method === 'skill.list')
           return skillRpc(
             this.deps.capabilities,
@@ -2593,7 +2763,22 @@ export class ShiftSupervisor {
             req.params,
             s.msg.kind === 'devops' && s.msg.agent.isDevops === true,
           );
-        if (req.method === 'hygiene.run') return this.hygieneRun(s);
+        if (req.method === 'test.services.up') {
+          if (s.devopsMode !== 'outside' || !this.deps.testServicesUp || !s.sandbox || !s.msg.devops)
+            return {
+              ok: false,
+              error: 'test services from a recipe start only in an approved DevOps request',
+            };
+          const rel = typeof req.params.recipe === 'string' ? req.params.recipe : '';
+          const base = join(s.sandbox.root, 'devops', s.msg.devops.requestId);
+          const file = resolve(base, rel);
+          if (!rel || !underRoot(file, base))
+            return { ok: false, error: 'the recipe must be a file in your working folder' };
+          // REVIEW S1: the folder is box-writable: no link, no FIFO, a regular file of at most 64 KB
+          const text = readBoxFile(file, base, 64 * 1024);
+          if (typeof text !== 'string') return { ok: false, error: `${rel}: ${text.error}` };
+          return this.deps.testServicesUp(s.msg, text);
+        }
         if (
           (req.method === 'git.push' || req.method === 'git.fetch') &&
           s.msg.kind === 'devops' &&
@@ -2969,28 +3154,127 @@ export class ShiftSupervisor {
     });
   }
 
-  private async hygieneRun(s: ActiveShift): Promise<IpcRpcResponse> {
+  /** REVIEW S3: the origin URLs of the request's main clones (the runner's own clones: trusted config). */
+  private async remotesOf(dirs: readonly string[]): Promise<string[]> {
+    const out: string[] = [];
+    for (const d of dirs) {
+      const r = await git(d, ['remote', 'get-url', 'origin']).catch(() => null);
+      const u = r?.exitCode === 0 ? r.stdout.trim() : '';
+      if (u) out.push(u);
+    }
+    return out;
+  }
+
+  /** [B2] The local clones of a DevOps request's project (read-only in the box): its card's repository and its plan's. */
+  private async devopsCloneDirs(msg: ShiftStartMsg): Promise<string[]> {
+    const urls = new Set<string>();
+    if (msg.devops?.card?.remoteUrlNormalized) urls.add(msg.devops.card.remoteUrlNormalized);
+    for (const r of msg.postAs?.repos ?? []) if (r.remoteUrlNormalized) urls.add(r.remoteUrlNormalized);
+    const out: string[] = [];
+    for (const u of urls) {
+      const found = await this.deps.findRepo(u).catch(() => undefined);
+      if (found?.localPath && !out.includes(found.localPath)) out.push(found.localPath);
+    }
+    return out;
+  }
+
+  /**
+   * quiet-approvals [B4]: a repository hygiene request as a fixed routine: no Claude session and no server text, only
+   * `runHygiene` (T1's rules and ledger, `cleanFinishedCards`), every clone inside this computer's code folders, then
+   * `devops_done` with the run's report and summary.
+   */
+  private async runHygieneShift(s: ActiveShift): Promise<void> {
     const { msg } = s;
-    if (msg.kind !== 'devops' || msg.agent.isDevops !== true)
-      return { ok: false, error: 'only the DevOps engineer can run repository hygiene' };
     const spec = msg.devops?.hygiene;
-    if (!spec)
-      return { ok: false, error: 'this request is not a repository hygiene request: nothing to run' };
-    const run = await runHygiene(spec, this.worktreePaths(), {
-      ledger: this.ledger,
-      changeState: async (q) => {
-        try {
-          const r = await this.deps.rpc(msg.shiftId, 'hygiene.change_state', q);
-          return r.ok ? ((r.result as { state?: 'open' | 'merged' | 'closed' | null }).state ?? null) : null;
-        } catch {
-          return null;
-        }
-      },
-      ...this.devopsAppAuth(msg.postAs),
-      ...(s.identity ? { identity: { name: s.identity.name, email: s.identity.email } } : {}),
+    if (msg.kind !== 'devops' || !msg.agent.isDevops || !spec) {
+      this.reject(msg.shiftId, 'internal', 'a hygiene run without its repository list');
+      return;
+    }
+    let identity: { name: string; email: string } | null = null;
+    try {
+      identity = await resolveCommitIdentity(this.deps.paths.root, msg.commitAs);
+    } catch {
+      identity = null;
+    }
+    if (!s.startedSent) {
+      this.deps.transport.send('shift.started', { shiftId: msg.shiftId });
+      s.startedSent = true;
+    }
+    this.addProgress(s, 'status', 'repository tidy-up: the fixed routine (no AI session)');
+    const started = Date.now();
+    let summary: string;
+    let report: ShiftReport;
+    try {
+      const run = await runHygiene(spec, this.worktreePaths(), {
+        ledger: this.ledger,
+        repoRoots: this.deps.config.repoRoots ?? [],
+        changeState: async (q) => {
+          try {
+            const r = await this.deps.rpc(msg.shiftId, 'hygiene.change_state', q);
+            return r.ok
+              ? ((r.result as { state?: 'open' | 'merged' | 'closed' | null }).state ?? null)
+              : null;
+          } catch {
+            return null;
+          }
+        },
+        ...this.devopsAppAuth(msg.postAs),
+        ...(identity ? { identity: { name: identity.name, email: identity.email } } : {}),
+      });
+      summary = run.summary;
+      report = {
+        kind: 'outcome',
+        outcomeId: 'devops_done',
+        note: summary,
+        data: { summary, commands: run.commands, hygiene: run.report },
+      } as ShiftReport;
+    } catch (err) {
+      summary = `Repository hygiene could not run: ${err instanceof Error ? err.message : String(err)}`;
+      report = {
+        kind: 'outcome',
+        outcomeId: 'devops_done',
+        note: summary,
+        data: { summary, commands: [] },
+      } as ShiftReport;
+    }
+    const r = await this.submit(s, report);
+    this.flushProgress(s);
+    const accepted = 'accepted' in r && r.accepted;
+    const endedFrame = this.deps.transport.send('shift.ended', {
+      shiftId: msg.shiftId,
+      outcome: accepted ? 'reported' : 'no_report',
+      exitCode: 0,
+      durationMs: Date.now() - started,
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 },
+      finalText: summary.slice(0, 4000),
+      guardViolations: [],
     });
-    this.addProgress(s, 'status', 'aom hygiene run: done');
-    return { ok: true, result: run };
+    this.deps.onShiftEnded?.(msg.shiftId, typeof endedFrame === 'string' ? endedFrame : undefined);
+  }
+
+  /**
+   * quiet-approvals R1: `aom devops-outside --why --needs` in the box. The session ends; at its end the runner holds the
+   * same shift start as one `devops.task` with the reason, so one local yes runs it outside the box.
+   */
+  private devopsOutside(s: ActiveShift, params: Record<string, unknown>): IpcRpcResponse {
+    const clean = (v: unknown) =>
+      typeof v === 'string'
+        ? v.replace(/[\p{Cc}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, ' ').trim()
+        : '';
+    const why = clean(params.why).slice(0, 2000);
+    const needs = clean(params.needs).slice(0, 500);
+    if (!why || !needs) return { ok: false, error: `usage: ${OUTSIDE_HINT}` } as IpcRpcResponse;
+    if (s.devopsOutside) return { ok: true, result: { message: 'Already asked. Stop now.' } };
+    s.devopsOutside = { why, needs };
+    this.addProgress(s, 'status', `asked to work outside the box: ${needs}`);
+    setTimeout(() => void s.session?.stop('devops_outside'), 1_000).unref?.();
+    return {
+      ok: true,
+      result: {
+        message:
+          'Asked. This session ends now; the owner is asked once on this computer, and the request then continues outside the box. Stop now.',
+      },
+    };
   }
 
   /** Per-repository app auth of a DevOps shift's plan; empty for a runner without post-as credentials. */
@@ -3700,6 +3984,25 @@ export class ShiftSupervisor {
     const summary = String((report.data as { summary?: unknown } | undefined)?.summary ?? report.note ?? '');
     if (!/^\s*resolved:/i.test(summary)) return;
     c.done = true;
+    // S7: the runner checks the resolution in the scratch clone (guards, then the project's configured checks in the
+    // check sandbox) and only then fetches it into the main clone (hardened git, never forced) for T7's move
+    if (s.scratchClone) {
+      const notMoved = (why: string) => {
+        this.addProgress(s, 'status', `${c.target.branch} was not moved: ${why}`);
+        this.log.warn(`shift ${s.msg.shiftId.slice(0, 8)}: ${c.target.branch} was not moved: ${why}`);
+      };
+      // Rework 1 (REVIEW B3): read the result only through upload-pack into the main clone's quarantine, never running
+      // git with the box-controlled scratch as the repository
+      const q = await quarantineResolution(c.target.repoPath, s.scratchClone, s.msg.shiftId);
+      if (!q.ok) return notMoved(q.reason);
+      const refused = await this.conflictPreMoveChecks(s, c.target.repoPath, c.target.branch, q.sha);
+      if (refused) return notMoved(refused);
+      try {
+        await promoteHandover(c.target.repoPath, q.name, q.sha);
+      } catch (err) {
+        return notMoved(String(err));
+      }
+    }
     const r = await applyConflictResolution({
       target: c.target,
       before: c.before,
@@ -3715,6 +4018,62 @@ export class ShiftSupervisor {
     (r.moved ? this.log.info : this.log.warn).call(this.log, `shift ${s.msg.shiftId.slice(0, 8)}: ${r.note}`);
     // the runner's own move is the new starting point of the card worktree check
     if (r.moved && s.cardFence) s.cardFence.before = await snapshotCardWorktrees(this.deps.paths.worktrees);
+  }
+
+  /**
+   * quiet-approvals S7: the checks before the runner moves a branch onto a box-made resolution. Returns why not, or null.
+   * The guards (tree_revert, mass deletion) always run; the project's confirmed checks of the repository (sent with a
+   * conflict request) run in the check sandbox (no network) on the resolution. A configured check that fails, or cannot
+   * run on this computer, refuses the move.
+   */
+  private async conflictPreMoveChecks(
+    s: ActiveShift,
+    mainRepo: string,
+    branch: string,
+    candidate: string,
+  ): Promise<string | null> {
+    const head = (await git(mainRepo, ['rev-parse', `refs/heads/${branch}`])).stdout.trim();
+    if (!head) return `the main clone has no ${branch}`;
+    const g = await resolutionGuards(mainRepo, head, candidate);
+    if (!g.ok) return g.reason;
+    const suites = s.msg.brief.checks?.suites ?? [];
+    if (suites.length === 0) return null;
+    const runs = this.deps.runs;
+    if (!runs) return 'the configured checks cannot run on this computer';
+    // the checks run on a runner-made detached worktree of the main clone (its own config), in the check sandbox
+    const wt = mkdtempSync(join(tmpdir(), 'aom-conflict-check-'));
+    rmSync(wt, { recursive: true, force: true });
+    const add = await git(mainRepo, ['worktree', 'add', '--detach', '-q', wt, candidate], {
+      env: { ...SAFE_GIT_ENV },
+    });
+    if (add.exitCode !== 0) return 'the resolution could not be checked out for its checks';
+    const tmps: string[] = [];
+    try {
+      const r = await runHandoffChecks({
+        suites,
+        worktree: wt,
+        changedPaths: g.changedPaths,
+        headSha: candidate,
+        logDir: join(s.sandbox?.scratch ?? join(tmpdir(), 'aom-checks'), 'conflict-checks'),
+        launch: async (argv: string[], key: string) => {
+          const l = await runs.checkLaunch({
+            key: `${s.msg.shiftId.slice(0, 8)}-c-${key}`,
+            worktree: wt,
+            argv,
+            network: 'none',
+          });
+          tmps.push(l.tmp);
+          return l;
+        },
+      });
+      if (r.blocking.length) return `the checks refused the resolution: ${r.refusal}`.slice(0, 1500);
+      this.addProgress(s, 'status', `checks before the move: ${r.summary}`);
+      return null;
+    } finally {
+      for (const t of tmps) rmSync(t, { recursive: true, force: true });
+      await git(mainRepo, ['worktree', 'remove', '--force', wt]).catch(() => undefined);
+      rmSync(wt, { recursive: true, force: true });
+    }
   }
 
   /**
@@ -3799,6 +4158,20 @@ export class ShiftSupervisor {
       };
     }
 
+    // quiet-approvals R1: inside the box there is no approval report; leaving the box is one local yes
+    if (
+      s.devopsMode === 'box' &&
+      report.kind === 'outcome' &&
+      (report as { outcomeId?: string }).outcomeId === 'devops_approval' &&
+      // `aom devops-question` reports through the same outcome ("Question: ..."): a question passes
+      !/^\s*question:/i.test(String((report as { data?: { action?: unknown } }).data?.action ?? ''))
+    )
+      return rejected(
+        `You work inside the safety box: an approval is not asked from here. If the request needs something the box does not allow, run \`${OUTSIDE_HINT}\`.`,
+      );
+    // a session that asked to leave the box reports nothing more (the owner is asked first)
+    if (s.devopsOutside)
+      return rejected('This session asked to work outside the box and is ending: stop now.');
     // The DevOps engineer never changes a card worktree: refused and reverted before the report goes anywhere (finding 2)
     if (terminal && s.cardFence) {
       const fenced = await this.checkCardFence(s);
@@ -4023,6 +4396,7 @@ export class ShiftSupervisor {
         this.deps.onDevopsApproval?.(
           msg,
           ((toSend as { data?: unknown }).data ?? {}) as Record<string, unknown>,
+          s.devopsMode,
         );
       } catch {
         // advisory: the server raises the Desk item either way

@@ -234,7 +234,27 @@ describe('aom git push|fetch --repo on an app repository (supervisor rpc)', () =
   });
 });
 
-describe('aom hygiene run in the runner (supervisor rpc hygiene.run)', () => {
+/**
+ * quiet-approvals [B4]: a hygiene request is the fixed routine (no AI session): the runner runs it and reports
+ * `devops_done` with the report, as `aom hygiene run` did. The result is read from that report.
+ */
+async function hygieneReport(
+  repo: TestRepo,
+  over: Partial<SupervisorDeps>,
+  extra: Record<string, unknown>,
+): Promise<{ result: Record<string, unknown>; adapter: ScriptedAdapter }> {
+  const adapter = await runDevops(repo, over, extra, async () => {
+    throw new Error('a hygiene request never starts an AI session');
+  });
+  const rep = h?.server.of('shift.report').at(-1) as unknown as {
+    report: { outcomeId: string; data: { hygiene: unknown; summary: string; commands: string[] } };
+  };
+  expect(rep.report.outcomeId).toBe('devops_done');
+  expect(adapter.inputs).toHaveLength(0);
+  return { result: { report: rep.report.data.hygiene, ...rep.report.data }, adapter };
+}
+
+describe('repository hygiene in the runner: the fixed routine (quiet-approvals [B4])', () => {
   const hygiene = (repo: TestRepo) => ({
     trigger: 'manual',
     repos: [
@@ -288,16 +308,11 @@ describe('aom hygiene run in the runner (supervisor rpc hygiene.run)', () => {
     ownerCommit(repo);
     const pushes = recordPushes(repo);
     const c = fakeCredentials(false);
-    let res: any;
-    const adapter = await runDevops(
-      repo,
-      c.overrides,
-      { postAs: planFor(repo.remoteNormalized), devops: { hygiene: hygiene(repo) } },
-      async (_i, ctl) => {
-        res = await ctl.post('/v1/rpc', { method: 'hygiene.run', params: {} });
-      },
-    );
-    expect(res.json.ok, res.json.error).toBe(true);
+    const { result, adapter } = await hygieneReport(repo, c.overrides, {
+      postAs: planFor(repo.remoteNormalized),
+      devops: { hygiene: hygiene(repo) },
+    });
+    const res: any = { json: { ok: true, result } };
     const r = res.json.result.report.repos[0];
     expect(r.problem).toBeNull();
     expect(r.pushed).toBe(true);
@@ -308,7 +323,8 @@ describe('aom hygiene run in the runner (supervisor rpc hygiene.run)', () => {
     );
     expect(c.ownerAuth).not.toHaveBeenCalled();
     expect(JSON.stringify(res.json.result)).not.toContain(APP_TOKEN_MARK);
-    expect(Object.values(adapter.inputs[0]?.env ?? {}).join('\n')).not.toContain(APP_TOKEN_MARK);
+    // no AI session at all, so no agent environment that could hold the token
+    expect(adapter.inputs).toHaveLength(0);
   });
 
   it('the app cannot mint: app_identity_failed naming project, hygiene and the app; nothing pushed', async () => {
@@ -317,15 +333,16 @@ describe('aom hygiene run in the runner (supervisor rpc hygiene.run)', () => {
     const pushes = recordPushes(repo);
     const before = sh(repo.origin, 'git', ['rev-parse', 'main']);
     const c = fakeCredentials(true);
-    let res: any;
-    await runDevops(
-      repo,
-      c.overrides,
-      { postAs: planFor(repo.remoteNormalized), devops: { hygiene: hygiene(repo) } },
-      async (_i, ctl) => {
-        res = await ctl.post('/v1/rpc', { method: 'hygiene.run', params: {} });
+    const res: any = {
+      json: {
+        result: (
+          await hygieneReport(repo, c.overrides, {
+            postAs: planFor(repo.remoteNormalized),
+            devops: { hygiene: hygiene(repo) },
+          })
+        ).result,
       },
-    );
+    };
     const r = res.json.result.report.repos[0];
     expect(r.problem.kind).toBe('app_identity_failed');
     expect(r.problem.detail).toContain('Guild Bot');
@@ -342,10 +359,11 @@ describe('aom hygiene run in the runner (supervisor rpc hygiene.run)', () => {
     const local = ownerCommit(repo);
     const pushes = recordPushes(repo);
     const c = fakeCredentials(true);
-    let res: any;
-    await runDevops(repo, c.overrides, { devops: { hygiene: hygiene(repo) } }, async (_i, ctl) => {
-      res = await ctl.post('/v1/rpc', { method: 'hygiene.run', params: {} });
-    });
+    const res: any = {
+      json: {
+        result: (await hygieneReport(repo, c.overrides, { devops: { hygiene: hygiene(repo) } })).result,
+      },
+    };
     expect(res.json.result.report.repos[0].pushed).toBe(true);
     expect(pushes()).toEqual(['owner']);
     // the very commit made locally, unchanged

@@ -51,6 +51,19 @@ export interface Choices {
    */
   devopsInstall: boolean;
   devopsInstallChosen: boolean;
+  /**
+   * quiet-approvals item 8 [D3]: DevOps may download the tools projects need (checksum-checked, runner's own folder)
+   * without asking. Default Yes, but only for a machine where it was never chosen (S4): a re-run keeps the choice.
+   */
+  toolInstall: boolean;
+  /** quiet-approvals item 9 [B4]: the daily tidy-up runs as a fixed routine without asking. Default Yes (unset only). */
+  hygiene: boolean;
+  /**
+   * quiet-approvals item 10 (D6/D9, D10 defaults): the most DevOps may ever be given from a Desk click. Docker (default Yes)
+   * and internet for test containers (default No); extra folders are chosen on the approvals page only.
+   */
+  ceilingDocker: boolean;
+  containerEgress: boolean;
 }
 
 export interface ChoicesInput {
@@ -226,6 +239,10 @@ export function initialChoices(input: ChoicesInput): Choices {
     ytdlp: opts.withYtdlp ?? true,
     devopsInstall: current.devopsInstall ?? false,
     devopsInstallChosen: current.devopsInstall !== undefined,
+    toolInstall: opts.toolInstall ?? current.toolInstall ?? true,
+    hygiene: (opts.hygiene ?? current.hygiene ?? 'run') === 'run',
+    ceilingDocker: opts.ceilingDocker ?? current.ceiling.docker,
+    containerEgress: opts.containerEgress ?? current.ceiling.containerEgress,
   };
 }
 
@@ -239,6 +256,10 @@ export function editableKeys(c: Choices): string[] {
     ...c.repos.map((r) => r.key),
     '6',
     '7',
+    '8',
+    '9',
+    '10a',
+    '10b',
   ];
 }
 
@@ -264,7 +285,11 @@ export function applyEdit(c: Choices, key: string, value: boolean | string): Cho
   else if (key === '7' && typeof value === 'boolean') {
     next.devopsInstall = value;
     next.devopsInstallChosen = true;
-  } else throw new SetupError(`not an item on this screen: ${key}`);
+  } else if (key === '8' && typeof value === 'boolean') next.toolInstall = value;
+  else if (key === '9' && typeof value === 'boolean') next.hygiene = value;
+  else if (key === '10a' && typeof value === 'boolean') next.ceilingDocker = value;
+  else if (key === '10b' && typeof value === 'boolean') next.containerEgress = value;
+  else throw new SetupError(`not an item on this screen: ${key}`);
   return next;
 }
 
@@ -283,7 +308,7 @@ export function replacedGrants(
     }));
 }
 
-/** Writes items 1, 2, 4 and 5 into the next policy (item 3 goes through the Docker step, item 6 runs the install). */
+/** Writes items 1, 2, 4, 5, 7, 8 and 9 into the next policy (item 3 goes through the Docker step, item 6 runs the install). */
 export function applyChoices(c: Choices, next: Policy): void {
   const agents: Record<string, string> = {};
   for (const o of c.orgs) if (o.allow && o.agentId) agents[o.orgId] = o.agentId;
@@ -291,6 +316,9 @@ export function applyChoices(c: Choices, next: Policy): void {
   next.devopsRequests = c.devopsRequests;
   next.deploy = c.deploy;
   if (c.devopsInstallChosen) next.devopsInstall = c.devopsInstall;
+  next.toolInstall = c.toolInstall;
+  next.hygiene = c.hygiene ? 'run' : 'ask';
+  next.ceiling = { ...next.ceiling, docker: c.ceilingDocker, containerEgress: c.containerEgress };
   const scripts = { ...next.installScripts };
   for (const r of c.repos) {
     if (r.allow) scripts[r.id] = true;

@@ -41,6 +41,7 @@ import {
 const KIND_LABELS: Record<string, string> = {
   'deploy.commit_redeploy': 'Redeploy at a new commit',
   'recipe.write': 'Recipe change',
+  'test.recipe_egress': 'Internet for test services',
   'deploy.exec': 'Deploy',
   'vault.configure': 'Vault set-up',
   'env.secret': 'Secret reseal',
@@ -188,7 +189,14 @@ function HeldPanel({
             {data.steps?.map((s) => (
               <li key={s.key} className="flex flex-col gap-1" data-testid={`local-step-${s.key}`}>
                 <p className="text-sm break-words text-fg">{s.summary}</p>
-                <LocalCommand command={s.command} kind={s.kind} testId={`local-step-command-${s.key}`} />
+                <LocalCommand
+                  command={s.command}
+                  kind={s.kind}
+                  testId={`local-step-command-${s.key}`}
+                  {...(s.kind === 'devops.ceiling'
+                    ? { windowPort: data.windowPort ?? null, anchor: 'ceiling' as const }
+                    : {})}
+                />
               </li>
             ))}
           </ul>
@@ -243,6 +251,7 @@ function HeldRow({
           command={item.command}
           kind="held"
           windowPort={windowPort}
+          heldId={item.id}
           testId={`local-command-${item.id}`}
           fallback={
             <p className="text-sm text-muted" data-testid={`local-only-${item.id}`}>

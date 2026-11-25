@@ -64,3 +64,14 @@ export const worktreeOf = (h: Harness, key = 'TOY', ref = 'TOY-1'): string => {
   const dir = existsSync(root) ? readdirSync(root).find((d) => d.startsWith(`${key}-`)) : undefined;
   return join(root, dir ?? key, ref);
 };
+
+/**
+ * quiet-approvals: the runtime has no DevOps box at all (fail closed), so a DevOps request takes the
+ * held path as before: for the tests of that path (one held item per request, a local no, ...).
+ */
+export function noBox(h: Harness): void {
+  const adapters = (h.runner as unknown as { adapters: Map<string, { boxMissing?: () => string | null }> })
+    .adapters;
+  // a runtime with no box at all (Rework 1: one whose box cannot start is refused instead, with the reason)
+  for (const a of adapters.values()) (a as { boxMissing?: unknown }).boxMissing = undefined;
+}

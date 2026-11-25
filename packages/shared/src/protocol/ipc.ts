@@ -285,6 +285,14 @@ export const RpcMethodSchema = z.enum([
   'toolchain.list',
   'toolchain.add',
   'toolchain.remove',
+  /**
+   * quiet-approvals [B1]: inside the DevOps box, the checksum-verified download of one tool of the request's project
+   * (runner-local, under the local `toolInstall` tick), and leaving the box (`aom devops-outside`: one local yes).
+   */
+  'toolchain.ensure',
+  'devops.outside',
+  /** quiet-approvals S6: bring up the test services of a recipe (outer box only; the runner runs Docker itself). */
+  'test.services.up',
   /** The DevOps engineer checks or starts this workstation's login to a code host; answered by the runner itself. */
   'git.status',
   'git.connect',

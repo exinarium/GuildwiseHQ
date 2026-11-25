@@ -82,7 +82,21 @@ export interface EnsureDeps {
     localPath: string,
     workingBranch: string | undefined,
   ) => Promise<{ empty: boolean; branch: string; branchMissing: boolean }>;
+  /**
+   * quiet-approvals [D3] `toolsOnly`: only checksum-verified user-space downloads run (the resolver path). A tool without
+   * one, and every dependency step, is not run and is listed in `deferred` (it waits for one local yes).
+   */
+  toolsOnly?: boolean;
+  /** quiet-approvals [B1]: only these tool ids (`aom toolchain ensure <tool>` in the box). */
+  onlyTools?: readonly string[];
 }
+
+/** The report of `ensureEnvironment`, plus what a `toolsOnly` run left for a local yes. */
+export type EnsureReport = EnvironmentReport & { deferred?: string[] };
+
+/** [D3] What a tools-only run says for a tool or step it may not run by itself. */
+export const TOOLS_ONLY_DEFERRED =
+  'not a checksum-verified download: it waits for a local yes on this computer (Approvals on this computer)';
 
 /**
  * Env for a command: `dotnet` and its installers run with the chosen root first on PATH and as DOTNET_ROOT; the rustup
@@ -134,7 +148,7 @@ const tail = (s: string, n = 3): string =>
  * `stacks.ts`; every command goes through `deps.exec` or the user-space installer, as the runner user, and is logged. Nothing runs
  * as root and no package manager runs: a system package is reported with the owner's command.
  */
-export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): Promise<EnvironmentReport> {
+export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): Promise<EnsureReport> {
   const tables = deps.tables ?? { stacks: STACKS, tools: TOOLS };
   const logTail: string[] = [];
   const log = (line: string) => {
@@ -228,6 +242,7 @@ export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): 
       for (const toolId of stack?.tools(d, deps.platform) ?? []) {
         const spec = tables.tools[toolId];
         if (!spec) continue;
+        if (deps.onlyTools && !deps.onlyTools.includes(toolId)) continue;
         const seen = need.get(toolId);
         // Two repositories asking for different versions: the higher one wins.
         if (!seen) need.set(toolId, { spec, params: { ...d.params }, stack: d.id });
@@ -247,7 +262,19 @@ export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): 
   }
 
   // 3. D6: the project's own dependencies (pnpm/pip/dotnet restore ...), once its tools are in place.
-  if (deps.installDependencies !== false)
+  // quiet-approvals [D3]: a tools-only run never runs one; each is listed for the local yes instead
+  const deferred: string[] = reports
+    .filter((r) => r.status === 'needs_access' && r.detail === TOOLS_ONLY_DEFERRED)
+    .map((r) => r.tool);
+  if (deps.toolsOnly) {
+    if (deps.installDependencies !== false && !deps.onlyTools)
+      for (const run of runs)
+        for (const d of run.detections) {
+          const stack = tables.stacks.find((x) => x.id === d.id);
+          for (const step of stack?.deps?.(d, deps.platform) ?? [])
+            deferred.push(runs.length > 1 ? `${step.name} (${run.name})` : step.name);
+        }
+  } else if (deps.installDependencies !== false)
     reports.push(...(await installDependencies(runs, tables, p.access, done, deps, log)));
 
   // The .NET SDKs agents will see: one line in the report (Workstations / Development environment).
@@ -285,6 +312,7 @@ export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): 
     summary,
     logTail,
     ...(emptyRepos.length ? { emptyRepos } : {}),
+    ...(deps.toolsOnly && deferred.length ? { deferred } : {}),
   };
 }
 
@@ -491,6 +519,8 @@ async function ensureTool(
   }
   const steps = recipes.any;
   if (!resolver && !steps?.length) return systemDependency(base, recipes, detected, deps.platform, manual);
+  // quiet-approvals [D3]: a tools-only run downloads only through a checksum-verified resolver
+  if (deps.toolsOnly && !resolver) return { ...base, status: 'needs_access', detail: TOOLS_ONLY_DEFERRED };
 
   if (!access.allowInstall)
     return needsAccess(
@@ -511,7 +541,7 @@ async function ensureTool(
     if (!result.ok)
       return { ...base, status: 'failed', detail: result.detail, ...(manual ? { fix: manual } : {}) };
     how = "a checksum-verified download into the runner's toolchains folder";
-  } else if (steps?.length) {
+  } else if (steps?.length && !deps.toolsOnly) {
     for (const step of steps) {
       log(`$ ${step.cmd} ${step.args.join(' ')}`);
       const r = await deps.exec.run(step.cmd, step.args, {

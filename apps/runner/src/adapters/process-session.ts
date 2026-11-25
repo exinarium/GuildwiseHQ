@@ -9,6 +9,8 @@ import type { NativeSubagentUsage, RuntimeEvent, RuntimeSession } from './types.
 export interface ProcessSpec {
   bin: string;
   args: string[];
+  /** quiet-approvals R5-B1: open fds handed to the child at 3, 4, ... (bubblewrap's `--bind-fd`); closed after spawn. */
+  extraFds?: number[];
   cwd: string;
   env: Record<string, string>;
   /** Maps one stdout line to runtime events. */
@@ -102,9 +104,16 @@ export function spawnSession(spec: ProcessSpec): RuntimeSession {
     env: spec.env,
     extendEnv: spec.inheritEnv ?? true,
     reject: false,
-    ...(spec.input !== undefined ? { input: spec.input } : { stdin: 'ignore' as const }),
-    stdout: 'pipe',
-    stderr: 'pipe',
+    ...(spec.extraFds?.length
+      ? {
+          ...(spec.input !== undefined ? { input: spec.input } : {}),
+          stdio: [spec.input !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe', ...spec.extraFds] as never,
+        }
+      : {
+          ...(spec.input !== undefined ? { input: spec.input } : { stdin: 'ignore' as const }),
+          stdout: 'pipe' as const,
+          stderr: 'pipe' as const,
+        }),
     // A process group of its own: stopping the agent also stops whatever its tools left running.
     ...(POSIX ? { detached: true } : { forceKillAfterDelay: 10_000 }),
     cleanup: true,

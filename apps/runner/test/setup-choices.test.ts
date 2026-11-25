@@ -67,7 +67,7 @@ describe('the one screen: choices model', () => {
     expect(c.repos[0]?.allow).toBe(true);
     expect(() => applyEdit(c, '1c', true)).toThrow(/no DevOps helper/);
     expect(() => applyEdit(c, '3', 'shared')).toThrow(/not an item/);
-    expect(() => applyEdit(c, '9', true)).toThrow(/not an item/);
+    expect(() => applyEdit(c, '10', true)).toThrow(/not an item/);
     const next = policy();
     applyChoices(c, next);
     expect(next.devops.agents).toEqual({ [ORG_A]: AGENT_A });
@@ -148,7 +148,7 @@ describe('the one screen: choices model', () => {
     const text = renderScreen(c).join('\n');
     expect(text).not.toContain('DevOps helpers that may work');
     expect(text).not.toContain('Install scripts');
-    expect(editableKeys(c)).toEqual(['2', '3', '4', '6', '7']);
+    expect(editableKeys(c)).toEqual(['2', '3', '4', '6', '7', '8', '9', '10a', '10b']);
   });
 });
 
@@ -168,7 +168,7 @@ describe('the one screen: text and edits', () => {
   });
 
   it('Enter accepts; a typed number asks that item and loops back', async () => {
-    const typed = ['1a', '9', '6', ''];
+    const typed = ['1a', '10', '6', ''];
     const asked: string[] = [];
     const p: Prompter = {
       async text(q) {
@@ -192,7 +192,7 @@ describe('the one screen: text and edits', () => {
     const c = await runScreen(init(), p, (l) => said.push(l));
     expect(c.orgs[0]?.allow).toBe(true);
     expect(c.ytdlp).toBe(false);
-    expect(said.join('\n')).toContain('There is no item 9 to change');
+    expect(said.join('\n')).toContain('There is no item 10 to change');
     expect(asked[0]).toContain('Each task still asks you first unless you change item 2.');
   });
 });

@@ -1,12 +1,13 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { uuidv7 } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { syncVault } from '../src/vaults/sync.ts';
 import { makeShiftStart } from './fixtures.ts';
-import { type Harness, startHarness } from './harness.ts';
+import { type Harness, noBox, startHarness } from './harness.ts';
 import { cleanupTmp, sh, tmp, waitUntil } from './helpers.ts';
 import { ScriptedAdapter } from './scripted-adapter.ts';
+import { grantedAuthority } from './test-authority.ts';
 import { IDENTITY, makeDevopsStart, makeVault, originFile } from './vault-fixtures.ts';
 
 cleanupTmp();
@@ -48,26 +49,38 @@ describe('DevOps shifts (mock agent, real aom CLI)', () => {
   });
 
   it('writes DevOps instructions with the granted access, not the card instructions', async () => {
-    h = await startHarness();
+    // quiet-approvals phase B: a folder from the server applies only under a root of this computer's ceiling
+    const apps = realpathSync(tmp('aom-srv-apps-'));
+    h = await startHarness(
+      {},
+      {
+        authority: grantedAuthority({
+          ceiling: { docker: true, mountRoots: [apps], containerEgress: false },
+        }),
+      },
+    );
     const agentId = uuidv7();
     await run(
       makeDevopsStart({
         agentId,
         summary: 'start the app',
-        access: { allowInstall: true, allowedPaths: ['/srv/apps'] },
+        access: { allowInstall: true, allowedPaths: [apps, '/srv/beyond-the-ceiling'] },
       }),
     );
     const md = instructionsOf(agentId);
     expect(md).toContain('You are Atlas, the DevOps engineer for the workstation "Desk"');
     expect(md).toContain('Install packages and tools: allowed');
     expect(md).toContain('Docker (install, run, manage containers): NOT allowed');
-    expect(md).toContain('/srv/apps');
+    expect(md).toContain(apps);
+    expect(md).not.toContain('/srv/beyond-the-ceiling');
     expect(md).toContain('aom devops-approval --action');
     expect(md).not.toContain('Environment help');
   });
 
   it('a request outside the granted access asks for approval and does not run it', async () => {
     h = await startHarness();
+    // outside the box (quiet-approvals: inside it, an approval report is refused in favour of devops-outside)
+    noBox(h);
     const { shiftId, ended } = await run(makeDevopsStart({ summary: 'install docker' }));
     expect(ended.outcome).toBe('reported');
     const [rep] = reportOf(shiftId);

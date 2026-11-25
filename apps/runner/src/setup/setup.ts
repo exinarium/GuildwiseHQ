@@ -1,3 +1,5 @@
+import { probeBwrap } from '../box/bwrap.ts';
+import { t12Warning } from '../box/t12.ts';
 import { entryDir, loadIndex } from '../pairings.ts';
 import { sealMarkerFor } from '../policy/integrity.ts';
 import { localCli } from '../policy/local-command.ts';
@@ -30,6 +32,8 @@ export interface SetupDeps {
   /** Effective uid; 0 refuses. */
   uid: number;
   username: string;
+  /** quiet-approvals T12: tests skip asking the real Docker daemon. */
+  skipT12Check?: boolean;
   platform: NodeJS.Platform;
   /** The runner data directory (`~/.aom-runner`), whose pairings carry the keys and the server's offers. */
   dataRoot: string;
@@ -358,8 +362,25 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
   );
   say(`  website tasks    ${written.devopsRequests === 'ask' ? 'ask me first' : 'start without asking'}`);
   say(
+    `  tool downloads   ${written.toolInstall === true ? 'without asking (checksum-checked)' : 'ask me first'}`,
+  );
+  say(`  daily tidy-up    ${written.hygiene === 'run' ? 'fixed routine, without asking' : 'ask me first'}`);
+  say(
     `  Docker           ${written.docker}${written.acceptRootEquivalent ? ' (root-equivalence accepted)' : ''}`,
   );
+  // quiet-approvals Rework 1 (REVIEW S4): DevOps needs bubblewrap 0.8 or newer for its safety box (Linux)
+  if (deps.platform === 'linux' && !deps.skipT12Check) {
+    const bw = probeBwrap();
+    if (!bw.ok) say(`  WARNING          DevOps cannot work on this computer yet: ${bw.reason}`);
+  }
+  // quiet-approvals T12: the installer warns too when this Docker also runs a Guildwise server stack
+  if (written.docker !== 'none' && !deps.skipT12Check) {
+    const t12 = t12Warning({
+      ...process.env,
+      ...(written.dockerHost ? { DOCKER_HOST: written.dockerHost } : {}),
+    });
+    if (t12) say(`  WARNING          ${t12}`);
+  }
   say(`  deploys          ${written.deploy}${written.deployPinCommit ? ', pinned to the commit' : ''}`);
   say(
     `  install scripts  ${Object.keys(written.installScripts).length} repositor${Object.keys(written.installScripts).length === 1 ? 'y' : 'ies'} allowed`,

@@ -45,3 +45,18 @@ export function applyDockerEnv(
     else env[k] = v;
   }
 }
+
+/**
+ * quiet-approvals phase B: the real daemon socket the Docker gatekeeper fronts, per the policy's Docker mode (the runner's
+ * own rootless daemon, a shared rootless daemon, Docker Desktop on a Mac or the installed daemon). Null: no Docker.
+ */
+export function daemonSocket(
+  policy: Pick<Policy, 'docker'> & Partial<Pick<Policy, 'dockerHost'>>,
+  uid: number | null,
+): string | null {
+  const strip = (h: string): string => h.replace(/^unix:\/\//, '');
+  if (policy.docker === 'rootless') return uid === null ? null : `/run/user/${uid}/docker.sock`;
+  if (policy.docker === 'shared') return policy.dockerHost ? strip(policy.dockerHost) : null;
+  if (policy.docker === 'host') return policy.dockerHost ? strip(policy.dockerHost) : '/var/run/docker.sock';
+  return null;
+}

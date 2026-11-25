@@ -19,7 +19,8 @@ import type { Policy } from './schema.ts';
  * policy.json allows.
  */
 export type GateDecision =
-  | { action: 'run' }
+  /** `toolsOnly` (quiet-approvals [D3]): only the checksum-verified tool downloads run, nothing else. */
+  | { action: 'run'; toolsOnly?: boolean }
   | {
       action: 'hold';
       kind: string;
@@ -208,12 +209,33 @@ export function gateReleaseSign(policy: Policy, payload: unknown): GateDecision 
  * in 1.10.0: nothing on the runner runs as root); a request for
  * installs or extra paths is a widening of access and waits for a local yes.
  */
-export function narrowAccess(policy: Policy, access: DevOpsAccess): DevOpsAccess {
+export function narrowAccess(
+  policy: Policy,
+  access: DevOpsAccess,
+  /** quiet-approvals R5-B1: checks a requested folder against the local ceiling (absent: no folder passes). */
+  folderOk: (path: string, roots: readonly string[]) => boolean = () => false,
+): DevOpsAccess {
+  const roots = policy.ceiling.mountRoots;
   return {
     ...access,
     sudo: false,
-    allowDocker: access.allowDocker && policy.allowDocker,
+    // quiet-approvals phase B: the local ceiling caps what any Desk click (a server switch) can give
+    allowDocker: access.allowDocker && policy.allowDocker && policy.ceiling.docker,
+    allowedPaths: roots.length ? access.allowedPaths.filter((p) => folderOk(p, roots)) : [],
   };
+}
+
+/** quiet-approvals phase B: what a server switch asks beyond the local ceiling ("needs a change on your computer"). */
+export function beyondCeiling(
+  policy: Policy,
+  access: DevOpsAccess,
+  folderOk: (path: string, roots: readonly string[]) => boolean = () => false,
+): string[] {
+  const out: string[] = [];
+  if (access.allowDocker && !policy.ceiling.docker) out.push('Docker');
+  const n = narrowAccess(policy, access, folderOk);
+  for (const p of access.allowedPaths) if (!n.allowedPaths.includes(p)) out.push(`the folder ${p}`);
+  return out;
 }
 
 /** The `env.ensure` payload as the runner runs it: access narrowed to the local grants (never sudo). */
@@ -227,6 +249,10 @@ export function gateEnvEnsure(policy: Policy, payload: unknown): GateDecision {
   const p: EnvEnsurePayload = parsed.data;
   const widens = p.access.allowInstall || p.access.allowedPaths.length > 0;
   if (!widens) return { action: 'run' }; // nothing beyond the locally granted rights is asked for
+  // quiet-approvals [D3]: with the local `toolInstall` tick (and no extra paths, setup done) the checksum-verified tool
+  // downloads run without asking; dependency steps and tools without a checksum still wait for one local yes
+  if (policy.toolInstall === true && p.access.allowedPaths.length === 0 && !setupPending(policy))
+    return { action: 'run', toolsOnly: true };
   return {
     action: 'hold',
     kind: 'env.ensure',
@@ -498,6 +524,35 @@ export function gateDevopsShift(
       .filter((l) => l !== '')
       .join('\n'),
     commandHash: commandHashOf('devops.task', s),
+    ...(pending ? { note: SETUP_PENDING_NOTE } : {}),
+  };
+}
+
+// ---------------------------------------------------------------- quiet-approvals [B4]: the tidy-up
+
+/**
+ * The deterministic tidy-up (a DevOps hygiene request) runs without asking only with the local `hygiene: 'run'` tick and
+ * setup done; otherwise it waits for one local yes. Either way it runs as the fixed routine (no AI session).
+ */
+export function gateHygiene(
+  policy: Policy,
+  s: { orgId: string; agentName?: string; agentId: string; shiftId: string; repos: string[] },
+): GateDecision {
+  const pending = setupPending(policy);
+  if (policy.hygiene === 'run' && !pending) return { action: 'run' };
+  return {
+    action: 'hold',
+    kind: 'devops.task',
+    summary: `Tidy the code folders (fixed routine) for ${s.agentName ?? s.agentId}`.slice(0, 300),
+    detail: [
+      'repository tidy-up: a fixed routine on this computer (no AI session; only branches this computer pushed are deleted on the git host)',
+      line('organization', s.orgId),
+      line('shift', s.shiftId),
+      line('repositories', s.repos.join(', ')),
+      '',
+      'Tick "Tidy the code folders every day" on Approvals on this computer (or `guildwise-runner setup --hygiene run`) to stop asking.',
+    ].join('\n'),
+    commandHash: commandHashOf('devops.hygiene', { orgId: s.orgId, repos: s.repos }),
     ...(pending ? { note: SETUP_PENDING_NOTE } : {}),
   };
 }

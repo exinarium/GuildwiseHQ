@@ -1,12 +1,14 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { urlHasPassword } from '@aom/shared';
 import { z } from 'zod';
+import { ceilingRootRefusal } from '../box/folder-check.ts';
 import { entryDir, loadIndex } from '../pairings.ts';
 import { resolveDataDir } from '../paths.ts';
 import { setupPending } from '../policy/gate.ts';
 import * as grants from '../policy/grants.ts';
-import type { HeldRecord } from '../policy/held.ts';
+import { type HeldRecord, HeldVersionMismatch, heldVersion } from '../policy/held.ts';
 import { localCommand } from '../policy/local-command.ts';
 import type { Policy } from '../policy/schema.ts';
 import { freshestFirst, SETUP_OFFERS_FILE, SetupOfferSchema } from '../setup/offers.ts';
@@ -17,7 +19,8 @@ import type { ApprovalsWindowDeps } from './server.ts';
  * What the approvals page shows and the one place it may change anything (DESIGN "What the page may change" [S1]).
  *
  * The page can change only this fixed list: a held item (approve or deny, one at a time), DevOps grant and revoke for an
- * organization the server offers, `devopsRequests`, install scripts for an offered repository, deploy mode, pin-commit
+ * organization the server offers, `devopsRequests`, `toolInstall` and `hygiene` (quiet-approvals rows 8 and 9), install
+ * scripts for an offered repository, deploy mode, pin-commit
  * and unpin, formatter pins, and trusting or removing a passkey. Each change is a strict schema: an unknown action, or
  * any extra field, is refused (403) and logged. Everything else in policy.json is shown read-only with its command;
  * `grants.ts` has operations for those for the CLI, and nothing here calls them.
@@ -181,6 +184,8 @@ export function buildState(ctx: WindowContext): Record<string, unknown> {
     .filter((r) => r.state === 'held')
     .map((r) => ({
       id: r.id,
+      // S2: the page sends back the version it shows; an item that changed meanwhile is refused (409)
+      version: r.version ?? heldVersion(r),
       kind: r.kind,
       what: HELD_WHAT[r.kind] ?? r.kind,
       summary: r.summary,
@@ -229,6 +234,16 @@ export function buildState(ctx: WindowContext): Record<string, unknown> {
       })),
       devopsRequests: p.devopsRequests,
       devopsInstall: p.devopsInstall === true,
+      // quiet-approvals rows 8 and 9; absent means never chosen here: they ask, and the page shows "New: fewer questions"
+      toolInstall: p.toolInstall === true,
+      hygiene: p.hygiene === 'run',
+      fewerQuestions: p.toolInstall === undefined || p.hygiene === undefined,
+      // quiet-approvals phase B: the most DevOps may ever be given from the Desk (shown at /#ceiling, never pre-filled)
+      ceiling: {
+        docker: p.ceiling.docker,
+        containerEgress: p.ceiling.containerEgress,
+        mountRoots: p.ceiling.mountRoots,
+      },
       devopsInstallCommand: cmd(ctx, 'devops install', ['on']),
       repos: offers.repos.map((r) => ({
         url: r.url,
@@ -310,12 +325,24 @@ const CredId = z
 
 /** The fixed allowlist. `.strict()`: any field beyond these is refused. */
 export const ChangeSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('held.approve'), id: HeldId, pin: z.boolean().optional() }).strict(),
+  z
+    .object({ action: z.literal('held.approve'), id: HeldId, version: Sha, pin: z.boolean().optional() })
+    .strict(),
   z.object({ action: z.literal('held.deny'), id: HeldId }).strict(),
   z.object({ action: z.literal('devops.grant'), orgId: Uuid }).strict(),
   z.object({ action: z.literal('devops.revoke'), orgId: Uuid }).strict(),
   z.object({ action: z.literal('devops.requests'), mode: z.enum(['ask', 'auto']) }).strict(),
   z.object({ action: z.literal('devops.install'), on: z.boolean() }).strict(),
+  z.object({ action: z.literal('devops.toolInstall'), on: z.boolean() }).strict(),
+  z.object({ action: z.literal('devops.hygiene'), mode: z.enum(['run', 'ask']) }).strict(),
+  z
+    .object({
+      action: z.literal('ceiling.set'),
+      docker: z.boolean(),
+      containerEgress: z.boolean(),
+      mountRoots: z.array(z.string().min(1).max(1000)).max(20),
+    })
+    .strict(),
   z.object({ action: z.literal('repo.scripts'), url: z.string().max(500), allow: z.boolean() }).strict(),
   z.object({ action: z.literal('deploy.mode'), mode: z.enum(['ask', 'off']) }).strict(),
   z.object({ action: z.literal('deploy.pinCommit'), on: z.boolean() }).strict(),
@@ -364,6 +391,9 @@ export async function applyChange(ctx: WindowContext, device: string, body: unkn
       case 'held.deny': {
         const r = deps.held.get(c.id);
         if (!r || r.state !== 'held') return refuse(404, 'This item is no longer waiting.');
+        // S2: approve exactly the version shown; a newer shift of the same request replaced it meanwhile
+        if (c.action === 'held.approve' && (r.version ?? heldVersion(r)) !== c.version)
+          return refuse(409, 'This item changed; look again.');
         if (c.action === 'held.deny') {
           await deps.decide(r.id, 'denied', {});
           audit(dir, deps.log, { action: c.action, target: `${r.kind} ${r.id}`, device }, ctx.now);
@@ -377,12 +407,18 @@ export async function applyChange(ctx: WindowContext, device: string, body: unkn
           return refuse(409, `This one is approved in the terminal: ${cmd(ctx, 'approve', [r.id])}`);
         if (c.pin && !r.pin) return refuse(400, 'Only a deploy can be pinned.');
         const extra: Partial<HeldRecord> = {};
+        if (c.pin && r.pin) extra.pinned = true;
+        try {
+          await deps.decide(r.id, 'approved', extra, c.version);
+        } catch (err) {
+          if (err instanceof HeldVersionMismatch) return refuse(409, 'This item changed; look again.');
+          throw err;
+        }
+        // the pin only after the compare-and-set succeeded: a changed item never adds a pin
         if (c.pin && r.pin) {
           const pin = r.pin;
           deps.policy.update((p) => grants.deployPinHeld(p, pin));
-          extra.pinned = true;
         }
-        await deps.decide(r.id, 'approved', extra);
         audit(
           dir,
           deps.log,
@@ -421,6 +457,46 @@ export async function applyChange(ctx: WindowContext, device: string, body: unkn
           (p) => grants.devopsInstall(p, c.on),
           (p) => p.devopsInstall ?? null,
         );
+      case 'devops.toolInstall':
+        return policyChange(
+          'toolInstall',
+          (p) => grants.toolInstall(p, c.on),
+          (p) => p.toolInstall ?? null,
+        );
+      case 'devops.hygiene':
+        return policyChange(
+          'hygiene',
+          (p) => grants.hygiene(p, c.mode),
+          (p) => p.hygiene ?? null,
+        );
+      case 'ceiling.set': {
+        // R5-B1: a root is kept by its real location and never one of the never-list (the owner typed it on this page)
+        const nl = {
+          home: homedir(),
+          policyRoot: deps.policy.dir,
+          runnerRoot: resolveDataDir(),
+          worktrees: join(resolveDataDir(), 'worktrees'),
+        };
+        const roots: string[] = [];
+        for (const r of c.mountRoots) {
+          if (!r.startsWith('/')) return refuse(400, `${r}: give the whole folder path, starting with /`);
+          const why = ceilingRootRefusal(r, nl);
+          if (why) return refuse(400, `${r} cannot be given to DevOps: ${why}`);
+          roots.push(realpathSync(r));
+        }
+        return policyChange(
+          'ceiling',
+          (p) => ({
+            ...p,
+            ceiling: {
+              docker: c.docker,
+              containerEgress: c.containerEgress,
+              mountRoots: [...new Set(roots)],
+            },
+          }),
+          (p) => p.ceiling,
+        );
+      }
       case 'devops.requests':
         return policyChange(
           'devopsRequests',

@@ -49,6 +49,11 @@ export class FakeChatAdapter implements RuntimeAdapter {
   private gate: Promise<void> = Promise.resolve();
   private open: () => void = () => {};
 
+  /** quiet-approvals: the fake builds the DevOps box (a DevOps chat turn runs in it, without a hold). */
+  boxMissing(): string | null {
+    return null;
+  }
+
   async capabilities(): Promise<RuntimeCapabilities> {
     return { runtime: 'mock', version: 'fake', available: true, capabilities: ['shell'] };
   }

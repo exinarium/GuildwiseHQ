@@ -141,6 +141,8 @@ export interface ChatDeps {
 
 interface ActiveChat {
   msg: ChatStartMsg;
+  /** quiet-approvals R1: a DevOps chat turn inside the box (builder-like sandbox, no guard, no DevOps verbs). */
+  devopsBox?: boolean;
   /** An @mention that works in a card worktree holds it for the turn (the DevOps fence never judges it, REVIEW B1). */
   releaseWorktree?: () => void;
   session?: RuntimeSession;
@@ -355,7 +357,7 @@ export class ChatManager {
     }
   }
 
-  async handleStart(msg: ChatStartMsg): Promise<void> {
+  async handleStart(msg: ChatStartMsg, opts: { devopsBox?: boolean } = {}): Promise<void> {
     const running = this.active.get(msg.chatId);
     if (running) {
       // The server sent the turn again (it had lost track of it) while this runner still has it: the work goes on, and its
@@ -372,7 +374,11 @@ export class ChatManager {
       if (!msg.attemptId || msg.attemptId === this.attempts.get(msg.chatId)) return;
       this.recent.delete(msg.chatId);
     }
-    const chat: ActiveChat = { msg, ...(msg.attemptId ? { attemptId: msg.attemptId } : {}) };
+    const chat: ActiveChat = {
+      msg,
+      ...(msg.attemptId ? { attemptId: msg.attemptId } : {}),
+      ...(opts.devopsBox && msg.agent.isDevops ? { devopsBox: true } : {}),
+    };
     this.noteAttempt(msg.chatId, msg.attemptId);
     this.active.set(msg.chatId, chat);
     try {
@@ -526,6 +532,17 @@ export class ChatManager {
           : { accepted: false, message: `Rejected: ${r.error ?? 'failed'}`, error: r.error ?? 'failed' };
       },
       rpc: async (req: IpcRpcRequest): Promise<IpcRpcResponse> => {
+        // quiet-approvals [B1]: a DevOps chat turn in the box keeps no DevOps verb (it can file a request instead)
+        if (
+          chat.devopsBox &&
+          ((req.method.startsWith('toolchain.') && req.method !== 'toolchain.list') ||
+            req.method.startsWith('git.') ||
+            req.method === 'devops.outside')
+        )
+          return {
+            ok: false,
+            error: `\`${req.method}\` is not available in a DevOps chat inside the safety box: file a DevOps request (\`aom devops "<what is needed>"\`) for work outside it`,
+          };
         if (req.method === 'skill.show' || req.method === 'skill.list')
           return skillRpc(
             this.deps.capabilities,
@@ -1416,7 +1433,8 @@ export class ChatManager {
       ...(msg.resumeSessionId ? { resumeSessionId: msg.resumeSessionId } : {}),
       // the account the server chose for a chat about a project's card (absent: main)
       ...(msg.account && msg.account.key !== 'main' ? { account: msg.account.key } : {}),
-      ...(devops
+      ...(chat.devopsBox ? { devopsBox: true } : {}),
+      ...(devops && !chat.devopsBox
         ? {
             devopsGuard: {
               sessionRef: msg.chatId,

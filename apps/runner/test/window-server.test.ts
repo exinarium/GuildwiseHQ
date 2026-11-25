@@ -2,7 +2,7 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync }
 import { join } from 'node:path';
 import { PAIR_CODE_RE } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { HeldRecord } from '../src/policy/held.ts';
+import { type HeldRecord, heldVersion } from '../src/policy/held.ts';
 import { readAudit } from '../src/window/audit.ts';
 import { approvalsPair, approvalsPort } from '../src/window/cli.ts';
 import { DeviceStore, readPort } from '../src/window/pairing.ts';
@@ -622,12 +622,20 @@ describe('what the page may change [S1]', () => {
         command: `/home/guildwise-runner-uat/.local/bin/guildwise-runner approve ${r.id}`,
       },
     ]);
-    expect((await change(e.port, token, { action: 'held.approve', id: r.id, pin: true })).status).toBe(200);
+    // S2: the page approves the version it shows
+    const version = st.waiting[0]?.version as string;
+    expect(version).toMatch(/^[0-9a-f]{64}$/);
+    expect(
+      (await change(e.port, token, { action: 'held.approve', id: r.id, version, pin: true })).status,
+    ).toBe(200);
     expect(e.held.get(r.id)).toMatchObject({ state: 'approved', decidedBy: 'local', pinned: true });
     expect(e.policy.get().deployPins).toEqual(['a'.repeat(64)]);
-    expect((await change(e.port, token, { action: 'held.approve', id: r.id })).status).toBe(404);
+    expect((await change(e.port, token, { action: 'held.approve', id: r.id, version })).status).toBe(404);
     const d = heldItem(e, { id: 'den1ed0000', kind: 'devops.task', pin: undefined });
-    expect((await change(e.port, token, { action: 'held.approve', id: d.id, pin: true })).status).toBe(400);
+    expect(
+      (await change(e.port, token, { action: 'held.approve', id: d.id, version: heldVersion(d), pin: true }))
+        .status,
+    ).toBe(400);
     expect((await change(e.port, token, { action: 'held.deny', id: d.id })).status).toBe(200);
     expect(e.held.get(d.id)?.state).toBe('denied');
     expect(readAudit(e.dir).map((l) => l.action)).toEqual(
@@ -638,13 +646,15 @@ describe('what the page may change [S1]', () => {
   it('approve respects "setup pending" and leaves release.sign to the terminal', async () => {
     const { e, token } = await signedIn({ setupDone: false });
     const r = heldItem(e);
-    const res = await change(e.port, token, { action: 'held.approve', id: r.id });
+    const res = await change(e.port, token, { action: 'held.approve', id: r.id, version: heldVersion(r) });
     expect(res.status).toBe(409);
     expect(String(res.json().error)).toContain('guildwise-runner setup');
     expect(e.held.get(r.id)?.state).toBe('held');
     e.policy.update((p) => ({ ...p, setupDone: true }));
     const s = heldItem(e, { id: 'sign000001', kind: 'release.sign', pin: undefined });
-    expect((await change(e.port, token, { action: 'held.approve', id: s.id })).status).toBe(409);
+    expect(
+      (await change(e.port, token, { action: 'held.approve', id: s.id, version: heldVersion(s) })).status,
+    ).toBe(409);
     expect(e.held.get(s.id)?.state).toBe('held');
   });
 });

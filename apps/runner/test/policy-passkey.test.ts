@@ -65,8 +65,8 @@ function item(kind: string) {
 }
 
 describe('passkey approvals, verified by the runner (R22)', () => {
-  it('the hard-coded kinds are exactly a commit-only redeploy and a recipe write', () => {
-    expect([...PASSKEY_KINDS]).toEqual(['deploy.commit_redeploy', 'recipe.write']);
+  it('the hard-coded kinds are a commit-only redeploy, a recipe write and one exact test recipe internet (D9)', () => {
+    expect([...PASSKEY_KINDS]).toEqual(['deploy.commit_redeploy', 'recipe.write', 'test.recipe_egress']);
     for (const k of [
       'deploy.exec',
       'devops.task',

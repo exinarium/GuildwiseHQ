@@ -295,12 +295,22 @@
     );
   }
 
+  /**
+   * quiet-approvals: the Desk links here as `/#held=<id>`. Only a well-formed id is taken, and it only marks and scrolls
+   * to that item: nothing is approved or filled in from the link.
+   */
+  function linkedHeldId() {
+    const hash = typeof location !== 'undefined' ? location.hash || '' : '';
+    const m = /^#held=([a-z0-9]{6,32})$/.exec(hash);
+    return m ? m[1] : null;
+  }
   function renderWaiting(items, blocked) {
     const waits = (blocked || []).map(blockedCard);
+    const linked = linkedHeldId();
     const list = items.map((it) =>
       h(
         'div',
-        { class: 'card' },
+        { class: it.id === linked ? 'card linked' : 'card', id: `held-${it.id}` },
         h('div', { class: 'card-head' }, h('strong', { text: it.what }), badge(it.kind, '')),
         h('p', { text: it.summary }),
         it.note ? h('p', { class: 'muted', text: it.note }) : null,
@@ -357,6 +367,93 @@
     box.checked = !want;
     ask(question(want), null, want ? 'Yes, allow' : 'Yes, turn off', async () => send(change(want)));
   };
+
+  /**
+   * quiet-approvals phase B: the most DevOps may ever be given from the Desk (`/#ceiling`). The Desk links here; the link
+   * fills in nothing: the owner picks or types every change on this page.
+   */
+  function ceilingSection(c) {
+    if (!c) return null;
+    const ceil = (over) => ({
+      action: 'ceiling.set',
+      docker: c.docker,
+      containerEgress: c.containerEgress,
+      mountRoots: c.mountRoots,
+      ...over,
+    });
+    const folder = h('input', {
+      type: 'text',
+      placeholder: '/full/path/of/a/folder',
+      'aria-label': 'Folder',
+    });
+    return h(
+      'div',
+      { id: 'ceiling' },
+      h('h3', { text: 'The most DevOps may get (from a Desk click)' }),
+      h('p', {
+        class: 'muted',
+        text: 'A click on the website can allow DevOps up to this limit and never past it. Only this page changes it.',
+      }),
+      check(
+        'Docker (only Guildwise’s own containers, through a gatekeeper)',
+        null,
+        c.docker,
+        toggle(
+          (on) =>
+            on ? 'Let a Desk click give DevOps Docker?' : 'Never give DevOps Docker from a Desk click?',
+          (on) => ceil({ docker: on }),
+        ),
+      ),
+      check(
+        'Internet for test containers',
+        'Safe choice: off. Most test services (databases, mail catchers) need none.',
+        c.containerEgress,
+        toggle(
+          (on) =>
+            on
+              ? 'Let a Desk click give test containers the internet? A changed recipe still asks again.'
+              : 'Never give test containers the internet?',
+          (on) => ceil({ containerEgress: on }),
+        ),
+      ),
+      h('p', { text: 'Extra folders a Desk click may give DevOps:' }),
+      ...(c.mountRoots.length
+        ? c.mountRoots.map((r) =>
+            h(
+              'div',
+              { class: 'actions' },
+              h('code', { text: r }),
+              h('button', {
+                class: 'btn',
+                type: 'button',
+                text: 'Remove',
+                onclick: () =>
+                  ask(`Stop giving DevOps ${r}?`, null, 'Yes, remove', async () =>
+                    send(ceil({ mountRoots: c.mountRoots.filter((x) => x !== r) })),
+                  ),
+              }),
+            ),
+          )
+        : [h('p', { class: 'muted', text: 'None (safe).' })]),
+      h(
+        'div',
+        { class: 'actions' },
+        folder,
+        h('button', {
+          class: 'btn',
+          type: 'button',
+          text: 'Add folder',
+          onclick: () => {
+            const v = folder.value.trim();
+            if (!v) return;
+            ask(`Let a Desk click give DevOps the folder ${v}?`, null, 'Yes, add', async () =>
+              send(ceil({ mountRoots: [...c.mountRoots, v] })),
+            );
+          },
+        }),
+      ),
+    );
+  }
 
   /** UAT 1.10.0 finding 2: a grant that names an old helper, with the one-click fix. */
   function staleGrant(o, helper) {
@@ -421,13 +518,24 @@
       'section',
       { class: 'panel' },
       h('h2', { text: 'What this computer allows' }),
+      // quiet-approvals: shown while rows 8 or 9 were never chosen here (they ask until then)
+      a.fewerQuestions
+        ? h(
+            'div',
+            { class: 'card linked' },
+            h('strong', { text: 'New: fewer questions' }),
+            h('p', {
+              text: 'Tick the two boxes below (tool downloads and the daily tidy-up) and these routine jobs stop asking you. Anything else still asks.',
+            }),
+          )
+        : null,
       h('h3', { text: 'DevOps helpers' }),
       devops.length
         ? devops
         : h('p', { class: 'muted', text: 'No organization offers a DevOps helper to this computer yet.' }),
       check(
         'Let DevOps helpers install the tools your projects need',
-        'In the runner’s own folder, never system-wide. Safe choice: off, then a request that needs a tool waits for you.',
+        'The website’s “Install packages and tools” switch for this computer, sent from here. In the runner’s own folder, never system-wide. Safe choice: off.',
         a.devopsInstall,
         toggle(
           (on) =>
@@ -437,18 +545,45 @@
           (on) => ({ action: 'devops.install', on }),
         ),
       ),
+      // quiet-approvals row 8: this computer's own downloads, kept apart from the website switch above (row 7)
+      check(
+        'DevOps may download the tools projects need without asking',
+        'Only downloads with a published checksum, into the runner’s own folder. Anything else still asks you.',
+        a.toolInstall,
+        toggle(
+          (on) =>
+            on
+              ? 'Let DevOps download the tools projects need (checksum-checked) without asking you each time?'
+              : 'Ask you first before DevOps downloads a tool?',
+          (on) => ({ action: 'devops.toolInstall', on }),
+        ),
+      ),
+      // quiet-approvals row 9
+      check(
+        'Tidy the code folders every day without asking',
+        'A fixed routine (no AI): it saves unfinished work and removes only branches this computer pushed.',
+        a.hygiene,
+        toggle(
+          (on) =>
+            on
+              ? 'Tidy the code folders every day without asking you?'
+              : 'Ask you first before each daily tidy-up?',
+          (on) => ({ action: 'devops.hygiene', mode: on ? 'run' : 'ask' }),
+        ),
+      ),
       check(
         'Let DevOps tasks from the website start without asking me',
-        'Safe choice: off, so each task waits for your yes.',
+        'Safe choice: off. With it on, helpers may also leave the inner safety box without asking; they still stay in the outer box.',
         a.devopsRequests === 'auto',
         toggle(
           (on) =>
             on
-              ? 'Let DevOps tasks start without asking you first?'
+              ? 'Let DevOps tasks start without asking you first? Helpers may then also leave the inner safety box without asking; they still stay in the outer box.'
               : 'Ask you first before each DevOps task?',
           (on) => ({ action: 'devops.requests', mode: on ? 'auto' : 'ask' }),
         ),
       ),
+      ceilingSection(a.ceiling),
       h('h3', { text: 'Install scripts' }),
       repos.length
         ? repos
@@ -662,7 +797,14 @@
       `${it.what}: run exactly this?`,
       it.detail,
       'Yes, approve',
-      () => send({ action: 'held.approve', id: it.id, ...(pin?.checked ? { pin: true } : {}) }),
+      // S2: the version shown here; a changed item is refused (409 "This item changed; look again")
+      () =>
+        send({
+          action: 'held.approve',
+          id: it.id,
+          version: it.version,
+          ...(pin?.checked ? { pin: true } : {}),
+        }),
       extra,
     );
   }
@@ -687,6 +829,22 @@
     S.state = r.data;
     renderHeader(r.data.header);
     document.getElementById('app').replaceChildren(...renderState(r.data));
+    // the Desk's "needs a change on your computer" link: scroll to the limit section, nothing filled in
+    if ((typeof location !== 'undefined' ? location.hash : '') === '#ceiling' && !S.scrolledTo) {
+      const el = document.getElementById('ceiling');
+      if (el) {
+        el.scrollIntoView({ block: 'start' });
+        S.scrolledTo = 'ceiling';
+      }
+    }
+    const linked = linkedHeldId();
+    if (linked && !S.scrolledTo) {
+      const el = document.getElementById(`held-${linked}`);
+      if (el) {
+        el.scrollIntoView({ block: 'center' });
+        S.scrolledTo = linked;
+      }
+    }
   }
   function stopTimers() {
     clearInterval(S.timer);

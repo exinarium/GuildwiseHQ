@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { chmodSync, rmSync } from 'node:fs';
 import {
@@ -46,6 +47,18 @@ export interface EgressRoute {
    * exact entry in `privateEndpoints` (loopback is not exempt), whatever `allowPrivateUpstream` says. Enforced on every request.
    */
   orgSourced?: boolean;
+  /**
+   * quiet-approvals S10 (the model proxy): only these upstream paths (exact, a query string allowed) are forwarded; any other
+   * path of the route is refused (403), so a shell in the box cannot reach other account endpoints (`/api/oauth/*`).
+   */
+  allowPaths?: string[];
+  /**
+   * quiet-approvals S10: the per-session bearer the runner issued. A request must present it (`x-api-key` or
+   * `authorization: Bearer`); it is never sent upstream. The route dies with the proxy at the session's end (revoked).
+   */
+  bearer?: string;
+  /** quiet-approvals S10: headers computed per request (a login token the runner keeps fresh outside every box). */
+  dynamicHeaders?: () => Record<string, string> | null;
 }
 
 export interface EgressProxyOptions {
@@ -70,6 +83,11 @@ export interface EgressProxyOptions {
    * Never read by the private-endpoint or org credential checks. Empty by default.
    */
   testServices?: string[];
+  /**
+   * quiet-approvals Rework 2 (REVIEW B4): exact `host:port` entries reached by NAME on any port, only at a public address:
+   * the name is resolved at every connect and a private, loopback, link-local or CGNAT answer is refused (no rebinding).
+   */
+  publicEndpoints?: string[];
   /** Test hook: the ports a CONNECT or plain request may use (default 80 and 443). */
   allowedPorts?: number[];
   /** Test hook: resolve names. */
@@ -244,11 +262,28 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
         deny(target.hostname);
         return fail(403, 'endpoint not allowed');
       }
+      if (route.allowPaths && !route.allowPaths.includes(target.pathname)) {
+        deny(`${target.hostname}${target.pathname}`);
+        return fail(403, 'path not allowed');
+      }
+      if (route.bearer !== undefined) {
+        const given =
+          (typeof req.headers['x-api-key'] === 'string' ? req.headers['x-api-key'] : undefined) ??
+          (/^Bearer (.+)$/.exec(String(req.headers.authorization ?? ''))?.[1] || undefined);
+        const a = Buffer.from(given ?? '');
+        const b = Buffer.from(route.bearer);
+        if (a.length !== b.length || !timingSafeEqual(a, b)) return fail(401, 'not this session');
+      }
       privateOk = route.allowPrivateUpstream === true && route.orgSourced !== true;
       routeHit = true;
       for (const k of ['authorization', 'x-goog-api-key', 'x-api-key', 'api-key', 'cookie'])
         delete headers[k];
       for (const [k, v] of Object.entries(route.headers)) headers[k.toLowerCase()] = v;
+      if (route.dynamicHeaders) {
+        const extra = route.dynamicHeaders();
+        if (!extra) return fail(503, 'no credential for the model on this computer');
+        for (const [k, v] of Object.entries(extra)) headers[k.toLowerCase()] = v;
+      }
     } else {
       try {
         target = new URL(raw);
@@ -266,7 +301,11 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
       if (
         !testHit &&
         (target.protocol !== 'http:' ||
-          !(listed || (portOk(port) && hostAllowed(target.hostname, o.allowedHosts))))
+          !(
+            listed ||
+            endpointListed(target.hostname, port, o.publicEndpoints ?? []) ||
+            (portOk(port) && hostAllowed(target.hostname, o.allowedHosts))
+          ))
       ) {
         deny(target.hostname);
         return fail(403, 'host not allowed');
@@ -339,7 +378,8 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
     if (hp && testServiceListed(hp.host, hp.port, testServices))
       return tunnel(normaliseTestServiceHost(hp.host), hp.port);
     const listed = !!hp && endpointListed(hp.host, hp.port, o.privateEndpoints ?? []);
-    if (!hp || !(listed || (portOk(hp.port) && hostAllowed(hp.host, o.allowedHosts)))) {
+    const pub = !!hp && endpointListed(hp.host, hp.port, o.publicEndpoints ?? []);
+    if (!hp || !(listed || pub || (portOk(hp.port) && hostAllowed(hp.host, o.allowedHosts)))) {
       deny(hp?.host ?? '?');
       return refuse('403 Forbidden');
     }

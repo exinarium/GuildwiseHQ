@@ -2109,6 +2109,30 @@ const VERBS: Record<string, Verb> = {
       }),
     );
   },
+  /**
+   * quiet-approvals R1: `aom devops-outside --needs "<what>" --why "<why>"` (the DevOps engineer inside the box): ends this
+   * session and asks the owner once, on the workstation, to run the request outside the box.
+   */
+  'devops-outside': async (ctx, p) => {
+    const needs = one(p, 'needs');
+    const why = one(p, 'why');
+    if (!needs?.trim() || !why?.trim())
+      throw new UsageError(
+        'usage: aom devops-outside --needs "<what the box does not allow>" --why "<why the request needs it>"',
+      );
+    const r = (await rpc(ctx, 'devops.outside', { needs, why })) as { message?: string };
+    ctx.io.out(`${r.message ?? 'Asked. Stop now.'}\n`);
+    return 0;
+  },
+  /** quiet-approvals S6: `aom test-services up <recipe.json>` (DevOps, after a local yes): the runner starts them. */
+  'test-services': async (ctx, p) => {
+    const recipe = p.positionals[1];
+    if (p.positionals[0] !== 'up' || !recipe)
+      throw new UsageError('usage: aom test-services up <recipe.json>');
+    const r = (await rpc(ctx, 'test.services.up', { recipe })) as { message?: string };
+    ctx.io.out(`${r.message ?? 'Done.'}\n`);
+    return 0;
+  },
   'devops-question': async (ctx, p) => {
     const text = one(p, 'text');
     const reason = one(p, 'reason');
@@ -2236,24 +2260,6 @@ const VERBS: Record<string, Verb> = {
   'devops-done': async (ctx, p) => {
     const summary = textFlag(ctx, p, 'summary', true) as string;
     return report(ctx, outcome('devops_done', summary, { summary, commands: many(p, 'command') }));
-  },
-  /**
-   * `aom hygiene run` (the DevOps engineer, repository hygiene request): tidies the repositories of the request with
-   * deterministic git (commit to the confirmed working branch, pull, push, delete merged agent branches), reports what it
-   * could not resolve and ends the request like `aom devops-done`.
-   */
-  hygiene: async (ctx, p) => {
-    if (p.positionals[0] !== 'run') throw new UsageError('usage: aom hygiene run [--note "<text>"]');
-    // Hygiene runs in the runner: it reads the spec from its own copy of the brief, and an app repository reaches
-    // origin with the app's token, which never enters this process.
-    const run = (await rpc(ctx, 'hygiene.run', {})) as HygieneRun;
-    const note = textFlag(ctx, p, 'note', false)?.trim();
-    const summary = `${run.summary}${note ? `\n\n${note}` : ''}`;
-    ctx.io.out(`${summary}\n`);
-    return report(
-      ctx,
-      outcome('devops_done', summary, { summary, commands: run.commands, hygiene: run.report }),
-    );
   },
   answer: async (ctx, p) => {
     const itemId = one(p, 'item');
@@ -2472,10 +2478,18 @@ const VERBS: Record<string, Verb> = {
   toolchain: async (ctx, p) => {
     const sub = p.positionals[0] ?? 'list';
     const usage =
-      'usage: aom toolchain list | add <name> --bin <dir> [--bin <dir>]... [--read <dir>]... [--env KEY=VALUE]... | remove <name>';
+      'usage: aom toolchain list | ensure <tool> | add <name> --bin <dir> [--bin <dir>]... [--read <dir>]... [--env KEY=VALUE]... | remove <name>';
     if (sub === 'list') {
       const r = (await rpc(ctx, 'toolchain.list')) as { text?: string };
       ctx.io.out(`${r.text ?? ''}\n`);
+      return 0;
+    }
+    // quiet-approvals [B1]: inside the box, the checksum-verified download of one tool the project needs
+    if (sub === 'ensure') {
+      const tool = p.positionals[1];
+      if (!tool) throw new UsageError(usage);
+      const r = (await rpc(ctx, 'toolchain.ensure', { tool })) as { message?: string };
+      ctx.io.out(`${r.message ?? 'Done.'}\n`);
       return 0;
     }
     const name = p.positionals[1];
@@ -2932,7 +2946,8 @@ export const USAGE = `usage: aom <verb> [options]
   devops-question --text "<q>" --reason "<r>"   DevOps engineer: ask a question (goes through the normal chain; you resume with the answer)
   devops-done --summary "<text>" [--command "<c>"]...                  DevOps engineer: request completed
   toolchain list | add <name> --bin <dir>... [--read <dir>]... [--env KEY=VALUE]... | remove <name>   tools sandboxed agents may use; DevOps engineer: register what you installed so agents get it on PATH
-  hygiene run [--note "<text>"]               DevOps engineer: repository hygiene request (commit to the working branch, pull, push, tidy), ends the request
+  devops-outside --needs "<what>" --why "<why>"  DevOps engineer inside the box: ask the owner once to run this request outside it (ends the session)
+  toolchain ensure <tool>                     DevOps engineer inside the box: download one tool the project needs (checksum-verified)
   backlog suggest --title "<title>" [--description "<what and why>"] [--priority critical|high|normal|low] [--tag <t>]... [--project KEY]   a follow-up you found that is outside this card goes on the project backlog as a suggestion (never on the board); the owner decides
   ceo backlog add|list|update|send ...   CEO agent only: the project backlog (see your instructions)
   ceo snapshot | show | search | act <action> ... | recommend | notify | task | memory | review-reply | devops | draft-cards | correction | job | order | dir | done | report   CEO agent only: manage the organisation within the policy (see your instructions)

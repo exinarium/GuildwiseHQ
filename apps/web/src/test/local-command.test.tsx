@@ -1,3 +1,4 @@
+import { localStepText } from '@aom/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -29,6 +30,29 @@ describe('LocalCommand', () => {
     await userEvent.click(screen.getByTestId('local-command-copy'));
     expect(writeText).toHaveBeenCalledWith(`${CLI} approve abcdef1234`);
     expect(screen.getByTestId('approvals-link').getAttribute('href')).toBe('http://127.0.0.1:47613/');
+  });
+
+  it('quiet-approvals: the link opens the page at the held item, and only for a well-formed id', () => {
+    const { unmount } = render(
+      <LocalCommand
+        command={`${CLI} approve abcdef1234`}
+        kind="held"
+        windowPort={47613}
+        heldId="abcdef1234"
+      />,
+    );
+    expect(screen.getByTestId('approvals-link').getAttribute('href')).toBe(
+      'http://127.0.0.1:47613/#held=abcdef1234',
+    );
+    unmount();
+    render(<ApprovalsLink port={47613} heldId={'x"><script>'} />);
+    expect(screen.getByTestId('approvals-link').getAttribute('href')).toBe('http://127.0.0.1:47613/');
+  });
+
+  it('quiet-approvals: a "needs a change on your computer" step opens the limit section, nothing filled in', () => {
+    render(<ApprovalsLink port={47613} anchor="ceiling" />);
+    expect(screen.getByTestId('approvals-link').getAttribute('href')).toBe('http://127.0.0.1:47613/#ceiling');
+    expect(localStepText('devops.ceiling')).toMatch(/needs a change on your computer/);
   });
 
   it('a command outside the grammar is never shown: the fallback appears instead', () => {

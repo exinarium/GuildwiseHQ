@@ -5,6 +5,7 @@ import {
   assertNotAgentSession,
   checkSeal,
   ensurePolicyKey,
+  keyLost,
   POLICY_KEY_FILE,
   readPolicyKey,
   type SealCheck,
@@ -131,7 +132,7 @@ export class PolicyStore {
       return 'the policy has no seal: everything asks until `guildwise-runner policy accept`';
     // no key: only a policy from before the seal may be adopted, once
     const pinned = !!body && 'toolchainPins' in body;
-    const sealedBefore = !!this.opts.sealMarker && existsSync(this.opts.sealMarker);
+    const sealedBefore = (!!this.opts.sealMarker && existsSync(this.opts.sealMarker)) || keyLost(this.dir);
     if (pinned || sealedBefore)
       return 'the policy key is missing although this policy was sealed: everything asks until `guildwise-runner policy accept`';
     return null;

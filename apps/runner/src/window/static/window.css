@@ -185,6 +185,11 @@ ul.plain {
   margin-bottom: 10px;
   background: var(--canvas);
 }
+/* quiet-approvals: the item the Desk linked to (/#held=<id>) */
+.card.linked {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px var(--brand);
+}
 .card-head {
   display: flex;
   justify-content: space-between;

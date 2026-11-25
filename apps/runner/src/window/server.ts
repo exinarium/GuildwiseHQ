@@ -81,7 +81,13 @@ export interface ApprovalsWindowDeps {
   passkeys: PasskeyStore;
   offers: () => WindowOffers;
   log: Logger;
-  decide: (id: string, state: 'approved' | 'denied', extra: Partial<HeldRecord>) => unknown;
+  decide: (
+    id: string,
+    state: 'approved' | 'denied',
+    extra: Partial<HeldRecord>,
+    /** S2: the version the page showed; the decision is a compare-and-set on it. */
+    expectedVersion?: string,
+  ) => unknown;
   dir?: string;
   cli?: string;
   now?: () => number;

@@ -215,6 +215,19 @@ describe('what hygiene cannot resolve becomes a reporter signal', () => {
       workingBranch: 'main',
     });
     expect(start?.devops?.conflictCard).toBeUndefined();
+    // quiet-approvals S7: the request carries the repository's confirmed checks, which the runner runs before the move
+    expect(start?.brief.checks).toEqual({ suites: [], detect: false });
+    const suite = { name: 'lint', repoId: w.repoId, cwd: '.', cmd: ['pnpm', 'lint'], kind: 'check' };
+    await q(
+      `UPDATE projects SET integration_tests = $2::jsonb WHERE id = (SELECT project_id FROM project_repos WHERE id = $1)`,
+      [w.repoId, JSON.stringify({ suites: [suite] })],
+    );
+    const withChecks = await buildDevopsShiftStart(ctx(), String(req?.id), randomUUID());
+    expect(withChecks?.brief.checks?.suites.map((x) => x.name)).toEqual(['lint']);
+    await q(
+      `UPDATE projects SET integration_tests = '{}'::jsonb WHERE id = (SELECT project_id FROM project_repos WHERE id = $1)`,
+      [w.repoId],
+    );
     await q(`UPDATE devops_requests SET status='done' WHERE origin='conflict'`);
     // a clean run resolves the finding again for the tests that follow
     await report({ repos: [repoResult()] });

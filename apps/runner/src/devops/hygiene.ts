@@ -1,4 +1,5 @@
 import { existsSync, realpathSync } from 'node:fs';
+import { sep } from 'node:path';
 import {
   HYGIENE_PROBLEM_LABEL,
   type HygieneProblemKind,
@@ -19,7 +20,7 @@ import { mayDeleteLocal } from './tidy-up-rules.ts';
 
 /**
  * Repository hygiene of one workstation (docs/design/phases.md, "DevOps repository hygiene and the working branch").
- * Deterministic git, run by the DevOps engineer's `aom hygiene run`:
+ * Deterministic git, run by the runner's fixed tidy-up routine (quiet-approvals [B4]; no AI session):
  *
  * - the working branch must be confirmed: while the repository has none, nothing is committed, pulled or pushed, and
  *   the uncommitted changes are only reported (the server turns that into a question on the desk);
@@ -266,6 +267,28 @@ export interface HygieneDeps {
   identity?: { name: string; email: string };
   /** The card branches this runner created or pushed (T1): absent, nothing is deleted on origin. */
   ledger?: BranchLedger;
+  /**
+   * quiet-approvals [B4]: this computer's code folders (`repoRoots`). When given, a clone whose real path is not inside
+   * one of them is reported `missing` and left alone, whatever path the server named.
+   */
+  repoRoots?: readonly string[];
+}
+
+/** [B4] Is `path` (by its real path) inside one of `roots` (each by its real path), separator-aware? */
+export function insideRepoRoots(path: string, roots: readonly string[]): boolean {
+  const real = (p: string): string | null => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return null;
+    }
+  };
+  const target = real(path);
+  if (!target) return false;
+  return roots.some((r) => {
+    const root = real(r);
+    return !!root && (target === root || target.startsWith(root.endsWith(sep) ? root : root + sep));
+  });
 }
 
 export async function hygieneRepo(
@@ -286,6 +309,10 @@ export async function hygieneRepo(
   const repo = new Repo(spec.localPath, deps.identity);
   const done = () => ({ result: res, commands: repo.commands });
 
+  if (deps.repoRoots && !insideRepoRoots(spec.localPath, deps.repoRoots)) {
+    mark(res, 'missing', `${spec.localPath} is not inside this computer's code folders`);
+    return done();
+  }
   if (!existsSync(spec.localPath) || (await repo.git(['rev-parse', '--git-dir'])).exitCode !== 0) {
     mark(res, 'missing', `no git clone at ${spec.localPath}`);
     return done();

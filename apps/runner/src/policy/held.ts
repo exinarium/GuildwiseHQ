@@ -1,8 +1,18 @@
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import {
+  closeSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { assertNotAgentSession, checkSeal, type SealCheck, sealIfKeyed } from './integrity.ts';
+import { canonicalJson, sha256Hex } from './deploy-pin.ts';
+import { assertNotAgentSession, checkSeal, keyLost, type SealCheck, sealIfKeyed } from './integrity.ts';
 import { policyDir, writeFileAtomic } from './store.ts';
 
 /**
@@ -42,6 +52,15 @@ export const HeldRecordSchema = z.object({
   pinned: z.boolean().optional(),
   /** `release.sign` approved in the CLI: the signature made there (a passphrase key signs only at the keyboard). */
   signature: z.string().max(4096).optional(),
+  /**
+   * quiet-approvals S2: the version of what this item shows and will run, set at every hold and in-place update. A
+   * decision names the version it was shown; `decide` is a compare-and-set on it, so a newer shift of the same request
+   * that replaced the replay meanwhile is never approved unseen (Found T11). For a held shift start it is the R2 key.
+   */
+  version: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
   /** The passkey challenge published for this item (R22): one nonce per item, never reused. */
   passkey: z
     .object({
@@ -67,6 +86,52 @@ export function capDetail(text: string, max: number = HELD_DETAIL_MAX): string {
 }
 
 export const newHeldId = (): string => randomBytes(5).toString('hex');
+
+/**
+ * quiet-approvals [B3]: the dispatch ids of a `shift.start` that change with every dispatch of the same job. The R2 key
+ * leaves exactly these out, so a re-dispatch of the identical job matches and anything else does not.
+ */
+export const DISPATCH_IDS: readonly string[] = [
+  'shiftId',
+  'claimId',
+  'queuedAt',
+  'dispatchedAt',
+  // the wire envelope of every server message: its frame id and send time (never job content)
+  'id',
+  'ts',
+];
+
+/** The body without its dispatch ids (top level only, a constant list). */
+export function withoutDispatchIds(body: unknown): Record<string, unknown> {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return {};
+  const out: Record<string, unknown> = { ...(body as Record<string, unknown>) };
+  for (const k of DISPATCH_IDS) delete out[k];
+  return out;
+}
+
+/** [B3] The R2 key of a `shift.start` body: sha256 of its canonical JSON without the dispatch ids. */
+export const r2Key = (body: unknown): string => sha256Hex(canonicalJson(withoutDispatchIds(body)));
+
+/** S2: the version of a held item (the R2 key for a shift start; otherwise everything it shows and replays). */
+export function heldVersion(r: Pick<HeldRecord, 'kind' | 'summary' | 'detail' | 'replay'>): string {
+  if (r.replay.type === 'shift.start') return r2Key(r.replay.body);
+  return sha256Hex(canonicalJson({ kind: r.kind, summary: r.summary, detail: r.detail, replay: r.replay }));
+}
+
+/** S2: the item changed after it was shown (the page answers 409, the CLI aborts). */
+export class HeldVersionMismatch extends Error {
+  constructor(readonly id: string) {
+    super('This item changed; look again');
+  }
+}
+
+/** How long a lock on one held item may be held before it is taken as stale (a crashed writer). */
+const LOCK_STALE_MS = 10_000;
+const LOCK_WAIT_MS = 3_000;
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
 
 export class HeldStore {
   readonly dir: string;
@@ -107,8 +172,9 @@ export class HeldStore {
       return null;
     }
     const { check, body } = checkSeal(this.root, raw);
-    if (check === 'bad' || check === 'unsealed') {
-      this.quarantine(id, check);
+    // S3: once a key existed, an unsealed record is untrusted even when the key is gone (asked for again)
+    if (check === 'bad' || check === 'unsealed' || (check === 'no_key' && keyLost(this.root))) {
+      this.quarantine(id, check === 'no_key' ? 'unsealed' : check);
       return null;
     }
     const parsed = HeldRecordSchema.safeParse(body);
@@ -169,6 +235,48 @@ export class HeldStore {
     rmSync(this.file(id), { force: true });
   }
 
+  /**
+   * S2: runs `fn` while holding this item's lock file (`<id>.lock`, `wx`), so the runner's in-place update and a
+   * decision from the CLI or the page never interleave between a read and a write. A lock older than 10 s is stale.
+   */
+  withLock<T>(id: string, fn: () => T): T {
+    mkdirSync(this.dir, { recursive: true, mode: 0o700 });
+    const lock = `${this.file(id)}.lock`;
+    const until = Date.now() + LOCK_WAIT_MS;
+    for (;;) {
+      try {
+        closeSync(openSync(lock, 'wx', 0o600));
+        break;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+        try {
+          if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) rmSync(lock, { force: true });
+        } catch {
+          // gone meanwhile
+        }
+        if (Date.now() > until) throw new Error(`held item ${id} is busy; try again`);
+        sleepSync(25);
+      }
+    }
+    try {
+      return fn();
+    } finally {
+      rmSync(lock, { force: true });
+    }
+  }
+
+  /** S2: an in-place change of a still-held item under its lock; the version follows what it now shows. */
+  update(id: string, change: (r: HeldRecord) => HeldRecord): HeldRecord | null {
+    return this.withLock(id, () => {
+      const r = this.get(id);
+      if (!r) return null;
+      const next = change(r);
+      const versioned = { ...next, version: heldVersion(next) };
+      this.put(versioned);
+      return versioned;
+    });
+  }
+
   /** Finds an item by its id or a unique prefix of it (what people type). */
   find(idOrPrefix: string): HeldRecord | null {
     const exact = /^[a-z0-9]{6,32}$/.test(idOrPrefix) ? this.get(idOrPrefix) : null;
@@ -177,18 +285,32 @@ export class HeldStore {
     return hits.length === 1 ? (hits[0] as HeldRecord) : null;
   }
 
-  /** CLI: records the decision. The runner acts on it within a few seconds. */
+  /**
+   * CLI and page: records the decision. The runner acts on it within a few seconds. S2: with `expectedVersion` it is a
+   * compare-and-set: an item whose version is not the one shown is left held and `HeldVersionMismatch` is thrown.
+   */
   decide(
     id: string,
     state: 'approved' | 'denied',
     by: 'local' | 'passkey',
     extra: Partial<HeldRecord> = {},
+    expectedVersion?: string,
   ): HeldRecord {
-    const r = this.get(id);
-    if (!r) throw new Error(`no held item ${id}`);
-    if (r.state !== 'held') throw new Error(`item ${id} is already ${r.state}`);
-    const next: HeldRecord = { ...r, ...extra, state, decidedAt: new Date().toISOString(), decidedBy: by };
-    this.put(next);
-    return next;
+    return this.withLock(id, () => {
+      const r = this.get(id);
+      if (!r) throw new Error(`no held item ${id}`);
+      if (r.state !== 'held') throw new Error(`item ${id} is already ${r.state}`);
+      if (expectedVersion !== undefined && (r.version ?? heldVersion(r)) !== expectedVersion)
+        throw new HeldVersionMismatch(id);
+      const next: HeldRecord = {
+        ...r,
+        ...extra,
+        state,
+        decidedAt: new Date().toISOString(),
+        decidedBy: by,
+      };
+      this.put(next);
+      return next;
+    });
   }
 }

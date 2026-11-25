@@ -754,18 +754,6 @@ async function devopsMain(brief: DevopsBrief): Promise<number> {
     });
     return 0;
   }
-  // Repository hygiene: the deterministic `aom hygiene run` does the git work (and ends the request).
-  if (d.hygiene) {
-    const h = aom(['hygiene', 'run']);
-    emit({
-      kind: 'final',
-      text:
-        h.code === 0
-          ? `mock devops hygiene: ${h.out.trim().split('\n')[0]}`
-          : `mock devops hygiene failed: ${(h.err || h.out).trim()}`,
-    });
-    return 0;
-  }
   // uat-runner-fixes-3 finding 2: an engineer that obeys a request to install and commit in a card worktree
   // (`[edit_worktree:<path>]`): the runner must refuse the report and revert the worktree; the mock then reports again.
   const target = /\[edit_worktree:([^\]]+)\]/.exec(d.summary)?.[1];
