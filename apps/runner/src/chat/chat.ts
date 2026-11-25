@@ -79,6 +79,7 @@ import { mergeReadFolders, resolveOrgFolderRepos, resolveReadRepos } from '../re
 import type { RestartAfterReply } from '../restart-after-reply.ts';
 import { cleanAgentTmp, ensureSandbox, holdAgentTmp, type Sandbox, sandboxEnv } from '../sandbox/sandbox.ts';
 import { type IssuedShiftCredential, issueShiftCredential } from '../session/shift-credential.ts';
+import { noteOutside } from '../toolchain/ensure-lock.ts';
 import { agentPath, type ToolchainRegistry, toolchainRpc } from '../toolchain/registry.ts';
 import { readVaultContext } from '../vaults/context.ts';
 
@@ -381,12 +382,16 @@ export class ChatManager {
     };
     this.noteAttempt(msg.chatId, msg.attemptId);
     this.active.set(msg.chatId, chat);
+    // tool-pin-lib S6: a DevOps chat turn outside the box runs as the user and could write the Guildwise tool folder
+    const outside = msg.agent.isDevops === true && !chat.devopsBox;
+    if (outside) noteOutside(1);
     try {
       await this.run(chat);
     } catch (err) {
       this.log.error(`chat ${msg.chatId} failed unexpectedly`, err);
       this.error(msg, err instanceof Error ? err.message : String(err));
     } finally {
+      if (outside) noteOutside(-1);
       if (chat.credential) chat.credential.revoke();
       else if (chat.token) this.deps.ipc.revoke(chat.token);
       this.delegates.endCaller(msg.chatId, 'the turn ended');
@@ -1361,12 +1366,12 @@ export class ChatManager {
         viewerOfChat(msg),
       ) ?? '';
     // Delegation (R3b): the agent's grants; a Claude Code chat also gets them as native subagents (read only, like the chat).
+    // review S3: the toolchains are resolved once per turn (each resolve checks the Guildwise tool folder)
+    const tc = this.deps.toolchains?.resolve();
     chat.delegateWork = {
       cwd,
       readDirs: folders.map((f) => f.path),
-      ...(this.deps.toolchains?.resolve()
-        ? { toolchainReadDirs: this.deps.toolchains.resolve()?.readDirs ?? [] }
-        : {}),
+      ...(tc ? { toolchainReadDirs: tc.readDirs } : {}),
     };
     const subagents =
       !devops &&
@@ -1405,7 +1410,6 @@ export class ChatManager {
         },
       )}`,
     );
-    const tc = this.deps.toolchains?.resolve();
     const baseEnv = {
       ...sandboxEnv(sandbox, undefined, tc?.env),
       ...this.issueCredential(chat),

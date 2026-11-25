@@ -20,7 +20,7 @@ export interface DotnetSelection {
   /** The root agents use, or undefined when no install with an SDK exists. */
   chosen?: DotnetInstall;
   all: DotnetInstall[];
-  /** Why this root: `config` (dotnetRoot override), `superset`, `most-sdks`, `highest-sdk`, `only`. */
+  /** Why this root: `config` (dotnetRoot override), `guildwise` (its own root), `superset`, `most-sdks`, `highest-sdk`, `only`. */
   reason?: string;
 }
 
@@ -33,6 +33,10 @@ export interface DotnetDetectOptions {
   /** Replaces the built-in system locations (`/usr/share/dotnet`, ...); tests use it to stay hermetic. */
   systemRoots?: string[];
 }
+
+/** tool-pin-lib Decision 3: Guildwise's own .NET root (`<toolchains>/dotnet`), preferred when it holds an SDK. */
+const ownDotnetRoot = (home: string): string =>
+  join(home, '.local', 'share', 'guildwise', 'toolchains', 'dotnet');
 
 /** Compares dotted versions with an optional `-preview` suffix (a release sorts after its previews). */
 export function compareVersions(a: string, b: string): number {
@@ -136,6 +140,17 @@ export function selectDotnet(o: DotnetDetectOptions = {}): DotnetSelection {
   }
   const withSdk = all.filter((i) => i.sdks.length);
   if (!withSdk.length) return { all };
+  // tool-pin-lib Decision 3: env.ensure installs into Guildwise's own root (the others are read-only to it), so once that
+  // root holds an SDK the agents use it
+  const ownReal = (() => {
+    try {
+      return realpathSync(ownDotnetRoot(home));
+    } catch {
+      return null;
+    }
+  })();
+  const own = ownReal ? withSdk.find((i) => i.root === ownReal) : undefined;
+  if (own) return { chosen: own, all, reason: 'guildwise' };
   const max = (i: DotnetInstall) => i.sdks[i.sdks.length - 1] ?? '0';
   const ranked = [...withSdk].sort(
     (a, b) => b.sdks.length - a.sdks.length || compareVersions(max(b), max(a)),

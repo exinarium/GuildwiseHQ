@@ -25,9 +25,14 @@ import type { Params, Platform } from './types.ts';
 
 /**
  * DESIGN §5 (1.10.0): DevOps installs stack tools as the runner user, in the runner account's own home only, never as
- * root and never with a package manager. Every download lands in `<root>/.tmp`, is checked against the vendor's
- * checksum (or a pinned one, `pins.ts`), and only then unpacked into `<root>/<tool>/<version>` (via `.partial` and a
- * rename) and linked into `<root>/bin`. `<root>` is `<passwd home>/.local/share/guildwise/toolchains`.
+ * root and never with a package manager. Every download lands in `<root>.stage` (next to the tool folder, not in it:
+ * tool-pin-lib S2), is checked against the vendor's checksum (or a pinned one, `pins.ts`), unpacked there, and only then
+ * renamed into `<root>/<tool>/<version>` and linked into `<root>/bin`. `<root>` is
+ * `<passwd home>/.local/share/guildwise/toolchains`, and nothing outside it is installed into (tool-pin-lib Decision 3).
+ *
+ * tool-pin-lib B1: the commands run with an exact environment (PATH = the verified tool folders' bins plus
+ * `/usr/bin:/bin`, HOME the account home, LANG), `tar` and `unzip` by absolute path, and every absolute path a step names
+ * must lie under no guarded tool folder, or under one that verified at the start of the run (`stepAllowed`).
  */
 
 export const TOOLCHAINS_REL = ['.local', 'share', 'guildwise', 'toolchains'] as const;
@@ -39,6 +44,9 @@ export const accountHome = (): string => userInfo().homedir;
 export function toolchainsRoot(home: string = accountHome()): string {
   return join(home, ...TOOLCHAINS_REL);
 }
+
+/** tool-pin-lib S2: where downloads are checked and unpacked, next to the tool folder (`<root>.stage`). */
+export const stageDir = (root: string): string => `${root}.stage`;
 
 export interface Checksum {
   algo: 'sha256' | 'sha512';
@@ -74,6 +82,10 @@ export interface UserStep {
   cmd: string;
   args: string[];
   env?: Record<string, string>;
+  /** Written to stdin (`sdkmanager --licenses` answers). */
+  input?: string;
+  /** A failing exit is logged, not an error (accepting licences that are already accepted). */
+  mayFail?: boolean;
 }
 
 export interface UserInstallPlan {
@@ -107,6 +119,60 @@ export interface UserInstallDeps {
   uid(): number;
   platform: Platform;
   arch: string;
+  /**
+   * tool-pin-lib B1: the guarded tool folders and the ones that verified at the start of this run; a step naming a path
+   * under a guarded folder that did not verify is refused. Absent: no guarded folders (tests of the installer alone).
+   */
+  guard?: { roots: readonly string[]; before: readonly string[] };
+}
+
+/**
+ * tool-pin-lib B1 / review S3: the installer's executor: exactly this environment (nothing inherited), PATH = the bins of
+ * the verified tool folders plus `/usr/bin:/bin`, HOME the account home (uv and rustup-init need it), LANG, then the
+ * step's own variables (which cannot change PATH, HOME or LANG).
+ */
+export function installerExecutor(base: Executor, binDirs: readonly string[], home: string): Executor {
+  return {
+    run(cmd, args, opts = {}) {
+      return base.run(cmd, args, {
+        ...opts,
+        exactEnv: true,
+        env: {
+          ...(opts.env ?? {}),
+          HOME: home,
+          LANG: 'C.UTF-8',
+          PATH: [...binDirs, '/usr/bin', '/bin'].join(':'),
+        },
+      });
+    },
+  };
+}
+
+const isUnder = (p: string, dir: string): boolean => {
+  const rel = relative(resolve(dir), resolve(p));
+  return rel === '' || (!!rel && !rel.startsWith('..') && !isAbsolute(rel));
+};
+
+/**
+ * tool-pin-lib B1: may this step run? Every absolute path in `cmd`, `args` and the step's variables (also the value of
+ * `--name=/path`) lies under
+ * no guarded tool folder, or under one that verified. Returns null when allowed, else the reason.
+ */
+export function stepRefusal(
+  step: Pick<UserStep, 'cmd' | 'args' | 'env'>,
+  guard: UserInstallDeps['guard'],
+): string | null {
+  if (!guard) return null;
+  // pre-review 3: the step's variables too (UV_TOOL_DIR, CARGO_HOME, ...)
+  const paths = [step.cmd, ...step.args, ...Object.values(step.env ?? {})]
+    .flatMap((a) => [a, ...(a.includes('=') ? [a.slice(a.indexOf('=') + 1)] : [])])
+    .filter((a) => isAbsolute(a));
+  for (const p of paths) {
+    const root = guard.roots.find((r) => isUnder(p, r));
+    if (root && !guard.before.some((b) => resolve(b) === resolve(root)))
+      return `refused: ${p} lies in the tool folder ${root}, which changed outside Guildwise's own installs`;
+  }
+  return null;
 }
 
 export class UserInstallError extends Error {}
@@ -133,7 +199,7 @@ export function defaultUserInstallDeps(): UserInstallDeps {
   return {
     fetchText: defaultFetchText,
     download: defaultDownload,
-    exec: realExecutor,
+    exec: installerExecutor(realExecutor, [join(toolchainsRoot(), 'bin')], accountHome()),
     home: homedir,
     accountHome,
     uid: () => (typeof process.getuid === 'function' ? process.getuid() : -1),
@@ -255,11 +321,17 @@ async function installArchive(
   const dest = a.into ? resolve(a.into.dir) : join(root, a.tool, a.version);
   if (!inside(home, dest))
     throw new UserInstallError(`refused: ${dest} is outside the runner's home (${home})`);
+  // tool-pin-lib Decision 3: the user's own tool folders are read-only to Guildwise
+  if (!inside(root, dest))
+    throw new UserInstallError(
+      `refused: ${dest} is outside the Guildwise tool folder (${root}); Guildwise installs nowhere else`,
+    );
   const present = a.present ?? dest;
   if (existsSync(present)) {
     log(`  ${a.tool} ${a.version}: already installed`);
   } else {
-    const tmp = join(root, '.tmp');
+    // tool-pin-lib S2: downloaded and unpacked next to the tool folder (same filesystem, so the rename stays atomic)
+    const tmp = stageDir(root);
     mkdirSync(tmp, { recursive: true, mode: 0o700 });
     const file = join(tmp, `${a.tool}-${a.version}-${basename(new URL(a.url).pathname)}`);
     rmSync(file, { force: true });
@@ -273,7 +345,7 @@ async function installArchive(
       );
     }
     log(`  ${a.checksum.algo} verified`);
-    const partial = a.into ? `${dest}.partial` : join(root, a.tool, `${a.version}.partial`);
+    const partial = join(tmp, `${a.tool}-${a.version}.partial`);
     rmSync(partial, { recursive: true, force: true });
     mkdirSync(partial, { recursive: true, mode: 0o755 });
     try {
@@ -284,8 +356,10 @@ async function installArchive(
       } else {
         const r =
           a.format === 'tar'
-            ? await deps.exec.run('tar', ['-xf', file, '-C', partial], { timeoutMs: 20 * 60_000 })
-            : await deps.exec.run('unzip', ['-q', '-o', file, '-d', partial], { timeoutMs: 20 * 60_000 });
+            ? await deps.exec.run('/usr/bin/tar', ['-xf', file, '-C', partial], { timeoutMs: 20 * 60_000 })
+            : await deps.exec.run('/usr/bin/unzip', ['-q', '-o', file, '-d', partial], {
+                timeoutMs: 20 * 60_000,
+              });
         if (r.exitCode !== 0)
           throw new UserInstallError(`unpacking ${basename(file)} failed: ${tail(r.stderr || r.stdout)}`);
       }
@@ -327,11 +401,18 @@ export async function runUserInstall(
   mkdirSync(root, { recursive: true, mode: 0o755 });
   for (const a of plan.archives) await installArchive(a, root, home, deps, log);
   for (const s of plan.steps ?? []) {
+    const refused = stepRefusal(s, deps.guard);
+    if (refused) throw new UserInstallError(refused);
     log(`  $ ${s.cmd} ${s.args.join(' ')}`);
     const r = await deps.exec.run(s.cmd, s.args, {
       timeoutMs: 30 * 60_000,
       ...(s.env ? { env: s.env } : {}),
+      ...(s.input !== undefined ? { input: s.input } : {}),
     });
+    if (r.exitCode !== 0 && s.mayFail) {
+      log(`  exit ${r.exitCode} (not needed)`);
+      continue;
+    }
     if (r.exitCode !== 0)
       throw new UserInstallError(
         `${basename(s.cmd)} failed: ${tail(r.stderr || r.stdout) || `exit ${r.exitCode}`}`,

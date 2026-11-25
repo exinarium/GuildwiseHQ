@@ -396,6 +396,10 @@ export interface ResolvedToolchains {
   readDirs: string[];
   /** Merged variables (the first entry that sets one wins). */
   env: Record<string, string>;
+  /** tool-pin-lib: entries left out because a folder of theirs lies in a tool folder that does not verify. */
+  dropped: string[];
+  /** Why they are missing, for the helper's instructions (set by the runner), when any were dropped. */
+  offNote?: string;
 }
 
 /**
@@ -423,6 +427,13 @@ export class ToolchainRegistry {
    * the box-writable DevOps tool prefix)? Unset: no gate.
    */
   treeOk?: (dir: string) => boolean;
+  /**
+   * tool-pin-lib (the entry rule): may an entry use this read folder or variable value (false only when it lies in a
+   * whole-pinned tool folder that does not verify)? Unset: no gate.
+   */
+  pathOk?: (path: string) => boolean;
+  /** tool-pin-lib S2: told which entries were dropped; returns the sentence for the helper's instructions. */
+  onDropped?: (names: string[]) => string | undefined;
 
   constructor(
     private readonly file: string,
@@ -537,13 +548,26 @@ export class ToolchainRegistry {
   }
 
   resolve(): ResolvedToolchains {
-    const entries = this.list();
+    const all = this.list();
+    const entries: ToolchainEntry[] = [];
+    const dropped: string[] = [];
     const pathDirs: string[] = [];
     const readDirs: string[] = [];
     const env: Record<string, string> = {};
-    for (const e of entries) {
-      for (const b of e.binDirs)
-        if (existsSync(b) && !pathDirs.includes(b) && (!this.treeOk || this.treeOk(b))) pathDirs.push(b);
+    for (const e of all) {
+      // tool-pin-lib (B4): an entry contributes only when every bin folder passes the tree pin and no read folder or
+      // path variable lies in a tool folder that fails; otherwise the whole entry is left out
+      const bins = e.binDirs.filter((b) => existsSync(b));
+      const paths = [...e.readDirs, ...Object.values(e.env).filter((v) => isAbsolute(v))];
+      if (
+        (this.treeOk && !bins.every((b) => (this.treeOk as (d: string) => boolean)(b))) ||
+        (this.pathOk && !paths.every((p) => (this.pathOk as (d: string) => boolean)(p)))
+      ) {
+        dropped.push(e.name);
+        continue;
+      }
+      entries.push(e);
+      for (const b of bins) if (!pathDirs.includes(b)) pathDirs.push(b);
       for (const r of [...e.binDirs, ...e.readDirs]) if (!readDirs.includes(r)) readDirs.push(r);
       for (const [k, v] of Object.entries(e.env)) {
         try {
@@ -554,7 +578,8 @@ export class ToolchainRegistry {
         if (!(k in env)) env[k] = v;
       }
     }
-    return { entries, pathDirs, readDirs, env };
+    const offNote = dropped.length ? this.onDropped?.(dropped) : undefined;
+    return { entries, pathDirs, readDirs, env, dropped, ...(offNote ? { offNote } : {}) };
   }
 }
 
@@ -593,8 +618,8 @@ export function formatToolchainList(entries: ToolchainEntry[], home: string = ho
 }
 
 /** The instruction line for sandboxed agents (appended by the supervisor). */
-export const toolchainNote = (available: string): string =>
-  `Toolchains available to you: ${available || 'none registered'}. If a tool is missing, do not install it yourself: ask DevOps (\`aom devops\`) to install it and register it with \`aom toolchain add\`.`;
+export const toolchainNote = (available: string, offNote?: string): string =>
+  `Toolchains available to you: ${available || 'none registered'}.${offNote ? ` ${offNote}` : ''} If a tool is missing, do not install it yourself: ask DevOps (\`aom devops\`) to install it and register it with \`aom toolchain add\`.`;
 
 /** `aom toolchain list|add|remove` over the IPC: anyone may list, only the DevOps engineer changes the list. */
 export function toolchainRpc(

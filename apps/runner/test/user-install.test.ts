@@ -41,6 +41,7 @@ import { TOOLS } from '../src/toolchain/stacks.ts';
 import {
   createUserInstaller,
   runUserInstall,
+  stageDir,
   sumFromText,
   toolchainsRoot,
   type UserInstallDeps,
@@ -146,13 +147,13 @@ interface StepCall {
   env?: Record<string, string>;
 }
 
-/** tar/unzip run for real; any other command (uv, rustup-init) is recorded and `effect` fakes its result. */
+/** tar/unzip run for real (by absolute path since tool-pin-lib B1); any other command is recorded and `effect` fakes its result. */
 function executor(effect: (s: StepCall) => void = () => {}): Executor & { steps: StepCall[] } {
   const steps: StepCall[] = [];
   return {
     steps,
     async run(cmd: string, args: string[], opts?: ExecOptions) {
-      if (cmd === 'tar' || cmd === 'unzip') return realExecutor.run(cmd, args, opts);
+      if (cmd === '/usr/bin/tar' || cmd === '/usr/bin/unzip') return realExecutor.run(cmd, args, opts);
       const s: StepCall = { cmd, args, ...(opts?.env ? { env: opts.env } : {}) };
       steps.push(s);
       effect(s);
@@ -192,11 +193,11 @@ function linkedInto(root: string, name: string): string {
   return target;
 }
 
-/** After a refused download: nothing unpacked, nothing linked, nothing left in .tmp. */
+/** After a refused download: nothing unpacked, nothing linked, nothing left in the stage folder (next to the root). */
 function nothingInstalled(root: string, tool: string) {
   expect(existsSync(join(root, tool))).toBe(false);
   expect(existsSync(join(root, 'bin'))).toBe(false);
-  expect(readdirSync(join(root, '.tmp'))).toEqual([]);
+  expect(readdirSync(stageDir(root))).toEqual([]);
 }
 
 const corrupt = (hex: string): string => (hex[0] === '0' ? '1' : '0') + hex.slice(1);
@@ -424,15 +425,16 @@ describe('user-space installs per stack (fixture downloads)', () => {
     expect(w.net.downloads).toEqual([]);
   });
 
-  it('.NET: into the chosen user root (~/.dotnet), which is not linked', async () => {
+  it('.NET: never into the user root (~/.dotnet): Guildwise installs only into its own tool folder (tool-pin-lib Decision 3)', async () => {
     const w = world();
     dotnetFixture(w);
     const chosen = join(w.home, '.dotnet');
-    expect(await w.install('dotnet-sdk', dotnetUserInstall(chosen, ['10.0'], []))).toMatchObject({
-      ok: true,
+    const r = await w.install('dotnet-sdk', dotnetUserInstall(chosen, ['10.0'], []));
+    expect(r).toMatchObject({
+      ok: false,
+      detail: expect.stringContaining('outside the Guildwise tool folder'),
     });
-    expect(existsSync(join(chosen, 'sdk', '10.0.401'))).toBe(true);
-    expect(existsSync(join(w.root, 'bin', 'dotnet'))).toBe(false);
+    expect(existsSync(join(chosen, 'sdk', '10.0.401'))).toBe(false);
   });
 
   it('.NET: a bad sha512 is refused', async () => {
@@ -628,7 +630,8 @@ describe('user-space installs per stack (fixture downloads)', () => {
 
   it('android cmdline-tools: a download that does not match the pin is refused; a matching one lands in latest', async () => {
     const w = world();
-    const sdk = join(w.home, 'Android', 'Sdk');
+    // tool-pin-lib Decision 3: Guildwise installs the SDK only into its own tool folder
+    const sdk = join(w.root, 'android-sdk');
     const arc = zipball({ 'cmdline-tools/bin/sdkmanager': '#!sdkmanager' });
     w.net.files.set(
       `https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS.build}_latest.zip`,
@@ -649,7 +652,25 @@ describe('user-space installs per stack (fixture downloads)', () => {
     plan.archives[0].checksum = { algo: 'sha256', hex: sha('sha256', arc) };
     await runUserInstall(plan, w.deps, () => {});
     expect(existsSync(join(sdk, 'cmdline-tools', 'latest', 'bin', 'sdkmanager'))).toBe(true);
-    expect(w.exec.steps[0]?.args[1]).toContain('--licenses');
+    // review S3: sdkmanager itself, no shell, so its paths are checked arguments
+    expect(w.exec.steps[0]).toMatchObject({
+      cmd: join(sdk, 'cmdline-tools', 'latest', 'bin', 'sdkmanager'),
+      args: [`--sdk_root=${sdk}`, '--licenses'],
+    });
+    // an SDK in the user's own folder is theirs to fill
+    const own = join(w.home, 'Android', 'Sdk');
+    const theirs = await androidCmdlineUserInstall(own)({
+      params: {},
+      platform: 'linux',
+      arch: 'x64',
+      root: w.root,
+      fetchText: w.net.fetchText,
+    });
+    if (!theirs?.archives[0]) throw new Error('no plan');
+    theirs.archives[0].checksum = { algo: 'sha256', hex: sha('sha256', arc) };
+    await expect(runUserInstall(theirs, w.deps, () => {})).rejects.toThrow(
+      /outside the Guildwise tool folder/,
+    );
   });
 
   it('every resolver in the tool table is one of these rows', () => {

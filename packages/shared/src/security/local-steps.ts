@@ -72,6 +72,8 @@ const VERBS: ReadonlyArray<{ verb: readonly string[]; args: readonly ArgCheck[] 
   { verb: ['repo', 'allow-scripts'], args: [re(REPO_URL_RE)] },
   { verb: ['formatter', 'pin'], args: [re(SHA256_RE)] },
   { verb: ['toolchain', 'approve'], args: [re(SHA256_RE)] },
+  // tool-pin-lib: a tool folder changed outside Guildwise's own installs; the yes is bound to the content shown
+  { verb: ['toolchain', 'trust'], args: [re(SHA256_RE)] },
   { verb: ['passkey', 'trust'], args: [re(B64URL_RE)] },
   { verb: ['approvals', 'pair'], args: [re(PAIR_CODE_RE)] },
   { verb: ['extras', 'install'], args: [lit('yt-dlp')] },
@@ -145,6 +147,8 @@ export const LOCAL_STEP_KINDS = [
   'extras.ytdlp',
   'devops.install',
   'toolchain.approve',
+  // tool-pin-lib: a tool folder changed outside Guildwise's own installs (the helpers stopped using it)
+  'toolchain.trust',
   // quiet-approvals phase B: a Desk click asked for more than the limit set on this computer
   'devops.ceiling',
   // quiet-approvals Rework 1 (REVIEW S4): the safety box cannot start here (old bubblewrap, no model credential)
@@ -171,6 +175,8 @@ export const LOCAL_STEP_TEXT: Readonly<Record<LocalStepKind | 'held', string>> =
   'extras.ytdlp': 'This installs the video transcript tool (yt-dlp) in the runner’s own folder.',
   'toolchain.approve':
     'The DevOps helper installed a tool for the other helpers. Run this on the workstation to see exactly what it adds and allow it.',
+  'toolchain.trust':
+    "A tool folder changed outside Guildwise's own installs, so the helpers stopped using it. Run this on the workstation to see what changed and allow it again.",
   'devops.ceiling':
     'DevOps asked for more than the limit you set on this computer (Docker, a folder, or internet for test containers). It runs without it. This needs a change on your computer: open Approvals on this computer, section “The most DevOps may get”, or run this there.',
   'devops.box':

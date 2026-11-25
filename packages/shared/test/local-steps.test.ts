@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SetupOffersWireSchema } from '../src/protocol/security.ts';
 import {
   LOCAL_CLI_RE,
+  LOCAL_STEP_KINDS,
   localCliOk,
   localCommandOk,
   localStepText,
@@ -123,5 +124,16 @@ describe('repository addresses with a password (zero known vulnerabilities)', ()
     expect(t).not.toContain('s3cret');
     expect(t).not.toContain(':pw@');
     expect(t).toContain('https://alice:***@git.example/v.git');
+  });
+});
+
+describe('tool-pin-lib: toolchain trust', () => {
+  it('takes exactly one sha256 and has its own step kind and text', () => {
+    const h = 'a'.repeat(64);
+    expect(localCommandOk(`guildwise-runner toolchain trust ${h}`)).toBe(true);
+    expect(localCommandOk('guildwise-runner toolchain trust abc')).toBe(false);
+    expect(localCommandOk(`guildwise-runner toolchain trust ${h} ${h}`)).toBe(false);
+    expect(LOCAL_STEP_KINDS).toContain('toolchain.trust');
+    expect(localStepText('toolchain.trust')).toContain('changed outside');
   });
 });

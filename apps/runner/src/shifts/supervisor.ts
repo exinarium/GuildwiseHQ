@@ -256,6 +256,7 @@ import { defaultEnvChecker, type EnvChecker, needsTestEnvironment } from '../tes
 import { environmentNote } from '../testing/environment-note.ts';
 import { probeTargetUrl, targetHosts } from '../testing/remote-target.ts';
 import { testerRpc } from '../testing/tester-env.ts';
+import { noteOutside } from '../toolchain/ensure-lock.ts';
 import { type PrepResult, type PrepStep, prepareWorktree, prepNote } from '../toolchain/prepare-worktree.ts';
 import {
   agentPath,
@@ -887,6 +888,9 @@ export class ShiftSupervisor {
       ...(opts.startedSent ? { startedSent: true } : {}),
     };
     this.active.set(msg.shiftId, shift);
+    // tool-pin-lib S6: an approved run outside the box runs as the user and could write the Guildwise tool folder
+    const outside = shift.devopsMode === 'outside';
+    if (outside) noteOutside(1);
     let settle!: () => void;
     const settled = new Promise<void>((r) => (settle = r));
     this.settling.set(msg.shiftId, settled);
@@ -898,6 +902,7 @@ export class ShiftSupervisor {
       if (!shift.session)
         this.reject(msg.shiftId, 'internal', err instanceof Error ? err.message : String(err));
     } finally {
+      if (outside) noteOutside(-1);
       // an unexpected error skipped the shift end: the card worktrees are still checked (REVIEW B2)
       if (shift.cardFence && !shift.cardFence.ended)
         await this.endCardFence(shift).catch((err) =>
@@ -1864,7 +1869,7 @@ export class ShiftSupervisor {
       texts.instructions += `\n${scratchCloneNote(s.scratchClone.dir, s.conflictFf.target.branch)}\n`;
     const tc = this.deps.toolchains?.resolve();
     if (tc && msg.kind !== 'devops')
-      texts.instructions += `\n${toolchainNote(describeToolchains(tc.entries))}\n`;
+      texts.instructions += `\n${toolchainNote(describeToolchains(tc.entries), tc.offNote)}\n`;
     const signIn = msg.kind === 'card' ? this.deps.mcpSignInNote?.(msg.mcpServers) : undefined;
     if (signIn) texts.instructions += `\n${signIn}\n`;
     // The tester's environment: where the app is, which suites to run, how to reach it from the sandbox.

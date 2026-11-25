@@ -55,13 +55,14 @@ describe('e2e-found-fixes B2: `aom devops install` applies the agents’ PATH pi
   const HASH = 'a'.repeat(64);
   /** A guarded (box-writable) root with real tree pins, like `toolBoxWritable` + `TreePins` in the runner. */
   function guarded() {
+    // a legacy root (the user's own tool folder): its bin folders keep their own pin (tool-pin-lib S1)
     const root = realpathSync(tmp('aom-guarded-'));
     const policy = tmp('aom-pins-policy-');
     ensurePolicyKey(policy);
     const pins = new TreePins(policy);
     const gate = (waiting: ToolGate['waiting'] = []): ToolGate => ({
       waiting,
-      treeOk: (d) => pins.ok(d, [root]),
+      treeOk: (d) => pins.ok(d, { whole: [], legacy: [root] }),
       guardedRootOf: (p) => {
         try {
           const r = realpathSync(p);
@@ -123,7 +124,7 @@ describe('e2e-found-fixes B2: `aom devops install` applies the agents’ PATH pi
     expect(find({ toolchainDirs: [bin], gate: g.gate() })).toMatchObject({
       refusal: expect.stringContaining('changed since it was installed'),
     });
-    g.pins.pin([bin]);
+    g.pins.pin([], [bin]);
     expect(find({ toolchainDirs: [bin], gate: g.gate() })).toMatchObject({ toolPath: join(bin, 'npm') });
     // the box changed the folder after the pin
     writeFileSync(join(bin, 'npm'), '#!/bin/sh\necho changed\n', { mode: 0o755 });
@@ -135,7 +136,7 @@ describe('e2e-found-fixes B2: `aom devops install` applies the agents’ PATH pi
   it('a pinned Node layout (bin/npm -> ../lib/...) is used and its checked real path is what runs', () => {
     const g = guarded();
     const n = userNode(g.root);
-    g.pins.pin([n.bin]);
+    g.pins.pin([], [n.bin]);
     expect(find({ toolchainDirs: [n.bin], gate: g.gate() })).toEqual({
       toolPath: join(n.bin, 'npm'),
       real: n.npmCli,
@@ -151,7 +152,7 @@ describe('e2e-found-fixes B2: `aom devops install` applies the agents’ PATH pi
     writeFileSync(nodeReal, '#!/bin/sh\n', { mode: 0o755 });
     rmSync(join(n.bin, 'node'));
     symlinkSync(join('..', 'libexec', 'node'), join(n.bin, 'node'));
-    g.pins.pin([n.bin]);
+    g.pins.pin([], [n.bin]);
     const r = find({ toolchainDirs: [n.bin], gate: g.gate() });
     expect(r).toMatchObject({ nodeExec: realpathSync(nodeReal) });
     expect((r as { nodeExec?: string }).nodeExec).not.toBe(join(n.bin, 'node'));

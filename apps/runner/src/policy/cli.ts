@@ -1,15 +1,19 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { ReleaseSignPayloadSchema, urlHasPassword } from '@aom/shared';
 import type { Command } from 'commander';
+import { binTreeHash, type GuardRoots, guardRoots, refusedCode, TreePins } from '../box/tool-box.ts';
+import type { Manifest } from '../box/tree-hash.ts';
 import { entryDir, loadIndex } from '../pairings.ts';
 import { resolveDataDir, runnerPaths } from '../paths.ts';
 import { readOffers, type SetupOffer } from '../setup/offers.ts';
 import { RELEASE_PREP_DIR } from '../signing/release-prepare.ts';
 import { type MinisignRunner, runMinisign, secretKeyKind, signArtefact } from '../signing/release-sign.ts';
 import { ToolchainRegistry } from '../toolchain/registry.ts';
+import { toolchainsRoot } from '../toolchain/user-install.ts';
 import { openOwnerTurn } from './authority.ts';
 import { setupPending } from './gate.ts';
 import * as grants from './grants.ts';
@@ -39,6 +43,11 @@ export interface PolicyCliDeps {
   offers?: () => SetupOffer[];
   /** T2: the runner's toolchain list (`toolchain approve` shows the entry it pins). */
   toolchains?: () => ToolchainRegistry;
+  /** tool-pin-lib: the tool folder pins and the guarded folders (`toolchain trust`). Default: this computer's. */
+  treePins?: () => TreePins;
+  guardRoots?: () => GuardRoots;
+  /** Where `toolchain trust` writes the full list of changes (default: the runner's logs folder). */
+  logsDir?: () => string;
 }
 
 /** The offers of every pairing under the data dir (what `setup` shows); none when the runner is not paired. */
@@ -528,6 +537,12 @@ export function registerPolicyCommands(
       "show a toolchain a DevOps helper registered and, after your yes, put it on the agents' PATH",
     )
     .action(run((h: string) => toolchainApprove(make(), h)));
+  toolchain
+    .command('trust <sha256>')
+    .description(
+      "show what changed in a tool folder outside Guildwise's own installs and, after your yes, let the helpers use it again",
+    )
+    .action(run((h: string) => toolchainTrust(make(), h)));
 
   const policy = program
     .command('policy')
@@ -589,6 +604,124 @@ export async function toolchainApprove(d: PolicyCliDeps, hash: string): Promise<
   if (!(await confirm(d, 'Allow this toolchain?'))) throw new Error('not approved');
   d.store.update((p) => ({ ...p, toolchainPins: [...new Set([...p.toolchainPins, hash])] }));
   d.out(`Approved "${e.name}": new shifts and chats get it.`);
+}
+
+const kindOf = (desc: string | undefined): string => (desc ? (desc[0] ?? '?') : '-');
+const isExec = (desc: string | undefined): boolean =>
+  !!desc && desc.startsWith('f ') && (Number.parseInt(desc.split(' ')[1] ?? '0', 8) & 0o111) !== 0;
+
+/** The changes between the recorded manifest and now: links and executable files first. */
+export function treeChanges(
+  old: Manifest | null,
+  cur: Manifest,
+): { lines: string[]; important: string[]; added: number; removed: number; changed: number } {
+  const lines: string[] = [];
+  const important: string[] = [];
+  let added = 0;
+  let removed = 0;
+  let changed = 0;
+  const names = [...new Set([...Object.keys(old ?? {}), ...Object.keys(cur)])].sort();
+  for (const n of names) {
+    const a = old?.[n];
+    const b = cur[n];
+    if (a === b) continue;
+    let line: string;
+    if (a === undefined) {
+      added++;
+      line = `added    ${n}${b?.startsWith('l ') ? ` -> ${b.slice(2)}` : ''}`;
+    } else if (b === undefined) {
+      removed++;
+      line = `removed  ${n}`;
+    } else {
+      changed++;
+      line = `changed  ${n}${kindOf(a) !== kindOf(b) ? ' (now a different kind of entry)' : ''}${b.startsWith('l ') ? ` -> ${b.slice(2)}` : ''}`;
+    }
+    lines.push(line);
+    if (
+      b?.startsWith('l ') ||
+      a?.startsWith('l ') ||
+      isExec(b) ||
+      isExec(a) ||
+      (a !== undefined && b !== undefined && kindOf(a) !== kindOf(b))
+    )
+      important.push(line);
+  }
+  return { lines, important, added, removed, changed };
+}
+
+/**
+ * `guildwise-runner toolchain trust <code>` (tool-pin-lib): the code is the current hash of a tool folder (its path mixed
+ * in) that changed outside Guildwise's own installs. Shows the changed links and executable files first, the totals, and
+ * writes the full list to a file; after a typed yes it pins the folder, only while it still has exactly that content.
+ */
+export async function toolchainTrust(d: PolicyCliDeps, code: string): Promise<void> {
+  if (!/^[0-9a-f]{64}$/.test(code)) throw new Error('usage: toolchain trust <sha256 shown on the Desk>');
+  const pins = d.treePins?.() ?? new TreePins(d.store.dir);
+  const g = d.guardRoots?.() ?? guardRoots(homedir(), toolchainsRoot());
+  for (const root of g.whole) {
+    const h = pins.fullHash(root);
+    if (h.kind === 'fail' && refusedCode(root, h.reason) === code)
+      throw new Error(
+        `${root} cannot be allowed as it is: ${h.reason}. Remove that entry (or reinstall the tool), then check the environment again.`,
+      );
+    if (h.kind !== 'ok' || h.hash !== code) continue;
+    const rec = pins.manifestOf(root);
+    const ch = treeChanges(rec?.entries ?? null, h.manifest ?? {});
+    d.out(`The tool folder ${root} changed outside Guildwise's own installs.`);
+    if (!rec) d.out('There is no earlier record of it on this computer, so every entry is listed as added.');
+    if (ch.important.length) {
+      d.out('Links and programs that changed:');
+      for (const l of ch.important.slice(0, 40)) d.out(`  ${l}`);
+      if (ch.important.length > 40) d.out(`  ... and ${ch.important.length - 40} more`);
+    }
+    d.out(`In all: ${ch.added} added, ${ch.changed} changed, ${ch.removed} removed.`);
+    try {
+      const logs = d.logsDir?.() ?? runnerPaths(resolveDataDir()).logs;
+      mkdirSync(logs, { recursive: true, mode: 0o700 });
+      const file = join(logs, `tree-trust-${new Date().toISOString().slice(0, 10)}.txt`);
+      writeFileSync(file, `${root}\n${code}\n${ch.lines.join('\n')}\n`, { mode: 0o600 });
+      d.out(`The full list: ${file}`);
+    } catch {
+      /* the list on screen is what counts */
+    }
+    d.out('Every helper on this computer would run programs from this folder again.');
+    if (!(await confirm(d, 'Allow this tool folder as it is now?'))) throw new Error('not approved');
+    if (!pins.pin([root], [], { [root]: code }).length)
+      throw new Error(
+        `${root} changed again while you looked: nothing was allowed. The Desk shows the new command.`,
+      );
+    d.out('Allowed: new sessions of the helpers use it again.');
+    return;
+  }
+  // a pinned bin folder of the user's own tools
+  for (const dir of Object.keys(pins.read().bins)) {
+    if (pins.changedBin(dir) !== code) continue;
+    d.out(`The tool folder ${dir} changed. It now holds:`);
+    d.out(`  (content hash ${binTreeHash(dir)?.slice(0, 16) ?? '?'})`);
+    for (const l of listDir(dir).slice(0, 60)) d.out(`  ${l}`);
+    d.out('Every helper on this computer would run programs from this folder again.');
+    if (!(await confirm(d, 'Allow this tool folder as it is now?'))) throw new Error('not approved');
+    if (!pins.pinBin(dir, code))
+      throw new Error(
+        `${dir} changed again while you looked: nothing was allowed. The Desk shows the new command.`,
+      );
+    d.out('Allowed: new sessions of the helpers use it again.');
+    return;
+  }
+  throw new Error(
+    'no tool folder has exactly this content now (it changed again, or it was allowed already): the Desk shows the current command',
+  );
+}
+
+function listDir(dir: string): string[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true }).map((e) => {
+      const p = join(dir, e.name);
+      return e.isSymbolicLink() ? `${e.name} -> ${readlinkSync(p)}` : e.name;
+    });
+  } catch {
+    return [];
+  }
 }
 
 /** `guildwise-runner ceo turn`: opens one CEO owner turn with full power from this machine (R18-S). */

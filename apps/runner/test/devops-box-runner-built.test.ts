@@ -639,18 +639,20 @@ describe('nothing box-writable runs unboxed: tree pins and the tool box', () => 
     mkdirSync(bin);
     writeFileSync(join(bin, 'node'), 'v1');
     const pins = new TreePins(pdir);
-    expect(pins.ok(bin, [root])).toBe(false);
-    pins.pin([bin]);
-    expect(pins.ok(bin, [root])).toBe(true);
+    // a legacy root (the user's own tool folder): its bin folders keep the non-recursive pin (tool-pin-lib S1)
+    const g = { whole: [], legacy: [root] };
+    expect(pins.ok(bin, g)).toBe(false);
+    pins.pin([], [bin]);
+    expect(pins.ok(bin, g)).toBe(true);
     const before = binTreeHash(bin);
     writeFileSync(join(bin, 'node'), 'v2-planted');
     expect(binTreeHash(bin)).not.toBe(before);
-    expect(pins.ok(bin, [root])).toBe(false);
+    expect(pins.ok(bin, g)).toBe(false);
     // a folder outside the guarded roots is not this check's business
-    expect(pins.ok(tmp('aom-other-'), [root])).toBe(true);
+    expect(pins.ok(tmp('aom-other-'), g)).toBe(true);
     // a changed pin file is not trusted
     writeFileSync(join(pdir, 'tree-pins.json'), JSON.stringify({ pins: { [bin]: binTreeHash(bin) } }));
-    expect(pins.ok(bin, [root])).toBe(false);
+    expect(pins.ok(bin, g)).toBe(false);
   });
 
   it('the registry keeps a refused folder off every PATH', async () => {

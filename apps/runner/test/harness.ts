@@ -33,6 +33,8 @@ export async function startHarness(
     exitGraceMs: 5000,
     authority: grantedAuthority(),
     policyDir: tmp('aom-policy-'),
+    // tool-pin-lib: never the account's real Guildwise tool folder (absent until a test makes it)
+    toolchainsRoot: join(dataDir, 'test-toolchains'),
     ...runnerOpts,
   });
   await runner.start();

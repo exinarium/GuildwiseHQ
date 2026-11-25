@@ -22,7 +22,7 @@ import {
   ytDlpPlan,
 } from '../src/toolchain/extras.ts';
 import { YTDLP } from '../src/toolchain/pins.ts';
-import { toolchainsRoot, type UserInstallDeps } from '../src/toolchain/user-install.ts';
+import { stageDir, toolchainsRoot, type UserInstallDeps } from '../src/toolchain/user-install.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
 
 cleanupTmp();
@@ -104,7 +104,7 @@ describe('installing yt-dlp', () => {
     expect(r.detail).toContain(YTDLP.files.linux.sha256);
     expect(ytDlpPath(w.home)).toBeNull();
     expect(existsSync(join(w.root, 'yt-dlp'))).toBe(false);
-    expect(readdirSync(join(w.root, '.tmp'))).toEqual([]);
+    expect(readdirSync(stageDir(w.root))).toEqual([]);
   });
 
   it('refuses root and a foreign HOME before downloading anything', async () => {

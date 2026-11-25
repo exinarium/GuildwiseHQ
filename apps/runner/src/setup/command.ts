@@ -1,8 +1,9 @@
 import { homedir, userInfo } from 'node:os';
 import type { Command } from 'commander';
 import { resolveDataDir } from '../paths.ts';
+import { policyDir } from '../policy/store.ts';
 import { realExecutor } from '../toolchain/exec.ts';
-import { installExtra } from '../toolchain/extras.ts';
+import { installExtra, keepingToolPin } from '../toolchain/extras.ts';
 import { parseSetupOptions, type RawSetupFlags, SetupError } from './options.ts';
 import { terminalPrompter } from './prompt.ts';
 import { runSetup } from './setup.ts';
@@ -87,7 +88,13 @@ export function registerSetupCommand(program: Command): void {
             prompter: process.stdin.isTTY && !opts.yes ? terminalPrompter : null,
             out: (line) => console.log(line),
             exec: realExecutor,
-            installExtra: (name) => installExtra(name, { log: (l) => console.log(`    ${l}`) }),
+            installExtra: (name) =>
+              keepingToolPin(
+                policyDir(),
+                () => installExtra(name, { log: (l) => console.log(`    ${l}`) }),
+                undefined,
+                (l) => console.log(`    ${l}`),
+              ),
           },
           opts,
         );

@@ -79,6 +79,12 @@ export interface UpdaterOptions {
   policy?: () => Pick<Policy, 'allowUnsignedUpdatesFrom' | 'legacyUpdateOrigin'>;
   /** The release key this runner trusts (default: the compiled-in key, `update/release-key.ts`). */
   trustedKey?: string;
+  /**
+   * tool-pin-lib review S6: called right before the switch and restart; waits (bounded) for a running environment
+   * preparation and keeps it from starting, so a restart never leaves a half-written tool folder. Returns a release for
+   * when the switch fails.
+   */
+  quiesce?: () => Promise<() => void>;
   /** Test seams. */
   stage?: typeof stageRelease;
   scheduleRestartFn?: typeof scheduleRestart;
@@ -516,6 +522,7 @@ export class Updater {
     } catch {
       return false; // the server is unreachable: the new version could not prove itself, so wait
     }
+    const release = this.opts.quiesce ? await this.opts.quiesce() : () => {};
     writePending(layout, {
       from: version,
       to: target,
@@ -524,6 +531,7 @@ export class Updater {
     try {
       switchTo(layout, pkg, layout.packageDir);
     } catch (err) {
+      release();
       removeFile(layout.pendingFile);
       this.waitingFor = null;
       this.set({

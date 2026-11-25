@@ -85,6 +85,10 @@ export function uvEnv(root: string): Record<string, string> {
     UV_TOOL_BIN_DIR: join(root, 'bin'),
     UV_CACHE_DIR: join(root, '.cache', 'uv'),
     UV_NO_MODIFY_PATH: '1',
+    // tool-pin-lib S5: the bytecode is written at install time, so running a uv tool later never changes the folder
+    UV_COMPILE_BYTECODE: '1',
+    // review S3: no cache that grows inside the pinned folder with every install (it stays pinned: no unchecked input)
+    UV_NO_CACHE: '1',
   };
 }
 
@@ -393,7 +397,6 @@ export const androidCmdlineUserInstall =
     if (!key) return null;
     const pin = ANDROID_CMDLINE_TOOLS.files[key];
     const sdkmanager = join(sdk, 'cmdline-tools', 'latest', 'bin', 'sdkmanager');
-    const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
     return {
       archives: [
         {
@@ -407,10 +410,13 @@ export const androidCmdlineUserInstall =
           present: join(sdk, 'cmdline-tools', 'latest', 'bin', 'sdkmanager'),
         },
       ],
+      // review S3: sdkmanager itself (no shell), the answers on stdin, so every path it gets is a checked argument
       steps: [
         {
-          cmd: 'bash',
-          args: ['-c', `yes | ${q(sdkmanager)} --sdk_root=${q(sdk)} --licenses > /dev/null || true`],
+          cmd: sdkmanager,
+          args: [`--sdk_root=${sdk}`, '--licenses'],
+          input: 'y\n'.repeat(50),
+          mayFail: true,
         },
       ],
     };

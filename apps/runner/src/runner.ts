@@ -5,6 +5,7 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -152,7 +153,17 @@ import {
   runTestServices,
   type TestRecipe,
 } from './box/test-services.ts';
-import { TREE_PINS_FILE, TreePins, toolBoxExecutor, toolBoxWritable } from './box/tool-box.ts';
+import {
+  allGuarded,
+  depsBoxPlan,
+  type GuardRoots,
+  guardRoots,
+  type RootStatus,
+  recipeBoxPlan,
+  refusedCode,
+  TreePins,
+  toolBoxExecutor,
+} from './box/tool-box.ts';
 import { PackCredentialStore } from './capabilities/pack-credentials.ts';
 import { PackManager } from './capabilities/packs.ts';
 import { CapabilityRegistry } from './capabilities/registry.ts';
@@ -323,16 +334,32 @@ import { chromiumPdfRenderer, type PdfRenderer } from './storage/pdf.ts';
 import { StorageService } from './storage/service.ts';
 import { selectDotnet } from './toolchain/dotnet.ts';
 import { ensureEnvironment } from './toolchain/ensure.ts';
+import {
+  ensureBusy,
+  outsideState,
+  runningBefore,
+  setRunning,
+  withEnsureLock,
+} from './toolchain/ensure-lock.ts';
 import { type Executor, realExecutor } from './toolchain/exec.ts';
 import { toolchainPathDirs, toolchainPathValue } from './toolchain/path-env.ts';
 import { ToolchainRegistry, toolchainHash } from './toolchain/registry.ts';
 import type { Platform } from './toolchain/types.ts';
-import { toolchainsRoot } from './toolchain/user-install.ts';
+import {
+  accountHome,
+  createUserInstaller,
+  installerExecutor,
+  toolchainsRoot,
+} from './toolchain/user-install.ts';
 import { VaultManager } from './vaults/manager.ts';
 import { RUNNER_VERSION } from './version.ts';
 import { DeviceStore, DevicesFileSchema } from './window/pairing.ts';
 
 export interface RunnerOptions {
+  /** Test hook: the Guildwise tool folder (default: `<account home>/.local/share/guildwise/toolchains`). */
+  toolchainsRoot?: string;
+  /** Test hook: how often an open trust step's folder is checked again (default 60 s). */
+  treeRecheckMs?: number;
   /** easy-runner-setup: the approvals page of this process (its port, or why it did not start). */
   windowState?: () => { port?: number; error?: string } | undefined;
   config: RunnerConfig;
@@ -981,9 +1008,17 @@ export class Runner {
     // quiet-approvals phase B: a box-writable tool folder goes on a PATH only while it matches the runner's tree pin, and the
     // DevOps tool prefix never does
     this.treePins = new TreePins(opts.policyDir ?? policyDir(), (m) => this.log.warn(m));
-    this.toolchains.treeOk = (d) =>
-      !underRoot(resolve(d), join(this.paths.root, 'devops-tools')) &&
-      this.treePins.ok(d, toolBoxWritable(homedir(), toolchainsRoot()));
+    // tool-pin-lib: the Guildwise tool folder is checked as a whole, the user's own folders by their bin pins (S1: every
+    // guard use takes both); a changed folder raises one trust step (never for a root an env.ensure in flight verified)
+    this.treePins.onStatus = (root, st) => this.noteTreeStatus(root, st);
+    this.toolchains.treeOk = (d) => {
+      if (underRoot(resolve(d), join(this.paths.root, 'devops-tools'))) return false;
+      const ok = this.treePins.ok(d, this.guard());
+      if (!ok) this.noteChangedBin(d);
+      return ok;
+    };
+    this.toolchains.pathOk = (p) => this.treePins.pathOk(p, this.guard());
+    this.toolchains.onDropped = (names) => this.toolsOffNote(names);
     this.toolchains.onChange = () => {
       this.reportToolchains(false);
       this.askToolchainPins();
@@ -1686,6 +1721,12 @@ export class Runner {
     }
     this.adoptPolicySeal();
     this.adoptTreePins();
+    {
+      // tool-pin-lib: a trust step disappears once its folder verifies again (the owner ran it)
+      const t = setInterval(() => this.recheckTreeSteps(), this.opts.treeRecheckMs ?? 60_000);
+      t.unref();
+      this.timers.push(t);
+    }
     await writeShims(this.paths.bin);
     await this.ipc.start();
     await this.ipc.startSocket().catch((err) => this.log.warn(`IPC socket unavailable: ${String(err)}`));
@@ -1867,16 +1908,125 @@ export class Runner {
    */
   private adoptTreePins(): void {
     try {
-      if (existsSync(join(this.treePins.policyDir, TREE_PINS_FILE))) return;
-      const dirs = toolBoxWritable(homedir(), toolchainsRoot())
-        .flatMap((w) => [w, join(w, 'bin')])
-        .filter((d) => existsSync(d));
-      this.treePins.pin(dirs);
-      if (dirs.length)
-        this.log.info(`pinned ${dirs.length} tool folder(s) as they are (first start of this version)`);
+      const g = this.guard();
+      const f = this.treePins.read();
+      if (f.version === 1) {
+        // Decision 1: an older pin file keeps the bin pins of the user's own folders; the Guildwise folder gets one trust
+        // step (never adopted silently: it may have changed before this version)
+        this.treePins.upgradeV1(g);
+        this.log.info(
+          'the tool folder pins were upgraded; the Guildwise tool folder waits for one yes on this computer',
+        );
+        return;
+      }
+      if (f.version !== 0) return;
+      const bins = g.legacy.flatMap((w) => [w, join(w, 'bin')]).filter((d) => existsSync(d));
+      // review S1: the first read of the whole folder (seconds per GB) runs asynchronously; meanwhile its tools are pending
+      // (off, no Desk step) and env.ensure waits for it. The pin itself then reads only the warmed cache.
+      this.adopting = (async () => {
+        for (const r of g.whole) await this.treePins.warm(r);
+        const pinned = this.treePins.pin(g.whole, bins);
+        if (pinned.length || bins.length)
+          this.log.info(
+            `pinned ${pinned.length + bins.length} tool folder(s) as they are (first start of this version)`,
+          );
+      })()
+        .catch((err) => this.log.warn(`could not pin the tool folders: ${String(err)}`))
+        .finally(() => {
+          this.adopting = null;
+          this.treePins.clearMemo();
+        });
     } catch (err) {
       this.log.warn(`could not pin the tool folders: ${String(err)}`);
     }
+  }
+
+  /** The one-time adoption of the tool folders while it runs (review S1). */
+  private adopting: Promise<void> | null = null;
+
+  /** tool-pin-lib: the guarded tool folders (the Guildwise folder whole, the user's own by their bin pins). */
+  private guard(): GuardRoots {
+    return guardRoots(homedir(), this.opts.toolchainsRoot ?? toolchainsRoot());
+  }
+
+  /** Open trust steps by root or bin folder -> the code they show. */
+  private readonly treeSteps = new Map<string, string>();
+
+  /**
+   * A whole root's fresh verdict: ok clears its trust step; changed, unpinned or refused raises one (with the code bound to
+   * exactly this content), unless an env.ensure in flight verified that root at its start (its tools are just off until
+   * it pins, review B3); pending raises nothing (the folder is still being read).
+   */
+  private noteTreeStatus(root: string, st: RootStatus): void {
+    if (st.state === 'ok' || st.state === 'absent') {
+      this.clearTreeStep(root);
+      return;
+    }
+    if (st.state === 'pending' || this.adopting) return;
+    if (runningBefore()?.has(root)) return;
+    const code = st.state === 'failed' ? refusedCode(root, st.reason ?? '') : st.hash;
+    if (!code) return;
+    this.raiseTreeStep(
+      root,
+      code,
+      st.state === 'failed'
+        ? `the Guildwise tool folder holds something that cannot be allowed (${st.reason ?? 'see the command'}): its tools are off`
+        : "the Guildwise tool folder changed outside Guildwise's own installs: the helpers stopped using it",
+    );
+  }
+
+  /** A pinned bin folder of the user's own tools that changed: one trust step for it. */
+  private noteChangedBin(dir: string): void {
+    const g = this.guard();
+    if (!g.legacy.some((r) => underRoot(resolve(dir), resolve(r)))) return;
+    const code = this.treePins.changedBin(dir);
+    if (code) this.raiseTreeStep(dir, code, `the tool folder ${dir} changed: the helpers stopped using it`);
+  }
+
+  private raiseTreeStep(key: string, code: string, summary: string): void {
+    const prev = this.treeSteps.get(key);
+    if (prev === code) return;
+    if (prev) this.approvals.clearStep(`toolchain.trust:${key}:${prev}`);
+    this.treeSteps.set(key, code);
+    this.log.warn(`${summary} (${key})`);
+    this.approvals.needStep({
+      key: `toolchain.trust:${key}:${code}`,
+      kind: 'toolchain.trust',
+      summary,
+      verb: 'toolchain trust',
+      args: [code],
+    });
+  }
+
+  private clearTreeStep(key: string): void {
+    const prev = this.treeSteps.get(key);
+    if (!prev) return;
+    this.treeSteps.delete(key);
+    this.approvals.clearStep(`toolchain.trust:${key}:${prev}`);
+  }
+
+  /** Re-checks the folders with an open trust step (the owner may have run it): clears the steps that verify now. */
+  private recheckTreeSteps(): void {
+    if (!this.treeSteps.size) return;
+    const g = this.guard();
+    this.treePins.clearMemo();
+    for (const key of [...this.treeSteps.keys()]) {
+      if (g.whole.includes(key)) this.treePins.status(key);
+      else if (this.treePins.ok(key, g)) this.clearTreeStep(key);
+    }
+  }
+
+  /** review S2: why a helper started now lacks some tools (logged, and in its toolchain note). */
+  private toolsOffNote(names: string[]): string | undefined {
+    const g = this.guard();
+    const inFlight = g.whole.some((r) => runningBefore()?.has(r));
+    const why = inFlight
+      ? 'an environment preparation is installing tools right now; they come back for sessions started after it ends'
+      : this.adopting || g.whole.some((r) => this.treePins.status(r).state === 'pending')
+        ? 'the Guildwise tool folder is still being checked after a start or an install'
+        : "a tool folder changed outside Guildwise's own installs (the owner is asked on this computer)";
+    this.log.info(`toolchains off for a new session (${names.join(', ')}): ${why}`);
+    return `Not available right now: ${names.join(', ')} (${why}).`;
   }
 
   private adoptPolicySeal(): void {
@@ -2469,45 +2619,136 @@ export class Runner {
   ) {
     // R18-S: Docker only where granted locally, whatever the server's access says
     const p = localEnvEnsure(this.authority.policy(), payload);
-    // quiet-approvals phase B: every check and install runs in the tool box (Linux; fail closed without bubblewrap), and
-    // the tool folders it wrote are pinned afterwards, so only the runner's own installs reach an unboxed PATH
-    const writable = toolBoxWritable(homedir(), toolchainsRoot());
+    // tool-pin-lib B3: one env.ensure at a time on this computer (the folders are shared); a queued one says so (N2)
+    return withEnsureLock(
+      () => this.ensureEnvLocked(p, opts),
+      () => this.log.info(`env.ensure ${p.projectId}: waiting for another environment preparation to end`),
+    );
+  }
+
+  private async ensureEnvLocked(
+    p: EnvEnsurePayload,
+    opts: { toolsOnly?: boolean; onlyTools?: readonly string[] },
+  ) {
+    const g = this.guard();
+    const tcRoot = this.opts.toolchainsRoot ?? toolchainsRoot();
+    // quiet-approvals phase B / tool-pin-lib: checks and installs run in the recipe box (Linux; fail closed without
+    // bubblewrap) with only the Guildwise tool folder writable; a project's own install steps run in its deps box with
+    // every tool folder read-only. Only folders that verified now (or do not exist yet) are mounted or pinned afterwards.
     let exec = this.exec;
+    let depsExec: ((remote: string, localPath: string) => Executor) | undefined;
     if (this.platform() === 'linux') {
       const bw = probeBwrap();
       if (!bw.ok) throw new Error(`the tool box for preparing environments cannot start: ${bw.reason}`);
+    }
+    // the box home of earlier versions held caches written with the user folders writable: started fresh once (inside
+    // the lock, so no other run uses it meanwhile)
+    const home = join(this.paths.root, 'toolbox-home');
+    if (!existsSync(join(home, '.v2'))) {
+      rmSync(home, { recursive: true, force: true });
+      mkdirSync(home, { recursive: true, mode: 0o700 });
+      writeFileSync(join(home, '.v2'), '');
+    }
+    // review S1: the one-time adoption first
+    if (this.adopting) await this.adopting;
+    // S2: the verdict after an awaited warm(), never a budget-limited one
+    for (const r of g.whole) await this.treePins.warm(r);
+    this.treePins.clearMemo();
+    const oldPins = this.treePins.read().roots;
+    const before: string[] = [];
+    for (const r of g.whole) {
+      const st = this.treePins.status(r).state;
+      if (st === 'ok' || st === 'absent') before.push(r);
+      else this.log.warn(`env.ensure ${p.projectId}: ${r} did not verify (${st}): nothing is installed`);
+    }
+    // pre-review 1: a legacy root whose pinned bin folder changed is not mounted and not on the installer PATH either
+    for (const r of g.legacy) {
+      if (this.treePins.legacyRootOk(r)) before.push(r);
+      else
+        this.log.warn(
+          `env.ensure ${p.projectId}: ${r} has a changed tool folder: it is left out of this run`,
+        );
+    }
+    const allowInstalls = before.includes(tcRoot);
+    if (allowInstalls) mkdirSync(tcRoot, { recursive: true, mode: 0o755 });
+    setRunning(before.filter((r) => g.whole.includes(r)));
+    const outside0 = outsideState();
+    if (this.platform() === 'linux') {
       const repoDirs: string[] = [];
       for (const r of p.repos) {
         const found = await this.findRepo(r.remoteUrlNormalized).catch(() => undefined);
         if (found) repoDirs.push(found.localPath);
       }
-      const home = join(this.paths.root, 'toolbox-home');
-      mkdirSync(home, { recursive: true, mode: 0o700 });
-      exec = toolBoxExecutor(this.exec, { writable, repoDirs, home });
+      exec = toolBoxExecutor(this.exec, recipeBoxPlan(before, tcRoot, home));
+      depsExec = (remote, localPath) => {
+        const repoDir = repoDirs.find((d) => underRoot(resolve(localPath), resolve(d))) ?? localPath;
+        const depsHome = join(
+          this.paths.root,
+          'toolbox-deps-home',
+          createHash('sha256').update(remote).digest('hex').slice(0, 16),
+        );
+        mkdirSync(depsHome, { recursive: true, mode: 0o700 });
+        return toolBoxExecutor(this.exec, depsBoxPlan(before, repoDir, depsHome));
+      };
     }
-    const report = await ensureEnvironment(p, {
-      exec,
-      ...(opts.toolsOnly ? { toolsOnly: true } : {}),
-      ...(opts.onlyTools ? { onlyTools: opts.onlyTools } : {}),
-      platform: this.platform(),
-      findRepo: (n) => this.findRepo(n),
-      logFile: join(this.paths.envLogs, `${p.projectId}.log`),
-      dotnet: () =>
-        selectDotnet({
-          ...(this.opts.config.dotnetRoot ? { override: this.opts.config.dotnetRoot } : {}),
-        }),
-      // R18-S: installs run their scripts only for repositories allowed on this workstation
-      installScriptsAllowed: (remote) => this.authority.policy().installScripts[remote] === true,
-      // uat-runner-fixes-3: an empty repository (or a missing working branch) is told before any card is turned away
-      repoState: (localPath, workingBranch) =>
-        repoStartState(localPath, workingBranch, (url) => gitAuthFor(this.forgeEnv, url)),
+    const accHome = accountHome();
+    const userInstaller = createUserInstaller({
+      exec: installerExecutor(
+        this.exec,
+        before.map((r) => join(r, 'bin')),
+        accHome,
+      ),
+      guard: { roots: allGuarded(g), before },
     });
     try {
-      this.treePins.pin(writable.flatMap((w) => [w, join(w, 'bin')]).filter((d) => existsSync(d)));
-    } catch (err) {
-      this.log.warn(`could not pin the tool folders: ${String(err)}`);
+      return await ensureEnvironment(p, {
+        exec,
+        ...(depsExec ? { depsExec } : {}),
+        userInstaller,
+        toolchainsRoot: tcRoot,
+        allowInstalls,
+        // S6: while an approved run outside the box is active, nothing is installed outside a box
+        userInstallBlocked: () =>
+          outsideState().active > 0
+            ? 'an approved DevOps run outside the safety box is active: tools are installed once it ends (check again then)'
+            : null,
+        ...(opts.toolsOnly ? { toolsOnly: true } : {}),
+        ...(opts.onlyTools ? { onlyTools: opts.onlyTools } : {}),
+        platform: this.platform(),
+        findRepo: (n) => this.findRepo(n),
+        logFile: join(this.paths.envLogs, `${p.projectId}.log`),
+        dotnet: () =>
+          selectDotnet({
+            ...(this.opts.config.dotnetRoot ? { override: this.opts.config.dotnetRoot } : {}),
+          }),
+        // R18-S: installs run their scripts only for repositories allowed on this workstation
+        installScriptsAllowed: (remote) => this.authority.policy().installScripts[remote] === true,
+        // uat-runner-fixes-3: an empty repository (or a missing working branch) is told before any card is turned away
+        repoState: (localPath, workingBranch) =>
+          repoStartState(localPath, workingBranch, (url) => gitAuthFor(this.forgeEnv, url)),
+      });
+    } finally {
+      // N3: pinned even after a throw; only the roots that verified at the start. S6: when an approved outside run was
+      // active at any moment of the run, only roots that still equal their old pin are kept (the rest wait for the yes).
+      // Review S2: decided right before the synchronous pin, after the asynchronous warm, so there is no window
+      const roots = before.filter((r) => g.whole.includes(r));
+      try {
+        await this.treePins.pinAsync(roots, () => {
+          const outside1 = outsideState();
+          if (!(outside0.active > 0 || outside1.active > 0 || outside1.epoch !== outside0.epoch))
+            return undefined;
+          this.log.warn(
+            `env.ensure ${p.projectId}: an approved run outside the box overlapped it; changed tool folders are not approved again`,
+          );
+          return Object.fromEntries(roots.flatMap((r) => (oldPins[r] ? [[r, oldPins[r] as string]] : [])));
+        });
+      } catch (err) {
+        this.log.warn(`could not pin the tool folders: ${String(err)}`);
+      }
+      setRunning([]);
+      this.treePins.clearMemo();
+      for (const r of roots) this.treePins.status(r);
     }
-    return report;
   }
 
   /** `repo.initial_commit`: the owner's one click for an empty repository (an empty first commit, pushed, never forced). */
@@ -3113,7 +3354,8 @@ export class Runner {
    * wait for the owner's yes, the tree pin of the box-writable tool folders, and which of those roots a path lies under.
    */
   private toolGate(): ToolGate {
-    const roots = toolBoxWritable(homedir(), toolchainsRoot()).flatMap((r) => {
+    // tool-pin-lib S1: every guarded root, the Guildwise folder and the user's own
+    const roots = allGuarded(this.guard()).flatMap((r) => {
       try {
         return [realpathSync(r)];
       } catch {
@@ -3384,6 +3626,13 @@ export class Runner {
       return {
         ok: false,
         error: `Downloading tools is not allowed without asking on this computer. ${boxRefusal(`toolchain ensure ${tool}`)}`,
+      };
+    // tool-pin-lib N2: env.ensure runs one at a time and can take up to 30 minutes; the box's request is answered now
+    // instead of timing out silently behind it
+    if (ensureBusy())
+      return {
+        ok: false,
+        error: 'waiting for another environment preparation on this computer: ask again in a few minutes',
       };
     const urls = new Set<string>();
     if (msg.devops?.card?.remoteUrlNormalized) urls.add(msg.devops.card.remoteUrlNormalized);

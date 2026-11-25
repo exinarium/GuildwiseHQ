@@ -20,6 +20,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { execa } from 'execa';
+import { TreePins } from '../box/tool-box.ts';
 import { YTDLP } from './pins.ts';
 import type { Platform } from './types.ts';
 import {
@@ -225,4 +226,33 @@ export async function ytDlpDoctorLines(over: Partial<YtDlpDoctorDeps> = {}): Pro
       });
   }
   return lines;
+}
+
+/**
+ * tool-pin-lib: an extra the owner installs at the terminal (`extras install`, `setup`) goes into the Guildwise tool
+ * folder; it is pinned afterwards, but only when the folder verified (or did not exist) before, so this never approves a
+ * change someone else made. Otherwise the folder keeps waiting for its trust step.
+ */
+export async function keepingToolPin<T extends { ok: boolean }>(
+  policyDir: string,
+  fn: () => Promise<T>,
+  root: string = toolchainsRoot(),
+  log: (l: string) => void = () => {},
+): Promise<T> {
+  const pins = new TreePins(policyDir);
+  const before = pins.fullHash(root);
+  const want = pins.read().roots[root];
+  const clean = before.kind === 'absent' || (before.kind === 'ok' && before.hash === want);
+  const r = await fn();
+  if (r.ok && clean) {
+    try {
+      pins.pin([root]);
+    } catch (err) {
+      log(`could not record the tool folder: ${String(err)}`);
+    }
+  } else if (r.ok)
+    log(
+      `${root} changed before this install: it waits for \`guildwise-runner toolchain trust\` (on the Desk)`,
+    );
+  return r;
 }

@@ -29,6 +29,7 @@ function setup(opts: {
   stage?: UpdaterOptions['stage'];
   mode?: UpdaterOptions['mode'];
   timing?: UpdaterOptions['timing'];
+  quiesce?: UpdaterOptions['quiesce'];
 }) {
   const install = makeInstall(opts.version ?? '2.1.0');
   const state = { server: opts.server ?? { version: '2.1.1' } };
@@ -52,6 +53,7 @@ function setup(opts: {
     scheduleRestartFn: vi.fn(),
     // releases are signed with the test fixture key (R18-U); the versions are above the floor
     trustedKey: TEST_PUB,
+    ...(opts.quiesce ? { quiesce: opts.quiesce } : {}),
   });
   running.push(updater);
   return { ...install, state, reports, restart, stage, updater };
@@ -68,6 +70,24 @@ describe('update check', () => {
     expect(pending).toMatchObject({ from: '2.1.0', to: '2.1.1' });
     expect((pending?.deadline ?? 0) * 1000).toBeGreaterThan(Date.now());
     expect(t.updater.current.state).toBe('updating');
+  });
+
+  it('tool-pin-lib S6: waits for a running environment preparation before it switches and restarts', async () => {
+    let letGo!: () => void;
+    const ensureDone = new Promise<void>((r) => (letGo = r));
+    const quiesce = vi.fn(async () => {
+      await ensureDone;
+      return () => {};
+    });
+    const t = setup({ quiesce });
+    await t.updater.check();
+    await until(() => quiesce.mock.calls.length > 0);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(t.restart).not.toHaveBeenCalled();
+    expect(readlinkSync(t.layout.current)).toBe(t.pkg);
+    letGo();
+    await until(() => t.restart.mock.calls.length > 0);
+    expect(readlinkSync(t.layout.current)).toBe(join(t.root, '2.1.1', 'aom-runner'));
   });
 
   it('does nothing when the server offers the same or an older version', async () => {

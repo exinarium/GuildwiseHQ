@@ -1,5 +1,16 @@
-import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, join } from 'node:path';
+import {
+  appendFileSync,
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  statSync,
+} from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import {
   type DevOpsAccess,
   type EnvEnsurePayload,
@@ -14,7 +25,7 @@ import {
   type DotnetSelection,
   dotnetGaps,
   dotnetProcessEnv,
-  dotnetRootWritable,
+  inspectDotnetRoot,
   shortPath,
 } from './dotnet.ts';
 import type { Executor } from './exec.ts';
@@ -89,7 +100,23 @@ export interface EnsureDeps {
   toolsOnly?: boolean;
   /** quiet-approvals [B1]: only these tool ids (`aom toolchain ensure <tool>` in the box). */
   onlyTools?: readonly string[];
+  /**
+   * tool-pin-lib (B1): the executor of the project's own dependency steps (the deps box: every tool folder read-only, the
+   * clone writable, a home of that repository's own). Default: `exec`.
+   */
+  depsExec?: (remoteUrlNormalized: string, localPath: string) => Executor;
+  /**
+   * tool-pin-lib (B1): false when the Guildwise tool folder did not verify at the start of the run: no check, recipe or
+   * user install runs, and each tool says so. Default true.
+   */
+  allowInstalls?: boolean;
+  /** tool-pin-lib S6: why a user-space install (unboxed) may not run now (an approved outside run is active), or null. */
+  userInstallBlocked?: () => string | null;
 }
+
+/** What each tool says when the Guildwise tool folder did not verify (tool-pin-lib B1). */
+export const TOOL_FOLDER_CHANGED =
+  "the Guildwise tool folder changed outside Guildwise's own installs: see the Desk (nothing was installed)";
 
 /** The report of `ensureEnvironment`, plus what a `toolsOnly` run left for a local yes. */
 export type EnsureReport = EnvironmentReport & { deferred?: string[] };
@@ -119,14 +146,22 @@ function dotnetRunEnv(
 const rootOf = (deps: EnsureDeps): string => deps.toolchainsRoot ?? toolchainsRoot();
 
 /** What the project asks of the SDK and what the chosen root lacks; used by the check and the installer. */
-function dotnetPlan(params: Params, deps: EnsureDeps) {
-  const sel = (deps.dotnet as () => DotnetSelection)();
-  const needs = {
+function dotnetNeeds(params: Params) {
+  return {
     ...(params.globalVersion ? { globalVersion: params.globalVersion } : {}),
     ...(params.rollForward ? { rollForward: params.rollForward } : {}),
     tfmMajors: (params.tfmMajors ?? '').split(',').filter(Boolean).map(Number),
   };
-  const gap = dotnetGaps(sel.chosen, needs);
+}
+
+const underDir = (p: string, dir: string): boolean => {
+  const rel = relative(resolve(dir), resolve(p));
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+};
+
+function dotnetPlan(params: Params, deps: EnsureDeps) {
+  const sel = (deps.dotnet as () => DotnetSelection)();
+  const gap = dotnetGaps(sel.chosen, dotnetNeeds(params));
   if (!sel.chosen) gap.problems.unshift('no .NET SDK found');
   return { sel, gap };
 }
@@ -372,9 +407,19 @@ async function installDependencies(
           });
           break;
         }
+        // tool-pin-lib S8/S4: the toolchain a rust-toolchain file names is installed in the recipe box first (the deps box
+        // has every tool folder read-only, so the rustup proxy could not install it there)
+        if (step.cmd === 'cargo') {
+          const rust = await ensureRustToolchain(run.localPath, deps, log);
+          if (rust) {
+            out.push({ ...base, ...rust });
+            break;
+          }
+        }
         log(`$ (${run.name}) ${step.cmd} ${plan.args.join(' ')}`);
         const dotnetEnv = dotnetRunEnv(step.cmd, deps);
-        const r = await deps.exec.run(depCommand(step, run.localPath), plan.args, {
+        const depsExec = deps.depsExec ? deps.depsExec(run.remote, run.localPath) : deps.exec;
+        const r = await depsExec.run(depCommand(step, run.localPath), plan.args, {
           cwd: run.localPath,
           timeoutMs: 30 * 60_000,
           ...dotnetEnv,
@@ -400,6 +445,132 @@ async function installDependencies(
     }
   }
   return out;
+}
+
+const RUST_CHANNEL = /^(stable|beta|nightly(-\d{4}-\d{2}-\d{2})?|\d+\.\d+(\.\d+)?)$/;
+const RUST_COMPONENT = /^[a-z0-9_-]+$/;
+const RUST_TARGET = /^[a-z0-9_]+(-[a-z0-9_.]+){1,4}$/;
+
+export type RustToolchainRequest =
+  | { channel: string; components: string[]; targets: string[] }
+  | { refused: string }
+  | null;
+
+/**
+ * tool-pin-lib S8/S4: what `rust-toolchain.toml` (or the legacy `rust-toolchain` file) asks for, validated: the channel,
+ * its components and targets. null: no file. Anything else it says (a path toolchain, a bad name) is refused.
+ */
+export function rustToolchainRequest(dir: string): RustToolchainRequest {
+  let text: string | null = null;
+  let legacy = false;
+  for (const [f, isLegacy] of [
+    ['rust-toolchain.toml', false],
+    ['rust-toolchain', true],
+  ] as const) {
+    const r = readPlainSmallFile(join(dir, f), RUST_FILE_MAX);
+    if (r === 'absent') continue;
+    // review B1: a link, FIFO, device or large file is refused without reading it (a repository could point it at a
+    // secret, or block the runner)
+    if (r === 'refused') return { refused: `${f} is not a plain file of at most 64 KB` };
+    text = r;
+    legacy = isLegacy;
+    break;
+  }
+  if (text === null) return null;
+  const trimmed = text.trim();
+  // the legacy file may hold a bare channel. Review B1: no text of the file goes into a message
+  if (legacy && !trimmed.includes('=') && !trimmed.includes('['))
+    return RUST_CHANNEL.test(trimmed)
+      ? { channel: trimmed, components: [], targets: [] }
+      : { refused: 'rust-toolchain names something that is not a release channel' };
+  if (/^\s*path\s*=/m.test(text)) return { refused: 'the rust toolchain file names a local toolchain path' };
+  const channel = /^\s*channel\s*=\s*"([^"]*)"/m.exec(text)?.[1];
+  if (!channel || !RUST_CHANNEL.test(channel))
+    return { refused: 'the rust toolchain file names a channel that is not a release channel' };
+  const list = (key: string): string[] => {
+    const m = new RegExp(`^\\s*${key}\\s*=\\s*\\[([^\\]]*)\\]`, 'm').exec(text as string);
+    return m ? [...(m[1] ?? '').matchAll(/"([^"]*)"/g)].map((x) => x[1] ?? '') : [];
+  };
+  const components = list('components');
+  const targets = list('targets');
+  if (components.some((c) => !RUST_COMPONENT.test(c)) || targets.some((t) => !RUST_TARGET.test(t)))
+    return { refused: 'the rust toolchain file names a component or target that is not valid' };
+  return { channel, components, targets };
+}
+
+const RUST_FILE_MAX = 64 * 1024;
+
+/**
+ * Review B1: a repository file read without following links: `absent`, `refused` (a link, FIFO, device or anything but a
+ * regular file, or larger than `max`), or its text. Opened with O_NOFOLLOW and O_NONBLOCK and fstat'ed again, so a
+ * file swapped for a FIFO between the checks cannot block the runner; at most `max` bytes are read.
+ */
+export function readPlainSmallFile(p: string, max: number): string | 'absent' | 'refused' {
+  let st: ReturnType<typeof lstatSync>;
+  try {
+    st = lstatSync(p);
+  } catch {
+    return 'absent';
+  }
+  if (!st.isFile() || st.size > max) return 'refused';
+  let fd: number;
+  try {
+    fd = openSync(p, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch {
+    return 'refused';
+  }
+  try {
+    const f = fstatSync(fd);
+    if (!f.isFile() || f.size > max) return 'refused';
+    const buf = Buffer.alloc(max + 1);
+    let off = 0;
+    for (;;) {
+      const n = readSync(fd, buf, off, buf.length - off, off);
+      if (n === 0) break;
+      off += n;
+      if (off > max) return 'refused';
+    }
+    return buf.subarray(0, off).toString('utf8');
+  } catch {
+    return 'refused';
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Installs the toolchain the project's rust-toolchain file names (recipe box); a report when it cannot, else null. */
+async function ensureRustToolchain(
+  dir: string,
+  deps: EnsureDeps,
+  log: (l: string) => void,
+): Promise<Pick<ToolReport, 'status' | 'detail' | 'fix'> | null> {
+  const req = rustToolchainRequest(dir);
+  if (!req) return null;
+  if ('refused' in req)
+    return {
+      status: 'failed',
+      detail: req.refused,
+      fix: 'Name a release channel (stable, beta, nightly[-YYYY-MM-DD] or a version) in rust-toolchain.toml, or install the toolchain yourself, then check again.',
+    };
+  const args = [
+    'toolchain',
+    'install',
+    req.channel,
+    '--profile',
+    'minimal',
+    ...req.components.flatMap((c) => ['-c', c]),
+    ...req.targets.flatMap((t) => ['-t', t]),
+  ];
+  log(`$ rustup ${args.join(' ')}`);
+  const r = await deps.exec.run('rustup', args, { timeoutMs: 30 * 60_000, ...dotnetRunEnv('rustup', deps) });
+  for (const line of `${r.stdout}\n${r.stderr}`.split('\n').slice(-6))
+    if (line.trim()) log(`  ${line.trim()}`);
+  if (r.exitCode === 0) return null;
+  return {
+    status: 'failed',
+    detail: tail(r.stderr || r.stdout) || `exit code ${r.exitCode}`,
+    fix: `Run "rustup ${args.join(' ')}" yourself, then check again.`,
+  };
 }
 
 function mergeParams(a: Params, b: Params): Params {
@@ -464,6 +635,14 @@ async function ensureTool(
     .map((a) => done.get(a))
     .find((r) => r && r.status !== 'ok' && r.status !== 'installed');
   if (blocker) return { ...base, status: 'skipped', detail: `waiting for ${blocker.tool}` };
+  // tool-pin-lib B1: nothing runs from (or into) a tool folder that changed outside Guildwise's own installs
+  if (deps.allowInstalls === false)
+    return {
+      ...base,
+      status: 'failed',
+      detail: TOOL_FOLDER_CHANGED,
+      fix: 'Run the command shown on the Desk on this computer to see what changed, then check again.',
+    };
 
   const before = await probe(spec, params, deps);
   if (before.ok) {
@@ -500,22 +679,38 @@ async function ensureTool(
   const recipes = spec.recipes(params, deps.platform);
   let resolver: UserInstallResolver | undefined = spec.userInstall;
   if (spec.id === 'dotnet-sdk' && deps.dotnet && deps.platform !== 'win32') {
-    // Into the root the agents use (or a root of our own under the toolchains folder when there is none).
+    // tool-pin-lib Decision 3: into the root the agents use when it is the Guildwise tool folder's own; any other root
+    // (`~/.dotnet`, a system root) is read-only to Guildwise, so the SDKs the project needs go into `<root>/dotnet`, which
+    // the agents then prefer. A configured root outside it is the owner's to fill.
     const { sel, gap } = dotnetPlan(params, deps);
+    const own = join(rootOf(deps), 'dotnet');
     const chosenRoot = sel.chosen?.root;
-    if (chosenRoot && !dotnetRootWritable(chosenRoot))
+    const ownChosen = !!chosenRoot && underDir(chosenRoot, rootOf(deps));
+    if (chosenRoot && !ownChosen && sel.reason === 'config')
       return {
         ...base,
         status: 'failed',
-        detail: `the .NET root ${shortPath(chosenRoot)} is not writable by the runner user (${before.output})`,
-        fix: `Install the SDK into ${chosenRoot} yourself${ownerCommand(recipes, detected) ? ` (${ownerCommand(recipes, detected)})` : ''}, or set dotnetRoot in the runner's config.json to ${join(rootOf(deps), 'dotnet')} so DevOps installs it there, then check again.`,
+        detail: `the configured .NET root ${shortPath(chosenRoot)} is not Guildwise's own (${before.output})`,
+        fix: `Install the SDK into ${chosenRoot} yourself${ownerCommand(recipes, detected) ? ` (${ownerCommand(recipes, detected)})` : ''}, or set dotnetRoot in the runner's config.json to ${own} so DevOps installs it there, then check again.`,
       };
-    const sdk = gap.channels.length
-      ? gap.channels
-      : gap.runtimeChannels.length
+    const target = ownChosen ? gap : dotnetGaps(inspectDotnetRoot(own) ?? undefined, dotnetNeeds(params));
+    const sdk = target.channels.length
+      ? target.channels
+      : target.runtimeChannels.length
         ? []
         : [`${params.sdkMajor ?? '8'}.0`];
-    resolver = dotnetUserInstall(chosenRoot, sdk, gap.runtimeChannels);
+    resolver = dotnetUserInstall(ownChosen ? chosenRoot : undefined, sdk, target.runtimeChannels);
+  }
+  // tool-pin-lib Decision 3: a workload goes into the chosen root, which must be Guildwise's own (the others are read-only)
+  if (spec.id.startsWith('dotnet-workload-') && deps.dotnet && deps.platform !== 'win32') {
+    const chosenRoot = deps.dotnet().chosen?.root;
+    if (chosenRoot && !underDir(chosenRoot, rootOf(deps)))
+      return {
+        ...base,
+        status: 'failed',
+        detail: `the .NET root ${shortPath(chosenRoot)} is the computer's own, which Guildwise does not change (${before.output})`,
+        fix: `Run "${manualBase ?? spec.name}" yourself, or set dotnetRoot in the runner's config.json to ${join(rootOf(deps), 'dotnet')} so DevOps installs .NET and its workloads there, then check again.`,
+      };
   }
   const steps = recipes.any;
   if (!resolver && !steps?.length) return systemDependency(base, recipes, detected, deps.platform, manual);
@@ -536,6 +731,8 @@ async function ensureTool(
   let how = 'its official installer';
   let lastErr = '';
   const installer = deps.userInstaller ?? createUserInstaller();
+  const blocked = resolver ? (deps.userInstallBlocked?.() ?? null) : null;
+  if (blocked) return { ...base, status: 'failed', detail: blocked };
   const result = resolver ? await installer.install(spec.id, resolver, params, log) : null;
   if (result) {
     if (!result.ok)

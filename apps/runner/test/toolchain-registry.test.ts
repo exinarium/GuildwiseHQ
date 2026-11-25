@@ -219,7 +219,7 @@ describe('env.ensure for .NET against the chosen root', () => {
     expect(restore?.env?.PATH?.startsWith(root)).toBe(true);
   });
 
-  it('missing SDK 10: reported, and installed into the (user-writable) chosen root', async () => {
+  it("missing SDK 10: reported, and installed into Guildwise's own root (the chosen one is read-only to it, tool-pin-lib)", async () => {
     const root = dotnetRoot(join(tmp(), 'dn'), ['8.0.425'], ['8.0.31']);
     const off = await run(
       { 'global.json': '{"sdk":{"version":"10.0.100"}}', 'a.csproj': proj('net10.0') },
@@ -234,7 +234,7 @@ describe('env.ensure for .NET against the chosen root', () => {
       { 'global.json': '{"sdk":{"version":"10.0.100"}}', 'a.csproj': proj('net10.0') },
       root,
     );
-    // the user-space plan: the 10.0 SDK from the release metadata (sha512), merged into the chosen root
+    // the user-space plan: the 10.0 SDK from the release metadata (sha512), into `<toolchains>/dotnet` (not the chosen root)
     const fetched: string[] = [];
     const plan = await on.resolvers.get('dotnet-sdk')?.({
       params: {},
@@ -270,7 +270,7 @@ describe('env.ensure for .NET against the chosen root', () => {
     expect(plan?.archives[0]).toMatchObject({
       url: 'https://b/sdk.tar.gz',
       checksum: { algo: 'sha512', hex: 'ab'.repeat(64) },
-      into: { dir: root, mode: 'merge' },
+      into: { dir: '/home/r/.local/share/guildwise/toolchains/dotnet', mode: 'merge' },
     });
     expect(on.calls.some((c) => c.line.includes('dotnet-install'))).toBe(false);
   });

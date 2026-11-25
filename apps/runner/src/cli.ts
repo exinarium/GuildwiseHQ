@@ -106,8 +106,9 @@ import { writeOffers } from './setup/offers.ts';
 import { chromiumPdfRenderer } from './storage/pdf.ts';
 import { clamdClient } from './storage/scan.ts';
 import { detectStacks, viewOf } from './toolchain/detect.ts';
+import { holdForRestart } from './toolchain/ensure-lock.ts';
 import { realExecutor } from './toolchain/exec.ts';
-import { EXTRAS, installExtra, isExtraId, ytDlpDoctorLines } from './toolchain/extras.ts';
+import { EXTRAS, installExtra, isExtraId, keepingToolPin, ytDlpDoctorLines } from './toolchain/extras.ts';
 import { preparePairing } from './up.ts';
 import { detectServiceMode, scheduleRestart } from './update/apply.ts';
 import { detectLayout, ensureGuildwiseAlias } from './update/layout.ts';
@@ -453,6 +454,13 @@ async function start(opts: { dataDir?: string; mock?: boolean }): Promise<void> 
         finish(0);
       },
       report: (s) => host.setUpdateStatus(s),
+      // tool-pin-lib S6: a running env.ensure ends before the restart (at most 30 minutes)
+      quiesce: async () => {
+        const h = await holdForRestart(30 * 60_000);
+        if (!h.held)
+          log.warn('an environment preparation is still running after 30 minutes: updating anyway');
+        return h.release;
+      },
       log,
       mode: serviceMode,
       disabled: process.env.AOM_RUNNER_AUTO_UPDATE === '0',
@@ -1708,7 +1716,12 @@ async function extrasInstall(name: string): Promise<void> {
   if (!isExtraId(name)) throw new Error(`unknown extra ${name} (known: ${EXTRAS.join(', ')})`);
   if (typeof process.getuid === 'function' && process.getuid() === 0)
     throw new Error('refused: run this as the runner user, not as root');
-  const r = await installExtra(name, { log: (l) => console.log(l) });
+  const r = await keepingToolPin(
+    policyDir(),
+    () => installExtra(name, { log: (l) => console.log(l) }),
+    undefined,
+    (l) => console.log(l),
+  );
   if (!r.ok) throw new Error(r.detail);
   console.log(r.detail);
 }
