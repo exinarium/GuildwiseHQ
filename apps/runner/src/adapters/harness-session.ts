@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve, sep } from 'node:path';
+import { isModelApiHost } from '../box/launch.ts';
 import { type EgressProxy, type EgressRoute, startEgressProxy } from '../sandbox/egress-proxy.ts';
 import {
   type HarnessSandboxInput,
@@ -94,6 +95,14 @@ export async function launchInHarnessSandbox(l: HarnessLaunch): Promise<Launched
     socketPath,
     allowedHosts: [...l.cliHosts, ...SHELL_DOMAINS, ...(l.extraHosts ?? [])],
     ...(l.routes ? { routes: l.routes } : {}),
+    // runner-bare-bin (S5): a DevOps box reaches a model service only through its route, never by CONNECT or a plain request,
+    // whatever `extraHosts` lists
+    ...(l.sandbox.devopsBox
+      ? {
+          refuseHost: isModelApiHost,
+          routeHosts: (l.routes ?? []).map((r) => new URL(r.upstream).hostname),
+        }
+      : {}),
     ...(l.onDeny ? { onDeny: l.onDeny } : {}),
     ...(l.privateEndpoints?.length ? { privateEndpoints: l.privateEndpoints } : {}),
     ...(l.publicEndpoints?.length ? { publicEndpoints: l.publicEndpoints } : {}),

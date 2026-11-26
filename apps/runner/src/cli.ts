@@ -52,6 +52,7 @@ import { FileStatusTokenStore } from './forge/status-tokens.ts';
 import { gitVersion } from './git/git.ts';
 import { scanRepos } from './git/repo-scan.ts';
 import { connectionLine } from './health/connection.ts';
+import { caLine, healthFetch, loadInstanceCa, tlsHint } from './health/instance-ca.ts';
 import { installErrorHandlers } from './health/runner-error.ts';
 import { RunnerHost } from './host.ts';
 import { AutomatedAppIntegration } from './integrations/automated-app.ts';
@@ -748,17 +749,16 @@ async function doctor(opts: { dataDir?: string; pairing?: string }): Promise<voi
       'repos',
       `${repos.length} found under ${config.repoRoots.length} root(s)`,
     );
+    // runner-bare-bin: a hand run has no NODE_EXTRA_CA_CERTS; the instance CA the unit passes is trusted for these fetches only
+    const ca = loadInstanceCa();
+    const caPem = ca.kind === 'ok' ? ca.pem : undefined;
+    const cl = caLine(ca);
+    if (cl) line(cl.ok, 'server CA', cl.detail);
     try {
-      const res = await fetch(new URL('/api/health', config.serverUrl), {
-        signal: AbortSignal.timeout(8000),
-      });
+      const res = await healthFetch(new URL('/api/health', config.serverUrl), caPem);
       line(res.ok, 'server', `${config.serverUrl} /api/health -> HTTP ${res.status}`);
     } catch (err) {
-      line(
-        false,
-        'server',
-        `${config.serverUrl} unreachable: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      line(false, 'server', `${config.serverUrl} unreachable: ${tlsHint(err, ca)}`);
     }
     for (const o of others) {
       const oc = (() => {
@@ -773,18 +773,14 @@ async function doctor(opts: { dataDir?: string; pairing?: string }): Promise<voi
         continue;
       }
       try {
-        const res = await fetch(new URL('/api/health', oc.serverUrl), { signal: AbortSignal.timeout(8000) });
+        const res = await healthFetch(new URL('/api/health', oc.serverUrl), caPem);
         line(
           res.ok,
           `server (${o.label})`,
           `${oc.serverUrl} /api/health -> HTTP ${res.status}${o.disabled ? `; ${o.disabled} by the server` : ''}`,
         );
       } catch (err) {
-        line(
-          false,
-          `server (${o.label})`,
-          `${oc.serverUrl} unreachable: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        line(false, `server (${o.label})`, `${oc.serverUrl} unreachable: ${tlsHint(err, ca)}`);
       }
     }
   }

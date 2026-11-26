@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { type AgentPermissions, CODEX_RUNTIME, codexRoleProblem } from '@aom/shared';
 import { execa } from 'execa';
 import { materializeSkills } from '../capabilities/materialize.ts';
@@ -23,6 +23,7 @@ import { proxyEnv } from '../sandbox/harness-sandbox.ts';
 import { DOTNET_SHM_DIR, usablePnpmLockDirs, userNugetPackages } from '../sandbox/sandbox.ts';
 import { registerSecret } from '../secrets/redact.ts';
 import { selfCommand } from '../shims.ts';
+import { lookupBin } from './bin-lookup.ts';
 import {
   agentEnv,
   BRANCH_MOVING_DENIED,
@@ -121,27 +122,21 @@ export const codexSkillsDirOf = (sandbox: Pick<SandboxInfo, 'home'>): string =>
 
 const expandHome = (p: string, home: string): string => (p.startsWith('~') ? join(home, p.slice(1)) : p);
 
-/** Is `name` an executable file on PATH, or the given path? Returns its absolute path. */
+/**
+ * Is `name` an executable file on PATH, or the given absolute path? Returns its absolute path. runner-bare-bin: through
+ * `lookupBin` after the `~` expansion: a relative path with a slash, a relative PATH entry and a non-executable first match
+ * are refused, and R3 applies (nobody but this user or root can change the binary or a folder above it). No runtime roots
+ * are forbidden here (that is the box's rule R2).
+ */
 export function findBinary(
   name: string,
   pathVar: string = process.env.PATH ?? '',
   home: string = homedir(),
 ): string | undefined {
-  const n = expandHome(name, home);
-  const ok = (p: string): boolean => {
-    try {
-      return statSync(p).isFile();
-    } catch {
-      return false;
-    }
-  };
-  if (isAbsolute(n) || n.includes('/') || n.includes(sep)) return ok(resolve(n)) ? resolve(n) : undefined;
-  for (const d of pathVar.split(delimiter)) {
-    if (!d) continue;
-    const p = join(d, n);
-    if (ok(p)) return p;
-  }
-  return undefined;
+  const r = lookupBin(expandHome(name, home), pathVar, {
+    uid: typeof process.geteuid === 'function' ? process.geteuid() : null,
+  });
+  return r.ok ? r.path : undefined;
 }
 
 /**

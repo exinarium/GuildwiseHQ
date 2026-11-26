@@ -30,6 +30,8 @@ import {
   modelProxyPlan,
 } from '../box/launch.ts';
 import { launchMacBox, macBoxMissing } from '../box/macos-launch.ts';
+import type { ModelCapture } from '../box/model-filter.ts';
+import { ModelLedger } from '../box/model-ledger.ts';
 import { type GrantedSkill, materializeSkills, skillsDirOf } from '../capabilities/materialize.ts';
 import type { ClaudeRuntimeConfigSchema } from '../config.ts';
 import { alwaysPathRefusal, deleteRootsFor, type GuardConfig } from '../devops/guard.ts';
@@ -38,6 +40,8 @@ import { holdSandboxRepo } from '../git/config-lock.ts';
 import { discoverPluginMcpServers, mcpConfigFor, type PluginMcpServer } from '../mcp/plugins.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { policyDir as localPolicyDir } from '../policy/store.ts';
+import { toolchainsRoot } from '../toolchain/user-install.ts';
+import { lookupBin } from './bin-lookup.ts';
 import { BRIDGE_PORT, launchInHarnessSandbox, probeHarnessSandbox } from './harness-session.ts';
 
 /** The card worktrees (`worktrees/<project>/<card>`): the roots a container may bind as a whole. */
@@ -61,6 +65,7 @@ export const NEEDS_API_KEY =
 import { reviewerPolicy } from '../review/reviewer-sandbox.ts';
 import {
   agentTmpDir,
+  agentTmpRoot,
   CACHE_ENV_KEYS,
   DOTNET_SHM_DIR,
   usablePnpmLockDirs,
@@ -571,6 +576,12 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       accounts?: ClaudeAccountRegistry;
       /** The provider credentials of this workstation: the Bedrock, Vertex and gateway backends read theirs here. */
       providers?: ProviderStore;
+      /** Test hook (runner-bare-bin [A11]): the model upstream of the boxes' route (a fake API on 127.0.0.1). */
+      modelUpstream?: string;
+      /** Test hook: the boxes' egress proxy may reach loopback (the fake API). Never passed by registry.ts. */
+      proxyTest?: { allowPrivate: true; resolve?: (host: string) => Promise<string> };
+      /** Test hook (B6): what each boxed model request used, refused or stripped; it never changes the verdict. */
+      modelCapture?: ModelCapture;
     } = {},
   ) {
     this.registry =
@@ -766,7 +777,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     guard: DevopsGuardInput | undefined,
     kind: 'shift' | 'chat',
     sandbox?: { home: string; scratch: string; tmp: string },
-  ): { command: string; file: string } | undefined {
+  ): { command: string; file: string; cfg: GuardConfig } | undefined {
     if (!guard || !this.paths) return undefined;
     // T10: where the session writes without the paths switch; with installs on, also the toolchain folders
     const writeRoots = [
@@ -802,7 +813,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
     writeFileSync(file, `${JSON.stringify(cfg, null, 2)}\n`, { mode: 0o600 });
     const quote = (w: string) => `'${w.replace(/'/g, `'\\''`)}'`;
-    return { command: `${[...selfCommand('aom'), 'devops-guard'].map(quote).join(' ')}`, file };
+    return { command: `${[...selfCommand('aom'), 'devops-guard'].map(quote).join(' ')}`, file, cfg };
   }
 
   /** A start that failed after the guard file was written leaves nothing behind. */
@@ -1121,6 +1132,52 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
   }
 
   /**
+   * runner-bare-bin (blocker 1): the Claude Code binary of every boxed start. A bare `bin` ("claude", the default) is looked up
+   * on the runner process's own PATH (never the agent PATH, which DevOps can extend), then its real path is checked (R2: not
+   * under a folder a box or agent writes; R3: nobody but this user or root can change it or a folder above it). The real path
+   * is what the box binds (its folder, read-only) and runs, exactly as an absolute `bin` would. Fails closed with the reason.
+   */
+  private boxedBin(): { path: string; real: string } {
+    const r = lookupBin(this.cfg.bin, this.host.pathVar ?? process.env.PATH ?? '', {
+      forbiddenRoots: [
+        ...(this.paths ? [this.paths.root] : []),
+        toolchainsRoot(),
+        agentTmpRoot(),
+        tmpdir(),
+        '/tmp',
+        '/var/tmp',
+        '/dev/shm',
+      ],
+      uid: typeof process.geteuid === 'function' ? process.geteuid() : null,
+    });
+    if (!r.ok) throw new Error(`could not start claude-code: ${r.reason}`);
+    return { path: r.path, real: r.real };
+  }
+
+  /** runner-bare-bin (B2): the session's model ledger, and the route options that feed it. */
+  private modelRoute(
+    serverTools: 'none' | 'web_search',
+    audit?: {
+      sink: NonNullable<ShiftStartInput['boxAudit']>;
+      sessionRef: string;
+      shiftKind: 'devops' | 'release_prep';
+    },
+  ): { ledger: ModelLedger; upstream: string; opts: Parameters<typeof modelProxyPlan>[2] } {
+    const ledger = new ModelLedger(
+      audit ? { audit: audit.sink, sessionRef: audit.sessionRef, shiftKind: audit.shiftKind } : {},
+    );
+    return {
+      ledger,
+      upstream: this.host.modelUpstream ?? MODEL_UPSTREAM,
+      opts: {
+        serverTools,
+        observe: ledger.observer(),
+        ...(this.host.modelCapture ? { capture: this.host.modelCapture } : {}),
+      },
+    };
+  }
+
+  /**
    * quiet-approvals phase B: the credential the model proxy adds for a boxed session (never put into the box), or null
    * when this computer has none the proxy can carry.
    */
@@ -1142,7 +1199,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
    */
   private async startBoxedSession(input: ShiftStartInput, account: ClaudeAccount): Promise<RuntimeSession> {
     const level: BoxLevel = input.devopsBox ? 'inner' : 'outer';
-    if (this.host.platform === 'darwin') return this.startMacBoxedSession(input, account, level);
+    // runner-bare-bin: the binary first, before any config dir, guard, Docker proxy or launch
+    const bin = this.boxedBin();
+    if (this.host.platform === 'darwin') return this.startMacBoxedSession(input, account, level, bin);
     const bw = probeBwrap();
     if (!bw.ok) throw new Error(`the DevOps safety box cannot start on this computer: ${bw.reason}`);
     const hs = probeHarnessSandbox(this.host.platform);
@@ -1184,7 +1243,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       ...(input.resumeSessionId ? { keepSession: input.resumeSessionId } : {}),
     });
     mkdirSync(join(configDir, 'home'), { recursive: true, mode: 0o700 });
-    const plan = modelProxyPlan(cred);
+    // B1: web search only where the session's settings allow it (the outer box); B2: the ledger outside the box
+    const mr = this.modelRoute(level === 'outer' ? 'web_search' : 'none', this.auditOf(input));
+    const plan = modelProxyPlan(cred, mr.upstream, mr.opts);
     // R4-B2: Docker only through the gatekeeper; its socket sits in a runner-owned folder, read-only in the box
     let docker: { proxy: DockerProxy; dir: string; socket: string } | undefined;
     if (level === 'outer' && input.dockerGate) {
@@ -1237,7 +1298,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       }
     const launch = await launchInHarnessSandbox({
       routes: [plan.route],
-      cliHosts: [new URL(MODEL_UPSTREAM).hostname],
+      // S5: no direct line to any model service; the model only through the route
+      cliHosts: [],
+      ...(this.host.proxyTest ? { proxyTest: this.host.proxyTest } : {}),
       extraHosts: [
         ...this.cfg.extraAllowedDomains,
         ...(level === 'outer' ? (input.outerEgress?.hosts ?? []) : []),
@@ -1263,7 +1326,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           ...(docker ? [docker.dir] : []),
           ...(input.boxReadOnly ?? []),
         ],
-        claudeBin: this.cfg.bin,
+        claudeBin: bin.real,
         toolchainReadDirs: policyCtx.toolchainReadPaths ?? [],
         cloneDirs: input.readDirs ?? [],
         ...(input.env.AOM_IPC_SOCKET ? { ipcSocket: input.env.AOM_IPC_SOCKET } : {}),
@@ -1277,8 +1340,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
             }
           : {}),
       }),
-      // the install is bound by its real folder: start it by its real path (a ~/.local/bin link is not in the box)
-      cmd: { bin: realpathSync(cmd.bin), args: cmd.args, env },
+      // the install is bound by its real folder: start it by its checked real path (a ~/.local/bin link is not in the box)
+      cmd: { bin: bin.real, args: cmd.args, env },
     });
     mkdirSync(join(root, 'devops-tools'), { recursive: true, mode: 0o700 });
     const parser = new ClaudeStreamParser();
@@ -1286,7 +1349,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       for (const f of opened) f.close();
     };
     try {
-      return spawnSession({
+      const session = spawnSession({
         bin: launch.command.bin,
         args: launch.command.args,
         cwd: input.cwd,
@@ -1295,11 +1358,20 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         ...(opened.length ? { extraFds: opened.map((f) => f.fd) } : {}),
         ...(cmd.stdin !== undefined ? { input: cmd.stdin } : {}),
         parseLine: (l) => parser.parseLine(l),
-        usage: () => parser.usage(),
+        // B2, S6: usage, login and limits from the proxy's ledger, never from what the box prints
+        usage: () => mr.ledger.usage(),
+        authFailure: () => mr.ledger.authFailed,
+        usageLimit: () => mr.ledger.usageLimit(),
         contextTokens: () => parser.contextTokens(),
         logFile: input.logFile,
         exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
         onExit: async () => {
+          // S5: what the box asked for and was refused (host names only), for the owner's diagnosis
+          const denied = launch.proxy.denied();
+          if (denied.length)
+            process.stderr.write(
+              `WARN DevOps box (${level}): egress refused for ${denied.slice(0, 20).join(', ')}\n`,
+            );
           // the per-session bearer dies with the proxy (revoked at the session's end)
           await launch.cleanup();
           if (docker) {
@@ -1308,10 +1380,31 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           }
         },
       });
+      // B5: the guard the runner wrote, kept in memory for the runner's own judgement of a blocked command
+      return guard ? Object.assign(session, { guardConfig: guard.cfg }) : session;
     } finally {
       // the child holds its own copies of the fds after spawn
       closeFds();
     }
+  }
+
+  /** runner-bare-bin (S7): the ledger's audit sink of a boxed DevOps shift (absent without one). */
+  private auditOf(input: ShiftStartInput):
+    | {
+        sink: NonNullable<ShiftStartInput['boxAudit']>;
+        sessionRef: string;
+        shiftKind: 'devops' | 'release_prep';
+      }
+    | undefined {
+    if (!input.boxAudit) return undefined;
+    return {
+      sink: input.boxAudit,
+      sessionRef: input.shiftId,
+      shiftKind:
+        input.devopsGuard?.shiftKind === 'release_prep' || input.kind === 'release_prep'
+          ? 'release_prep'
+          : 'devops',
+    };
   }
 
   /** quiet-approvals S5: the same session on macOS, in the Seatbelt profile of its level (unit-tested; Mac QA required). */
@@ -1319,6 +1412,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     input: ShiftStartInput,
     account: ClaudeAccount,
     level: BoxLevel,
+    bin: { path: string; real: string },
   ): Promise<RuntimeSession> {
     const missing = macBoxMissing();
     if (missing) throw new Error(`the DevOps safety box cannot start on this computer: ${missing}`);
@@ -1358,7 +1452,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     });
     const home = join(configDir, 'home');
     mkdirSync(home, { recursive: true, mode: 0o700 });
-    const plan = modelProxyPlan(cred);
+    const mr = this.modelRoute(level === 'outer' ? 'web_search' : 'none', this.auditOf(input));
+    const plan = modelProxyPlan(cred, mr.upstream, mr.opts);
     const cmd = buildClaudeCommand(
       { ...input, sandbox: { ...input.sandbox, configDir, home, tmp }, readDirs: input.readDirs ?? [] },
       this.noClaudeToken(this.liveFor(account)),
@@ -1369,7 +1464,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       configDir,
       tmp,
       aomReadPaths: [...policyCtx.aomReadPaths, ...(guard ? [guardDir] : [])],
-      claudeBin: this.cfg.bin,
+      claudeBin: bin.real,
       toolchainReadDirs: policyCtx.toolchainReadPaths ?? [],
       cloneDirs: input.readDirs ?? [],
       ...(level === 'outer'
@@ -1409,8 +1504,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         ...(input.env.AOM_IPC_SOCKET ? { ipcSocket: input.env.AOM_IPC_SOCKET } : {}),
       },
       routes: [plan.route],
-      allowedHosts: [new URL(MODEL_UPSTREAM).hostname, ...this.cfg.extraAllowedDomains],
-      cmd: { bin: realpathSync(cmd.bin), args: cmd.args, env: cmd.env },
+      // S5: no direct line to a model service (the route's upstream is reachable through the route only)
+      allowedHosts: [...this.cfg.extraAllowedDomains],
+      cmd: { bin: bin.real, args: cmd.args, env: cmd.env },
     });
     const env: Record<string, string> = {
       ...launch.command.env,
@@ -1421,7 +1517,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     delete env.CLAUDE_CODE_OAUTH_TOKEN;
     Object.assign(env, plan.env);
     const parser = new ClaudeStreamParser();
-    return spawnSession({
+    const session = spawnSession({
       bin: launch.command.bin,
       args: launch.command.args,
       cwd: input.cwd,
@@ -1429,7 +1525,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       inheritEnv: false,
       ...(cmd.stdin !== undefined ? { input: cmd.stdin } : {}),
       parseLine: (l) => parser.parseLine(l),
-      usage: () => parser.usage(),
+      usage: () => mr.ledger.usage(),
+      authFailure: () => mr.ledger.authFailed,
+      usageLimit: () => mr.ledger.usageLimit(),
       contextTokens: () => parser.contextTokens(),
       logFile: input.logFile,
       exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
@@ -1441,6 +1539,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         }
       },
     });
+    return guard ? Object.assign(session, { guardConfig: guard.cfg }) : session;
   }
 
   private async startShiftSession(
@@ -1696,6 +1795,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
   /** The CEO's full-power turn (see `buildClaudeOwnerTurnCommand`). Needs no OS sandbox. */
   async startOwnerTurn(input: OwnerTurnInput): Promise<RuntimeSession> {
     if (realClaudeBlocked()) throw new RealClaudeBlockedError();
+    // runner-bare-bin: the binary first, before any config dir or launch
+    const bin = this.boxedBin();
     // quiet-approvals phase B (S12): a full-power turn runs in the outer box the runner builds (fail closed), with a private
     // config dir: the owner's own Claude setup (plugins, MCP servers, skills) is not mounted, only what Guildwise gives it
     const missing = this.boxMissing();
@@ -1722,7 +1823,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     const named = [...new Set([input.cwd, ...(input.addDirs ?? [])])].filter(
       (p) => p && resolve(p) !== resolve(work),
     );
-    const plan = modelProxyPlan(cred);
+    // B1: the CEO turn's settings allow WebSearch; B2, S6: usage, login and limits from the ledger (replaces ownerHooks)
+    const mr = this.modelRoute('web_search');
+    const plan = modelProxyPlan(cred, mr.upstream, mr.opts);
     const base = buildClaudeOwnerTurnCommand(input, this.noClaudeToken(this.live), {});
     const aomRead = [
       input.turnDir,
@@ -1738,7 +1841,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     };
     mkdirSync(join(root, 'devops-tools'), { recursive: true, mode: 0o700 });
     const parser = new ClaudeStreamParser();
-    const hooks = this.ownerHooks(parser);
+    const hooks = this.ownerHooks(mr.ledger);
     const baseEnv: Record<string, string> = ownerBoxEnv(base.env, { configDir, home });
     // macOS (REVIEW S8): the same turn in the outer Seatbelt profile; Seatbelt checks resolved paths (no fd binds)
     if (this.host.platform === 'darwin') {
@@ -1756,7 +1859,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         configDir,
         tmp,
         aomReadPaths: aomRead,
-        claudeBin: this.cfg.bin,
+        claudeBin: bin.real,
         toolchainReadDirs: [],
         cloneDirs: [],
         outer,
@@ -1770,8 +1873,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           ...(input.env.AOM_IPC_SOCKET ? { ipcSocket: input.env.AOM_IPC_SOCKET } : {}),
         },
         routes: [plan.route],
-        allowedHosts: [new URL(MODEL_UPSTREAM).hostname, ...this.cfg.extraAllowedDomains],
-        cmd: { bin: realpathSync(base.bin), args: base.args, env: baseEnv },
+        allowedHosts: [...this.cfg.extraAllowedDomains],
+        cmd: { bin: bin.real, args: base.args, env: baseEnv },
       });
       return spawnSession({
         bin: launch.command.bin,
@@ -1781,7 +1884,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         inheritEnv: false,
         ...(base.stdin !== undefined ? { input: base.stdin } : {}),
         parseLine: (l) => parser.parseLine(l),
-        usage: () => parser.usage(),
+        usage: () => mr.ledger.usage(),
         logFile: input.logFile,
         exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
         ...hooks,
@@ -1805,7 +1908,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     try {
       launch = await launchInHarnessSandbox({
         routes: [plan.route],
-        cliHosts: [new URL(MODEL_UPSTREAM).hostname],
+        cliHosts: [],
+        ...(this.host.proxyTest ? { proxyTest: this.host.proxyTest } : {}),
         extraHosts: this.cfg.extraAllowedDomains,
         sandbox: boxSandbox({
           level: 'outer',
@@ -1813,14 +1917,14 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           configDir,
           tmp,
           aomReadPaths: aomRead,
-          claudeBin: this.cfg.bin,
+          claudeBin: bin.real,
           toolchainReadDirs: [],
           cloneDirs: [],
           ...(input.env.AOM_IPC_SOCKET ? { ipcSocket: input.env.AOM_IPC_SOCKET } : {}),
           outer,
           fdBinds: opened.map((f, i) => ({ fdIndex: 3 + i, real: f.real, writable: false })),
         }),
-        cmd: { bin: realpathSync(base.bin), args: base.args, env },
+        cmd: { bin: bin.real, args: base.args, env },
       });
     } catch (err) {
       for (const f of opened) f.close();
@@ -1836,7 +1940,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         ...(opened.length ? { extraFds: opened.map((f) => f.fd) } : {}),
         ...(base.stdin !== undefined ? { input: base.stdin } : {}),
         parseLine: (l) => parser.parseLine(l),
-        usage: () => parser.usage(),
+        usage: () => mr.ledger.usage(),
         logFile: input.logFile,
         exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
         ...hooks,
@@ -1854,22 +1958,27 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     }
   }
 
-  /** Auth and usage-limit bookkeeping of a turn on the Owner's own login (no private credentials copy to harvest). */
+  /**
+   * Auth and usage-limit bookkeeping of a boxed turn on the Owner's own login. runner-bare-bin (S6): from the model proxy's
+   * ledger only (an upstream 401 or 429, Anthropic's own usage), never from the box's stdout or stderr, which a command in the
+   * box can write.
+   */
   private ownerHooks(
-    parser: ClaudeStreamParser,
+    ledger: ModelLedger,
   ): Pick<Parameters<typeof spawnSession>[0], 'authFailure' | 'usageLimit' | 'onExit'> {
     return {
-      authFailure: (stderr) => parser.authFailure || isAuthFailureText(stderr),
-      usageLimit: (stderr) =>
-        detectUsageLimit(parser.usageLimitText, this.nowDate(), this.host.zone) ??
-        detectUsageLimit(stderr, this.nowDate(), this.host.zone),
+      authFailure: () => ledger.authFailed,
+      usageLimit: () => ledger.usageLimit(),
       // the CEO's owner turn runs on the Owner's own login: the main account
-      onExit: async ({ code, authFailed, usageLimit }) => {
+      onExit: async ({ code }) => {
         const main = this.registry.main;
-        if (authFailed) main.auth.markExpired();
-        else if (code === 0 && parser.usage().outputTokens > 0) main.auth.markOk();
-        if (usageLimit) main.usage.markLimited(usageLimit.until);
-        else if (code === 0 && parser.usage().outputTokens > 0) main.usage.markOk();
+        const ok = code === 0 && ledger.usage().outputTokens > 0;
+        // review S1: an upstream 401 marks the login expired only when the turn failed
+        if (ledger.authFailed && code !== 0) main.auth.markExpired();
+        else if (ok) main.auth.markOk();
+        const limit = ledger.usageLimit();
+        if (limit) main.usage.markLimited(limit.until);
+        else if (ok) main.usage.markOk();
       },
     };
   }

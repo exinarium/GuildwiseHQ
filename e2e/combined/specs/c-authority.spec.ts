@@ -19,7 +19,7 @@ import {
   waitBuilt,
   waitRequest,
 } from '../support/flow.ts';
-import { type Host, runnerCli, startHost } from '../support/host.ts';
+import { type Host, runnerCli, setBoxState, startHost } from '../support/host.ts';
 
 // Group C: runner-authority-fixes wiring on the combined build (AC3, AC9, AC12; AC4 is in a-devops.spec.ts next to A1).
 // The scripted DevOps engineer drives the real runner paths: the real `aom devops-guard` hook command (its classifier and the
@@ -72,8 +72,22 @@ test('[C12] setup: a runner with a local grant, a project, one built card that w
 
 test('[C12] the runner guard (the real hook command, given a test-built config) refuses installs, Docker, outside folders, the policy folder and card worktrees by rule; the Install and Docker switches lift only their own rules', async () => {
   const wt = worktreeOf(card);
+  // runner-bare-bin (S4): run in the OUTER box (a runtime with no inner box: the request goes outside), where the runner has the
+  // guard configuration it judges a refusal with; the in-box hook's own report is untrusted there
+  setBoxState(host, 'none');
+  // with no box the request waits for one local yes, given on the approvals page
+  const yesOutside = async () => {
+    const held = await waitFor(
+      'the outside run waits for a yes',
+      async () => (await page.state()).waiting,
+      (w) => w.length === 1,
+      90_000,
+    );
+    expect((await page.approve(held[0]?.id as string)).status).toBe(200);
+  };
   // switches off
   const offId = await sendDevopsRequest(api, host.workstationId, `probe the guard [scn:guard;path=${wt}]`);
+  await yesOutside();
   await waitRequest(offId, 'finished', (r) => TERMINAL(r?.status), 180_000);
   const off = guardResults('off');
   const rule = (needle: string) => off.find((r) => r.command.includes(needle));
@@ -85,15 +99,28 @@ test('[C12] the runner guard (the real hook command, given a test-built config) 
   expect(rule('guildwise-runner approve')).toMatchObject({ decision: 'denied', rule: 'policy_fence' });
   expect(rule('commit --allow-empty')).toMatchObject({ decision: 'denied', rule: 'card_worktree' });
   expect(exact('ls')?.decision, 'a harmless read is allowed').toBe('allowed');
-  // the shell's audit reached the runner (the hook's report call)
-  const audit = readFileSync(join(host.home, 'logs', 'devops-audit.jsonl'), 'utf8');
-  expect(audit).toContain('pipx install yt-dlp');
+  // the shell's audit reached the runner (the hook's report call), and the refused `pipx install` is in the audit. runner-bare-bin
+  // (S4): the hook runs in the box, so its own entries are stored as untrusted and its refusal is not taken; the refusal on
+  // record is the runner's own verdict of that command (`runner:install_off`), the trusted record
+  const audit = readFileSync(join(host.home, 'logs', 'devops-audit.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l) as { rule: string; decision: string; command: string });
+  expect(audit).toContainEqual(
+    expect.objectContaining({
+      decision: 'refused',
+      rule: 'runner:install_off',
+      command: 'pipx install yt-dlp',
+    }),
+  );
+  expect(audit.some((e) => e.command === 'ls' && e.rule.startsWith('untrusted:'))).toBe(true);
   // switches ON (Install and Docker): those two commands pass, the fences stay
   const onId = await sendDevopsRequest(
     api,
     host.workstationId,
     `probe the guard again [scn:guard;path=${wt};on]`,
   );
+  await yesOutside();
   await waitRequest(onId, 'finished', (r) => TERMINAL(r?.status), 180_000);
   const on = guardResults('on');
   const ruleOn = (needle: string) => on.find((r) => r.command.includes(needle));
@@ -102,6 +129,7 @@ test('[C12] the runner guard (the real hook command, given a test-built config) 
   expect(ruleOn('policy.json')).toMatchObject({ decision: 'denied', rule: 'policy_fence' });
   expect(ruleOn('guildwise-runner approve')).toMatchObject({ decision: 'denied', rule: 'policy_fence' });
   expect(ruleOn('commit --allow-empty')).toMatchObject({ decision: 'denied', rule: 'card_worktree' });
+  setBoxState(host, 'ok');
 });
 
 test('[C9] a DevOps shift that moves a card branch (update-ref in the clone) is put back and kept off the branch', async () => {

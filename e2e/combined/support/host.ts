@@ -1,5 +1,15 @@
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import type { APIRequestContext } from '@playwright/test';
@@ -57,6 +67,48 @@ function recordHostPid(home: string, pid: number | undefined): void {
 
 const tsxCli = (): string =>
   join(dirname(createRequire(join(ROOT, 'package.json')).resolve('tsx/package.json')), 'dist', 'cli.mjs');
+
+/**
+ * runner-bare-bin [A11]: a host that runs a REAL runtime in the runner-built box must look like an installed runner from inside
+ * that box: `aom` (the runner's bin shim and the guard hook) is the standalone bundle `aom.mjs` next to the runner code, the only
+ * runner folder the box mounts (read-only). Under tsx the shim would start tsx and the TypeScript sources, which the box does
+ * not mount. So this host is bundled (esbuild, the runner's own dependencies external, resolved from apps/runner/node_modules)
+ * into a folder that also holds the build's `aom.mjs`, `mock-agent.mjs` and assets, exactly the layout of `dist/`.
+ */
+function bundledHost(): string {
+  const runner = join(ROOT, 'apps', 'runner');
+  const out = join(runner, 'node_modules', '.cache', 'aom-box-host');
+  rmSync(out, { recursive: true, force: true });
+  mkdirSync(out, { recursive: true });
+  const dist = join(runner, 'dist');
+  for (const f of readdirSync(dist))
+    if (f !== 'aom-runner.mjs') cpSync(join(dist, f), join(out, f), { recursive: true });
+  const pkg = JSON.parse(readFileSync(join(runner, 'package.json'), 'utf8')) as {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  };
+  const external = [...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})].filter(
+    (d) => d !== '@aom/shared',
+  );
+  const tsup = createRequire(join(runner, 'package.json')).resolve('tsup/package.json');
+  const esbuild = createRequire(tsup)('esbuild') as {
+    buildSync: (o: Record<string, unknown>) => unknown;
+  };
+  esbuild.buildSync({
+    entryPoints: [join(ROOT, 'e2e', 'combined', 'support', 'scripted-runner-host.ts')],
+    outfile: join(out, 'host.mjs'),
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node22',
+    external: [...external, ...external.map((d) => `${d}/*`)],
+    banner: {
+      js: "import { createRequire as __aomCreateRequire } from 'node:module'; const require = __aomCreateRequire(import.meta.url);",
+    },
+    logLevel: 'error',
+  });
+  return join(out, 'host.mjs');
+}
 
 export const policyJson = (p: HostPolicy, grant?: { orgId: string; agentId: string }): string =>
   `${JSON.stringify({
@@ -143,7 +195,9 @@ export async function startHost(
   });
   const child = spawn(
     process.execPath,
-    [tsxCli(), join(ROOT, 'e2e', 'combined', 'support', 'scripted-runner-host.ts')],
+    o.extraEnv?.AOM_COMBINED_CLAUDE_BOX === '1'
+      ? [bundledHost()]
+      : [tsxCli(), join(ROOT, 'e2e', 'combined', 'support', 'scripted-runner-host.ts')],
     { env, stdio: ['ignore', 'pipe', out], detached: true, cwd: ROOT },
   );
   closeSync(out);

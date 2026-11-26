@@ -123,7 +123,41 @@ export class ScenarioAdapter extends MockAdapter {
     }
   }
 
+  /**
+   * runner-bare-bin (B5): a runtime that runs an outer-box DevOps session exposes the guard configuration it attached
+   * (`RuntimeSession.guardConfig`), and the runner judges a `--switch` claim with it, never with what the box reports. The mock
+   * agent has no Claude to attach a hook to, so the configuration is assembled here the way ClaudeCodeAdapter.devopsGuard does
+   * (as `guardProbes` and `switchBlock` below do), from the access the runner handed this session.
+   */
   override async start(input: ShiftStartInput): Promise<RuntimeSession> {
+    const s = await this.startScenario(input);
+    const g = input.devopsGuard;
+    if (!g || input.devopsBox || !input.boxRequestId) return s;
+    const root = this.runnerRoot;
+    return Object.assign(s, {
+      guardConfig: {
+        sessionRef: g.sessionRef,
+        kind: 'shift' as const,
+        deleteRoots: [join(root, 'worktrees'), '/tmp'],
+        home: process.env.HOME ?? '',
+        protectedBranches: g.protectedBranches ?? [],
+        approvedCommands: g.approvedCommands ?? [],
+        shiftKind: g.shiftKind ?? 'devops',
+        frozenBranches: g.frozenBranches ?? [],
+        cardWorktreesRoot: join(root, 'worktrees'),
+        policyRoot: process.env.AOM_RUNNER_POLICY_DIR as string,
+        ...(g.access
+          ? {
+              access: g.access,
+              writeRoots: [input.sandbox.home, input.sandbox.scratch, input.sandbox.tmp, '/tmp'],
+            }
+          : {}),
+        secretRoots: ['secrets', 'keys', 'config.json'].map((d) => join(root, d)),
+      },
+    });
+  }
+
+  private async startScenario(input: ShiftStartInput): Promise<RuntimeSession> {
     const brief = await briefOf(input);
     // what the runner told the runtime about the box for this DevOps shift (D1 reads it): `devopsBox: true` only inside the inner box
     if (brief?.devops)

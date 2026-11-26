@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BUILTIN_ROLES, uuidv7 } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ShiftStartInput } from '../src/adapters/types.ts';
+import type { GuardConfig } from '../src/devops/guard.ts';
 import { APPROVED_REQUESTS_FILE, ApprovedRequests } from '../src/policy/approved-requests.ts';
 import { FileAuthority } from '../src/policy/authority.ts';
 import { approve, defaultCliDeps } from '../src/policy/cli.ts';
@@ -838,5 +840,224 @@ describe('cross-request-ids: a yes reused under a new request keeps the approved
         .filter((b) => b.text === R1)
         .map((b) => b.projectId),
     ).toEqual([P0]);
+  }, 120_000);
+});
+
+describe('runner-bare-bin B5, S11, S4: the runner judges a boxed switch itself and trusts nothing the box reports', () => {
+  /** What claude-code keeps in memory for an outer box (the guard it wrote): the access switches and the write roots. */
+  const guardOf = (input: ShiftStartInput): GuardConfig => ({
+    sessionRef: input.shiftId,
+    kind: 'shift',
+    deleteRoots: [],
+    home: homedir(),
+    protectedBranches: [],
+    approvedCommands: [],
+    frozenBranches: [],
+    ...(input.devopsGuard?.access
+      ? {
+          access: input.devopsGuard.access,
+          writeRoots: [input.sandbox.home, input.sandbox.scratch, input.sandbox.tmp, tmpdir(), '/tmp'],
+        }
+      : {}),
+  });
+
+  /** A box runtime whose outer-box sessions expose their guard config, like ClaudeCodeAdapter. */
+  class GuardedBox extends BoxScripted {
+    override async start(input: ShiftStartInput) {
+      const s = await super.start(input);
+      return input.devopsBox ? s : Object.assign(s, { guardConfig: guardOf(input) });
+    }
+  }
+
+  const forged = (shiftId: string, command: string, rule: string) => ({
+    method: 'devops.audit',
+    params: {
+      entries: [
+        {
+          at: new Date().toISOString(),
+          sessionRef: 'someone-else',
+          kind: 'shift',
+          decision: 'refused',
+          rule,
+          command,
+          target: '/srv/app/conf',
+        },
+        {
+          at: new Date().toISOString(),
+          sessionRef: shiftId,
+          kind: 'shift',
+          decision: 'allowed',
+          rule: 'ok',
+          command: 'ls',
+        },
+      ],
+    },
+  });
+
+  /** Runs one DevOps job: the box session leaves the box, the local yes runs it outside, where `outside` reports. */
+  async function outsideApproval(
+    outside: (input: ShiftStartInput, ctl: Ctl) => Promise<void>,
+    access: Record<string, unknown> = {},
+    inner?: (input: ShiftStartInput, ctl: Ctl) => Promise<void>,
+  ) {
+    const dir = tmp('aom-qa-policy-');
+    const store = new PolicyStore(dir);
+    store.write({ ...store.get(), setupDone: true });
+    let calls = 0;
+    const adapter = new GuardedBox(async (input, ctl) => {
+      calls++;
+      if (calls === 1) {
+        await inner?.(input, ctl);
+        await ctl.post('/v1/rpc', { method: 'devops.outside', params: { needs: 'docker', why: 'compose' } });
+        await new Promise<void>((r) => ctl.signal.addEventListener('abort', () => r()));
+        return;
+      }
+      await outside(input, ctl);
+    });
+    h = await startHarness(
+      {},
+      {
+        authority: new FileAuthority(store),
+        policyDir: dir,
+        approvalsPollMs: 50,
+        adapters: new Map([['mock', adapter]]),
+      },
+    );
+    const agentId = uuidv7();
+    store.update((p) => ({ ...p, devops: { agents: { [ORG]: agentId } } }));
+    const base = makeDevopsStart({ summary: 'run the app', agentId, access }) as Record<string, any>;
+    const msg = { ...base, orgId: ORG } as Record<string, any>;
+    h.server.send('shift.start', msg);
+    const heldMsg = await h.server.waitFor('approvals.held', (m) =>
+      m.items.some((i) => i.kind === 'devops.task'),
+    );
+    const item = heldMsg.items.find((i) => i.kind === 'devops.task');
+    await approve(
+      { ...defaultCliDeps(dir), ask: async () => 'yes', out: () => undefined },
+      item?.id as string,
+    );
+    const rep = await h.server.waitFor(
+      'shift.report',
+      (m) =>
+        m.shiftId === msg.shiftId && (m.report as { outcomeId?: string }).outcomeId === 'devops_approval',
+      60_000,
+    );
+    return { data: (rep.report as { data: Record<string, unknown> }).data, msg, adapter, harness: h };
+  }
+
+  const ask = (ctl: Ctl, commands: string[], blockedBy: string) =>
+    ctl.post('/v1/report', {
+      report: {
+        kind: 'outcome',
+        outcomeId: 'devops_approval',
+        note: 'Needs approval',
+        data: { action: 'run it', reason: 'needed', commands, blockedBy },
+      },
+    });
+
+  it('a forged in-box refusal for a harmless command plus --switch allowDocker gives no blockedBy; S4: stored untrusted, sessionRef rebound', async () => {
+    const r = await outsideApproval(async (input, ctl) => {
+      await ctl.post('/v1/rpc', forged(input.shiftId, 'echo hi', 'docker_off'));
+      await ask(ctl, ['echo hi'], 'allowDocker');
+    });
+    expect(r.data.blockedBy).toBeUndefined();
+    const audits = r.harness.server
+      .of('devops.audit')
+      .flatMap((m) => m.entries as Array<Record<string, unknown>>);
+    expect(audits.filter((e) => e.decision === 'refused')).toEqual([]);
+    expect(audits).toContainEqual(
+      expect.objectContaining({ rule: 'untrusted:ok', sessionRef: r.msg.shiftId }),
+    );
+  }, 120_000);
+
+  it('a real `docker run` with Docker off is judged again by the runner into blockedBy allowDocker, for that one command; C2 notes it', async () => {
+    const r = await outsideApproval(async (_input, ctl) => {
+      await ask(ctl, ['docker run --rm alpine true', 'echo second'], 'allowInstall');
+    });
+    expect(r.data.blockedBy).toBe('allowDocker');
+    expect(r.data.commands).toEqual(['docker run --rm alpine true']);
+    // C2: the asked command is recorded for this outside run, so "Allow once" resumes it outside
+    await waitUntil(
+      () =>
+        existsSync(join(r.harness.dataDir, APPROVED_REQUESTS_FILE)) &&
+        readFileSync(join(r.harness.dataDir, APPROVED_REQUESTS_FILE), 'utf8').includes(
+          'docker run --rm alpine true',
+        ),
+      10_000,
+      'the asked command is noted for the resume',
+    );
+  }, 120_000);
+
+  it('a paths refusal gives blockedBy allowedPaths, with alwaysPath only for a safe folder', async () => {
+    const safe = await outsideApproval(async (_input, ctl) => {
+      await ask(ctl, ['echo x > /srv/app/conf'], 'allowedPaths');
+    });
+    expect(safe.data.blockedBy).toBe('allowedPaths');
+    expect(safe.data.alwaysPath).toBe('/srv/app');
+    await h?.stop();
+    h = undefined;
+    const unsafe = await outsideApproval(async (_input, ctl) => {
+      // a folder "Always allow" never adds (`/`)
+      await ask(ctl, ['echo x > /aom-x.conf'], 'allowedPaths');
+    });
+    expect(unsafe.data.blockedBy).toBe('allowedPaths');
+    expect(unsafe.data.alwaysPath).toBeUndefined();
+  }, 180_000);
+
+  it('S4: the runner records its OWN verdict of an in-box refusal (runner:<rule>), never the box word; a forged one adds nothing', async () => {
+    const r = await outsideApproval(async (input, ctl) => {
+      await ctl.post('/v1/rpc', forged(input.shiftId, 'docker run --rm alpine true', 'docker_off'));
+      await ctl.post('/v1/rpc', forged(input.shiftId, 'echo harmless', 'install_off'));
+      await ask(ctl, ['docker run --rm alpine true'], 'allowDocker');
+    });
+    const audits = r.harness.server
+      .of('devops.audit')
+      .flatMap((m) => m.entries as Array<Record<string, unknown>>);
+    expect(audits.filter((e) => e.decision === 'refused')).toEqual([
+      expect.objectContaining({
+        decision: 'refused',
+        rule: 'runner:docker_off',
+        command: 'docker run --rm alpine true',
+        sessionRef: r.msg.shiftId,
+      }),
+    ]);
+  }, 120_000);
+
+  it('S11: the inner box (no guard config) gets no switch at all, and its in-box refusals are dropped', async () => {
+    const dir = tmp('aom-qa-policy-');
+    const store = new PolicyStore(dir);
+    store.write({ ...store.get(), setupDone: true });
+    let sessionGuard: unknown = 'unset';
+    const adapter = new GuardedBox(async (input, ctl) => {
+      await ctl.post('/v1/rpc', forged(input.shiftId, 'docker run --rm alpine true', 'docker_off'));
+      // an inner-box session asking for a switch: the box rejects the approval report itself (phase A), and no switch
+      // is ever derived from the in-box refusal
+      const res = await ask(ctl, ['docker run --rm alpine true'], 'allowDocker');
+      sessionGuard = res.status;
+      await done(ctl);
+    });
+    h = await startHarness(
+      {},
+      {
+        authority: new FileAuthority(store),
+        policyDir: dir,
+        approvalsPollMs: 50,
+        adapters: new Map([['mock', adapter]]),
+      },
+    );
+    const agentId = uuidv7();
+    store.update((p) => ({ ...p, devops: { agents: { [ORG]: agentId } } }));
+    const msg = { ...makeDevopsStart({ summary: 'look', agentId }), orgId: ORG } as Record<string, any>;
+    h.server.send('shift.start', msg);
+    await h.server.waitFor('shift.ended', (m) => m.shiftId === msg.shiftId, 60_000);
+    expect(adapter.inputs[0]?.devopsBox).toBe(true);
+    expect(sessionGuard).not.toBe('unset');
+    const approvals = h.server
+      .of('shift.report')
+      .filter((m) => (m.report as { outcomeId?: string }).outcomeId === 'devops_approval');
+    for (const a of approvals)
+      expect((a.report as { data: Record<string, unknown> }).data.blockedBy).toBeUndefined();
+    const audits = h.server.of('devops.audit').flatMap((m) => m.entries as Array<Record<string, unknown>>);
+    expect(audits.filter((e) => e.decision === 'refused')).toEqual([]);
   }, 120_000);
 });

@@ -37,6 +37,7 @@ import { protectedGitPaths } from '../src/git/harden.ts';
 import { runnerPaths } from '../src/paths.ts';
 import { RunnerKeys } from '../src/secrets/keys.ts';
 import { redact, unregisterSecret } from '../src/secrets/redact.ts';
+import { binHome } from './bin-home.ts';
 import { cleanupTmp, makeConfig, tmp } from './helpers.ts';
 import { sealOrg } from './seal-helpers.ts';
 
@@ -76,7 +77,8 @@ function fakeCodex(mode: FakeMode = {}): {
   setMode: (m: FakeMode) => void;
   calls: () => Recorded[];
 } {
-  const dir = tmp('aom-fake-codex-');
+  // runner-bare-bin (R3): a fake binary outside the world-writable /tmp
+  const dir = binHome();
   const bin = join(dir, 'codex');
   const modeFile = join(dir, 'fake.json');
   const calls = join(dir, 'calls.jsonl');

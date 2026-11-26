@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
+  accessSync,
+  constants,
   existsSync,
   lstatSync,
   readdirSync,
@@ -9,7 +11,7 @@ import {
   statSync,
 } from 'node:fs';
 import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, delimiter, dirname, join, resolve, sep } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { type IpcRpcResponse, parseYamlLimited } from '@aom/shared';
 import { underRoot } from '../box/folder-check.ts';
 import { allowScriptsHint } from '../policy/installs.ts';
@@ -612,12 +614,17 @@ export function findPackageManager(
   return null;
 }
 
-/** `cmd` in folder `d` when it is a file there, else null. */
-function whichIn(cmd: string, d: string): string | null {
-  if (!d) return null;
+/**
+ * `cmd` in folder `d` when it is an executable file there, else null. runner-bare-bin: a relative or empty PATH entry is
+ * skipped (it would resolve against whatever the cwd is), and a file without execute permission is not a match.
+ */
+export function whichIn(cmd: string, d: string): string | null {
+  if (!d || !isAbsolute(d)) return null;
   const f = join(d, cmd);
   try {
-    return statSync(f).isFile() ? f : null;
+    if (!statSync(f).isFile()) return null;
+    accessSync(f, constants.X_OK);
+    return f;
   } catch {
     return null;
   }

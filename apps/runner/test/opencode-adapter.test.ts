@@ -25,6 +25,7 @@ import { ProviderStore } from '../src/direct/store.ts';
 import { runnerPaths } from '../src/paths.ts';
 import { DOTNET_SHM_DIR, ensureSandbox, pnpmLockDirs, usablePnpmLockDirs } from '../src/sandbox/sandbox.ts';
 import { RunnerKeys } from '../src/secrets/keys.ts';
+import { binHome } from './bin-home.ts';
 import { cleanupTmp, makeConfig, tmp } from './helpers.ts';
 import { sealOrg, sealWs } from './seal-helpers.ts';
 
@@ -287,7 +288,8 @@ describe('the opencode command and configuration', () => {
 // ------------------------------------------------------------------------------------------------- the adapter with a fake opencode
 
 function fakeOpencode(mode: { lines?: string[]; exit?: number; stderr?: string } = {}) {
-  const dir = tmp('aom-fake-opencode-');
+  // runner-bare-bin (R3): a fake binary outside the world-writable /tmp
+  const dir = binHome();
   const bin = join(dir, 'opencode');
   const modeFile = join(dir, 'fake.json');
   writeFileSync(modeFile, JSON.stringify(mode));

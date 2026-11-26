@@ -22,6 +22,7 @@ import {
   type CheckEvidence,
   checkStatusPasses,
   DELEGATE_RPC,
+  type DevopsAuditEntry,
   type GuardViolation,
   HANDOFF_PREP_BUDGET_MS,
   HANDOFF_WORK_BUDGET_MS,
@@ -109,7 +110,7 @@ import {
   delegateNote,
   delegateUsageReporter,
 } from '../delegate/delegate.ts';
-import { recordDevopsAudit } from '../devops/audit.ts';
+import { inBoxAuditParams, recordDevopsAudit } from '../devops/audit.ts';
 import {
   type CardWorktreeSnapshot,
   enforceCardFence,
@@ -129,7 +130,7 @@ import {
   parseDependencyChange,
 } from '../devops/dependency-install.ts';
 import { devopsPushPlan, devopsRequestIdentity, withAppPushRefusal } from '../devops/devops-git.ts';
-import { alwaysPathRefusal, redactCommand } from '../devops/guard.ts';
+import { alwaysPathRefusal, classifyCommand, redactCommand } from '../devops/guard.ts';
 import { type HygieneDeps, runHygiene } from '../devops/hygiene.ts';
 import { installScriptsOffFor, withInstallScriptsOff } from '../devops/install-env.ts';
 import {
@@ -539,6 +540,8 @@ interface ActiveShift {
   msg: ShiftStartMsg;
   /** quiet-approvals R1: how a DevOps request shift runs (absent: not decided here, the DevOps profile as before). */
   devopsMode?: DevopsMode;
+  /** runner-bare-bin (S4, B5): the session runs in a box the runner built (inner or outer): nothing it reports is trusted. */
+  boxed?: boolean;
   /** quiet-approvals R1: the box session asked to leave the box; at its end the runner holds the same shift. */
   devopsOutside?: { why: string; needs: string };
   /** Set at the end of such a session: the runner is told after the shift's cleanup. */
@@ -2026,6 +2029,7 @@ export class ShiftSupervisor {
     const guardFor = inBox ? undefined : devopsGuardFor(msg, s.identity?.email);
     const devopsGuard = guardFor && installScriptsOff ? { ...guardFor, installScriptsOff: true } : guardFor;
     const boxed = inBox || s.devopsMode === 'outside';
+    if (boxed) s.boxed = true;
     const boxReadDirs = boxed ? await this.devopsCloneDirs(msg) : [];
     if (guardedShift(msg) && !devopsGuard && !inBox) {
       this.reject(msg.shiftId, 'internal', 'the DevOps guard could not be configured for this shift');
@@ -2045,6 +2049,10 @@ export class ShiftSupervisor {
         ...(inBox ? { devopsBox: true } : {}),
         // quiet-approvals phase B: the runner builds the box (inner, or outer after a local yes) around this session
         ...(boxed && msg.devops ? { boxRequestId: msg.devops.requestId } : {}),
+        // runner-bare-bin (S7): the trusted audit of a boxed session comes from the model proxy outside the box
+        ...(boxed && msg.devops
+          ? { boxAudit: (entries: DevopsAuditEntry[]) => this.boxAudit(s, entries) }
+          : {}),
         ...(s.scratchClone ? { boxReadOnly: s.scratchClone.protectedPaths } : {}),
         ...(s.devopsMode === 'outside'
           ? {
@@ -2762,22 +2770,28 @@ export class ShiftSupervisor {
         if (req.method === 'card.attachments') return this.cardAttachments(s, req.params);
         if (req.method === 'transcript.fetch') return this.transcriptFetch(s, req.params);
         if (req.method === DEVOPS_INSTALL_RPC) return this.devopsInstall(s, req.params);
-        if (req.method === 'devops.audit')
-          return recordDevopsAudit(req.params, {
+        if (req.method === 'devops.audit') {
+          // runner-bare-bin (S4): a boxed session's in-box refusals are its own word and are dropped below; the runner judges
+          // each one again with the guard configuration it wrote and records its OWN verdict (the trusted record)
+          if (s.boxed && s.msg.agent.isDevops === true) this.runnerRefusals(s, req.params);
+          return recordDevopsAudit(inBoxAuditParams(req.params, s.msg.shiftId, s.boxed === true), {
             isDevops: s.msg.agent.isDevops === true,
             logFile: join(this.deps.paths.logs, 'devops-audit.jsonl'),
             send: (entries) => {
-              // T10 (R4-S3): the guard's own refusals of this shift, by exact command
-              for (const e of entries)
-                if (e.decision === 'refused')
-                  s.guardRefusals.set(e.command.trim().replace(/\s+/g, ' '), {
-                    rule: e.rule,
-                    ...(e.target ? { target: e.target } : {}),
-                  });
+              // T10 (R4-S3): the guard's own refusals of this shift, by exact command. runner-bare-bin (S4): never from a box,
+              // whose guard pipe a command in the box can forge (the runner judges a boxed switch itself, B5)
+              if (!s.boxed)
+                for (const e of entries)
+                  if (e.decision === 'refused')
+                    s.guardRefusals.set(e.command.trim().replace(/\s+/g, ' '), {
+                      rule: e.rule,
+                      ...(e.target ? { target: e.target } : {}),
+                    });
               void this.deps.transport.send('devops.audit', { entries });
             },
             redact: redactCommand,
           });
+        }
         if (req.method.startsWith('run.')) return this.runRpc(s, req.method, req.params);
         if (req.method.startsWith('env.') || req.method === 'test.suite')
           return this.testerRpc(s, req.method, req.params);
@@ -4102,6 +4116,60 @@ export class ShiftSupervisor {
   }
 
   /**
+   * runner-bare-bin (S4): the trusted record of a boxed session's refusals. The box reported the command; the runner confirms
+   * the rule, so a record is no proof the command was tried. For each `refused` entry the runner judges the command itself
+   * (`classifyCommand` with the guard configuration it wrote and keeps in memory, the request folder as the cwd, no `git` run)
+   * and records only a refusal of its own, as `runner:<rule>`. The box cannot make the runner record a refusal the runner does
+   * not reach itself; the inner box (no guard configuration) gets none.
+   */
+  private runnerRefusals(s: ActiveShift, params: Record<string, unknown>): void {
+    const cfg = s.session?.guardConfig;
+    const cwd =
+      s.sandbox && s.msg.devops ? devopsRequestDir(s.sandbox.root, s.msg.devops.requestId) : undefined;
+    if (!cfg || !cwd || !Array.isArray(params.entries)) return;
+    const out: DevopsAuditEntry[] = [];
+    for (const e of (params.entries as unknown[]).slice(0, 50)) {
+      if (typeof e !== 'object' || e === null) continue;
+      const x = e as { decision?: unknown; command?: unknown };
+      if (x.decision !== 'refused' || typeof x.command !== 'string' || !x.command.trim()) continue;
+      let v: ReturnType<typeof classifyCommand>;
+      try {
+        v = classifyCommand(x.command, cfg, cwd, {});
+      } catch {
+        continue;
+      }
+      if (v.decision !== 'refused') continue;
+      out.push({
+        at: new Date().toISOString(),
+        sessionRef: s.msg.shiftId,
+        kind: 'shift',
+        ...(cfg.shiftKind ? { shiftKind: cfg.shiftKind } : {}),
+        decision: 'refused',
+        rule: `runner:${v.rule}`.slice(0, 80),
+        command: x.command.slice(0, 2000),
+        ...(v.target ? { target: v.target.slice(0, 4000) } : {}),
+      });
+    }
+    if (out.length) this.boxAudit(s, out);
+  }
+
+  /**
+   * runner-bare-bin (S7): the model proxy's audit entries of a boxed session (each Bash call the model requested; the box's claim
+   * that it saw the result). Recorded and reported by the runner, never through the in-box RPC; never counted as a refusal.
+   */
+  private boxAudit(s: ActiveShift, entries: DevopsAuditEntry[]): void {
+    recordDevopsAudit(
+      { entries: entries.map((e) => ({ ...e, sessionRef: s.msg.shiftId })) },
+      {
+        isDevops: s.msg.agent.isDevops === true,
+        logFile: join(this.deps.paths.logs, 'devops-audit.jsonl'),
+        send: (list) => void this.deps.transport.send('devops.audit', { entries: list }),
+        redact: redactCommand,
+      },
+    );
+  }
+
+  /**
    * T10 (R4-S3, R4-S2): an approval's `blockedBy` (from `aom devops-approval --switch`) is replaced by the rule the guard
    * recorded when it refused that exact command; with no recorded switch refusal it is dropped (the request is then an
    * ordinary approval). For a paths refusal the folder "Always allow" may add is set only when that folder is safe.
@@ -4122,24 +4190,46 @@ export class ShiftSupervisor {
       command: string;
       target?: string;
     } | null = null;
-    for (const c of commands) {
-      const r = s.guardRefusals.get(redactCommand(c).trim().replace(/\s+/g, ' '));
-      const sw = r ? RULE_SWITCH[r.rule] : undefined;
-      if (r && sw) {
-        found = { sw, command: c, ...(r.target ? { target: r.target } : {}) };
-        break;
+    if (s.boxed) {
+      // runner-bare-bin (B5): a boxed session's refusals are never taken from the box. The runner judges each named command
+      // itself with the guard configuration it wrote (kept in memory), in the request folder, with no `git` run (empty deps).
+      // S11: no guard configuration (the inner box) means no switch: an ordinary approval.
+      const cfg = s.session?.guardConfig;
+      const cwd =
+        s.sandbox && s.msg.devops ? devopsRequestDir(s.sandbox.root, s.msg.devops.requestId) : undefined;
+      if (cfg && cwd)
+        for (const c of commands) {
+          let v: ReturnType<typeof classifyCommand>;
+          try {
+            v = classifyCommand(c, cfg, cwd, {});
+          } catch {
+            continue;
+          }
+          const sw = v.decision === 'refused' ? RULE_SWITCH[v.rule] : undefined;
+          if (sw) {
+            found = { sw, command: c, ...(v.target ? { target: v.target } : {}) };
+            break;
+          }
+        }
+    } else
+      for (const c of commands) {
+        const r = s.guardRefusals.get(redactCommand(c).trim().replace(/\s+/g, ' '));
+        const sw = r ? RULE_SWITCH[r.rule] : undefined;
+        if (r && sw) {
+          found = { sw, command: c, ...(r.target ? { target: r.target } : {}) };
+          break;
+        }
       }
-    }
     if (!found) {
       if (claimed)
         this.log.warn(
-          `shift ${s.msg.shiftId.slice(0, 8)}: --switch ${String(claimed)} refused: the guard recorded no such refusal`,
+          `shift ${s.msg.shiftId.slice(0, 8)}: --switch ${String(claimed)} refused: ${s.boxed ? "the runner's own check found no such refusal" : 'the guard recorded no such refusal'}`,
         );
       return d;
     }
     if (claimed && claimed !== found.sw)
       this.log.warn(
-        `shift ${s.msg.shiftId.slice(0, 8)}: --switch ${String(claimed)} corrected to ${found.sw} (the guard's own refusal)`,
+        `shift ${s.msg.shiftId.slice(0, 8)}: --switch ${String(claimed)} corrected to ${found.sw} (${s.boxed ? "the runner's own check" : "the guard's own refusal"})`,
       );
     d.blockedBy = found.sw;
     // Rework 1 (B1): a switch approval is for exactly the command the guard refused, the one the owner is shown

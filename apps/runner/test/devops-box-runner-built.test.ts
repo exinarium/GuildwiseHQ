@@ -30,6 +30,7 @@ import {
 } from '../src/box/launch.ts';
 import { startEgressProxy } from '../src/sandbox/egress-proxy.ts';
 import { harnessBwrapArgs } from '../src/sandbox/harness-sandbox.ts';
+import { binHome } from './bin-home.ts';
 import { cleanupTmp, tmp } from './helpers.ts';
 import { policyCtx } from './policy-fixtures.ts';
 
@@ -158,7 +159,13 @@ describe('S10: the model proxy plan', () => {
     const call = (path: string, key: string) =>
       new Promise<number>((resolve) => {
         const req = httpRequest(
-          { socketPath, path, method: 'POST', headers: { 'x-api-key': key } },
+          // runner-bare-bin: the filtered route takes JSON only
+          {
+            socketPath,
+            path,
+            method: 'POST',
+            headers: { 'x-api-key': key, 'content-type': 'application/json' },
+          },
           (res) => {
             res.resume();
             resolve(res.statusCode ?? 0);
@@ -819,7 +826,8 @@ describe.skipIf(!bwrapOk)('Rework 1 (REVIEW B2): the CEO full-power box never ge
     const turnDir = join(root, 'ceo-turns', 'c1');
     mkdirSync(turnDir, { recursive: true });
     // a stand-in for Claude Code that probes the box and writes what it saw into its own work folder
-    const bin = join(realpathSync(tmp('aom-fakeclaude-')), 'claude');
+    // runner-bare-bin (S1): a fake binary outside every temp root
+    const bin = join(binHome(), 'claude');
     writeFileSync(
       bin,
       `#!/bin/sh
@@ -1082,7 +1090,8 @@ describe.skipIf(!bwrapOk)(
       const requestId = '019e3f6a-7b1c-7a2d-8c3e-0123456789b2';
       const cwd = join(sb.root, 'devops', requestId);
       mkdirSync(cwd, { recursive: true });
-      const bin = join(realpathSync(tmp('aom-fakeclaude2-')), 'claude');
+      // runner-bare-bin (S1): a fake binary outside every temp root
+      const bin = join(binHome(), 'claude');
       writeFileSync(
         bin,
         `#!/bin/sh

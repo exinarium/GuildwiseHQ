@@ -2,6 +2,7 @@ import type {
   AgentRuntimeSpec,
   ChatContext,
   ClaudeAccountInfo,
+  DevopsAuditEntry,
   ReportedBackend,
   ReportedKey,
   ReportedModel,
@@ -9,6 +10,7 @@ import type {
   Usage,
 } from '@aom/shared';
 import type { GrantedSkill } from '../capabilities/materialize.ts';
+import type { GuardConfig } from '../devops/guard.ts';
 import type { ReviewerRun } from '../review/reviewer-sandbox.ts';
 import type { Sandbox } from '../sandbox/sandbox.ts';
 
@@ -177,6 +179,11 @@ export interface ShiftStartInput {
   /** quiet-approvals S7: paths inside the box's writable folder that stay read-only (a scratch clone's git config and hooks). */
   boxReadOnly?: string[];
   /**
+   * runner-bare-bin (S7): where the model proxy's ledger sends the boxed session's audit entries (each Bash call the model
+   * requested, and the box's claim that it saw a result). The supervisor records and reports them, never through the box.
+   */
+  boxAudit?: (entries: DevopsAuditEntry[]) => void;
+  /**
    * quiet-approvals phase B (R4-B2): Docker for an outer-box session, through the gatekeeper only: the real daemon socket
    * (never in the box), this runner's label, and whether test containers may reach the internet (the local ceiling).
    */
@@ -249,6 +256,11 @@ export interface RuntimeSession {
   lastActivityAt?(): number;
   /** Native subagents the session ran (Claude Code), read from its transcripts; call after the session ended. */
   nativeSubagentUsage?(): NativeSubagentUsage[];
+  /**
+   * runner-bare-bin (B5): the DevOps guard configuration the runner wrote for an outer box, kept in memory (never read back
+   * from the box). The supervisor judges a blocked command with it itself. Absent: no guard (the inner box), so no switch.
+   */
+  guardConfig?: GuardConfig;
 }
 
 export interface ChatStartInput {

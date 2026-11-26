@@ -4,6 +4,7 @@ import { chmodSync, rmSync } from 'node:fs';
 import {
   createServer as createHttpServer,
   request as httpRequest,
+  type IncomingHttpHeaders,
   type IncomingMessage,
   type Server,
 } from 'node:http';
@@ -17,6 +18,7 @@ import {
   orgCredentialEndpointProblem,
   testServiceDomain,
 } from '@aom/shared';
+import { type JsonValue, StrictJsonError, strictParse, strictStringify } from '../box/strict-json.ts';
 
 /**
  * The network of a harness sandbox (docs/RUNNER.md, "Sandbox parity of the other runtimes"). The sandboxed CLI has no network
@@ -59,6 +61,52 @@ export interface EgressRoute {
   bearer?: string;
   /** quiet-approvals S10: headers computed per request (a login token the runner keeps fresh outside every box). */
   dynamicHeaders?: () => Record<string, string> | null;
+  /**
+   * runner-bare-bin (B1, B4, S9): the route rebuilds every request from a checked value. The body is buffered, parsed with
+   * `strictParse` and given to the filter with the client's headers; the filter returns the value to forward and the upstream
+   * header set built from scratch, or a refusal (403). Only `strictStringify(body)` goes upstream, never the original bytes,
+   * and only the filter's headers plus `headers`, `dynamicHeaders` and `requiredHeaders` (added last, in that order).
+   */
+  requestFilter?: (
+    value: JsonValue,
+    headers: IncomingHttpHeaders,
+    path: string,
+  ) => { body: JsonValue; headers: Record<string, string> } | { refuse: string };
+  /** runner-bare-bin: the largest request body a filtered route buffers (default 32 MiB); over it: 413. */
+  maxRequestBytes?: number;
+  /** runner-bare-bin (B2): sees each checked request and tees each upstream response (outside the box). */
+  observe?: RouteObserver;
+  /**
+   * runner-bare-bin (S6): headers the auth mode needs, added after everything else; an `anthropic-beta` here is appended to the
+   * filtered list instead of replacing it.
+   */
+  requiredHeaders?: Record<string, string>;
+}
+
+/** runner-bare-bin (B2): the model ledger's view of a filtered route. Errors it throws are caught and never break the pipe. */
+export interface RouteObserver {
+  request?(body: JsonValue, path: string): void;
+  /** Called once per upstream response; the returned sink gets every body chunk, then `end`. */
+  response?(
+    status: number,
+    headers: IncomingHttpHeaders,
+  ): { write(chunk: Buffer): void; end(): void } | undefined;
+}
+
+/** runner-bare-bin (S8): requests in flight per filtered route, and bytes buffered by all filtered routes of this runner. */
+export const MODEL_ROUTE_MAX_IN_FLIGHT = 6;
+let maxBufferedBytes = 128 * 1024 * 1024;
+let bufferedBytes = 0;
+/** Review S2: bytes one filtered route (one box) may hold buffered, so one box cannot take the whole runner-wide buffer. */
+export const MODEL_ROUTE_MAX_BUFFERED_BYTES = 48 * 1024 * 1024;
+let maxRouteBytes = MODEL_ROUTE_MAX_BUFFERED_BYTES;
+/** Test hook: the runner-wide buffer cap of the filtered routes. */
+export function setFilteredRouteBufferCapForTests(bytes?: number): void {
+  maxBufferedBytes = bytes ?? 128 * 1024 * 1024;
+}
+/** Test hook: the per-route buffer cap of the filtered routes. */
+export function setPerRouteBufferCapForTests(bytes?: number): void {
+  maxRouteBytes = bytes ?? MODEL_ROUTE_MAX_BUFFERED_BYTES;
 }
 
 export interface EgressProxyOptions {
@@ -88,6 +136,13 @@ export interface EgressProxyOptions {
    * the name is resolved at every connect and a private, loopback, link-local or CGNAT answer is refused (no rebinding).
    */
   publicEndpoints?: string[];
+  /**
+   * runner-bare-bin (S5): hosts a CONNECT or a plain (absolute-form) request is refused, whatever the allow-list says (the
+   * model APIs from a box: the box reaches its model only through a route). Routes are not affected.
+   */
+  refuseHost?: (host: string) => boolean;
+  /** runner-bare-bin (S5): upstream hosts only a route may reach (never a CONNECT or a plain request). */
+  routeHosts?: string[];
   /** Test hook: the ports a CONNECT or plain request may use (default 80 and 443). */
   allowedPorts?: number[];
   /** Test hook: resolve names. */
@@ -200,6 +255,157 @@ export function testServiceListed(host: string, port: number, entries: readonly 
   return entries.includes(testServiceDomain({ host: h, port }));
 }
 
+const guarded = (f: () => void): void => {
+  try {
+    f();
+  } catch {
+    // an observer error never breaks the response pipe
+  }
+};
+
+function observeResponse(
+  o: RouteObserver,
+  upRes: IncomingMessage,
+): { write(chunk: Buffer): void; end(): void } | undefined {
+  try {
+    return o.response?.(upRes.statusCode ?? 502, upRes.headers);
+  } catch {
+    return undefined;
+  }
+}
+
+const inFlight = new WeakMap<EgressRoute, number>();
+const routeBytes = new WeakMap<EgressRoute, number>();
+
+/**
+ * runner-bare-bin (B4, S8, S9): admission, buffering, the strict parse and the filter of one request on a filtered route. Every
+ * failure is a status: 503 (busy), 415 (encoding or type), 400 (query, JSON), 413 (too big, the connection closed), 403 (the
+ * filter). The route's slot and buffered bytes are released when the response ends.
+ */
+async function filterRequest(
+  route: EgressRoute,
+  req: IncomingMessage,
+  res: import('node:http').ServerResponse,
+  target: URL,
+): Promise<
+  | { fail: number; text: string; close?: boolean }
+  | { body: Buffer; headers: Record<string, string>; observe?: RouteObserver }
+> {
+  const filter = route.requestFilter as NonNullable<EgressRoute['requestFilter']>;
+  const n = inFlight.get(route) ?? 0;
+  if (n >= MODEL_ROUTE_MAX_IN_FLIGHT) return { fail: 503, text: 'proxy busy' };
+  inFlight.set(route, n + 1);
+  let held = 0;
+  let released = false;
+  const release = (): void => {
+    if (released) return;
+    released = true;
+    inFlight.set(route, Math.max(0, (inFlight.get(route) ?? 1) - 1));
+    bufferedBytes = Math.max(0, bufferedBytes - held);
+    routeBytes.set(route, Math.max(0, (routeBytes.get(route) ?? 0) - held));
+    held = 0;
+  };
+  res.on('close', release);
+  res.on('finish', release);
+  const enc = String(req.headers['content-encoding'] ?? '')
+    .trim()
+    .toLowerCase();
+  if (enc && enc !== 'identity') return { fail: 415, text: 'content-encoding not allowed' };
+  const ct = String(req.headers['content-type'] ?? '')
+    .split(';')[0]
+    ?.trim()
+    .toLowerCase();
+  if (ct !== 'application/json') return { fail: 415, text: 'content-type must be application/json' };
+  if (target.search !== '' && target.search !== '?beta=true') return { fail: 400, text: 'query not allowed' };
+  // the query is rebuilt, never forwarded raw
+  target.search = target.search === '?beta=true' ? '?beta=true' : '';
+  const max = route.maxRequestBytes ?? 32 * 1024 * 1024;
+  const declared = Number(req.headers['content-length'] ?? Number.NaN);
+  if (Number.isFinite(declared) && declared > max)
+    return { fail: 413, text: 'request too large', close: true };
+  const chunks: Buffer[] = [];
+  const got = await new Promise<'ok' | 'big' | 'busy' | 'error'>((resolve) => {
+    let size = 0;
+    let settled = false;
+    const done = (r: 'ok' | 'big' | 'busy' | 'error'): void => {
+      if (settled) return;
+      settled = true;
+      if (r !== 'ok') {
+        req.removeAllListeners('data');
+        req.resume();
+      }
+      resolve(r);
+    };
+    req.on('data', (c: Buffer) => {
+      if (settled) return;
+      size += c.length;
+      if (size > max) return done('big');
+      if (bufferedBytes + c.length > maxBufferedBytes) return done('busy');
+      // review S2: and this route's own share
+      if ((routeBytes.get(route) ?? 0) + c.length > maxRouteBytes) return done('busy');
+      bufferedBytes += c.length;
+      routeBytes.set(route, (routeBytes.get(route) ?? 0) + c.length);
+      held += c.length;
+      chunks.push(c);
+    });
+    req.on('end', () => done('ok'));
+    req.on('error', () => done('error'));
+    req.on('aborted', () => done('error'));
+  });
+  if (got === 'big') return { fail: 413, text: 'request too large', close: true };
+  if (got === 'busy') return { fail: 503, text: 'proxy busy' };
+  if (got === 'error') return { fail: 400, text: 'request aborted' };
+  let value: JsonValue;
+  try {
+    value = strictParse(Buffer.concat(chunks), { maxDepth: 64, maxNodes: 2_000_000 });
+  } catch (err) {
+    return { fail: 400, text: err instanceof StrictJsonError ? `bad JSON: ${err.message}` : 'bad JSON' };
+  }
+  let r: ReturnType<typeof filter>;
+  try {
+    r = filter(value, req.headers, target.pathname);
+  } catch {
+    return { fail: 400, text: 'the request could not be checked' };
+  }
+  if ('refuse' in r) {
+    process.stderr.write(`deny model route ${target.pathname}: ${r.refuse.slice(0, 200)}\n`);
+    return { fail: 403, text: `refused by the runner's model proxy: ${r.refuse}` };
+  }
+  let body: Buffer;
+  try {
+    body = Buffer.from(strictStringify(r.body), 'utf8');
+  } catch {
+    return { fail: 400, text: 'the request could not be rebuilt' };
+  }
+  const out: Record<string, string> = { ...r.headers };
+  for (const [k, v] of Object.entries(route.headers)) out[k.toLowerCase()] = v;
+  if (route.dynamicHeaders) {
+    const extra = route.dynamicHeaders();
+    if (!extra) return { fail: 503, text: 'no credential for the model on this computer' };
+    for (const [k, v] of Object.entries(extra)) out[k.toLowerCase()] = v;
+  }
+  for (const [k0, v] of Object.entries(route.requiredHeaders ?? {})) {
+    const k = k0.toLowerCase();
+    if (k === 'anthropic-beta' && out[k]) {
+      const have = out[k].split(',').map((x) => x.trim());
+      out[k] = [
+        ...have,
+        ...v
+          .split(',')
+          .map((x) => x.trim())
+          .filter((x) => x && !have.includes(x)),
+      ].join(',');
+    } else out[k] = v;
+  }
+  out['content-length'] = String(body.length);
+  out['accept-encoding'] = 'identity';
+  if (route.observe?.request) {
+    const o = route.observe;
+    guarded(() => o.request?.(r.body, target.pathname));
+  }
+  return { body, headers: out, ...(route.observe ? { observe: route.observe } : {}) };
+}
+
 /** Starts the proxy on a Unix socket (mode 0600). The caller closes it when the session ends. */
 export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressProxy> {
   const denied = new Set<string>();
@@ -216,7 +422,15 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
   const testServices = canonicalTestServices(o.testServices ?? []);
 
   const server: Server = createHttpServer((req, res) => {
-    void handle(req, res);
+    // S8: a route never throws; whatever fails is an error status
+    handle(req, res).catch(() => {
+      try {
+        if (!res.headersSent) res.writeHead(500, { 'content-type': 'text/plain' });
+        res.end('proxy error');
+      } catch {
+        // the client is gone
+      }
+    });
   });
 
   const handle = async (req: IncomingMessage, res: import('node:http').ServerResponse): Promise<void> => {
@@ -229,6 +443,7 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
     let privateOk = false;
     let routeHit = false;
     let testHit: string | undefined;
+    let filtered: { body: Buffer; headers: Record<string, string>; observe?: RouteObserver } | undefined;
     const headers: Record<string, string | string[]> = {};
     for (const [k, v] of Object.entries(req.headers)) if (v !== undefined) headers[k] = v;
     for (const k of ['host', 'connection', 'proxy-connection', 'keep-alive', 'transfer-encoding', 'upgrade'])
@@ -254,7 +469,7 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
       } catch {
         return fail(400, 'bad path');
       }
-      if (!hostAllowed(target.hostname, o.allowedHosts)) {
+      if (!hostAllowed(target.hostname, [...o.allowedHosts, ...(o.routeHosts ?? [])])) {
         deny(target.hostname);
         return fail(403, 'host not allowed');
       }
@@ -284,6 +499,14 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
         if (!extra) return fail(503, 'no credential for the model on this computer');
         for (const [k, v] of Object.entries(extra)) headers[k.toLowerCase()] = v;
       }
+      if (route.requestFilter) {
+        const r = await filterRequest(route, req, res, target);
+        if ('fail' in r) {
+          if (r.close) res.setHeader('connection', 'close');
+          return fail(r.fail, r.text);
+        }
+        filtered = r;
+      }
     } else {
       try {
         target = new URL(raw);
@@ -298,6 +521,10 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
         testHit = normaliseTestServiceHost(target.hostname);
       const listed = endpointListed(target.hostname, Number(target.port || 80), o.privateEndpoints ?? []);
       const port = Number(target.port || 80);
+      if (!testHit && o.refuseHost?.(target.hostname)) {
+        deny(target.hostname);
+        return fail(403, 'host not allowed');
+      }
       if (
         !testHit &&
         (target.protocol !== 'http:' ||
@@ -335,17 +562,23 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
         port: target.port || (secure ? 443 : 80),
         path: `${target.pathname}${target.search}`,
         method: req.method,
-        headers: { ...headers, host: target.host },
+        headers: filtered ? { ...filtered.headers, host: target.host } : { ...headers, host: target.host },
         servername: target.hostname,
       },
       (upRes) => {
         res.writeHead(upRes.statusCode ?? 502, upRes.headers);
+        const sink = filtered?.observe ? observeResponse(filtered.observe, upRes) : undefined;
+        if (sink) {
+          upRes.on('data', (c: Buffer) => guarded(() => sink.write(c)));
+          upRes.on('end', () => guarded(() => sink.end()));
+        }
         upRes.pipe(res);
       },
     );
     up.on('error', () => fail(502, 'upstream error'));
     res.on('close', () => up.destroy());
-    req.pipe(up);
+    if (filtered) up.end(filtered.body);
+    else req.pipe(up);
   };
 
   server.on('connect', (req, client: Socket, head) => {
@@ -377,6 +610,10 @@ export async function startEgressProxy(o: EgressProxyOptions): Promise<EgressPro
     // through the test hook, never through the private-address check, which would refuse loopback).
     if (hp && testServiceListed(hp.host, hp.port, testServices))
       return tunnel(normaliseTestServiceHost(hp.host), hp.port);
+    if (hp && o.refuseHost?.(hp.host)) {
+      deny(hp.host);
+      return refuse('403 Forbidden');
+    }
     const listed = !!hp && endpointListed(hp.host, hp.port, o.privateEndpoints ?? []);
     const pub = !!hp && endpointListed(hp.host, hp.port, o.publicEndpoints ?? []);
     if (!hp || !(listed || pub || (portOk(hp.port) && hostAllowed(hp.host, o.allowedHosts)))) {

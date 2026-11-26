@@ -1,6 +1,6 @@
 import { accessSync, constants, readdirSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 
 /**
  * .NET installations on this workstation. The `dotnet` muxer only resolves SDKs inside its own root, so one root has to
@@ -103,7 +103,8 @@ export function dotnetCandidates(o: DotnetDetectOptions = {}): string[] {
     ]),
   );
   for (const dir of (env.PATH ?? '').split(delimiter)) {
-    if (!dir) continue;
+    // runner-bare-bin: a relative PATH entry would resolve against the cwd
+    if (!dir || !isAbsolute(dir)) continue;
     // `/usr/local/bin/dotnet` -> `/usr/share/dotnet/dotnet`: the root is the folder of the real executable
     try {
       out.push(dirname(realpathSync(join(dir, 'dotnet'))));

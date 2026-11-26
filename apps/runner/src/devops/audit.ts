@@ -32,3 +32,27 @@ export function recordDevopsAudit(
   opts.send(entries);
   return { ok: true, result: { recorded: entries.length } };
 }
+
+const isEntryObj = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/**
+ * runner-bare-bin (S4): the `devops.audit` params as the runner records them. Every entry's `sessionRef` is this shift (a
+ * forged one is rebound). From a box the runner built (inner or outer), whose guard hook a command in the box can kill or
+ * forge: `refused` entries are dropped (they never shape an approval) and each rule is stored as `untrusted:<rule>`.
+ */
+export function inBoxAuditParams(
+  params: Record<string, unknown>,
+  shiftId: string,
+  boxed: boolean,
+): Record<string, unknown> {
+  if (!Array.isArray(params.entries)) return params;
+  let entries = (params.entries as unknown[]).map((e) => (isEntryObj(e) ? { ...e, sessionRef: shiftId } : e));
+  if (boxed)
+    entries = entries
+      .filter((e) => !(isEntryObj(e) && e.decision === 'refused'))
+      .map((e) =>
+        isEntryObj(e) && typeof e.rule === 'string' ? { ...e, rule: `untrusted:${e.rule}`.slice(0, 80) } : e,
+      );
+  return { ...params, entries };
+}

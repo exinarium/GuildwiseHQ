@@ -1,6 +1,10 @@
-import { mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { userInfo } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
+import { lookupBin } from '../../../apps/runner/src/adapters/bin-lookup.ts';
+import { ClaudeCodeAdapter } from '../../../apps/runner/src/adapters/claude-code.ts';
+import type { RuntimeAdapter } from '../../../apps/runner/src/adapters/types.ts';
+import { ClaudeRuntimeConfigSchema } from '../../../apps/runner/src/config.ts';
 import { RunnerHost } from '../../../apps/runner/src/host.ts';
 import { createLogger } from '../../../apps/runner/src/log.ts';
 import { entryDir, loadIndex } from '../../../apps/runner/src/pairings.ts';
@@ -77,6 +81,9 @@ async function main(): Promise<void> {
   else windowState = { port: window.port, error: window.windowError ?? 'not started' };
 
   const adapter = new ScenarioAdapter({ enabled: true }, paths, gateDir);
+  const adapters = new Map<string, RuntimeAdapter>([['mock', adapter]]);
+  const claude = realBoxAdapter(paths);
+  if (claude) adapters.set('claude-code', claude);
   const host = new RunnerHost({
     root: paths.root,
     log,
@@ -84,7 +91,7 @@ async function main(): Promise<void> {
     runnerOptions: {
       windowState: () => windowState,
       authority: defaultAuthority(),
-      adapters: new Map([['mock', adapter]]),
+      adapters,
       approvalsPollMs: 200,
     },
   });
@@ -102,6 +109,44 @@ async function main(): Promise<void> {
   process.once('SIGINT', () => void stop());
   void host.fatal.then(() => void stop());
   void entryDir;
+}
+
+/**
+ * runner-bare-bin [A11]: with AOM_COMBINED_CLAUDE_BOX=1 the real `ClaudeCodeAdapter` is registered as `claude-code`, configured
+ * with the BARE bin "claude" (blocker 1), an API key that is a dummy, and its constructor test hooks: the model upstream is the
+ * spec's fake API on 127.0.0.1 (AOM_COMBINED_FAKE_API), the boxes' proxy may reach loopback for it, and every model request's
+ * capture event goes to AOM_COMBINED_CAPTURE. It refuses to start unless "claude" on this host's PATH is the harness's own fake
+ * under AOM_COMBINED_TOOLS, or (AOM_COMBINED_REAL_CLAUDE=1, [A11-L2]) exactly the real Claude Code AOM_COMBINED_REAL_CLAUDE_BIN
+ * names. The product never reads these variables; `registry.ts` never passes the hooks.
+ */
+function realBoxAdapter(paths: ReturnType<typeof runnerPaths>): ClaudeCodeAdapter | undefined {
+  if (process.env.AOM_COMBINED_CLAUDE_BOX !== '1') return undefined;
+  const upstream = process.env.AOM_COMBINED_FAKE_API ?? '';
+  if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(upstream))
+    throw new Error('AOM_COMBINED_FAKE_API must be a 127.0.0.1 URL');
+  const found = lookupBin('claude', process.env.PATH ?? '', { uid: process.geteuid?.() ?? null });
+  if (!found.ok) throw new Error(`no claude for the real box: ${found.reason}`);
+  const tools = process.env.AOM_COMBINED_TOOLS ? realpathSync(process.env.AOM_COMBINED_TOOLS) : '';
+  const real =
+    process.env.AOM_COMBINED_REAL_CLAUDE === '1' ? process.env.AOM_COMBINED_REAL_CLAUDE_BIN : undefined;
+  const ok = real ? found.real === realpathSync(real) : !!tools && found.real.startsWith(`${tools}${sep}`);
+  if (!ok)
+    throw new Error(`refusing to start ${found.real}: not the harness's fake (or the named real claude)`);
+  const capture = process.env.AOM_COMBINED_CAPTURE;
+  return new ClaudeCodeAdapter(
+    ClaudeRuntimeConfigSchema.parse({
+      bin: 'claude',
+      sandbox: 'required',
+      authMode: 'api_key',
+      apiKey: 'sk-ant-api03-combined-harness-dummy',
+    }),
+    paths,
+    {
+      modelUpstream: upstream,
+      proxyTest: { allowPrivate: true },
+      ...(capture ? { modelCapture: (e) => appendFileSync(capture, `${JSON.stringify(e)}\n`) } : {}),
+    },
+  );
 }
 
 main().catch((err) => {

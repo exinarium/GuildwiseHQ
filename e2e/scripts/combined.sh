@@ -23,6 +23,8 @@ if port_open 4601; then notready "port 4601 is in use: a normal e2e server runs;
 PORT="${AOM_E2E_PORT:-4602}"
 if port_open "$PORT"; then notready "port $PORT is in use"; else ready "port $PORT free"; fi
 command -v git >/dev/null && ready "git" || notready "git"
+# [A11]: the runner-built DevOps box bridges its egress proxy with socat
+command -v socat >/dev/null && ready "socat" || notready "socat (apt install socat)"
 if bwrap --unshare-all --ro-bind / / true 2>/dev/null; then ready "bwrap probe (--unshare-all --ro-bind / / true)"; else notready "bwrap probe failed (a user-namespace restriction passes 'which' and fails here)"; fi
 [ -f "$root/apps/server/dist/main.mjs" ] && [ -f "$root/apps/runner/dist/aom-runner.mjs" ] && [ -d "$root/apps/web/dist" ] && ready "build outputs present" || notready "build outputs missing (pnpm build)"
 [ "$bad" = 0 ] || { echo "preflight failed: nothing was started" >&2; exit 2; }

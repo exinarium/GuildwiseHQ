@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type EgressProxy, type EgressRoute, startEgressProxy } from '../sandbox/egress-proxy.ts';
 import { proxyEnv } from '../sandbox/harness-sandbox.ts';
+import { isModelApiHost } from './launch.ts';
 import { type MacProfileInput, macDevopsProfile } from './macos-profile.ts';
 
 /**
@@ -67,6 +68,9 @@ export async function launchMacBox(o: {
     socketPath: join(dir, 'p.sock'),
     allowedHosts: o.allowedHosts,
     routes: o.routes,
+    // runner-bare-bin (S5): the model services only through the route
+    refuseHost: isModelApiHost,
+    routeHosts: o.routes.map((r) => new URL(r.upstream).hostname),
   });
   const bridge = await startTcpBridge(join(dir, 'p.sock'));
   const file = join(dir, `devops-${o.profile.level}.sb`);

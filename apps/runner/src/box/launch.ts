@@ -1,9 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import type { HarnessLaunch } from '../adapters/harness-session.ts';
-import type { EgressRoute } from '../sandbox/egress-proxy.ts';
+import type { EgressRoute, RouteObserver } from '../sandbox/egress-proxy.ts';
 import type { BoxLevel } from './config-dir.ts';
+import { anthropicRequestFilter, type ModelCapture, type ServerTools } from './model-filter.ts';
 
 /**
  * quiet-approvals phase B: the two DevOps boxes the runner builds itself (D7 (b)) around Claude Code, whose own sandbox is
@@ -27,6 +28,34 @@ import type { BoxLevel } from './config-dir.ts';
 export const MODEL_ROUTE = '/anthropic';
 export const MODEL_PATHS: readonly string[] = ['/v1/messages', '/v1/messages/count_tokens'];
 export const MODEL_UPSTREAM = 'https://api.anthropic.com';
+
+/**
+ * runner-bare-bin (S5): model services a box never reaches directly (a CONNECT or a plain request): Claude Code reaches its
+ * model only through the route, whose filter and ledger apply. Each entry covers the host and its subdomains.
+ */
+export const MODEL_API_HOSTS: readonly string[] = [
+  'anthropic.com',
+  'claude.ai',
+  'claude.com',
+  'openai.com',
+  'generativelanguage.googleapis.com',
+  'aiplatform.googleapis.com',
+  'openrouter.ai',
+];
+
+/** Is `host` (or an allow-list entry such as `*.anthropic.com`) a model service of `MODEL_API_HOSTS` or Bedrock? */
+export function isModelApiHost(host: string): boolean {
+  const h = host
+    .toLowerCase()
+    .replace(/^\*\./, '')
+    .replace(/\.$/, '')
+    .replace(/^\[|\]$/g, '');
+  if (/^bedrock-runtime(-fips)?\.[a-z0-9-]+\.amazonaws\.com$/.test(h)) return true;
+  return MODEL_API_HOSTS.some((m) => h === m || h.endsWith(`.${m}`));
+}
+
+/** The beta a Claude login or OAuth token needs upstream (S6: added after the filter, so a box cannot strip it). */
+export const OAUTH_BETA = 'oauth-2025-04-20';
 
 /** The credential the runner holds for Claude Code on this computer (never put into a box). */
 export type ModelCredential =
@@ -58,13 +87,35 @@ export function loginAccessToken(file: string, now: number = Date.now()): string
   }
 }
 
-/** S10: the model proxy route and the box's placeholder environment, per auth mode. */
-export function modelProxyPlan(cred: ModelCredential, upstream: string = MODEL_UPSTREAM): ModelProxyPlan {
+export interface ModelRouteOptions {
+  /** B1: which server tools the session's requests may use (`web_search` only where its settings allow WebSearch). */
+  serverTools?: ServerTools;
+  /** B2: the session's ledger (usage, login and limits, the audit), fed outside the box. */
+  observe?: RouteObserver;
+  /** B6: a constructor test hook only; it reports and never changes what is refused or stripped. */
+  capture?: ModelCapture;
+}
+
+/**
+ * S10: the model proxy route and the box's placeholder environment, per auth mode. runner-bare-bin (B1, B4, S6, S9): every
+ * request is rebuilt from a checked value (`anthropicRequestFilter`), with only allowlisted headers, and the auth mode's
+ * required beta added last.
+ */
+export function modelProxyPlan(
+  cred: ModelCredential,
+  upstream: string = MODEL_UPSTREAM,
+  o: ModelRouteOptions = {},
+): ModelProxyPlan {
   const nonce = randomBytes(24).toString('base64url');
   const base = {
     prefix: MODEL_ROUTE,
     upstream,
     allowPaths: [...MODEL_PATHS],
+    requestFilter: anthropicRequestFilter({
+      serverTools: o.serverTools ?? 'none',
+      ...(o.capture ? { capture: o.capture } : {}),
+    }),
+    ...(o.observe ? { observe: o.observe } : {}),
   };
   if (cred.kind === 'api_key') {
     const bearer = `sk-ant-api03-box-${nonce}`;
@@ -78,7 +129,12 @@ export function modelProxyPlan(cred: ModelCredential, upstream: string = MODEL_U
   if (cred.kind === 'oauth_token')
     return {
       bearer,
-      route: { ...base, headers: { authorization: `Bearer ${cred.token}` }, bearer },
+      route: {
+        ...base,
+        headers: { authorization: `Bearer ${cred.token}` },
+        requiredHeaders: { 'anthropic-beta': OAUTH_BETA },
+        bearer,
+      },
       env: { CLAUDE_CODE_OAUTH_TOKEN: bearer },
     };
   const file = cred.credentialsFile;
@@ -87,6 +143,7 @@ export function modelProxyPlan(cred: ModelCredential, upstream: string = MODEL_U
     route: {
       ...base,
       headers: {},
+      requiredHeaders: { 'anthropic-beta': OAUTH_BETA },
       bearer,
       dynamicHeaders: () => {
         const t = loginAccessToken(file);
@@ -105,6 +162,10 @@ export function boxedClaudeEnv(plan: ModelProxyPlan, bridgePort: number): Record
     // spike (day 1, Claude Code 2.1.331): with this set it calls only the base URL; otherwise api.anthropic.com too
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     DISABLE_AUTOUPDATER: '1',
+    // runner-bare-bin (B1): features switched off so every request fits the route's fixed allowlist; both only remove betas and
+    // fields (tool search with `defer_loading`, per-turn and mid-conversation controls), never add any
+    ENABLE_TOOL_SEARCH: 'false',
+    CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',
   };
 }
 
@@ -143,8 +204,14 @@ const realDir = (p: string): string | null => {
   }
 };
 
-/** The mount plan of a box (the harness sandbox input without the proxy socket and bridge). */
+/**
+ * The mount plan of a box (the harness sandbox input without the proxy socket and bridge). runner-bare-bin: `claudeBin` is the
+ * checked real path from `lookupBin`; a bare or relative name throws (it used to resolve against the cwd, so a file named
+ * `claude` there would have had its folder bound).
+ */
 export function boxSandbox(i: BoxPlanInput): HarnessLaunch['sandbox'] {
+  if (!isAbsolute(i.claudeBin))
+    throw new Error(`the box needs the checked absolute path of Claude Code, not "${i.claudeBin}"`);
   const node = realDir(process.execPath);
   const claude = realDir(i.claudeBin);
   const ro = [

@@ -339,6 +339,9 @@ export function wrapInHarnessSandbox(
   const script = `${bridge} sleep 0.2; exec "$@"`;
   const env = { ...cmd.env };
   if (i.shimDir) env.PATH = `${i.shimDir}:${env.PATH ?? '/usr/bin:/bin'}`;
+  // runner-bare-bin (blocker 2): Claude Code's env scrub wraps every Bash call and hook in its own bubblewrap; under this box's
+  // `--disable-userns` that nested sandbox cannot start (ENOSPC). The box is the sandbox: the scrub is off in it, never nested.
+  if (i.devopsBox) env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = '0';
   return {
     bin: i.bwrap ?? 'bwrap',
     // the launcher must not be the masking shim itself: with the shim over `bash`, it runs the real shell

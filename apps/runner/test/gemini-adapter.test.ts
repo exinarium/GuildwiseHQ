@@ -36,6 +36,7 @@ import { runnerPaths } from '../src/paths.ts';
 import { ensureSandbox } from '../src/sandbox/sandbox.ts';
 import { RunnerKeys } from '../src/secrets/keys.ts';
 import { redact, unregisterSecret } from '../src/secrets/redact.ts';
+import { binHome } from './bin-home.ts';
 import { cleanupTmp, makeConfig, tmp } from './helpers.ts';
 import { sealOrg, sealWs } from './seal-helpers.ts';
 
@@ -358,7 +359,8 @@ interface FakeMode {
 }
 
 function fakeGemini(mode: FakeMode = {}) {
-  const dir = tmp('aom-fake-gemini-');
+  // runner-bare-bin (R3): a fake binary outside the world-writable /tmp
+  const dir = binHome();
   const bin = join(dir, 'gemini');
   const modeFile = join(dir, 'fake.json');
   writeFileSync(modeFile, JSON.stringify(mode));
