@@ -59,9 +59,16 @@ let remote: Remote;
 let fake: FakeApi;
 let page: ApprovalsPage;
 let capture: string;
+/** devops-box-access: the toolchain folder and the card worktree the box checks list (filled in at setup). */
+let boxPaths: { toolchain: string; card: string; node: string };
 
-/** The commands the model asks for (one Bash `tool_use` each); `policy` and `outside` are filled in at setup. */
-function commandList(policy: string, outside: string): string[] {
+/** The commands the model asks for (one Bash `tool_use` each); the paths are filled in at setup. */
+function commandList(
+  policy: string,
+  outside: string,
+  /** devops-box-access: a configured toolchain folder and a read-only card worktree (outer box only). */
+  box: { toolchain: string; card: string; node: string },
+): string[] {
   // no command substitution: real Claude Code's own permission check (dontAsk) refuses `$(...)`; curl prints the label itself
   const post = (label: string, body: string) =>
     `curl -s -o /dev/null -w "${label}=%{http_code}" -H "x-api-key: $ANTHROPIC_API_KEY" -H 'content-type: application/json' "$ANTHROPIC_BASE_URL/v1/messages" -d '${body}'`;
@@ -69,6 +76,12 @@ function commandList(policy: string, outside: string): string[] {
     'echo box-bash-ok > bash.txt && echo WROTE',
     `cat ${policy} && echo POLICY-READ || echo POLICY-REFUSED`,
     `touch ${outside} && echo OUTSIDE-WRITTEN || echo OUTSIDE-REFUSED`,
+    // devops-box-access (blocker 4): what the box shows may be used; a write to the read-only worktree is still refused
+    `ls ${box.toolchain} && echo TOOLCHAIN-LISTED`,
+    'cat /etc/os-release && echo OS-RELEASE-READ',
+    `ls ${box.card} && echo CARD-LISTED || echo CARD-UNSEEN`,
+    `${box.node} -e "require('fs').writeFileSync('${box.card}/x','x')" && echo CARD-WRITTEN || echo CARD-WRITE-FAILED`,
+    `touch ${box.card}/y && echo CARD-TOUCHED || echo CARD-TOUCH-REFUSED`,
     post(
       'MCP',
       '{"model":"m","max_tokens":5,"messages":[{"role":"user","content":"x"}],"mcp_servers":[{"type":"url","url":"https://example.com","name":"x"}]}',
@@ -178,7 +191,16 @@ test(`[A11${L2 ? '-L2' : ''}] setup: a runner whose claude-code bin is the bare 
   const policy = join(E2E_DIR, 'runner-a11-box', 'policy', 'policy.json');
   // a host folder the box does not mount (the box's own /tmp is a private tmpfs, so a /tmp path would prove nothing)
   const outside = join(TOOLS as string, 'a11-outside-write');
-  const list = commandList(policy, outside);
+  // a toolchain folder outside the box's own folders (configured as the runtime's toolchainPaths) and a card worktree
+  const toolchain = join(tools, 'a11-toolchain');
+  mkdirSync(join(toolchain, 'bin'), { recursive: true });
+  writeFileSync(join(toolchain, 'a11-tool-marker'), 'tool\n');
+  boxPaths = {
+    toolchain,
+    card: join(E2E_DIR, 'runner-a11-box', 'worktrees', 'ABX-a11card', 'ABX-1'),
+    node: realpathSync(process.execPath),
+  };
+  const list = commandList(policy, outside, boxPaths);
   fake = await startFakeApi({
     commands: (text) =>
       text.includes('[fake:outside]') && text.includes(BOX_NOTE)
@@ -201,6 +223,7 @@ test(`[A11${L2 ? '-L2' : ''}] setup: a runner whose claude-code bin is the bare 
       AOM_COMBINED_FAKE_API: fake.url,
       AOM_COMBINED_TOOLS: tools,
       AOM_COMBINED_CAPTURE: capture,
+      AOM_COMBINED_TOOLCHAIN: toolchain,
       ...(L2 ? { AOM_COMBINED_REAL_CLAUDE: '1', AOM_COMBINED_REAL_CLAUDE_BIN: REAL_CLAUDE } : {}),
       PATH: `${bin}:${process.env.PATH ?? '/usr/bin:/bin'}`,
     },
@@ -222,6 +245,9 @@ test(`[A11${L2 ? '-L2' : ''}] setup: a runner whose claude-code bin is the bare 
 
 /** Runs one request to done and checks everything [A11] promises for it. */
 async function runAndCheck(summary: string, outer: boolean): Promise<void> {
+  // the card worktree exists before the box starts (the outer box binds the whole worktrees folder read-only)
+  mkdirSync(boxPaths.card, { recursive: true });
+  writeFileSync(join(boxPaths.card, 'a11-card-file.txt'), 'card\n');
   let before = fake.totals();
   const id = await sendDevopsRequest(api, host.workstationId, summary);
   if (outer) {
@@ -260,6 +286,47 @@ async function runAndCheck(summary: string, outer: boolean): Promise<void> {
   // inside, and never reaches this computer
   expect(resultOf('touch ')).toMatch(/OUTSIDE-(REFUSED|WRITTEN)|Refused by the DevOps guard/);
   expect(existsSync(join(TOOLS as string, 'a11-outside-write'))).toBe(false);
+  // devops-box-access (blocker 4): the folders the box shows are usable by a checked command (real Claude no longer denies
+  // them in dontAsk), at both levels; the card worktree is bound only in the outer box, read-only there
+  const denied = /Permission to use Bash has been denied/;
+  const tool = resultOf(`ls ${boxPaths.toolchain}`);
+  expect(tool, 'ls <toolchain dir>').toContain('a11-tool-marker');
+  expect(tool).toContain('TOOLCHAIN-LISTED');
+  expect(tool).not.toMatch(denied);
+  const os = resultOf('cat /etc/os-release');
+  expect(os, 'cat /etc/os-release').toContain('OS-RELEASE-READ');
+  expect(os).toMatch(/^ID=/m);
+  expect(os).not.toMatch(denied);
+  const card = resultOf(`ls ${boxPaths.card}`);
+  if (outer) {
+    expect(card, 'ls <read-only card worktree>').toContain('a11-card-file.txt');
+    expect(card).toContain('CARD-LISTED');
+    expect(card).not.toMatch(denied);
+    // the box refuses the write whatever runs it (node is never path-checked by Claude Code): a read-only bind
+    expect(resultOf(`${boxPaths.node} -e`), 'node write to the worktree').toMatch(/EROFS/);
+  } else {
+    // the inner box does not bind the worktrees: unseen, or refused one layer earlier by real Claude (outside its folders)
+    expect(card).not.toContain('a11-card-file.txt');
+    expect(card).toMatch(/CARD-UNSEEN|denied/);
+  }
+  expect(resultOf(`${boxPaths.node} -e`)).not.toContain('CARD-WRITTEN');
+  expect(resultOf(`touch ${boxPaths.card}/y`)).not.toContain('CARD-TOUCHED');
+  for (const f of ['x', 'y']) expect(existsSync(join(boxPaths.card, f)), `card/${f}`).toBe(false);
+  // [A11]: the settings the session got list the box's folders (the same source as its binds), never <agent>/scratch
+  const agentDir = dirname(dirname(reqDirs[0] as string));
+  for (const level of outer ? ['inner', 'outer'] : ['inner']) {
+    const s = JSON.parse(readFileSync(join(agentDir, 'config', level, id, 'settings.json'), 'utf8')) as {
+      permissions: { additionalDirectories: string[] };
+    };
+    const dirs = s.permissions.additionalDirectories;
+    expect(dirs, `${level} additionalDirectories`).toEqual(
+      expect.arrayContaining([boxPaths.toolchain, '/usr', '/etc']),
+    );
+    expect(dirs).not.toContain(join(agentDir, 'scratch'));
+    expect(dirs.includes(join(host.home, 'worktrees')), `${level} lists the worktrees`).toBe(
+      level === 'outer',
+    );
+  }
   // real Claude Code in the INNER box refuses a network command by itself (its settings deny WebFetch, so `curl` is denied in
   // dontAsk mode): that is a refusal too, one layer earlier; the stand-in and the outer box reach the route and get its answer
   const claudeDenied = (r: string) => L2 && !outer && r.includes('Permission to use Bash has been denied');

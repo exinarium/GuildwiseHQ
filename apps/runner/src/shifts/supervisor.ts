@@ -283,6 +283,7 @@ import {
   autoCommit,
   autoCommitRefusedNote,
   describeRefusal,
+  refusalAdvice,
   uncommittedFiles,
   unreportedWorkNote,
 } from './autocommit.ts';
@@ -4581,7 +4582,9 @@ function mainSyncNote(sync: NonNullable<ActiveShift['syncMain']>): string {
 }
 
 const refusedReport = (f: Parameters<typeof describeRefusal>[0]): string =>
-  `The runner did not commit your pending changes as Work in progress: ${describeRefusal(f)}. Nothing in the worktree was changed. If the deletion is intended, commit it yourself with a message that says why, then report again. If it is not, restore the files from HEAD and report again. If you did not make these changes, ask with aom question.`;
+  f.reason === 'mass_deletion' || f.reason === 'tree_revert'
+    ? `The runner did not commit your pending changes as Work in progress: ${describeRefusal(f)}. Nothing in the worktree was changed. If the deletion is intended, commit it yourself with a message that says why, then report again. If it is not, restore the files from HEAD and report again. If you did not make these changes, ask with aom question.`
+    : `The runner did not commit your pending changes as Work in progress: ${describeRefusal(f)}. Nothing in the worktree was changed. ${refusalAdvice(f)} Then report again. If you did not make these changes, ask with aom question.`;
 
 const rejected = (error: string, matches?: LedgerMatch[]): IpcReportResponse => ({
   accepted: false,

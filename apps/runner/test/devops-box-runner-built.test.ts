@@ -1162,3 +1162,154 @@ exit 0
     }, 60_000);
   },
 );
+
+describe.skipIf(!bwrapOk)(
+  'devops-box-access: the boxed session settings list what its box binds (through the adapter, real bubblewrap)',
+  () => {
+    async function startLevel(level: 'inner' | 'outer') {
+      const { ClaudeCodeAdapter } = await import('../src/adapters/claude-code.ts');
+      const { ClaudeRuntimeConfigSchema } = await import('../src/config.ts');
+      const { runnerPaths } = await import('../src/paths.ts');
+      const { ensureSandbox } = await import('../src/sandbox/sandbox.ts');
+      const home = realpathSync(tmp('aom-dba-home-'));
+      const policy = join(home, '.config', 'aom-runner');
+      mkdirSync(policy, { recursive: true });
+      const root = join(home, '.aom-runner');
+      const paths = runnerPaths(root);
+      const sb = await ensureSandbox(paths, '019e3f6a-7b1c-7a2d-8c3e-0123456789a1', 'Forge');
+      const requestId = '019e3f6a-7b1c-7a2d-8c3e-0123456789b2';
+      const cwd = join(sb.root, 'devops', requestId);
+      const card = join(root, 'worktrees', 'ABX-0192abcd', 'ABX-1');
+      for (const d of [cwd, card]) mkdirSync(d, { recursive: true });
+      const toolchain = join(binHome(), 'bun');
+      mkdirSync(join(toolchain, 'bin'), { recursive: true });
+      const bin = join(binHome(), 'claude');
+      // the stand-in records its argv, the variables Claude Code would read, and what it can list in the box
+      writeFileSync(
+        bin,
+        `#!/bin/sh
+{ for a in "$@"; do echo "ARG=$a"; done
+  echo "ADD_DIRS_CLAUDE_MD=\${CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD-unset}"
+  ls ${toolchain} >/dev/null 2>&1 && echo TOOLCHAIN-LISTED
+  ls ${card} >/dev/null 2>&1 && echo CARD-LISTED
+} > "$PWD/out.txt" 2>&1
+exit 0
+`,
+        { mode: 0o755 },
+      );
+      const savedPolicy = process.env.AOM_RUNNER_POLICY_DIR;
+      process.env.AOM_RUNNER_POLICY_DIR = policy;
+      process.env.AOM_CLAUDE_SMOKE = '1';
+      try {
+        const adapter = new ClaudeCodeAdapter(
+          ClaudeRuntimeConfigSchema.parse({
+            bin,
+            sandbox: 'required',
+            authMode: 'api_key',
+            apiKey: 'sk-ant-test-key',
+            toolchainPaths: [toolchain],
+          }),
+          paths,
+          { home } as never,
+        );
+        const perms = BUILTIN_ROLES.find((r) => r.key === 'devops')?.permissions;
+        const s = await adapter.start({
+          shiftId: '019e3f6a-7b1c-7a2d-8c3e-0123456789c3',
+          prompt: 'go',
+          instructionsMarkdown: '',
+          kind: 'devops',
+          cwd,
+          sandbox: sb,
+          agent: {
+            agentId: 'a',
+            name: 'Forge',
+            roleKey: 'devops',
+            seniority: 'senior',
+            runtime: 'claude-code',
+            model: 'claude-opus-5-5',
+            skills: [],
+            permissions: perms,
+            isDevops: true,
+          },
+          env: { PATH: '/usr/bin:/bin' },
+          addDirs: [join(home, 'added')],
+          readDirs: [],
+          maxShiftMinutes: 5,
+          boxRequestId: requestId,
+          ...(level === 'inner'
+            ? { devopsBox: true }
+            : {
+                devopsGuard: {
+                  sessionRef: 's',
+                  shiftKind: 'devops',
+                  protectedBranches: [],
+                  approvedCommands: [],
+                  access: { allowInstall: false, allowDocker: false, allowedPaths: [] },
+                },
+              }),
+        } as never);
+        for await (const _e of s.events()) {
+          // drain
+        }
+      } finally {
+        delete process.env.AOM_CLAUDE_SMOKE;
+        if (savedPolicy === undefined) delete process.env.AOM_RUNNER_POLICY_DIR;
+        else process.env.AOM_RUNNER_POLICY_DIR = savedPolicy;
+      }
+      const configDir = boxConfigDir(sb.root, level, requestId);
+      const settings = JSON.parse(readFileSync(join(configDir, 'settings.json'), 'utf8')) as {
+        permissions: { additionalDirectories: string[]; allow: string[]; deny: string[] };
+      };
+      return {
+        settings,
+        out: readFileSync(join(cwd, 'out.txt'), 'utf8'),
+        sb,
+        configDir,
+        toolchain,
+        card,
+        root,
+        home,
+      };
+    }
+
+    it('inner: settings.json lists the toolchain and the system folders, never <agent>/scratch; no --add-dir; Edit as before', async () => {
+      const r = await startLevel('inner');
+      const dirs = r.settings.permissions.additionalDirectories;
+      expect(dirs).toEqual(expect.arrayContaining([r.toolchain, '/usr', '/etc', join(r.configDir, 'home')]));
+      expect(dirs).not.toContain(r.sb.scratch);
+      expect(dirs.some((d) => d.startsWith(join(r.root, 'worktrees')))).toBe(false);
+      expect(r.out).toContain('TOOLCHAIN-LISTED');
+      expect(r.out).not.toContain('CARD-LISTED');
+      // Edit and Write only where they were (the request folder)
+      expect(r.settings.permissions.allow.filter((a) => /^(Edit|Write)/.test(a)).join(' ')).not.toContain(
+        r.toolchain,
+      );
+      expect(r.out).not.toContain('ARG=--add-dir');
+      expect(r.out).toContain('ARG=--setting-sources');
+      expect(r.out).toMatch(/ARG=--setting-sources\nARG=user/);
+      expect(r.out).toContain('ARG=--disable-slash-commands');
+      expect(r.out).toContain('ADD_DIRS_CLAUDE_MD=unset');
+    }, 60_000);
+
+    it('outer: settings.json adds the card worktrees and devops-tools, denies the credentials to its tools; the card is readable', async () => {
+      const r = await startLevel('outer');
+      const dirs = r.settings.permissions.additionalDirectories;
+      expect(dirs).toEqual(expect.arrayContaining([r.toolchain, '/usr', '/etc', join(r.root, 'worktrees')]));
+      // development wrote exactly [<agent>/scratch], a folder this box does not bind
+      expect(dirs).not.toContain(r.sb.scratch);
+      expect(dirs).not.toContain(join(r.home, 'added'));
+      expect(r.settings.permissions.deny).toEqual(
+        expect.arrayContaining([
+          `Edit(/${join(r.root, 'worktrees')}/**)`,
+          `Read(/${join(r.home, '.ssh')}/**)`,
+          `Read(/${join(r.home, '.gitconfig')})`,
+        ]),
+      );
+      expect(r.out).toContain('TOOLCHAIN-LISTED');
+      expect(r.out).toContain('CARD-LISTED');
+      expect(r.out).not.toContain('ARG=--add-dir');
+      expect(r.out).toContain('ARG=--disable-slash-commands');
+      expect(r.out).toContain('ADD_DIRS_CLAUDE_MD=unset');
+    }, 60_000);
+  },
+);

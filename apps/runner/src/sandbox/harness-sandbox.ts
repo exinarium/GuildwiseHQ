@@ -77,6 +77,8 @@ export interface HarnessSandboxInput {
 
 /** System folders every program needs. Links (merged /usr) are recreated as links, real folders are bound read-only. */
 const SYSTEM_DIRS = ['/bin', '/sbin', '/lib', '/lib32', '/lib64', '/libx32'];
+/** Bound read-only in every box, before anything else. */
+const BASE_RO_BINDS = ['/usr', '/etc'];
 
 function exists(p: string): boolean {
   try {
@@ -93,7 +95,34 @@ const inside = (parent: string, child: string): boolean => {
   return c === p || c.startsWith(`${p}/`);
 };
 
-type Mount = { kind: 'bind' | 'ro-bind' | 'tmpfs' | 'ro-null'; src?: string; dest: string };
+/** How the box shows one of `SYSTEM_DIRS` on this host: a link to the same target, a read-only bind, or not at all. */
+function systemDirEntry(d: string): { link: string } | 'ro' | null {
+  try {
+    if (lstatSync(d).isSymbolicLink()) return { link: readlinkSync(d) };
+    return exists(d) ? 'ro' : null;
+  } catch {
+    return null; // absent on this distribution
+  }
+}
+
+/**
+ * devops-box-access: the system folders every box binds read-only (`/usr`, `/etc` and the real `SYSTEM_DIRS` of this host; a
+ * merged-usr link is not a bind, it resolves into `/usr`). The single source of that part of the argv and of the boxed
+ * session's working directories.
+ */
+export function systemRoBinds(): string[] {
+  return [...BASE_RO_BINDS, ...SYSTEM_DIRS.filter((d) => systemDirEntry(d) === 'ro')];
+}
+
+export type Mount = { kind: 'bind' | 'ro-bind' | 'tmpfs' | 'ro-null'; src?: string; dest: string };
+
+/** What the mount list needs: the sandbox input, with the egress proxy socket optional (a box plan has none yet). */
+export type HarnessMountInput = Omit<
+  HarnessSandboxInput,
+  'proxySocket' | 'bridgePort' | 'hiddenFromShell'
+> & {
+  proxySocket?: string;
+};
 
 /**
  * The bubblewrap arguments (up to and excluding the `--` before the command). Pure apart from reading the host's system links and
@@ -117,12 +146,7 @@ export function harnessBwrapArgs(i: HarnessSandboxInput): string[] {
     '/tmp',
     '--tmpfs',
     '/run',
-    '--ro-bind',
-    '/usr',
-    '/usr',
-    '--ro-bind',
-    '/etc',
-    '/etc',
+    ...BASE_RO_BINDS.flatMap((d) => ['--ro-bind', d, d]),
   ];
   if (i.devopsBox) {
     if (i.shimDir || i.shellOverride || i.hiddenFromShell.length)
@@ -131,12 +155,9 @@ export function harnessBwrapArgs(i: HarnessSandboxInput): string[] {
     if (exists('/etc/ssh')) args.push('--tmpfs', '/etc/ssh');
   }
   for (const d of SYSTEM_DIRS) {
-    try {
-      if (lstatSync(d).isSymbolicLink()) args.push('--symlink', readlinkSync(d), d);
-      else if (exists(d)) args.push('--ro-bind', d, d);
-    } catch {
-      // absent on this distribution
-    }
+    const e = systemDirEntry(d);
+    if (e === 'ro') args.push('--ro-bind', d, d);
+    else if (e) args.push('--symlink', e.link, d);
   }
   if (i.shellOverride) {
     args.push('--ro-bind', i.shellOverride.real, REAL_SHELL_IN_BOX);
@@ -150,6 +171,35 @@ export function harnessBwrapArgs(i: HarnessSandboxInput): string[] {
       }
     }
   }
+  const mounts = harnessMounts(i);
+  // parents before children, so a read-only parent never hides a writable child bound earlier
+  mounts.sort((a, b) => a.dest.length - b.dest.length);
+  // R5-B1: the checked folders last, by their fd (the inode the runner checked), never by a path bubblewrap resolves again
+  const fdArgs = (i.fdBinds ?? []).flatMap((f) => [
+    f.writable ? '--bind-fd' : '--ro-bind-fd',
+    String(f.fdIndex),
+    f.real,
+  ]);
+  const seen = new Set<string>();
+  for (const m of mounts) {
+    const key = `${m.kind}:${m.dest}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (m.kind === 'bind') args.push('--bind', m.src as string, m.dest);
+    else if (m.kind === 'ro-bind') args.push('--ro-bind', m.src as string, m.dest);
+    else if (m.kind === 'ro-null') args.push('--ro-bind', '/dev/null', m.dest);
+    else args.push('--tmpfs', m.dest);
+  }
+  args.push(...fdArgs);
+  return args;
+}
+
+/**
+ * devops-box-access: the box's mounts (binds, read-only binds and masks) in the order they are listed, before the argv sorts
+ * parents first and drops duplicates. Without `proxySocket` (a plan not launched yet) its folder is simply not in the list.
+ * `harnessBwrapArgs` and the boxed session's working directories (`boundDirsOf`) both read it.
+ */
+export function harnessMounts(i: HarnessMountInput): Mount[] {
   const mounts: Mount[] = [];
   const bind = (p: string, writable: boolean): void => {
     if (exists(p)) mounts.push({ kind: writable ? 'bind' : 'ro-bind', src: p, dest: p });
@@ -165,7 +215,7 @@ export function harnessBwrapArgs(i: HarnessSandboxInput): string[] {
   for (const p of i.readonly) bind(p, false);
   if (i.nugetFallbackDir) bind(i.nugetFallbackDir, false);
   if (i.ipcSocket) bind(dirname(i.ipcSocket), false);
-  bind(dirname(i.proxySocket), false);
+  if (i.proxySocket) bind(dirname(i.proxySocket), false);
   if (i.shimDir) mounts.push({ kind: 'ro-bind', src: i.shimDir, dest: i.shimDir });
   // reference repositories: read-only, secret files masked; a clone too big to check is not opened at all
   for (const d of i.readDirs) {
@@ -190,26 +240,7 @@ export function harnessBwrapArgs(i: HarnessSandboxInput): string[] {
   for (const p of protectedGitPaths(i.cwd))
     if (inside(i.cwd, p) || i.gitDirs.some((g) => inside(g, p)))
       mounts.push({ kind: 'ro-bind', src: p, dest: p });
-  // parents before children, so a read-only parent never hides a writable child bound earlier
-  mounts.sort((a, b) => a.dest.length - b.dest.length);
-  // R5-B1: the checked folders last, by their fd (the inode the runner checked), never by a path bubblewrap resolves again
-  const fdArgs = (i.fdBinds ?? []).flatMap((f) => [
-    f.writable ? '--bind-fd' : '--ro-bind-fd',
-    String(f.fdIndex),
-    f.real,
-  ]);
-  const seen = new Set<string>();
-  for (const m of mounts) {
-    const key = `${m.kind}:${m.dest}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    if (m.kind === 'bind') args.push('--bind', m.src as string, m.dest);
-    else if (m.kind === 'ro-bind') args.push('--ro-bind', m.src as string, m.dest);
-    else if (m.kind === 'ro-null') args.push('--ro-bind', '/dev/null', m.dest);
-    else args.push('--tmpfs', m.dest);
-  }
-  args.push(...fdArgs);
-  return args;
+  return mounts;
 }
 
 /** Where the real shell lives inside a box whose `bash` is replaced by the shim. */

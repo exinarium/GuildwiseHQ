@@ -205,9 +205,11 @@ export function withoutSandboxStubs(lines: string[], stubs: readonly string[]): 
 /** Porcelain status lines of `cwd` (untracked files included) minus the sandbox stubs. */
 export async function statusLinesWithoutStubs(
   cwd: string,
-  opts: { untracked?: boolean } = {},
+  /** `gitPrefix`: global options before `status` (devops-box-access: the install-output excludes file). */
+  opts: { untracked?: boolean; gitPrefix?: string[] } = {},
 ): Promise<{ ok: boolean; lines: string[] }> {
   const r = await git(cwd, [
+    ...(opts.gitPrefix ?? []),
     'status',
     '--porcelain',
     opts.untracked === false ? '--untracked-files=no' : '--untracked-files=all',

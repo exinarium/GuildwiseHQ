@@ -51,10 +51,15 @@ export function resetBoxConfigDir(dir: string, r: ConfigReset): string {
     }
   };
   walk(dir);
-  writeFileSync(join(dir, 'settings.json'), `${JSON.stringify(r.settings, null, 2)}\n`, { mode: 0o600 });
+  writeBoxSettings(dir, r.settings);
   writeFileSync(join(dir, 'mcp.json'), `${JSON.stringify(r.mcp, null, 2)}\n`, { mode: 0o600 });
   if (r.instructions !== undefined) writeFileSync(join(dir, 'CLAUDE.md'), r.instructions, { mode: 0o600 });
   return dir;
+}
+
+/** (Re)writes the settings file of a reset config dir (devops-box-access: the final settings, once the box plan is built). */
+export function writeBoxSettings(dir: string, settings: unknown): void {
+  writeFileSync(join(dir, 'settings.json'), `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
 }
 
 /** What is left in a reset dir (for tests and the doctor). */

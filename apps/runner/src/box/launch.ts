@@ -1,8 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { HarnessLaunch } from '../adapters/harness-session.ts';
 import type { EgressRoute, RouteObserver } from '../sandbox/egress-proxy.ts';
+import { harnessMounts, systemRoBinds } from '../sandbox/harness-sandbox.ts';
 import type { BoxLevel } from './config-dir.ts';
 import { anthropicRequestFilter, type ModelCapture, type ServerTools } from './model-filter.ts';
 
@@ -179,6 +180,11 @@ export interface BoxPlanInput {
   tmp: string;
   /** The runner's `bin/` and the `aom` script's folder. */
   aomReadPaths: string[];
+  /**
+   * devops-box-access: the runner's own read-only plumbing (the guard's folder, the Docker gatekeeper's folder, a scratch
+   * clone's protected git files), bound right after `aomReadPaths`; never one of the session's working directories.
+   */
+  plumbingReadPaths?: string[];
   /** Claude Code's binary (its install is read-only in the box). */
   claudeBin: string;
   /** Toolchain folders agents may read. */
@@ -216,6 +222,7 @@ export function boxSandbox(i: BoxPlanInput): HarnessLaunch['sandbox'] {
   const claude = realDir(i.claudeBin);
   const ro = [
     ...i.aomReadPaths,
+    ...(i.plumbingReadPaths ?? []),
     ...(claude ? [claude] : []),
     ...(node && !node.startsWith('/usr/') ? [node] : []),
     ...i.toolchainReadDirs,
@@ -241,5 +248,79 @@ export function boxSandbox(i: BoxPlanInput): HarnessLaunch['sandbox'] {
     ...(i.ipcSocket ? { ipcSocket: i.ipcSocket } : {}),
     devopsBox: true,
     ...(i.fdBinds?.length ? { fdBinds: i.fdBinds } : {}),
+  };
+}
+
+type BoxPlan = HarnessLaunch['sandbox'];
+
+const insideDir = (parent: string, child: string): boolean => {
+  const p = resolve(parent);
+  const c = resolve(child);
+  return c === p || c.startsWith(`${p}/`);
+};
+
+/**
+ * devops-box-access: every folder the built plan really shows in the box (Linux): the `bind` and `ro-bind` destinations of its
+ * mounts (masks are not folders it shows), the system binds, and the folders bound by fd. The same source as the argv.
+ */
+export function boundDirsOf(plan: BoxPlan): string[] {
+  const out = new Set<string>();
+  for (const m of harnessMounts(plan))
+    if (m.kind === 'bind' || m.kind === 'ro-bind') out.add(resolve(m.dest));
+  for (const d of systemRoBinds()) out.add(d);
+  for (const f of plan.fdBinds ?? []) out.add(resolve(f.real));
+  return [...out];
+}
+
+export interface BoxWorkDirs {
+  /** Claude Code's `additionalDirectories`: the folders the box shows, the request folder (its cwd) aside. */
+  dirs: string[];
+  /** The read-only ones that hold no writable folder: they get `Edit` denies. */
+  readOnly: string[];
+  /** Git credentials the outer box binds for git itself: Claude's own tools are denied on them. */
+  credentials: string[];
+}
+
+/**
+ * devops-box-access (blocker 4): the working directories of a boxed DevOps session, read from the same plan input the box is
+ * built from and kept only where `isBound` says the built plan really shows them. Claude Code (2.1.332) asks before a checked
+ * shell command reads a path outside its working directories, and `dontAsk` turns that into a denial; the box is the boundary,
+ * so the session gets exactly what the box shows it.
+ * - writable: the config dir's home, the tmp, the outer box's devops-tools, writable fd binds;
+ * - read-only: `system` (Linux `systemRoBinds()`, macOS `MAC_SYSTEM_READ`), the toolchains, the clones, the outer box's card
+ *   worktrees, read-only fd binds;
+ * - dropped: anything inside the request folder (the cwd), anything not bound, duplicates;
+ * - never listed: the config dir itself, the runner's bin and `aom`, the plumbing, Claude's and Node's installs, sockets.
+ */
+export function boxWorkDirs(
+  i: BoxPlanInput,
+  isBound: (p: string) => boolean,
+  system: readonly string[],
+): BoxWorkDirs {
+  const writableIn = [
+    join(i.configDir, 'home'),
+    i.tmp,
+    ...(i.outer ? [i.outer.devopsTools] : []),
+    ...(i.fdBinds ?? []).filter((f) => f.writable).map((f) => f.real),
+  ];
+  const readOnlyIn = [
+    ...system,
+    ...i.toolchainReadDirs,
+    ...i.cloneDirs,
+    ...(i.outer ? [i.outer.cardWorktrees] : []),
+    ...(i.fdBinds ?? []).filter((f) => !f.writable).map((f) => f.real),
+  ];
+  const keep = (list: string[]): string[] => [
+    ...new Set(list.map((p) => resolve(p)).filter((p) => !insideDir(i.requestDir, p) && isBound(p))),
+  ];
+  const writable = keep(writableIn);
+  const readOnly = keep(readOnlyIn).filter((p) => !writable.includes(p));
+  // every folder any box process may write: an Edit deny must never cover one of them
+  const allWritable = [i.requestDir, i.configDir, ...writable];
+  const o = i.outer;
+  return {
+    dirs: [...new Set([...writable, ...readOnly])],
+    readOnly: readOnly.filter((p) => !allWritable.some((w) => insideDir(p, w))),
+    credentials: o ? ['.ssh', '.gitconfig'].map((f) => join(o.realHome, f)) : [],
   };
 }

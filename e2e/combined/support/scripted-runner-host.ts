@@ -117,7 +117,8 @@ async function main(): Promise<void> {
  * spec's fake API on 127.0.0.1 (AOM_COMBINED_FAKE_API), the boxes' proxy may reach loopback for it, and every model request's
  * capture event goes to AOM_COMBINED_CAPTURE. It refuses to start unless "claude" on this host's PATH is the harness's own fake
  * under AOM_COMBINED_TOOLS, or (AOM_COMBINED_REAL_CLAUDE=1, [A11-L2]) exactly the real Claude Code AOM_COMBINED_REAL_CLAUDE_BIN
- * names. The product never reads these variables; `registry.ts` never passes the hooks.
+ * names; AOM_COMBINED_TOOLCHAIN is its one configured toolchain folder. The product never reads these variables; `registry.ts`
+ * never passes the hooks.
  */
 function realBoxAdapter(paths: ReturnType<typeof runnerPaths>): ClaudeCodeAdapter | undefined {
   if (process.env.AOM_COMBINED_CLAUDE_BOX !== '1') return undefined;
@@ -139,6 +140,8 @@ function realBoxAdapter(paths: ReturnType<typeof runnerPaths>): ClaudeCodeAdapte
       sandbox: 'required',
       authMode: 'api_key',
       apiKey: 'sk-ant-api03-combined-harness-dummy',
+      // devops-box-access [A11-L2]: a toolchain folder the boxes mount read-only (the spec lists it with `ls`)
+      ...(process.env.AOM_COMBINED_TOOLCHAIN ? { toolchainPaths: [process.env.AOM_COMBINED_TOOLCHAIN] } : {}),
     }),
     paths,
     {

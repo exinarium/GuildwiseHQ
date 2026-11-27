@@ -924,7 +924,7 @@ export async function runDependencyChange(o: {
     return {
       ok: true,
       result: {
-        message: `DevOps ran \`${line}\` for your worktree: done. package.json and the lockfile are updated there; carry on (commit them with your change).`,
+        message: `DevOps ran \`${line}\` for your worktree: done. package.json and the lockfile are updated there; carry on (commit them with your change, never node_modules).`,
         command: line,
       },
     };

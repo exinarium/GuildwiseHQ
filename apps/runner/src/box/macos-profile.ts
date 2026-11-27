@@ -47,17 +47,23 @@ export const MACH_NEVER: readonly string[] = [
 
 const lit = (p: string): string => JSON.stringify(p);
 
+/**
+ * The system folders both profiles let every process read (`/dev` apart). devops-box-access: also the system part of the boxed
+ * session's working directories on macOS (`boxWorkDirs`).
+ */
+export const MAC_SYSTEM_READ: readonly string[] = [
+  '/usr',
+  '/bin',
+  '/sbin',
+  '/System',
+  '/Library/Apple',
+  '/private/etc',
+  '/private/var/db/timezone',
+];
+
 export function macDevopsProfile(i: MacProfileInput): string {
-  const sys = [
-    '/usr',
-    '/bin',
-    '/sbin',
-    '/System',
-    '/Library/Apple',
-    '/private/etc',
-    '/dev',
-    '/private/var/db/timezone',
-  ];
+  // the order of the profile text is unchanged: `/dev` stays where it was in the list
+  const sys = [...MAC_SYSTEM_READ.slice(0, 6), '/dev', ...MAC_SYSTEM_READ.slice(6)];
   const read = [
     ...sys,
     ...i.readPaths,

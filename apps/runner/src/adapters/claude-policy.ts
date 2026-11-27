@@ -1055,6 +1055,15 @@ export function buildDevopsBoxSettings(
       }),
     ]),
   ];
+  // devops-box-access: the toolchain folders its own sandbox lets it read (`allowRead`) are readable by Claude's checked shell
+  // commands and file tools too (a bare `Read` allow does not count for a path outside the working directories). Never an
+  // added directory here: Claude Code opens an added directory whole to its own sandbox.
+  s.permissions.allow = [
+    ...new Set([
+      ...s.permissions.allow,
+      ...(ctx.toolchainReadPaths ?? []).flatMap((t) => [`Read(${ruleAbs(t)})`, `Read(${ruleAbs(t)}/**)`]),
+    ]),
+  ];
   if (s.sandbox) {
     s.sandbox.failIfUnavailable = true;
     s.sandbox.allowUnsandboxedCommands = false;
@@ -1067,6 +1076,33 @@ export function buildDevopsBoxSettings(
     ];
   }
   return s;
+}
+
+/**
+ * devops-box-access (blocker 4): a session in a box the runner builds (inner or outer level) gets the folders its box shows as
+ * Claude Code working directories (`boxWorkDirs` in box/launch.ts), so a checked shell command that reads one is not turned into
+ * a denial by `dontAsk`. The box stays the boundary: it shows these folders to every process already. The allows are untouched
+ * (a working directory auto-allows reads only); the read-only folders get `Edit` denies, and the git credentials the outer box
+ * binds for git itself are refused to Claude's own tools. Pure: returns a new settings object.
+ */
+export function withBoxWorkDirs(
+  s: ClaudeSettings,
+  w: { dirs: string[]; readOnly: string[]; credentials: string[] },
+): ClaudeSettings {
+  return {
+    ...s,
+    permissions: {
+      ...s.permissions,
+      additionalDirectories: [...w.dirs],
+      deny: [
+        ...new Set([
+          ...s.permissions.deny,
+          ...w.readOnly.flatMap((p) => [`Edit(${ruleAbs(p)})`, `Edit(${ruleAbs(p)}/**)`]),
+          ...w.credentials.flatMap((c) => [`Read(${ruleAbs(c)})`, `Read(${ruleAbs(c)}/**)`]),
+        ]),
+      ],
+    },
+  };
 }
 
 /**

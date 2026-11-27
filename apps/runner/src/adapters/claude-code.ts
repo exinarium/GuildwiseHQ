@@ -18,18 +18,22 @@ import { CARD_ATTACHMENTS_DIR, type ClaudeAccountInfo, MAIN_ACCOUNT } from '@aom
 import { execa } from 'execa';
 import type { z } from 'zod';
 import { probeBwrap } from '../box/bwrap.ts';
-import { type BoxLevel, boxConfigDir, resetBoxConfigDir } from '../box/config-dir.ts';
+import { type BoxLevel, boxConfigDir, resetBoxConfigDir, writeBoxSettings } from '../box/config-dir.ts';
 import { type DockerProxy, startDockerProxy } from '../box/docker-proxy.ts';
 import { sshThroughProxy } from '../box/egress-allow.ts';
 import { openCheckedFolder, openNamedFolder } from '../box/folder-check.ts';
 import {
+  type BoxPlanInput,
+  boundDirsOf,
   boxedClaudeEnv,
   boxSandbox,
+  boxWorkDirs,
   MODEL_UPSTREAM,
   type ModelCredential,
   modelProxyPlan,
 } from '../box/launch.ts';
 import { launchMacBox, macBoxMissing } from '../box/macos-launch.ts';
+import { MAC_SYSTEM_READ } from '../box/macos-profile.ts';
 import type { ModelCapture } from '../box/model-filter.ts';
 import { ModelLedger } from '../box/model-ledger.ts';
 import { type GrantedSkill, materializeSkills, skillsDirOf } from '../capabilities/materialize.ts';
@@ -40,6 +44,7 @@ import { holdSandboxRepo } from '../git/config-lock.ts';
 import { discoverPluginMcpServers, mcpConfigFor, type PluginMcpServer } from '../mcp/plugins.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { policyDir as localPolicyDir } from '../policy/store.ts';
+import { systemRoBinds } from '../sandbox/harness-sandbox.ts';
 import { toolchainsRoot } from '../toolchain/user-install.ts';
 import { lookupBin } from './bin-lookup.ts';
 import { BRIDGE_PORT, launchInHarnessSandbox, probeHarnessSandbox } from './harness-session.ts';
@@ -115,6 +120,7 @@ import {
   shadowedWrites,
   splitOwnRepository,
   toolchainReadPaths,
+  withBoxWorkDirs,
 } from './claude-policy.ts';
 import { ClaudeStreamParser } from './claude-stream-parser.ts';
 import { agentsDocument, NATIVE_SUBAGENT_ENV, readNativeSubagentUsage } from './claude-subagents.ts';
@@ -1224,95 +1230,81 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       throw new Error('the DevOps guard could not be attached to the outer box');
     if (guard) input = { ...input, env: { ...input.env, AOM_DEVOPS_GUARD: guard.file } };
     const policyCtx = this.policy(input, input.cwd, false, guard?.command);
-    const settings =
-      level === 'inner'
-        ? buildDevopsBoxSettings(input.agent.permissions, policyCtx, { ...input.sandbox, configDir })
-        : buildShiftSettings(
-            input.agent.permissions,
-            policyCtx,
-            { ...input.sandbox, configDir },
-            'devops',
-            true,
-          );
-    // the box is the boundary: Claude Code's own sandbox is off inside it (never nested)
-    delete (settings as { sandbox?: unknown }).sandbox;
-    resetBoxConfigDir(configDir, {
-      settings,
-      mcp: { mcpServers: {} },
-      instructions: input.instructionsMarkdown,
-      ...(input.resumeSessionId ? { keepSession: input.resumeSessionId } : {}),
-    });
-    mkdirSync(join(configDir, 'home'), { recursive: true, mode: 0o700 });
-    // B1: web search only where the session's settings allow it (the outer box); B2: the ledger outside the box
-    const mr = this.modelRoute(level === 'outer' ? 'web_search' : 'none', this.auditOf(input));
-    const plan = modelProxyPlan(cred, mr.upstream, mr.opts);
-    // R4-B2: Docker only through the gatekeeper; its socket sits in a runner-owned folder, read-only in the box
+    // R4-B2: Docker only through the gatekeeper; its socket sits in a runner-owned folder, read-only in the box.
+    // devops-box-access: Docker and the Desk folders start before the settings (the plan binds them); from here until the
+    // spawn, a throw closes both.
     let docker: { proxy: DockerProxy; dir: string; socket: string } | undefined;
-    if (level === 'outer' && input.dockerGate) {
-      const gdir = mkdtempSync(join(tmpdir(), 'aom-dk-'));
-      chmodSync(gdir, 0o755);
-      const socket = join(gdir, 'docker.sock');
-      const bindRoots = [input.cwd];
-      // REVIEW S5: a card worktree is only ever bound read-only into a container
-      const roBindRoots = cardWorktreeRoots(join(root, 'worktrees'));
-      const proxy = await startDockerProxy({
-        socketPath: socket,
-        upstream: input.dockerGate.upstream,
-        policy: {
-          instance: input.dockerGate.instance,
-          bindRoots,
-          roBindRoots,
-          containerEgress: input.dockerGate.containerEgress,
-        },
-      });
-      docker = { proxy, dir: gdir, socket };
-    }
-    const boxSb = { ...input.sandbox, configDir, home: join(configDir, 'home'), tmp };
-    const cmd = buildClaudeCommand(
-      { ...input, sandbox: boxSb, readDirs: input.readDirs ?? [] },
-      this.noClaudeToken(this.liveFor(account)),
-    );
-    const env: Record<string, string> = {
-      ...cmd.env,
-      ...boxedClaudeEnv(plan, BRIDGE_PORT),
-      ...(docker ? { DOCKER_HOST: `unix://${docker.socket}` } : {}),
-    };
-    delete env.ANTHROPIC_API_KEY;
-    delete env.CLAUDE_CODE_OAUTH_TOKEN;
-    Object.assign(env, plan.env);
-    // REVIEW S3: git over ssh goes through the egress proxy too (only to the project's own remotes and deploy targets)
-    if (level === 'outer') env.GIT_SSH_COMMAND = sshThroughProxy(BRIDGE_PORT);
-    // REVIEW S2 (R5-B1 rule 4): a Desk folder grant inside the ceiling is bound by the fd the runner checked
-    const nl = {
-      home: this.realHome(),
-      policyRoot: localPolicyDir(),
-      worktrees: join(root, 'worktrees'),
-      runnerRoot: root,
-    };
     const opened: Array<{ fd: number; real: string; close(): void }> = [];
-    if (level === 'outer')
-      for (const p of input.devopsGuard?.access?.allowedPaths ?? []) {
-        const r = openCheckedFolder(p, input.ceilingRoots ?? [], nl);
-        if (r.ok) opened.push(r.folder);
-        else process.stderr.write(`WARN DevOps box: ${r.reason}\n`);
+    const closeFds = () => {
+      for (const f of opened.splice(0)) f.close();
+    };
+    const closeDocker = async () => {
+      if (!docker) return;
+      const d = docker;
+      docker = undefined;
+      await d.proxy.close().catch(() => undefined);
+      rmSync(d.dir, { recursive: true, force: true });
+    };
+    let launch: Awaited<ReturnType<typeof launchInHarnessSandbox>> | undefined;
+    try {
+      if (level === 'outer' && input.dockerGate) {
+        const gdir = mkdtempSync(join(tmpdir(), 'aom-dk-'));
+        chmodSync(gdir, 0o755);
+        const socket = join(gdir, 'docker.sock');
+        const bindRoots = [input.cwd];
+        // REVIEW S5: a card worktree is only ever bound read-only into a container
+        const roBindRoots = cardWorktreeRoots(join(root, 'worktrees'));
+        try {
+          const proxy = await startDockerProxy({
+            socketPath: socket,
+            upstream: input.dockerGate.upstream,
+            policy: {
+              instance: input.dockerGate.instance,
+              bindRoots,
+              roBindRoots,
+              containerEgress: input.dockerGate.containerEgress,
+            },
+          });
+          docker = { proxy, dir: gdir, socket };
+        } catch (err) {
+          rmSync(gdir, { recursive: true, force: true });
+          throw err;
+        }
       }
-    const launch = await launchInHarnessSandbox({
-      routes: [plan.route],
-      // S5: no direct line to any model service; the model only through the route
-      cliHosts: [],
-      ...(this.host.proxyTest ? { proxyTest: this.host.proxyTest } : {}),
-      extraHosts: [
-        ...this.cfg.extraAllowedDomains,
-        ...(level === 'outer' ? (input.outerEgress?.hosts ?? []) : []),
-      ],
-      // Rework 2 (REVIEW B4): names only at public addresses (resolved at every connect); private only for literals
-      ...(level === 'outer' && input.outerEgress?.endpoints.length
-        ? { publicEndpoints: input.outerEgress.endpoints }
-        : {}),
-      ...(level === 'outer' && input.outerEgress?.privateEndpoints.length
-        ? { privateEndpoints: input.outerEgress.privateEndpoints }
-        : {}),
-      sandbox: boxSandbox({
+      // REVIEW S2 (R5-B1 rule 4): a Desk folder grant inside the ceiling is bound by the fd the runner checked
+      const nl = {
+        home: this.realHome(),
+        policyRoot: localPolicyDir(),
+        worktrees: join(root, 'worktrees'),
+        runnerRoot: root,
+      };
+      if (level === 'outer')
+        for (const p of input.devopsGuard?.access?.allowedPaths ?? []) {
+          const r = openCheckedFolder(p, input.ceilingRoots ?? [], nl);
+          if (r.ok) opened.push(r.folder);
+          else process.stderr.write(`WARN DevOps box: ${r.reason}\n`);
+        }
+      const baseSettings =
+        level === 'inner'
+          ? buildDevopsBoxSettings(input.agent.permissions, policyCtx, { ...input.sandbox, configDir })
+          : buildShiftSettings(
+              input.agent.permissions,
+              policyCtx,
+              { ...input.sandbox, configDir },
+              'devops',
+              true,
+            );
+      // the box is the boundary: Claude Code's own sandbox is off inside it (never nested)
+      delete (baseSettings as { sandbox?: unknown }).sandbox;
+      resetBoxConfigDir(configDir, {
+        settings: baseSettings,
+        mcp: { mcpServers: {} },
+        instructions: input.instructionsMarkdown,
+        ...(input.resumeSessionId ? { keepSession: input.resumeSessionId } : {}),
+      });
+      mkdirSync(join(configDir, 'home'), { recursive: true, mode: 0o700 });
+      // devops-box-access: the plan first (its folders exist now), then the settings list exactly what it binds
+      const planInput: BoxPlanInput = {
         level,
         requestDir: input.cwd,
         ...(opened.length
@@ -1320,8 +1312,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           : {}),
         configDir,
         tmp,
-        aomReadPaths: [
-          ...policyCtx.aomReadPaths,
+        aomReadPaths: policyCtx.aomReadPaths,
+        plumbingReadPaths: [
           ...(guard ? [guardDir] : []),
           ...(docker ? [docker.dir] : []),
           ...(input.boxReadOnly ?? []),
@@ -1339,25 +1331,66 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
               },
             }
           : {}),
-      }),
-      // the install is bound by its real folder: start it by its checked real path (a ~/.local/bin link is not in the box)
-      cmd: { bin: bin.real, args: cmd.args, env },
-    });
-    mkdirSync(join(root, 'devops-tools'), { recursive: true, mode: 0o700 });
-    const parser = new ClaudeStreamParser();
-    const closeFds = () => {
-      for (const f of opened) f.close();
-    };
-    try {
+      };
+      const boxPlan = boxSandbox(planInput);
+      const bound = new Set(boundDirsOf(boxPlan));
+      const settings = withBoxWorkDirs(
+        baseSettings,
+        boxWorkDirs(planInput, (p) => bound.has(p), systemRoBinds()),
+      );
+      writeBoxSettings(configDir, settings);
+      // B1: web search only where the session's settings allow it (the outer box); B2: the ledger outside the box
+      const mr = this.modelRoute(level === 'outer' ? 'web_search' : 'none', this.auditOf(input));
+      const plan = modelProxyPlan(cred, mr.upstream, mr.opts);
+      const boxSb = { ...input.sandbox, configDir, home: join(configDir, 'home'), tmp };
+      // devops-box-access: no --add-dir; the settings list the folders (the box's own, never a separate list)
+      const cmd = buildClaudeCommand(
+        { ...input, sandbox: boxSb, addDirs: [], readDirs: [] },
+        this.noClaudeToken(this.liveFor(account)),
+      );
+      const env: Record<string, string> = {
+        ...cmd.env,
+        ...boxedClaudeEnv(plan, BRIDGE_PORT),
+        ...(docker ? { DOCKER_HOST: `unix://${docker.socket}` } : {}),
+      };
+      delete env.ANTHROPIC_API_KEY;
+      delete env.CLAUDE_CODE_OAUTH_TOKEN;
+      Object.assign(env, plan.env);
+      // REVIEW S3: git over ssh goes through the egress proxy too (only to the project's own remotes and deploy targets)
+      if (level === 'outer') env.GIT_SSH_COMMAND = sshThroughProxy(BRIDGE_PORT);
+      launch = await launchInHarnessSandbox({
+        routes: [plan.route],
+        // S5: no direct line to any model service; the model only through the route
+        cliHosts: [],
+        ...(this.host.proxyTest ? { proxyTest: this.host.proxyTest } : {}),
+        extraHosts: [
+          ...this.cfg.extraAllowedDomains,
+          ...(level === 'outer' ? (input.outerEgress?.hosts ?? []) : []),
+        ],
+        // Rework 2 (REVIEW B4): names only at public addresses (resolved at every connect); private only for literals
+        ...(level === 'outer' && input.outerEgress?.endpoints.length
+          ? { publicEndpoints: input.outerEgress.endpoints }
+          : {}),
+        ...(level === 'outer' && input.outerEgress?.privateEndpoints.length
+          ? { privateEndpoints: input.outerEgress.privateEndpoints }
+          : {}),
+        sandbox: boxPlan,
+        // the install is bound by its real folder: start it by its checked real path (a ~/.local/bin link is not in the box)
+        cmd: { bin: bin.real, args: cmd.args, env },
+      });
+      mkdirSync(join(root, 'devops-tools'), { recursive: true, mode: 0o700 });
+      const parser = new ClaudeStreamParser();
+      const l = launch;
+      const dk = docker;
       const session = spawnSession({
-        bin: launch.command.bin,
-        args: launch.command.args,
+        bin: l.command.bin,
+        args: l.command.args,
         cwd: input.cwd,
-        env: launch.command.env,
+        env: l.command.env,
         inheritEnv: false,
         ...(opened.length ? { extraFds: opened.map((f) => f.fd) } : {}),
         ...(cmd.stdin !== undefined ? { input: cmd.stdin } : {}),
-        parseLine: (l) => parser.parseLine(l),
+        parseLine: (line) => parser.parseLine(line),
         // B2, S6: usage, login and limits from the proxy's ledger, never from what the box prints
         usage: () => mr.ledger.usage(),
         authFailure: () => mr.ledger.authFailed,
@@ -1367,21 +1400,28 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         exitError: () => (parser.resultError ? `claude result: ${parser.resultError}` : undefined),
         onExit: async () => {
           // S5: what the box asked for and was refused (host names only), for the owner's diagnosis
-          const denied = launch.proxy.denied();
+          const denied = l.proxy.denied();
           if (denied.length)
             process.stderr.write(
               `WARN DevOps box (${level}): egress refused for ${denied.slice(0, 20).join(', ')}\n`,
             );
           // the per-session bearer dies with the proxy (revoked at the session's end)
-          await launch.cleanup();
-          if (docker) {
-            await docker.proxy.close().catch(() => undefined);
-            rmSync(docker.dir, { recursive: true, force: true });
+          await l.cleanup();
+          if (dk) {
+            await dk.proxy.close().catch(() => undefined);
+            rmSync(dk.dir, { recursive: true, force: true });
           }
         },
       });
+      // the session owns Docker and the launch from here (closed in onExit)
+      docker = undefined;
+      launch = undefined;
       // B5: the guard the runner wrote, kept in memory for the runner's own judgement of a blocked command
       return guard ? Object.assign(session, { guardConfig: guard.cfg }) : session;
+    } catch (err) {
+      await launch?.cleanup();
+      await closeDocker();
+      throw err;
     } finally {
       // the child holds its own copies of the fds after spawn
       closeFds();
@@ -1433,7 +1473,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       throw new Error('the DevOps guard could not be attached to the outer box');
     if (guard) input = { ...input, env: { ...input.env, AOM_DEVOPS_GUARD: guard.file } };
     const policyCtx = this.policy(input, input.cwd, false, guard?.command);
-    const settings =
+    const baseSettings =
       level === 'inner'
         ? buildDevopsBoxSettings(input.agent.permissions, policyCtx, { ...input.sandbox, configDir })
         : buildShiftSettings(
@@ -1443,27 +1483,24 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
             'devops',
             true,
           );
-    delete (settings as { sandbox?: unknown }).sandbox;
+    delete (baseSettings as { sandbox?: unknown }).sandbox;
     resetBoxConfigDir(configDir, {
-      settings,
+      settings: baseSettings,
       mcp: { mcpServers: {} },
       instructions: input.instructionsMarkdown,
       ...(input.resumeSessionId ? { keepSession: input.resumeSessionId } : {}),
     });
     const home = join(configDir, 'home');
     mkdirSync(home, { recursive: true, mode: 0o700 });
-    const mr = this.modelRoute(level === 'outer' ? 'web_search' : 'none', this.auditOf(input));
-    const plan = modelProxyPlan(cred, mr.upstream, mr.opts);
-    const cmd = buildClaudeCommand(
-      { ...input, sandbox: { ...input.sandbox, configDir, home, tmp }, readDirs: input.readDirs ?? [] },
-      this.noClaudeToken(this.liveFor(account)),
-    );
-    const sb = boxSandbox({
+    // devops-box-access: the plan first; the settings list what the profile lets the session read (Seatbelt checks the
+    // resolved path, so a folder that exists is a folder it shows)
+    const planInput: BoxPlanInput = {
       level,
       requestDir: input.cwd,
       configDir,
       tmp,
-      aomReadPaths: [...policyCtx.aomReadPaths, ...(guard ? [guardDir] : [])],
+      aomReadPaths: policyCtx.aomReadPaths,
+      plumbingReadPaths: guard ? [guardDir] : [],
       claudeBin: bin.real,
       toolchainReadDirs: policyCtx.toolchainReadPaths ?? [],
       cloneDirs: input.readDirs ?? [],
@@ -1476,7 +1513,18 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
             },
           }
         : {}),
-    });
+    };
+    const sb = boxSandbox(planInput);
+    writeBoxSettings(
+      configDir,
+      withBoxWorkDirs(baseSettings, boxWorkDirs(planInput, existsSync, MAC_SYSTEM_READ)),
+    );
+    const mr = this.modelRoute(level === 'outer' ? 'web_search' : 'none', this.auditOf(input));
+    const plan = modelProxyPlan(cred, mr.upstream, mr.opts);
+    const cmd = buildClaudeCommand(
+      { ...input, sandbox: { ...input.sandbox, configDir, home, tmp }, addDirs: [], readDirs: [] },
+      this.noClaudeToken(this.liveFor(account)),
+    );
     // R4-B2 on macOS too: Docker Desktop (or another daemon) only through the gatekeeper
     let docker: { proxy: DockerProxy; dir: string; socket: string } | undefined;
     if (level === 'outer' && input.dockerGate) {
