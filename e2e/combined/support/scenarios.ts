@@ -114,6 +114,11 @@ export const SCENARIOS: Record<string, Handling> = {
     title:
       'AC12 each DevOps switch (install, Docker, paths) and the policy and card-folder fences are enforced by the runner guard',
   },
+  C13: {
+    kind: 'auto',
+    title:
+      'installer-policy-seal: an upgrade over a sealed policy with the shared Docker daemon (setup + record step as the runner) starts connected, sealed, the acceptance held',
+  },
   D1: {
     kind: 'auto',
     title: 'DevOps in the inner box needs no click: a request runs, nothing waits on this computer',

@@ -1,6 +1,8 @@
 import { homedir, userInfo } from 'node:os';
+import { join } from 'node:path';
 import type { Command } from 'commander';
 import { resolveDataDir } from '../paths.ts';
+import { POLICY_FILE } from '../policy/schema.ts';
 import { policyDir } from '../policy/store.ts';
 import { realExecutor } from '../toolchain/exec.ts';
 import { installExtra, keepingToolPin } from '../toolchain/extras.ts';
@@ -85,6 +87,8 @@ export function registerSetupCommand(program: Command): void {
             username: userInfo().username,
             platform: process.platform,
             dataRoot: resolveDataDir(opts.dataDir),
+            // the store's own folder (AOM_RUNNER_POLICY_DIR honoured), as keepingToolPin below and every policy verb use
+            policyFile: join(policyDir(), POLICY_FILE),
             prompter: process.stdin.isTTY && !opts.yes ? terminalPrompter : null,
             out: (line) => console.log(line),
             exec: realExecutor,

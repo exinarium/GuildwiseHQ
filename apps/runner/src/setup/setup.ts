@@ -410,6 +410,13 @@ export async function runSetup(deps: SetupDeps, opts: SetupOptions): Promise<Set
     say('Finish the root part as an administrator:');
     for (const c of admin) say(`  ${c}`);
   }
+  // installer-policy-seal: root never writes policy.json; the runner records the shared daemon in its sealed policy itself
+  if (written.docker === 'shared') {
+    say(`Then, as ${deps.username}, record the shared Docker daemon in the sealed policy:`);
+    say(
+      `  ${localCli({ username: deps.username, home: deps.home })} policy record-shared-docker${mode === 'current' ? '   (after logging out and in again, so the new group counts)' : ''}`,
+    );
+  }
   say('');
   say(`Sign in as ${deps.username} where the runner needs it (logins are never copied from another user):`);
   if (deps.platform === 'darwin' && mode === 'dedicated') {

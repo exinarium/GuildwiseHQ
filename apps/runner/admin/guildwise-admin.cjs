@@ -87,8 +87,6 @@ const SUBID_COUNT = 65536;
 /** A shared daemon's socket one level below /run (never a dot segment, never the default /run/docker.sock). */
 const SHARED_SOCKET_RE = /^\/(?:var\/)?run\/[A-Za-z0-9_-][A-Za-z0-9._-]*\/docker\.sock$/;
 const SUBID_FLOOR = 100000;
-/** The runner's policy.json inside its HOME (apps/runner/src/policy/store.ts policyDir). */
-const POLICY_REL = '.config/aom-runner/policy.json';
 
 /**
  * Every name and path that belongs to one runner. `null`: the single runner of before (the exact constants above); a
@@ -907,29 +905,17 @@ function macAclEntries(user, socket) {
 }
 
 /**
- * Writes the root-recorded acceptance of a shared rootless daemon into the runner's policy.json (owner decision
- * 2026-11-21: "The uat runner will use the rootless docker already installed"). Root writes it at install, after the
- * typed acceptance; the start-up check then only warns for exactly that socket (and only while the daemon is rootless).
+ * installer-policy-seal: root never writes the runner's policy.json (it is sealed with a key only the runner user holds;
+ * a root write kept the old seal and the runner fell back to the safe defaults at its next start). After the checks and
+ * the group join, the runner records the accepted shared daemon itself, sealed: this is the command for the person (or
+ * the installer) to run as the runner user. Dedicated users through sudo (named instances too), the person's own account
+ * after a new login (the group join counts from the next login).
  */
-function recordSharedDocker(sys, u, socket, group) {
-  const file = path.posix.join(u.home, POLICY_REL);
-  assertNoSymlinkBelow(sys, u.home, file);
-  let policy = {};
-  const text = readOwnedFile(sys, file, u.uid);
-  if (text) {
-    try {
-      policy = JSON.parse(text);
-    } catch {
-      throw new AdminError(`${file} is not valid JSON: fix or remove it, then run this again`);
-    }
-  }
-  policy.docker = 'shared';
-  policy.dockerHost = `unix://${socket}`;
-  policy.sharedDocker = { socket, group, acceptedAt: sys.now().toISOString() };
-  ensureOwnedDir(sys, path.posix.join(u.home, '.config'), u, 0o700);
-  ensureOwnedDir(sys, path.posix.dirname(file), u, 0o700);
-  writeUserFile(sys, u, file, `${JSON.stringify(policy, null, 2)}\n`, 0o600);
-  note(sys, `Recorded the accepted shared Docker daemon ${socket} in ${file}.`);
+function recordStepCommand(u, L) {
+  const bin = `${u.home}/.local/bin/guildwise-runner`;
+  return u.name === L.user
+    ? `sudo -u ${u.name} -H ${bin} policy record-shared-docker`
+    : `${bin} policy record-shared-docker   (as ${u.name}, after logging out and in again)`;
 }
 
 /**
@@ -939,8 +925,9 @@ function recordSharedDocker(sys, u, socket, group) {
  *             in L.dockerDir; `setup_runner_docker` then runs as the runner.
  *   host      the installed daemon (root-equivalent; --accept-root-equivalent): the group of the real
  *             /var/run/docker.sock (never gid 0). macOS: ACLs on the logged-in user's Docker Desktop socket.
- *   shared    a rootless daemon of another user (`--docker-socket`; --accept-shared-daemon): its socket's group, and
- *             the acceptance recorded in policy.json.
+ *   shared    a rootless daemon of another user (`--docker-socket`; --accept-shared-daemon): its socket's group. The
+ *             runner then records the acceptance in its sealed policy.json itself (`guildwise-runner policy
+ *             record-shared-docker`, printed here); root never writes policy.json.
  *   none      undoes the above (the subuid range stays).
  * F1: when the runner is the installing person (current-user mode), groups are never changed for rootless or none.
  */
@@ -1049,11 +1036,11 @@ function dockerSet(sys, mode, opts = {}) {
         `the daemon at ${real} does not run rootless: refused (use docker host for a root daemon)`,
       );
     if (!groupsOf(sys, u.name).includes(group)) addToGroup(sys, u.name, group);
-    recordSharedDocker(sys, u, real, group);
     note(
       sys,
       `${u.name} is in the group ${group} of ${real}: it can control every container on that daemon (accepted). Runners that share a daemon can each control the other's containers; this typed acceptance records that you chose it.`,
     );
+    note(sys, `Then record it in the runner's sealed policy, as ${u.name}: ${recordStepCommand(u, L)}`);
     return { mode, socket: real, group };
   }
 
@@ -1948,6 +1935,7 @@ const USAGE = `usage: sudo ${SELF_PATH} <command> [options]
   docker rootless|none [--user <name>]
   docker host --accept-root-equivalent [--desktop-socket /Users/<u>/.docker/run/docker.sock (macOS)]
   docker shared --docker-socket <path> --accept-shared-daemon
+                                 then, as the runner user: guildwise-runner policy record-shared-docker
   cleanup-legacy [--data-dir <dir>]
   readers add|remove <user> [--path <clones folder>]
   migrate-user [--from <user>] [--to <user>] [--data-dir <dir>] | migrate-user --finish

@@ -141,6 +141,8 @@ apply_root_choices`,
         `parse_flags "$@"; ${STUB_ROOT}; RUNNER_MODE=dedicated; RUNNER_NAME=guildwise-runner-${inst}; RUNNER_HOME=/home/guildwise-runner-${inst}
 policy_value() { case "$1" in docker) echo shared ;; dockerHost) echo /run/docker-svc/docker.sock ;; esac; }
 install_docker_binaries() { echo "install_docker_binaries $ADMIN_DIR/docker" >> "$STUB_LOG"; }
+record_supported() { return 0; }
+runner() { echo "runner $*" >> "$STUB_LOG"; }
 apply_root_choices`,
         {
           args: [
@@ -160,6 +162,8 @@ apply_root_choices`,
       expect(r.log).toContain(
         `as_root /usr/local/lib/guildwise/${inst}/guildwise-admin --instance ${inst} docker shared --docker-socket /run/docker-svc/docker.sock --accept-shared-daemon --user guildwise-runner-${inst}\n`,
       );
+      // installer-policy-seal: then the instance's runner records it in its own sealed policy
+      expect(r.log).toContain('runner policy record-shared-docker\n');
     }
   });
 });

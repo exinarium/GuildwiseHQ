@@ -510,7 +510,7 @@ describe('setup step 4: Docker for the runner (deps-without-sudo §3)', () => {
     expect(() => opts({ dockerSocket: '/tmp/docker.sock' })).toThrow(/--docker-socket/);
   });
 
-  it('shared rootless daemon (owner 2026-11-21): typed acceptance, policy names the socket, root records the acceptance', async () => {
+  it('shared rootless daemon (owner 2026-11-21): typed acceptance, policy names the socket, root joins the group and the runner records the acceptance', async () => {
     expect(() => opts({ docker: 'shared', dockerSocket: '/run/docker-svc/docker.sock' })).toThrow(
       /accept-shared-daemon/,
     );

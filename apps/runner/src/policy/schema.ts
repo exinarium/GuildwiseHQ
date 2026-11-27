@@ -110,8 +110,10 @@ export const PolicySchema = z
     dockerHost: z.string().regex(DOCKER_HOST_RE).optional(),
     /**
      * `shared` (owner 2026-11-21: "The uat runner will use the rootless docker already installed"; "Prod and UAT can use
-     * the same rootless docker"): the acceptance root recorded at install (`guildwise-admin docker shared`), after the
-     * typed acceptance in setup. The start-up check then only warns for exactly this socket, while its daemon is rootless.
+     * the same rootless docker"): the acceptance recorded at install, after the typed acceptance in setup (root's
+     * `guildwise-admin docker shared` checks and joins the group; the runner then records it, sealed, with
+     * `guildwise-runner policy record-shared-docker`). The start-up check then only warns for exactly this socket, while
+     * its daemon is rootless.
      */
     sharedDocker: z
       .object({

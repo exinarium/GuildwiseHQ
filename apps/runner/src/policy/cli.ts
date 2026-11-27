@@ -21,6 +21,7 @@ import { type HeldRecord, HeldStore, HeldVersionMismatch, heldVersion } from './
 import { POLICY_KEY_FILE, sealMarkerFor } from './integrity.ts';
 import { PasskeyStore } from './passkey-store.ts';
 import type { Policy } from './schema.ts';
+import { recordSharedDocker, type SharedDockerDeps, sharedDockerProbe } from './shared-docker.ts';
 import { PolicyStore, policyDir } from './store.ts';
 
 /**
@@ -562,6 +563,36 @@ export function registerPolicyCommands(
     .command('accept')
     .description('after a change made outside the runner (or a lost key): show the file and seal it as it is')
     .action(run(() => policyAccept(make())));
+  policy
+    .command('record-shared-docker')
+    .description(
+      'installer step after `guildwise-admin docker shared`: record the accepted shared rootless Docker daemon in the sealed policy (existing key only)',
+    )
+    .action(run(() => policyRecordSharedDocker(make())));
+}
+
+/**
+ * `guildwise-runner policy record-shared-docker` (installer-policy-seal): the runner seals the shared-daemon acceptance
+ * itself, after root's checks and group join. A refusal exits 1 with the reason.
+ */
+export async function policyRecordSharedDocker(
+  d: PolicyCliDeps,
+  o: {
+    /** Tests: the leaf that looks at the machine (default: the start-up check's probeHost). */
+    probeHost?: Parameters<typeof sharedDockerProbe>[0];
+    user?: string;
+    realpath?: SharedDockerDeps['realpath'];
+  } = {},
+): Promise<void> {
+  const r = await recordSharedDocker(d.store, {
+    probe: sharedDockerProbe(o.probeHost, o.user),
+    ...(o.realpath ? { realpath: o.realpath } : {}),
+  });
+  d.out(
+    r.recorded
+      ? `Recorded the accepted shared Docker daemon ${r.socket} (group ${r.group}) in ${d.store.file}.`
+      : `The shared Docker daemon ${r.socket} is already recorded in ${d.store.file}: nothing to change.`,
+  );
 }
 
 /**

@@ -929,6 +929,19 @@ place_runner_release() {
 
 runner() { as_runner "${RUNNER_ROOT}/current/aom-runner" "$@"; }
 
+# runner_fresh <args...>: the runner CLI in a fresh login of the runner's account, so a group guildwise-admin just joined
+# counts (installer-policy-seal). The dedicated user: as_runner (runuser and sudo -u load its groups anew). Your own
+# account ("current"): `sudo -n -u <you>`, passing on the runner's own folders (AOM_RUNNER_HOME, AOM_RUNNER_POLICY_DIR)
+# when they are set, so it reads the store setup wrote. Returns 3 when sudo cannot do that (no new login).
+runner_fresh() {
+  if [ "${RUNNER_MODE}" = dedicated ] || [ -n "${RUNNER_AS}" ]; then runner "$@"; return; fi
+  local me; me="$(id -un)"
+  sudo -n -u "${me}" -H true 2>/dev/null || return 3
+  sudo -n -u "${me}" -H env HOME="${RUNNER_HOME}" PATH="$(runner_path)" ${RUNNER_CA:+NODE_EXTRA_CA_CERTS="${RUNNER_CA}"} \
+    ${AOM_RUNNER_HOME:+AOM_RUNNER_HOME="${AOM_RUNNER_HOME}"} ${AOM_RUNNER_POLICY_DIR:+AOM_RUNNER_POLICY_DIR="${AOM_RUNNER_POLICY_DIR}"} \
+    "${RUNNER_ROOT}/current/aom-runner" "$@"
+}
+
 # A tree made by an earlier installer under umask 0002 is repaired: no group or other write anywhere in it (UAT R25 F3).
 repair_runner_tree() {
   as_runner chmod -R go-w "${RUNNER_ROOT}" ||
@@ -1325,6 +1338,7 @@ apply_root_choices() {
       install_docker_binaries
       run_admin docker shared --docker-socket "${sock}" --accept-shared-daemon --user "${RUNNER_NAME}" ||
         die "guildwise-admin could not give ${RUNNER_NAME} the shared Docker daemon." "Run: sudo ${ADMIN_HINT} docker shared --docker-socket ${sock} --accept-shared-daemon --user ${RUNNER_NAME}   to see why."
+      record_shared_docker
       good "Docker for the runner: the shared rootless daemon at ${sock} (accepted; runners that share it can each control the other's containers)" ;;
     *)
       if [ "${RUNNER_MODE}" = dedicated ]; then
@@ -1335,6 +1349,31 @@ apply_root_choices() {
 }
 
 setup_supported() { runner setup --help >/dev/null 2>&1; }
+
+# The runner version has the record step. commander prints the parent's help for an unknown verb, so the verb's own usage
+# line is what counts. Captured whole (no pipe into grep -q: with pipefail an early exit could read as "not supported").
+record_supported() {
+  local h
+  h="$(runner policy record-shared-docker --help 2>/dev/null)" || true
+  case "${h}" in *"policy record-shared-docker"*) return 0 ;; esac
+  return 1
+}
+
+# installer-policy-seal: root (guildwise-admin) never writes policy.json, which only the runner can seal. After root's
+# checks and group join, the runner records the accepted shared daemon in its sealed policy itself, with its existing key.
+record_shared_docker() {
+  local rc=0 manual
+  # Never skipped: without the record step the runner refuses to start (no sealed acceptance), so the install stops here
+  record_supported ||
+    die "This runner release cannot record the shared Docker daemon in its sealed policy (no \`guildwise-runner policy record-shared-docker\`): the runner would refuse to start." "Install the current runner release (run the installer from your Guildwise server again), or choose another Docker mode (--docker rootless or none)."
+  if [ "${RUNNER_MODE}" = dedicated ] || [ -n "${RUNNER_AS}" ]; then manual="sudo -u ${RUNNER_NAME} -H ${RUNNER_HOME}/.local/bin/guildwise-runner policy record-shared-docker"
+  else manual="${RUNNER_HOME}/.local/bin/guildwise-runner policy record-shared-docker"; fi
+  runner_fresh policy record-shared-docker || rc=$?
+  [ "${rc}" = 3 ] &&
+    die "Could not start a fresh login of ${RUNNER_NAME} to record the shared Docker daemon (sudo -n -u ${RUNNER_NAME} was refused)." "Log out and in again, then run: ${manual}"
+  [ "${rc}" = 0 ] ||
+    die "The runner could not record the shared Docker daemon in its sealed policy (exit ${rc})." "Run: ${manual}   to see why."
+}
 
 # "Setting local permissions": guildwise-runner setup (as the runner's account) asks for and writes the policy; the
 # root parts then go through guildwise-admin. The installer itself passes on only the flags you gave it.
@@ -1382,7 +1421,7 @@ set_local_permissions() {
   fi
   [ "${rc}" = 0 ] || die "guildwise-runner setup did not finish (exit ${rc})." "Run the command again, or run guildwise-runner setup as ${RUNNER_NAME}."
   apply_root_choices
-  step_ok "Local permissions set (written by guildwise-runner setup to ${RUNNER_HOME}/.config/aom-runner/policy.json, readable only by ${RUNNER_NAME})"
+  step_ok "Local permissions set (written and sealed by the runner, as ${RUNNER_NAME}, in ${RUNNER_HOME}/.config/aom-runner/policy.json, readable only by ${RUNNER_NAME})"
 }
 
 # ---- doctor and finish -----------------------------------------------------------------------------------------------------

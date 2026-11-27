@@ -481,7 +481,10 @@ set_local_permissions`;
   it('shared (owner 2026-11-21): the socket from policy.json and --accept-shared-daemon, only when accepted here', () => {
     setup = shHome();
     const policy = '{"docker":"shared","dockerHost":"unix:///run/docker-svc/docker.sock"}';
-    const ok = runSh(setup, PERMS(policy), {
+    // installer-policy-seal: after root's step the runner records the acceptance in its sealed policy (stubbed here)
+    const record =
+      'record_supported() { return 0; }; runner_fresh() { echo "runner_fresh $*" >> "$STUB_LOG"; }';
+    const ok = runSh(setup, PERMS(policy, record), {
       args: [
         '--docker',
         'shared',
@@ -491,6 +494,7 @@ set_local_permissions`;
       ],
     });
     expect(ok.status, ok.stderr).toBe(0);
+    expect(ok.log).toContain('runner_fresh policy record-shared-docker');
     expect(ok.log).toContain(
       '--docker shared --docker-found none --docker-socket /run/docker-svc/docker.sock --accept-shared-daemon',
     );

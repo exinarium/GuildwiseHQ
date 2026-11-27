@@ -170,6 +170,24 @@ export async function startHost(
   }
   write({ ...(o.policy ?? {}), ...(grant ? { grant } : {}) });
   initGates(gateDirOf(home));
+  return launch({ name: o.name, home, policyDir, fakeHome, identity: o.identity, extraEnv: o.extraEnv });
+}
+
+interface LaunchOptions {
+  name: string;
+  home: string;
+  policyDir: string;
+  fakeHome: string;
+  identity?: boolean;
+  extraEnv?: Record<string, string>;
+}
+
+/** How each host was started, so `restartHost` starts the same one again. */
+const launched = new WeakMap<Host, LaunchOptions>();
+
+/** Starts the scripted runner host on an already paired data folder and waits until its workstation is connected. */
+async function launch(o: LaunchOptions): Promise<Host> {
+  const { home, policyDir, fakeHome } = o;
   const logFile = join(home, 'host.out.log');
   const out = openSync(logFile, 'a');
   // An explicit allowlist: nothing else of the caller's environment (GH_TOKEN, AWS_*, SSH_AUTH_SOCK, ANTHROPIC_*, GIT_AUTHOR_*)
@@ -243,7 +261,37 @@ export async function startHost(
       }
     },
   };
+  launched.set(host, o);
   return host;
+}
+
+/** Stops the host and waits until its process has exited and the server shows the workstation disconnected. */
+export async function stopHost(h: Host): Promise<void> {
+  const exited =
+    h.child.exitCode !== null || h.child.signalCode !== null
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => h.child.once('exit', () => resolve()));
+  await h.stop();
+  await Promise.race([exited, new Promise((r) => setTimeout(r, 15_000))]);
+  await waitFor(
+    `workstation ${h.name} disconnected`,
+    async () =>
+      (await q<{ connected: boolean }>(`SELECT connected FROM workstations WHERE id=$1`, [
+        h.workstationId,
+      ]).catch(() => [])) as Array<{ connected: boolean }>,
+    (r) => r[0]?.connected === false,
+    30_000,
+  );
+}
+
+/**
+ * installer-policy-seal [C13]: starts a stopped host again on the same folders, the way the service starts after a
+ * reinstall: no new pairing, and policy.json is NOT written (whatever setup and the record step left is what it reads).
+ */
+export async function restartHost(h: Host): Promise<Host> {
+  const o = launched.get(h);
+  if (!o) throw new Error(`host ${h.name} was not started by startHost`);
+  return launch(o);
 }
 
 export { release, waitReached };

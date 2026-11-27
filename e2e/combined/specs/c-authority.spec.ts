@@ -19,7 +19,7 @@ import {
   waitBuilt,
   waitRequest,
 } from '../support/flow.ts';
-import { type Host, runnerCli, setBoxState, startHost } from '../support/host.ts';
+import { type Host, restartHost, runnerCli, setBoxState, startHost, stopHost } from '../support/host.ts';
 
 // Group C: runner-authority-fixes wiring on the combined build (AC3, AC9, AC12; AC4 is in a-devops.spec.ts next to A1).
 // The scripted DevOps engineer drives the real runner paths: the real `aom devops-guard` hook command (its classifier and the
@@ -199,4 +199,67 @@ test('[C3] the approval settings are sealed: an edit made outside the runner mak
   // the server sends the waiting request again once its back-off is over: with the policy sealed again it runs
   await advanceClock(10 * 60_000);
   expect((await waitRequest(id, 'done', (r) => TERMINAL(r?.status), 180_000))?.status).toBe('done');
+});
+
+test('[C13] an upgrade over a sealed policy with the shared Docker daemon: setup and the record step as the runner, then a start: connected, sealed, the shared-daemon acceptance holds', async () => {
+  // installer-policy-seal (Combined-QA blocker 3). The harness has no root and no Docker: the root step (guildwise-admin, which
+  // no longer writes policy.json) and the start-up refusal are unit-tested (installer-policy-seal.test.ts, startup-check.test.ts)
+  const sock = '/run/docker-c13/docker.sock';
+  let h = await startHost(api, {
+    password: OWNER.password,
+    name: 'c13-box',
+    repoRoot: remote.repoRoot,
+    policy: {
+      extra: {
+        docker: 'shared',
+        dockerHost: `unix://${sock}`,
+        sharedDocker: { socket: sock, group: 'docker-c13', acceptedAt: '2026-11-26T08:00:00.000Z' },
+      },
+    },
+  });
+  try {
+    // the first start sealed it
+    const first = runnerCli(h, ['policy']);
+    expect(first.out, first.out).toContain('sealed with');
+    expect(first.out).toContain('"devopsRequests": "auto"');
+    await stopHost(h);
+    // the installer's choices step: the real `guildwise-runner setup` as the runner, with a changed choice
+    const setup = runnerCli(h, [
+      'setup',
+      '--yes',
+      '--runner-user',
+      'current',
+      '--docker',
+      'shared',
+      '--docker-socket',
+      sock,
+      '--accept-shared-daemon',
+      '--devops-requests',
+      'ask',
+      '--no-ytdlp',
+    ]);
+    expect(setup.code, setup.out).toBe(0);
+    expect(setup.out).toContain('policy record-shared-docker');
+    // the installer's record step after root's join: already recorded for this socket, nothing to change
+    const rec = runnerCli(h, ['policy', 'record-shared-docker']);
+    expect(rec.code, rec.out).toBe(0);
+    expect(rec.out).toContain(`The shared Docker daemon ${sock} is already recorded`);
+    // the service starts again: no new pairing, policy.json is not rewritten by the harness
+    h = await restartHost(h);
+    const after = runnerCli(h, ['policy']);
+    expect(after.out, after.out).toContain('sealed with');
+    expect(after.out).not.toMatch(/INVALID|changed outside the runner/);
+    expect(after.out).toContain('"devopsRequests": "ask"');
+    expect(after.out).toContain('"docker": "shared"');
+    expect(after.out).toContain(`"socket": "${sock}"`);
+    expect(after.out).toContain('"group": "docker-c13"');
+    const page13 = new ApprovalsPage(h.approvalsPort, h.policyDir);
+    expect((await page13.state()).status.policyError ?? '').toBe('');
+    const ws = await q<{ connected: boolean }>('SELECT connected FROM workstations WHERE id=$1', [
+      h.workstationId,
+    ]);
+    expect(ws[0]?.connected).toBe(true);
+  } finally {
+    await h.stop();
+  }
 });

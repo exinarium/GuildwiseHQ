@@ -16,7 +16,7 @@ import type { Policy } from './schema.ts';
  * The start-up check (R18-P, R21): at start and again after `welcome`. A runner whose user is root-equivalent (uid 0,
  * passwordless sudo, the docker group, a writable socket of another Docker daemon) turns a single approved mistake into
  * root; the runner's own rootless daemon (its socket under its own /run/user/<uid>, parent 0700) never counts. A shared
- * rootless daemon whose acceptance root recorded at install (policy.json `sharedDocker`) only warns while that daemon
+ * rootless daemon whose acceptance was recorded at install (policy.json `sharedDocker`, after root's checks) only warns while that daemon
  * reports rootless (owner 2026-11-21). A runner whose
  * files another user can write can be changed under it. With local `startupRefusal` (written by the 1.10.0 installer and
  * by `setup`) or a server that requires signed runners (the server may narrow, never widen) the runner refuses: it
@@ -361,7 +361,7 @@ export async function probeHost(o: {
   /** Paths whose owner and mode matter: the runner root, policy.json and its folder, the admin tools. */
   paths: string[];
   env?: NodeJS.ProcessEnv;
-  /** The shared daemon socket root recorded (policy.json `sharedDocker.socket`): asked whether it is rootless. */
+  /** The recorded shared daemon socket (policy.json `sharedDocker.socket`): asked whether it is rootless. */
   sharedSocket?: string;
   /** Candidates for the root-owned docker CLI that asks it (S2: absolute paths only, never PATH). */
   dockerCli?: readonly string[];

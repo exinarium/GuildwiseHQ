@@ -139,7 +139,7 @@ describe('policy.json docker values (deps-without-sudo)', () => {
     ).toBe(false);
   });
 
-  it('sharedDocker: the acceptance root records for a shared rootless daemon', () => {
+  it('sharedDocker: the recorded acceptance of a shared rootless daemon (root checks, the runner records it sealed)', () => {
     const p = PolicySchema.parse({
       docker: 'shared',
       dockerHost: 'unix:///run/docker-svc/docker.sock',

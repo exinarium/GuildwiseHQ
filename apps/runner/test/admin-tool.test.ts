@@ -444,8 +444,13 @@ describe('docker rootless|host|shared|none (deps-without-sudo §3)', () => {
   const joined = (f: { calls: { cmd: string; args: string[] }[] }) =>
     f.calls.some((c) => (c.cmd === 'usermod' && c.args[0] === '-aG') || c.cmd === 'gpasswd');
 
-  it("shared (owner 2026-11-21): the socket group of another user's rootless daemon, the acceptance recorded in policy.json", async () => {
+  it("shared (owner 2026-11-21): the socket group of another user's rootless daemon; the runner records the acceptance (installer-policy-seal)", async () => {
     const f = sharedMachine({ rootless: true });
+    // a policy the runner sealed: root never rewrites it (its write kept the old seal and broke it)
+    const file = join(f.root, RUNNER.home, '.config/aom-runner/policy.json');
+    mkdirSync(join(file, '..'), { recursive: true });
+    const sealed = `${JSON.stringify({ version: 1, docker: 'shared', dockerHost: 'unix:///run/docker-svc/docker.sock', integrity: { alg: 'hmac-sha256', mac: 'a'.repeat(64) } }, null, 2)}\n`;
+    writeFileSync(file, sealed, { mode: 0o600 });
     expect(await admin.main(SHARED.slice(0, 4), f.sys)).toBe(1);
     expect(f.err.join('\n')).toContain('--accept-shared-daemon');
     expect(await admin.main(SHARED, f.sys)).toBe(0);
@@ -461,15 +466,59 @@ describe('docker rootless|host|shared|none (deps-without-sudo §3)', () => {
     ]);
     expect(ask).toBeLessThan(join_);
     expect(f.calls[join_]).toEqual({ cmd: 'usermod', args: ['-aG', 'docker-svc', 'guildwise-runner'] });
-    const policy = JSON.parse(
-      readFileSync(join(f.root, RUNNER.home, '.config/aom-runner/policy.json'), 'utf8'),
-    );
-    expect(policy).toMatchObject({
-      docker: 'shared',
-      dockerHost: 'unix:///run/docker-svc/docker.sock',
-      sharedDocker: { socket: '/run/docker-svc/docker.sock', group: 'docker-svc' },
-    });
+    expect(readFileSync(file, 'utf8')).toBe(sealed);
     expect(f.out.join('\n')).toContain("Runners that share a daemon can each control the other's containers");
+    expect(f.out.join('\n')).toContain(
+      "Then record it in the runner's sealed policy, as guildwise-runner: sudo -u guildwise-runner -H /home/guildwise-runner/.local/bin/guildwise-runner policy record-shared-docker",
+    );
+    // no policy yet: root creates none
+    const fresh = sharedMachine({ rootless: true });
+    expect(await admin.main(SHARED, fresh.sys)).toBe(0);
+    expect(existsSync(join(fresh.root, RUNNER.home, '.config/aom-runner'))).toBe(false);
+  });
+
+  it('shared: the record step is printed in the form of the runner user (instance, your own account) and by apply', async () => {
+    const uatUser = { ...RUNNER, name: 'guildwise-runner-uat', home: '/home/guildwise-runner-uat' };
+    const uat = sharedMachine({ rootless: true });
+    uat.users.set(uatUser.name, { ...uatUser, groups: [] });
+    mkdirSync(join(uat.root, uatUser.home), { recursive: true });
+    mkdirSync(join(uat.root, 'usr/local/lib/guildwise/uat'), { recursive: true });
+    uat.sys.execPath = '/usr/local/lib/guildwise/uat/node/bin/node';
+    expect(await admin.main([...SHARED, '--instance', 'uat'], uat.sys), uat.err.join('\n')).toBe(0);
+    expect(uat.out.join('\n')).toContain(
+      'sudo -u guildwise-runner-uat -H /home/guildwise-runner-uat/.local/bin/guildwise-runner policy record-shared-docker',
+    );
+    const me = sharedMachine({ rootless: true });
+    me.users.set(ALICE.name, { ...ALICE, groups: [] });
+    mkdirSync(join(me.root, ALICE.home), { recursive: true });
+    expect(await admin.main([...SHARED, '--user', 'alice'], me.sys), me.err.join('\n')).toBe(0);
+    expect(me.out.join('\n')).toContain(
+      '/home/alice/.local/bin/guildwise-runner policy record-shared-docker   (as alice, after logging out and in again)',
+    );
+    expect(existsSync(join(me.root, ALICE.home, '.config'))).toBe(false);
+    const ap = sharedMachine({ rootless: true });
+    ap.users.set(ALICE.name, { ...ALICE, groups: [] });
+    mkdirSync(join(ap.root, ALICE.home), { recursive: true });
+    expect(
+      await admin.main(
+        [
+          'apply',
+          '--runner-user',
+          'current',
+          '--user',
+          'alice',
+          '--docker',
+          'shared',
+          '--docker-socket',
+          '/run/docker-svc/docker.sock',
+          '--accept-shared-daemon',
+        ],
+        ap.sys,
+      ),
+      ap.err.join('\n'),
+    ).toBe(0);
+    expect(ap.out.join('\n')).toContain('policy record-shared-docker');
+    expect(existsSync(join(ap.root, ALICE.home, '.config'))).toBe(false);
   });
 
   it('S1: a daemon that is not rootless (or does not answer) is refused and no group is joined', async () => {
