@@ -94,6 +94,75 @@ export const TREE_PIN_MANIFEST_DIR = 'tree-pin-manifest';
 export interface GuardRoots {
   whole: string[];
   legacy: string[];
+  /**
+   * gate-fixes-3 (pins): the DevOps tool folders `<tcRoot>/devops/<tool>/<version>`, each its own whole root (also listed in
+   * `whole`). Only `toolchain approve` or `toolchain trust` pins one; env.ensure and the adoption never do.
+   */
+  subroots?: string[];
+  /** gate-fixes-3: folders a whole root's hash leaves out (`<tcRoot>/devops`); a path in one belongs to no root but a subroot. */
+  exclude?: Record<string, string[]>;
+}
+
+/** gate-fixes-3: the folder under the Guildwise tool folder that DevOps installs into, per `<tool>/<version>`. */
+export const DEVOPS_TOOLCHAINS_DIR = 'devops';
+
+/** A DevOps tool or version folder name (as the toolchain registry's names: no `..`, no separator). */
+const SUBROOT_NAME_RE = /^[a-z0-9][a-z0-9._+-]{0,39}$/i;
+
+const realDirAt = (p: string): boolean => {
+  try {
+    return lstatSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * gate-fixes-3: the DevOps subroots right now, `<tcRoot>/devops/<tool>/<version>`, both levels real directories (never a
+ * link) with names matching the registry's rule. A loose file, a link or an odd name is no subroot (and so in no root).
+ */
+export function devopsSubroots(toolchainsRoot: string): string[] {
+  const base = join(toolchainsRoot, DEVOPS_TOOLCHAINS_DIR);
+  if (!realDirAt(base)) return [];
+  const out: string[] = [];
+  const names = (d: string): string[] => {
+    try {
+      return readdirSync(d).sort();
+    } catch {
+      return [];
+    }
+  };
+  for (const tool of names(base)) {
+    const td = join(base, tool);
+    if (!SUBROOT_NAME_RE.test(tool) || !realDirAt(td)) continue;
+    for (const ver of names(td)) {
+      const vd = join(td, ver);
+      if (SUBROOT_NAME_RE.test(ver) && realDirAt(vd)) out.push(vd);
+    }
+  }
+  return out;
+}
+
+/** gate-fixes-3: is `p` a DevOps subroot path of `toolchainsRoot` (lexically: `devops/<tool>/<version>`)? */
+export function isDevopsSubroot(p: string, toolchainsRoot: string): boolean {
+  const base = join(resolve(toolchainsRoot), DEVOPS_TOOLCHAINS_DIR);
+  const r = resolve(p);
+  if (!r.startsWith(`${base}/`)) return false;
+  const parts = r.slice(base.length + 1).split('/');
+  return parts.length === 2 && parts.every((n) => SUBROOT_NAME_RE.test(n));
+}
+
+/**
+ * gate-fixes-3 (c): the folder an approved outside run may create new tools in, `<tcRoot>/devops`, only with the
+ * "download tools" tick (`toolInstall`) and setup done; null otherwise. Never the whole tool folder, never a parent.
+ */
+export function toolchainWriteDir(
+  policy: { toolInstall?: boolean | undefined; setupDone?: boolean | undefined },
+  toolchainsRoot: string,
+): string | null {
+  return policy.toolInstall === true && policy.setupDone === true
+    ? join(toolchainsRoot, DEVOPS_TOOLCHAINS_DIR)
+    : null;
 }
 
 /** The user-space tool folders of the user's own installs (read-only in every box; their bin folders stay pinned). */
@@ -115,8 +184,18 @@ export function legacyToolRoots(home: string): string[] {
 }
 
 export function guardRoots(home: string, toolchainsRoot: string): GuardRoots {
-  return { whole: [toolchainsRoot], legacy: legacyToolRoots(home) };
+  const subroots = devopsSubroots(toolchainsRoot);
+  return {
+    whole: [toolchainsRoot, ...subroots],
+    legacy: legacyToolRoots(home),
+    subroots,
+    exclude: { [toolchainsRoot]: [join(toolchainsRoot, DEVOPS_TOOLCHAINS_DIR)] },
+  };
 }
+
+/** gate-fixes-3: the whole roots the runner itself may pin (env.ensure, the adoption): never a DevOps subroot. */
+export const runnerPinnable = (g: GuardRoots): string[] =>
+  g.whole.filter((r) => !(g.subroots ?? []).includes(r));
 
 /** Every guarded root, whole first. */
 export const allGuarded = (g: GuardRoots): string[] => [...g.whole, ...g.legacy];
@@ -201,6 +280,11 @@ export interface TreePinsOptions {
   now?: () => number;
   /** Keep the digest cache in memory only (tests). */
   memoryCache?: boolean;
+  /**
+   * gate-fixes-3: the Guildwise tool folder. Its hash leaves out `<it>/devops` (pinned per `<tool>/<version>` instead); a
+   * path in there that is in no subroot belongs to no pin. Absent: no exclusion (as before).
+   */
+  toolchainsRoot?: string;
 }
 
 export class TreePins {
@@ -280,6 +364,19 @@ export class TreePins {
     this.memo.clear();
   }
 
+  /** gate-fixes-3: what the hash of `root` leaves out (only the Guildwise tool folder's `devops`). */
+  excludeOf(root: string): string[] {
+    const tc = this.opts.toolchainsRoot;
+    return tc && resolve(root) === resolve(tc) ? [join(tc, DEVOPS_TOOLCHAINS_DIR)] : [];
+  }
+
+  /** gate-fixes-3: the DevOps subroots with a pin record (read-only in every box once pinned). */
+  pinnedSubroots(): string[] {
+    const tc = this.opts.toolchainsRoot;
+    if (!tc) return [];
+    return Object.keys(this.read().roots).filter((r) => isDevopsSubroot(r, tc));
+  }
+
   private hashOpts(extra: Partial<TreeHashOptions> = {}): TreeHashOptions {
     return {
       cache: this.cache,
@@ -294,6 +391,8 @@ export class TreePins {
     if (r.kind === 'absent') return { state: 'absent' };
     if (r.kind === 'pending') return { state: 'pending', reason: r.reason };
     if (r.kind === 'fail') return { state: 'failed', reason: r.reason };
+    // gate-fixes-3 S4: an unpinned folder with nothing in it (after the exclusion) is as good as absent: no trust step
+    if (!pinned && r.empty) return { state: 'absent' };
     if (!pinned) return { state: 'unpinned', hash: r.hash, reason: `${root} has no earlier record` };
     return r.hash === pinned ? { state: 'ok', hash: r.hash } : { state: 'changed', hash: r.hash };
   }
@@ -302,7 +401,11 @@ export class TreePins {
   status(root: string): RootStatus {
     const hit = this.memo.get(root);
     if (hit) return hit;
-    const s = this.toStatus(root, rootTreeHash(root, this.hashOpts()), this.read().roots[root]);
+    const s = this.toStatus(
+      root,
+      rootTreeHash(root, this.hashOpts({ exclude: this.excludeOf(root) })),
+      this.read().roots[root],
+    );
     this.memo.set(root, s);
     if (!this.memoArmed) {
       this.memoArmed = true;
@@ -321,6 +424,7 @@ export class TreePins {
     const cur = this.warming.get(root);
     if (cur) return cur;
     const p = warmTree(root, this.cache, {
+      exclude: this.excludeOf(root),
       ...(this.opts.racyMs !== undefined ? { racyMs: this.opts.racyMs } : {}),
       ...(this.opts.now ? { now: this.opts.now } : {}),
     })
@@ -333,18 +437,25 @@ export class TreePins {
     return p;
   }
 
-  /** The guarded root (real path) `p` lies under, and whether it is a whole root. */
-  private rootOf(p: string, g: GuardRoots): { root: string; whole: boolean } | null {
+  /**
+   * The guarded root `p` lies under, and whether it is a whole root. gate-fixes-3 (N5): the longest whole root wins (a
+   * DevOps subroot before the tool folder); a path in an excluded folder (`<tcRoot>/devops`) that is in no subroot is a
+   * `hole`: it belongs to no pin and never falls back to the tool folder's.
+   */
+  private rootOf(p: string, g: GuardRoots): { root: string; whole: boolean; hole?: boolean } | null {
     const real = realOr(p);
     const lexical = resolve(p);
-    for (const [list, whole] of [
-      [g.whole, true],
-      [g.legacy, false],
-    ] as const)
-      for (const r of list) {
-        const rr = realOr(r);
-        if ((real && rr && underRoot(real, rr)) || underRoot(lexical, resolve(r))) return { root: r, whole };
-      }
+    const under = (r: string): boolean => {
+      const rr = realOr(r);
+      return !!(real && rr && underRoot(real, rr)) || underRoot(lexical, resolve(r));
+    };
+    const whole = g.whole.filter(under).sort((a, b) => resolve(b).length - resolve(a).length)[0];
+    if (whole) {
+      const holes = g.exclude?.[whole] ?? [];
+      if (holes.some(under)) return { root: whole, whole: true, hole: true };
+      return { root: whole, whole: true };
+    }
+    for (const r of g.legacy) if (under(r)) return { root: r, whole: false };
     return null;
   }
 
@@ -356,6 +467,7 @@ export class TreePins {
     if (!realOr(dir)) return false;
     const at = this.rootOf(dir, g);
     if (!at) return true;
+    if (at.hole) return false;
     if (at.whole) return this.status(at.root).state === 'ok';
     const want = this.read().bins[dir];
     return !!want && binTreeHash(dir) === want;
@@ -364,6 +476,7 @@ export class TreePins {
   /** The entry rule for read folders and variable values: false only when `p` lies in a whole root that fails. */
   pathOk(p: string, g: GuardRoots): boolean {
     const at = this.rootOf(p, g);
+    if (at?.hole) return false;
     return !at || !at.whole || this.status(at.root).state === 'ok';
   }
 
@@ -423,7 +536,14 @@ export class TreePins {
 
   /** The full hash (no budget) and manifest of a root right now. */
   fullHash(root: string): TreeResult {
-    return rootTreeHash(root, this.hashOpts({ budgetBytes: Number.POSITIVE_INFINITY, manifest: true }));
+    return rootTreeHash(
+      root,
+      this.hashOpts({
+        budgetBytes: Number.POSITIVE_INFINITY,
+        manifest: true,
+        exclude: this.excludeOf(root),
+      }),
+    );
   }
 
   /**
@@ -499,6 +619,8 @@ export interface ToolBoxPlan {
   repoDirs: string[];
   /** The box's private home (caches). */
   home: string;
+  /** gate-fixes-3: read-only folders whose `bin` never goes on the box's PATH (`<tcRoot>/devops`: unpinned there). */
+  noPath?: string[];
 }
 
 /**
@@ -514,9 +636,16 @@ export function toolBoxWritable(_home: string, toolchainsRoot: string): string[]
  * roots read-only, a private home, and no project clone.
  */
 export function recipeBoxPlan(before: readonly string[], toolchainsRoot: string, home: string): ToolBoxPlan {
+  // gate-fixes-3: the DevOps tools are read-only here (a recipe never writes or adopts them)
+  const devops = join(toolchainsRoot, DEVOPS_TOOLCHAINS_DIR);
+  const writable = before.filter((r) => r === toolchainsRoot && existsSync(r));
   return {
-    writable: before.filter((r) => r === toolchainsRoot && existsSync(r)),
-    readonly: before.filter((r) => r !== toolchainsRoot && existsSync(r)),
+    writable,
+    readonly: [
+      ...before.filter((r) => r !== toolchainsRoot && existsSync(r)),
+      ...(writable.length && realDirAt(devops) && !before.includes(devops) ? [devops] : []),
+    ],
+    noPath: [devops],
     repoDirs: [],
     home,
   };
@@ -593,7 +722,9 @@ export function toolBoxExecutor(base: Executor, plan: ToolBoxPlan, bwrap = 'bwra
         ...(opts.env ?? {}),
         HOME: plan.home,
         PATH: [
-          ...[...plan.writable, ...(plan.readonly ?? [])].map((w) => join(w, 'bin')),
+          ...[...plan.writable, ...(plan.readonly ?? [])]
+            .filter((w) => !(plan.noPath ?? []).includes(w))
+            .map((w) => join(w, 'bin')),
           '/usr/local/bin',
           '/usr/bin',
           '/bin',
@@ -606,4 +737,93 @@ export function toolBoxExecutor(base: Executor, plan: ToolBoxPlan, bwrap = 'bwra
       });
     },
   };
+}
+
+// ---------------------------------------------------------------- the DevOps toolchain writer lock
+
+/**
+ * gate-fixes-3 (B1): while an approved outside run may write `<tcRoot>/devops`, the runner keeps an entry per shift in
+ * `<policyDir>/toolchain-writer.lock` (the runner's pid and the shift id). `toolchain approve` and `toolchain trust` refuse
+ * to pin a DevOps subroot while an entry names a live pid, so approved content never changes under a writer. Boxes cannot
+ * reach the policy dir. Liveness by pid fails closed (a runner that still lives keeps the lock).
+ */
+export const TOOLCHAIN_WRITER_LOCK = 'toolchain-writer.lock';
+
+interface WriterEntry {
+  pid: number;
+  shiftId: string;
+}
+
+const writerFile = (policyDir: string): string => join(policyDir, TOOLCHAIN_WRITER_LOCK);
+
+function readWriters(policyDir: string): WriterEntry[] {
+  try {
+    const j = JSON.parse(readFileSync(writerFile(policyDir), 'utf8')) as { writers?: unknown };
+    return Array.isArray(j.writers)
+      ? j.writers.filter(
+          (w): w is WriterEntry =>
+            !!w &&
+            typeof (w as WriterEntry).pid === 'number' &&
+            typeof (w as WriterEntry).shiftId === 'string',
+        )
+      : [];
+  } catch (err) {
+    // an unreadable lock (not a missing one) fails closed: someone may be writing
+    return (err as NodeJS.ErrnoException).code === 'ENOENT' ? [] : [{ pid: process.pid, shiftId: '?' }];
+  }
+}
+
+function changeWriters(policyDir: string, fn: (w: WriterEntry[]) => WriterEntry[]): void {
+  withFileLock(`${writerFile(policyDir)}.lock`, () => {
+    const next = fn(readWriters(policyDir));
+    if (next.length) writeFileAtomic(writerFile(policyDir), `${JSON.stringify({ writers: next })}\n`, 0o600);
+    else
+      try {
+        unlinkSync(writerFile(policyDir));
+      } catch {
+        /* none */
+      }
+  });
+}
+
+/** The runner starts an outside run that may write the DevOps tools: its entry (pid, shift). */
+export function addToolchainWriter(policyDir: string, shiftId: string, pid: number = process.pid): void {
+  changeWriters(policyDir, (w) => [...w.filter((e) => e.shiftId !== shiftId), { pid, shiftId }]);
+}
+
+/** That run ended: only its own entry goes (another live run keeps the lock). */
+export function removeToolchainWriter(policyDir: string, shiftId: string): void {
+  changeWriters(policyDir, (w) => w.filter((e) => e.shiftId !== shiftId));
+}
+
+/** At runner start: entries of an earlier runner process are cleared (its boxes died with it). */
+export function clearToolchainWriters(policyDir: string, pid: number = process.pid): void {
+  changeWriters(policyDir, (w) => w.filter((e) => e.pid === pid));
+}
+
+const pidAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
+
+/** The live writers (shift ids) of the DevOps tools now; empty when none. */
+export function liveToolchainWriters(policyDir: string): string[] {
+  return readWriters(policyDir)
+    .filter((w) => pidAlive(w.pid))
+    .map((w) => w.shiftId);
+}
+
+/**
+ * gate-fixes-3 (REVIEW B-1): runs `fn` (a pin of DevOps subroots) under the writer lock, only while no writer lives. The
+ * runner adds its entry under the same lock BEFORE it reads the pinned subroots, so either it reads this pin (and binds the
+ * folder read-only) or this sees its entry and refuses. Returns null when a writer lives.
+ */
+export function withNoToolchainWriter<T>(policyDir: string, fn: () => T): T | null {
+  return withFileLock(`${writerFile(policyDir)}.lock`, () =>
+    readWriters(policyDir).some((w) => pidAlive(w.pid)) ? null : fn(),
+  );
 }

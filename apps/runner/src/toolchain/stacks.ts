@@ -579,6 +579,7 @@ const ANDROID_TOOLS: ToolSpec[] = [
     checks: (_p, platform) => [one(sdkmanagerPath(platform), ['--version'], VER)],
     recipes: () => ({}),
     userInstall: (ctx) => androidCmdlineUserInstall(androidHome(ctx.platform))(ctx),
+    versionPinned: true,
     manual: (_p, platform) =>
       `Install the Android command-line tools into ${join(androidHome(platform), 'cmdline-tools', 'latest')} (https://developer.android.com/studio#command-line-tools-only; curl and unzip are needed)`,
   },
@@ -714,6 +715,7 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
         checks: () => [one('bun', ['--version'], VER)],
         recipes: () => pkg('brew', 'oven-sh/bun/bun'),
         userInstall: bunUserInstall,
+        versionPinned: true,
         manual: () => 'Install Bun from https://bun.sh',
       },
       {
@@ -756,6 +758,7 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
         checks: () => [one('uv', ['--version'], VER)],
         recipes: () => pkg('brew', 'uv'),
         userInstall: uvUserInstall,
+        versionPinned: true,
         manual: () => 'Install uv (https://docs.astral.sh/uv/)',
       },
       {
@@ -839,6 +842,7 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
             pkg('winget', 'Apache.Maven'),
           ),
         userInstall: mavenUserInstall,
+        versionPinned: true,
         manual: () => 'Install Maven (https://maven.apache.org)',
       },
       {
@@ -857,6 +861,7 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
             pkg('winget', 'Gradle.Gradle'),
           ),
         userInstall: gradleUserInstall,
+        versionPinned: true,
         manual: () => 'Install Gradle (https://gradle.org) or add a wrapper to the repository',
       },
       {
@@ -922,3 +927,21 @@ export const TOOLS: Record<string, ToolSpec> = Object.fromEntries(
 );
 
 export type { Detection, Platform, RepoView };
+
+/**
+ * gate-fixes-3: the catalogue id `aom toolchain ensure <tool>` means: an exact id, else the one tool whose name matches
+ * case-insensitively (`bun` -> `node-bun`, `uv` -> `python-uv`); null when none or more than one match.
+ */
+export function catalogueToolId(tool: string, tools: Record<string, ToolSpec> = TOOLS): string | null {
+  const t = tool.trim();
+  if (Object.hasOwn(tools, t)) return t;
+  const lower = t.toLowerCase();
+  const hits = Object.values(tools).filter((s) => s.name.toLowerCase() === lower);
+  return hits.length === 1 ? (hits[0]?.id ?? null) : null;
+}
+
+/** gate-fixes-3 (S2): the names of the catalogued tools `aom toolchain ensure` installs even when a project does not use them. */
+export const versionPinnedToolNames = (tools: Record<string, ToolSpec> = TOOLS): string[] =>
+  Object.values(tools)
+    .filter((s) => s.versionPinned && s.userInstall)
+    .map((s) => s.name);

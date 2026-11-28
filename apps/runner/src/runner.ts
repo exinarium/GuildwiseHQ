@@ -140,7 +140,7 @@ import { AppTokenBroker } from './apps/broker.ts';
 import { AppKeyStore } from './apps/store.ts';
 import { ServerHttp } from './attachments/index.ts';
 import { probeBwrap } from './box/bwrap.ts';
-import { DeployHosts } from './box/egress-allow.ts';
+import { DeployHosts, GITHUB_ASSET_HOSTS } from './box/egress-allow.ts';
 import { checkFolder, underRoot } from './box/folder-check.ts';
 import { recipeSha256 } from './box/recipe-approval.ts';
 import {
@@ -155,14 +155,17 @@ import {
 } from './box/test-services.ts';
 import {
   allGuarded,
+  clearToolchainWriters,
   depsBoxPlan,
   type GuardRoots,
   guardRoots,
   type RootStatus,
   recipeBoxPlan,
   refusedCode,
+  runnerPinnable,
   TreePins,
   toolBoxExecutor,
+  toolchainWriteDir,
 } from './box/tool-box.ts';
 import { PackCredentialStore } from './capabilities/pack-credentials.ts';
 import { PackManager } from './capabilities/packs.ts';
@@ -186,7 +189,7 @@ import {
   sweepInstallCaches,
   type ToolGate,
 } from './devops/dependency-install.ts';
-import { boxRefusal, type DevopsMode } from './devops/requests.ts';
+import { boxRefusal, type DevopsMode, OUTSIDE_HINT } from './devops/requests.ts';
 import { verifyRights } from './devops/rights.ts';
 import { ProviderStore } from './direct/store.ts';
 import { type AppTokenSource, brokerTokenSource } from './external/app-token.ts';
@@ -346,6 +349,7 @@ import {
 import { type Executor, realExecutor } from './toolchain/exec.ts';
 import { toolchainPathDirs, toolchainPathValue } from './toolchain/path-env.ts';
 import { ToolchainRegistry, toolchainHash } from './toolchain/registry.ts';
+import { catalogueToolId, TOOLS } from './toolchain/stacks.ts';
 import type { Platform } from './toolchain/types.ts';
 import {
   accountHome,
@@ -1011,7 +1015,9 @@ export class Runner {
     this.toolchains.pinned = (h) => this.authority.policy().toolchainPins.includes(h);
     // quiet-approvals phase B: a box-writable tool folder goes on a PATH only while it matches the runner's tree pin, and the
     // DevOps tool prefix never does
-    this.treePins = new TreePins(opts.policyDir ?? policyDir(), (m) => this.log.warn(m));
+    this.treePins = new TreePins(opts.policyDir ?? policyDir(), (m) => this.log.warn(m), {
+      toolchainsRoot: opts.toolchainsRoot ?? toolchainsRoot(),
+    });
     // tool-pin-lib: the Guildwise tool folder is checked as a whole, the user's own folders by their bin pins (S1: every
     // guard use takes both); a changed folder raises one trust step (never for a root an env.ensure in flight verified)
     this.treePins.onStatus = (root, st) => this.noteTreeStatus(root, st);
@@ -1059,6 +1065,7 @@ export class Runner {
       testServicesUp: (msg, text) => this.testServicesUp(msg, text),
       deployHosts: () => new DeployHosts(this.paths.root).list(),
       ceilingRoots: () => this.authority.policy().ceiling.mountRoots,
+      toolchainWrite: () => this.toolchainWrite(),
       dockerGate: () => {
         const p = this.authority.policy();
         const upstream = daemonSocket(p, process.getuid?.() ?? null);
@@ -1735,6 +1742,12 @@ export class Runner {
     }
     this.adoptPolicySeal();
     this.adoptTreePins();
+    // gate-fixes-3 (B1): writer entries of an earlier runner process are gone with its boxes
+    try {
+      clearToolchainWriters(this.opts.policyDir ?? policyDir());
+    } catch (err) {
+      this.log.warn(`could not clear the DevOps toolchain writer lock: ${String(err)}`);
+    }
     {
       // tool-pin-lib: a trust step disappears once its folder verifies again (the owner ran it)
       const t = setInterval(() => this.recheckTreeSteps(), this.opts.treeRecheckMs ?? 60_000);
@@ -1959,8 +1972,9 @@ export class Runner {
       // review S1: the first read of the whole folder (seconds per GB) runs asynchronously; meanwhile its tools are pending
       // (off, no Desk step) and env.ensure waits for it. The pin itself then reads only the warmed cache.
       this.adopting = (async () => {
-        for (const r of g.whole) await this.treePins.warm(r);
-        const pinned = this.treePins.pin(g.whole, bins);
+        // gate-fixes-3: a DevOps subroot is never adopted (only the owner's yes pins one)
+        for (const r of runnerPinnable(g)) await this.treePins.warm(r);
+        const pinned = this.treePins.pin(runnerPinnable(g), bins);
         if (pinned.length || bins.length)
           this.log.info(
             `pinned ${pinned.length + bins.length} tool folder(s) as they are (first start of this version)`,
@@ -1999,6 +2013,12 @@ export class Runner {
     }
     if (st.state === 'pending' || this.adopting) return;
     if (runningBefore()?.has(root)) return;
+    // gate-fixes-3: a DevOps subroot raises a trust step only once it has a pin record (an unpinned one waits for
+    // `toolchain approve`, which shows it with its entry)
+    if (this.guard().subroots?.includes(root) && !this.treePins.read().roots[root]) {
+      this.clearTreeStep(root);
+      return;
+    }
     const code = st.state === 'failed' ? refusedCode(root, st.reason ?? '') : st.hash;
     if (!code) return;
     this.raiseTreeStep(
@@ -2650,7 +2670,7 @@ export class Runner {
   /** `env.ensure`: detect the stacks of the project's repositories, verify and install their tools. */
   private async ensureEnv(
     payload: EnvEnsurePayload,
-    opts: { toolsOnly?: boolean; onlyTools?: readonly string[] } = {},
+    opts: { toolsOnly?: boolean; onlyTools?: readonly string[]; extraTools?: readonly string[] } = {},
   ) {
     // R18-S: Docker only where granted locally, whatever the server's access says
     const p = localEnvEnsure(this.authority.policy(), payload);
@@ -2663,7 +2683,7 @@ export class Runner {
 
   private async ensureEnvLocked(
     p: EnvEnsurePayload,
-    opts: { toolsOnly?: boolean; onlyTools?: readonly string[] },
+    opts: { toolsOnly?: boolean; onlyTools?: readonly string[]; extraTools?: readonly string[] },
   ) {
     const g = this.guard();
     const tcRoot = this.opts.toolchainsRoot ?? toolchainsRoot();
@@ -2694,7 +2714,8 @@ export class Runner {
     for (const r of g.whole) {
       const st = this.treePins.status(r).state;
       if (st === 'ok' || st === 'absent') before.push(r);
-      else this.log.warn(`env.ensure ${p.projectId}: ${r} did not verify (${st}): nothing is installed`);
+      else if (!g.subroots?.includes(r))
+        this.log.warn(`env.ensure ${p.projectId}: ${r} did not verify (${st}): nothing is installed`);
     }
     // pre-review 1: a legacy root whose pinned bin folder changed is not mounted and not on the installer PATH either
     for (const r of g.legacy) {
@@ -2733,7 +2754,7 @@ export class Runner {
         before.map((r) => join(r, 'bin')),
         accHome,
       ),
-      guard: { roots: allGuarded(g), before },
+      guard: { roots: allGuarded(g), before, exclude: Object.values(g.exclude ?? {}).flat() },
     });
     try {
       return await ensureEnvironment(p, {
@@ -2749,6 +2770,7 @@ export class Runner {
             : null,
         ...(opts.toolsOnly ? { toolsOnly: true } : {}),
         ...(opts.onlyTools ? { onlyTools: opts.onlyTools } : {}),
+        ...(opts.extraTools ? { extraTools: opts.extraTools } : {}),
         platform: this.platform(),
         findRepo: (n) => this.findRepo(n),
         logFile: join(this.paths.envLogs, `${p.projectId}.log`),
@@ -2766,7 +2788,8 @@ export class Runner {
       // N3: pinned even after a throw; only the roots that verified at the start. S6: when an approved outside run was
       // active at any moment of the run, only roots that still equal their old pin are kept (the rest wait for the yes).
       // Review S2: decided right before the synchronous pin, after the asynchronous warm, so there is no window
-      const roots = before.filter((r) => g.whole.includes(r));
+      // gate-fixes-3: env.ensure never pins a DevOps subroot
+      const roots = before.filter((r) => runnerPinnable(g).includes(r));
       try {
         await this.treePins.pinAsync(roots, () => {
           const outside1 = outsideState();
@@ -3489,11 +3512,40 @@ export class Runner {
     }
     this.client.send('shift.accepted', { shiftId: msg.shiftId });
     if (requestId) this.blocked.delete(requestId);
+    // gate-fixes-3 (S1): a local yes on a DevOps request can run it outside the box (runApproved): say what that adds
+    const grant = requestId ? this.outsideGrantLines() : '';
     this.approvals.hold({
-      decision: d,
+      decision: grant ? { ...d, detail: `${d.detail}\n${grant}` } : d,
       replay: { type: 'shift.start', body: msg },
       ...(requestId ? { requestKey: `devops:${requestId}` } : {}),
     });
+  }
+
+  /**
+   * gate-fixes-3 (c): what an approved outside run may write in the Guildwise tool folder: new `<tool>/<version>` folders
+   * in `<tcRoot>/devops`, only with the local "download tools" tick and setup done, Linux only; the pinned DevOps subroots
+   * stay read-only. Null: no toolchain write.
+   */
+  private toolchainWrite(): import('./adapters/types.ts').ToolchainWrite | null {
+    if (this.platform() !== 'linux') return null;
+    const root = this.opts.toolchainsRoot ?? toolchainsRoot();
+    const dir = toolchainWriteDir(this.authority.policy(), root);
+    return dir ? { root, dir, pinned: this.treePins.pinnedSubroots() } : null;
+  }
+
+  /**
+   * gate-fixes-3 (S1): the runner's own lines about what an approved outside run gets beyond what the helper wrote (never
+   * built from its words): GitHub's download hosts and the DevOps tools folder, both only with the "download tools" tick.
+   */
+  private outsideGrantLines(): string {
+    const w = this.toolchainWrite();
+    if (!w) return '';
+    return [
+      '',
+      'Outside the box it may also (set by this computer, not by the helper):',
+      `  - reach GitHub's download hosts: ${GITHUB_ASSET_HOSTS.join(', ')}`,
+      `  - write new tools in ${w.dir}/<tool>/<version>; they wait for \`toolchain approve\``,
+    ].join('\n');
   }
 
   /**
@@ -3687,7 +3739,20 @@ export class Runner {
     const urls = new Set<string>();
     if (msg.devops?.card?.remoteUrlNormalized) urls.add(msg.devops.card.remoteUrlNormalized);
     for (const r of msg.postAs?.repos ?? []) if (r.remoteUrlNormalized) urls.add(r.remoteUrlNormalized);
-    if (urls.size === 0) return { ok: false, error: 'this request names no project repository to prepare' };
+    // gate-fixes-3 (S2): a catalogued tool whose version is fixed in code is installed even when the project does not
+    // use it (no repository needed); any other tool only when the project needs it
+    const id = catalogueToolId(tool);
+    const spec = id ? TOOLS[id] : undefined;
+    const pinnedTool = !!(id && spec?.versionPinned && spec.userInstall);
+    if (urls.size === 0 && !pinnedTool)
+      return {
+        ok: false,
+        error: id
+          ? `${spec?.name ?? tool} is not needed by this project: use \`${OUTSIDE_HINT}\``
+          : 'this request names no project repository to prepare',
+      };
+    // the payload needs one repository: a tools-only run of a pinned tool without one names none that exists
+    if (urls.size === 0) urls.add('none.invalid/no-repository');
     const repos = [...urls].map((u, i) => ({
       repoId: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
       name: u.split('/').pop() ?? u,
@@ -3702,10 +3767,20 @@ export class Runner {
           repos,
           access: { allowInstall: true, allowDocker: false, sudo: false, allowedPaths: [] },
         }),
-        { toolsOnly: true, onlyTools: [tool] },
+        {
+          toolsOnly: true,
+          onlyTools: [id ?? tool],
+          ...(pinnedTool && id ? { extraTools: [id] } : {}),
+        },
       );
       const t = report.tools.find((x) => x.stack !== 'repository');
-      if (!t) return { ok: false, error: `the project needs no tool "${tool}" (${report.summary})` };
+      if (!t)
+        return {
+          ok: false,
+          error: id
+            ? `${spec?.name ?? tool} is not needed by this project: use \`${OUTSIDE_HINT}\``
+            : `the project needs no tool "${tool}" (${report.summary})`,
+        };
       if (t.status === 'ok' || t.status === 'installed')
         return { ok: true, result: { message: `${t.tool}: ${t.status}${t.version ? ` ${t.version}` : ''}` } };
       return {

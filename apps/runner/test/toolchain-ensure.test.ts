@@ -564,3 +564,25 @@ describe('quiet-approvals [D3]: a tools-only run (the local toolInstall tick)', 
     expect(r.tools.map((t) => t.status)).toEqual(['installed']);
   });
 });
+
+describe('gate-fixes-3 (S2): `extraTools` adds a catalogued tool no repository uses', () => {
+  it('Bun with no lockfile is installed when named in extraTools; without it nothing is needed', async () => {
+    const { m, installer, deps, payload } = setup({ 'README.md': '# app' });
+    m.answers.set('bun --version', { exitCode: 127, stdout: '', stderr: 'not found' });
+    installer.effects.set('node-bun', { answers: { 'bun --version': ok('1.4.5') } });
+    const none = await ensureEnvironment(payload(access()), {
+      ...deps,
+      toolsOnly: true,
+      onlyTools: ['node-bun'],
+    });
+    expect(none.tools).toEqual([]);
+    const r = await ensureEnvironment(payload(access()), {
+      ...deps,
+      toolsOnly: true,
+      onlyTools: ['node-bun'],
+      extraTools: ['node-bun'],
+    });
+    expect(installer.calls).toEqual(['node-bun']);
+    expect(r.tools.map((t) => [t.tool, t.status])).toEqual([['Bun', 'installed']]);
+  });
+});

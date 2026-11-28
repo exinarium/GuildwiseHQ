@@ -135,7 +135,13 @@ import {
   resolveBrokerPush,
   withAppPushRefusal,
 } from '../devops/devops-git.ts';
-import { alwaysPathRefusal, classifyCommand, redactCommand } from '../devops/guard.ts';
+import {
+  alwaysPathRefusal,
+  classifyCommand,
+  redactCommand,
+  toolchainFixedPath,
+  toolchainFixedReason,
+} from '../devops/guard.ts';
 import { type HygieneDeps, runHygiene } from '../devops/hygiene.ts';
 import { installScriptsOffFor, withInstallScriptsOff } from '../devops/install-env.ts';
 import {
@@ -390,6 +396,8 @@ export interface SupervisorDeps {
   deployHosts?: () => string[];
   /** Rework 1 (REVIEW S2): the local ceiling's folder roots. */
   ceilingRoots?: () => string[];
+  /** gate-fixes-3 (c): the outer box's toolchain write (the local "download tools" tick), or null. */
+  toolchainWrite?: () => import('../adapters/types.ts').ToolchainWrite | null;
   /** quiet-approvals S6: `aom test-services up <recipe>` of an outer-box DevOps shift (the runner runs Docker itself). */
   testServicesUp?: (msg: ShiftStartMsg, recipeText: string) => Promise<IpcRpcResponse>;
   /** The capability registry (`aom skill show|list`, and the index in the instructions of an agent whose role lists skills). */
@@ -1918,7 +1926,7 @@ export class ShiftSupervisor {
     // quiet-approvals R1: the box's own rules and the way out, from the runner (never from the server's text)
     if (s.devopsMode === 'box') texts.instructions += `\n${DEVOPS_BOX_NOTE}\n`;
     if (s.devopsMode === 'outside' && s.docker)
-      texts.instructions += `\n${devopsOutsideNote(s.docker.state === 'gate' ? 'yes' : s.docker.state === 'switch' ? 'switch' : s.docker.reason)}\n`;
+      texts.instructions += `\n${devopsOutsideNote(s.docker.state === 'gate' ? 'yes' : s.docker.state === 'switch' ? 'switch' : s.docker.reason, this.deps.toolchainWrite?.()?.dir)}\n`;
     if (s.scratchClone && s.conflictFf)
       texts.instructions += `\n${scratchCloneNote(s.scratchClone.dir, s.conflictFf.target.branch)}\n`;
     const tc = this.deps.toolchains?.resolve();
@@ -2116,6 +2124,7 @@ export class ShiftSupervisor {
           ? {
               outerEgress: outerEgress(await this.remotesOf(boxReadDirs), this.deps.deployHosts?.() ?? []),
               ceilingRoots: this.deps.ceilingRoots?.() ?? [],
+              toolchainWrite: this.deps.toolchainWrite?.() ?? null,
             }
           : {}),
         // the outer box reaches Docker only through the gatekeeper, and only when the (narrowed) access allows it
@@ -4334,6 +4343,52 @@ export class ShiftSupervisor {
     return d;
   }
 
+  /**
+   * gate-fixes-3: why a `devops_approval` report must not reach the Desk, or null.
+   * - R2-1: in a box with the runner's guard, a named command the guard refuses with a rule no approval opens
+   *   (`toolchain_fixed`, `docker_unavailable`): its own message goes back to the helper.
+   * - AC4 (N1): EVERY named command is already approved (the boxed guard's `approvedCommands`, else the request's
+   *   approval) and the runner's guard refuses none of them (a switch could still open one): approving again changes
+   *   nothing, so the helper is told to run it or report the error.
+   */
+  private pointlessApproval(s: ActiveShift, report: ShiftReport): string | null {
+    if (report.kind !== 'outcome' || (report as { outcomeId?: string }).outcomeId !== 'devops_approval')
+      return null;
+    const data = (report as { data?: { action?: unknown; commands?: unknown } }).data;
+    if (/^\s*question:/i.test(String(data?.action ?? ''))) return null;
+    const commands = Array.isArray(data?.commands) ? data.commands.map(String).filter((c) => c.trim()) : [];
+    if (!commands.length) return null;
+    const cfg = s.boxed ? s.session?.guardConfig : undefined;
+    const cwd =
+      s.sandbox && s.msg.devops ? devopsRequestDir(s.sandbox.root, s.msg.devops.requestId) : undefined;
+    // a command the runner's guard still refuses (a switch may open it) is a real ask even when approved before
+    let stillRefused = false;
+    if (cfg && cwd)
+      for (const c of commands) {
+        let v: ReturnType<typeof classifyCommand>;
+        try {
+          v = classifyCommand(c, cfg, cwd, {});
+        } catch {
+          stillRefused = true;
+          continue;
+        }
+        if (v.decision === 'refused' && (v.rule === 'toolchain_fixed' || v.rule === 'docker_unavailable'))
+          return v.reason ?? `\`${c}\` cannot be approved here (${v.rule})`;
+        if (v.decision === 'refused') stillRefused = true;
+        // REVIEW S-2: a write into the tool folder the guard does not parse (`curl -o`, `tar -C`, `unzip -d`) fails in the
+        // box all the same, and no click opens it
+        const fixed = toolchainFixedPath(c, cfg);
+        if (fixed) return toolchainFixedReason(fixed, cfg.toolchainWrite?.dirs[0]);
+      }
+    const norm = (c: string): string => c.trim().replace(/\s+/g, ' ');
+    const approved = new Set(
+      (s.boxed && cfg ? cfg.approvedCommands : (s.msg.devops?.approval?.commands ?? [])).map(norm),
+    );
+    if (!stillRefused && approved.size && commands.every((c) => approved.has(norm(c))))
+      return 'already approved: run it; if it failed, report the error (an approval cannot change why it failed)';
+    return null;
+  }
+
   /** The last card worktree check of a DevOps shift (its end, whichever way it ends). */
   private async endCardFence(s: ActiveShift): Promise<void> {
     if (!s.cardFence || s.cardFence.ended) return;
@@ -4370,6 +4425,9 @@ export class ShiftSupervisor {
     // a session that asked to leave the box reports nothing more (the owner is asked first)
     if (s.devopsOutside)
       return rejected('This session asked to work outside the box and is ending: stop now.');
+    // gate-fixes-3 (AC4, R2-1): an approval no Desk click can answer never leaves the runner
+    const pointless = this.pointlessApproval(s, report);
+    if (pointless) return rejected(pointless);
     // The DevOps engineer never changes a card worktree: refused and reverted before the report goes anywhere (finding 2)
     if (terminal && s.cardFence) {
       const fenced = await this.checkCardFence(s);

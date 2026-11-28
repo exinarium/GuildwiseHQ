@@ -199,6 +199,10 @@ export function registerCeoWakes(ctx: Ctx): () => void {
       case 'DeskItemCreated': {
         const sub = p.subkind ?? '';
         if (NO_WAKE_SUBKINDS.has(sub) || p.kind === 'rating') return;
+        // gate-fixes-3 (S5): a DevOps approval is the owner's alone (the CEO cannot approve DevOps actions); a wake only
+        // made the CEO relay it as an "Urgent" notice beside the item. The item is pinned, blocking and pushed already. A
+        // DevOps question still wakes the CEO.
+        if (p.kind === 'approval' && sub === 'devops') return;
         if (p.askedBy?.agentId === ceo.agentId) return;
         const auth = sub === 'claude_auth_expired' || sub === 'mcp_needs_sign_in';
         // The same subject (a card and what is asked about it, or an alert of one title) is handled once until it changes.

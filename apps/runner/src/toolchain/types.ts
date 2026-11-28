@@ -76,6 +76,11 @@ export interface ToolSpec {
   recipes: (p: Params, platform: Platform) => Partial<Record<Manager, Step[]>>;
   /** The user-space install into the toolchains root (`user-install.ts`, checksum verified). */
   userInstall?: UserInstallResolver;
+  /**
+   * gate-fixes-3 (S2): the `userInstall` version is fixed in code (`pins.ts`), never the vendor's latest. Only such a tool
+   * may be installed by `aom toolchain ensure` although the project does not use it.
+   */
+  versionPinned?: boolean;
   /** Tools (by id) that must be fine first; otherwise this one is skipped. */
   after?: string[];
   /** Needs the manager to have allowed Docker (`allowDocker`) in addition to installing. */

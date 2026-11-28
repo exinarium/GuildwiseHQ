@@ -128,6 +128,14 @@ export const DeskItemDtoSchema = z.object({
       devopsSwitch: z.string().max(40).optional(),
       switchLabel: z.string().max(80).optional(),
       workstationName: z.string().max(200).optional(),
+      /**
+       * gate-fixes-3 (d): a DevOps switch item's "Allow once / Always allow" data (the request is `requestId`): the exact
+       * command the runner's guard refused, which buttons are offered, and the folder "Always allow" adds.
+       */
+      exactCommand: z.string().max(8000).optional(),
+      allowOnce: z.boolean().optional(),
+      allowAlways: z.boolean().optional(),
+      alwaysPath: z.string().max(4000).optional(),
       /** `gate` for an escalated gate (the desk hides "Continue the journey"). */
       waitKind: z.string().optional(),
       /** Runner-offline items (`form_offline_link`, `form_offline_hold_expired`): strings only, never an email address. */

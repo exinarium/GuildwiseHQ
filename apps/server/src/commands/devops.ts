@@ -907,6 +907,19 @@ export async function resolveDevOpsApprovalIn(
 // ------------------------------------------------------------------------- reports of a DevOps shift
 
 /** Terminal and non-terminal reports of a `devops` shift (`aom devops-done`, `aom devops-approval`, `aom comment`). */
+/**
+ * gate-fixes-3 (AC4, N1): every reported command equals (whitespace-normalized) one the request's resolved approval
+ * approved. False for an empty list or no approved approval.
+ */
+export function repeatsApprovedCommands(approval: unknown, commands: readonly string[]): boolean {
+  const ap = approval as { resolution?: unknown; commands?: unknown } | null | undefined;
+  if (!ap || ap.resolution !== 'approved' || !Array.isArray(ap.commands)) return false;
+  const norm = (c: string): string => c.trim().replace(/\s+/g, ' ');
+  const approved = new Set(ap.commands.map((c) => norm(String(c))));
+  const named = commands.map(norm).filter(Boolean);
+  return named.length > 0 && named.every((c) => approved.has(c));
+}
+
 export async function applyDevopsReport(
   ctx: Ctx,
   tx: Tx,
@@ -1019,6 +1032,15 @@ export async function applyDevopsReport(
       );
       return { accepted: true };
     }
+    // gate-fixes-3 (AC4): a repeat of commands that are ALL approved already for this request changes nothing (the yes was
+    // given; approving again cannot change why a command failed): no Desk item, no event. Covers older runners. A switch
+    // the runner's own guard confirmed (`blockedBy`) still asks: turning the switch on is a real answer.
+    if (!data.data.blockedBy && repeatsApprovedCommands(req.approval, data.data.commands))
+      return {
+        accepted: false,
+        error:
+          'already approved: run it; if it failed, report the error (an approval cannot change why it failed)',
+      };
     // A merge-conflict resolution in the card's own worktree of a project that does not require approval for merges.
     if (req.card_id && isCardMergeConflictApproval(data.data)) {
       const proj = await requestProject(tx, req as never);

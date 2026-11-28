@@ -123,7 +123,12 @@ export interface UserInstallDeps {
    * tool-pin-lib B1: the guarded tool folders and the ones that verified at the start of this run; a step naming a path
    * under a guarded folder that did not verify is refused. Absent: no guarded folders (tests of the installer alone).
    */
-  guard?: { roots: readonly string[]; before: readonly string[] };
+  guard?: {
+    roots: readonly string[];
+    before: readonly string[];
+    /** gate-fixes-3: folders no step may name at all (`<tcRoot>/devops`: the DevOps tools, never written by a recipe). */
+    exclude?: readonly string[];
+  };
 }
 
 /**
@@ -168,6 +173,8 @@ export function stepRefusal(
     .flatMap((a) => [a, ...(a.includes('=') ? [a.slice(a.indexOf('=') + 1)] : [])])
     .filter((a) => isAbsolute(a));
   for (const p of paths) {
+    const hole = guard.exclude?.find((e) => isUnder(p, e));
+    if (hole) return `refused: ${p} lies in ${hole}, the DevOps tools, which an install never names`;
     const root = guard.roots.find((r) => isUnder(p, r));
     if (root && !guard.before.some((b) => resolve(b) === resolve(root)))
       return `refused: ${p} lies in the tool folder ${root}, which changed outside Guildwise's own installs`;

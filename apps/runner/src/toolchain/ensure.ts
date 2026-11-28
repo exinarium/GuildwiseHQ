@@ -101,6 +101,11 @@ export interface EnsureDeps {
   /** quiet-approvals [B1]: only these tool ids (`aom toolchain ensure <tool>` in the box). */
   onlyTools?: readonly string[];
   /**
+   * gate-fixes-3 (S2): tool ids needed although no repository uses them (`aom toolchain ensure <tool>` of a catalogued tool
+   * whose version is fixed in code). Still filtered by `onlyTools`.
+   */
+  extraTools?: readonly string[];
+  /**
    * tool-pin-lib (B1): the executor of the project's own dependency steps (the deps box: every tool folder read-only, the
    * clone writable, a home of that repository's own). Default: `exec`.
    */
@@ -284,6 +289,12 @@ export async function ensureEnvironment(p: EnvEnsurePayload, deps: EnsureDeps): 
         else seen.params = mergeParams(seen.params, d.params);
       }
     }
+  }
+
+  for (const toolId of deps.extraTools ?? []) {
+    const spec = tables.tools[toolId];
+    if (!spec || need.has(toolId) || (deps.onlyTools && !deps.onlyTools.includes(toolId))) continue;
+    need.set(toolId, { spec, params: {}, stack: 'extra' });
   }
 
   // 2. Verify, then install what is missing.

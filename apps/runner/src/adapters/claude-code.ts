@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -13,15 +14,15 @@ import {
 } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { CARD_ATTACHMENTS_DIR, type ClaudeAccountInfo, MAIN_ACCOUNT } from '@aom/shared';
 import { execa } from 'execa';
 import type { z } from 'zod';
 import { probeBwrap } from '../box/bwrap.ts';
 import { type BoxLevel, boxConfigDir, resetBoxConfigDir, writeBoxSettings } from '../box/config-dir.ts';
 import { type DockerProxy, startDockerProxy } from '../box/docker-proxy.ts';
-import { sshThroughProxy } from '../box/egress-allow.ts';
-import { openCheckedFolder, openNamedFolder } from '../box/folder-check.ts';
+import { impliedHosts, sshThroughProxy } from '../box/egress-allow.ts';
+import { type OpenedFolder, openCheckedFolder, openNamedFolder } from '../box/folder-check.ts';
 import {
   type BoxPlanInput,
   boundDirsOf,
@@ -36,6 +37,7 @@ import { launchMacBox, macBoxMissing } from '../box/macos-launch.ts';
 import { MAC_SYSTEM_READ } from '../box/macos-profile.ts';
 import type { ModelCapture } from '../box/model-filter.ts';
 import { ModelLedger } from '../box/model-ledger.ts';
+import { addToolchainWriter, removeToolchainWriter, TreePins } from '../box/tool-box.ts';
 import { type GrantedSkill, materializeSkills, skillsDirOf } from '../capabilities/materialize.ts';
 import type { ClaudeRuntimeConfigSchema } from '../config.ts';
 import { alwaysPathRefusal, deleteRootsFor, type GuardConfig } from '../devops/guard.ts';
@@ -46,9 +48,14 @@ import { discoverPluginMcpServers, mcpConfigFor, type PluginMcpServer } from '..
 import type { RunnerPaths } from '../paths.ts';
 import { policyDir as localPolicyDir } from '../policy/store.ts';
 import { systemRoBinds } from '../sandbox/harness-sandbox.ts';
-import { toolchainsRoot } from '../toolchain/user-install.ts';
+import { accountHome, toolchainsRoot } from '../toolchain/user-install.ts';
 import { lookupBin } from './bin-lookup.ts';
-import { BRIDGE_PORT, launchInHarnessSandbox, probeHarnessSandbox } from './harness-session.ts';
+import {
+  BRIDGE_PORT,
+  launchInHarnessSandbox,
+  probeHarnessSandbox,
+  SHELL_DOMAINS,
+} from './harness-session.ts';
 
 /** The card worktrees (`worktrees/<project>/<card>`): the roots a container may bind as a whole. */
 export function cardWorktreeRoots(worktrees: string): string[] {
@@ -146,6 +153,7 @@ import type {
   RuntimeCapabilities,
   RuntimeSession,
   ShiftStartInput,
+  ToolchainWrite,
 } from './types.ts';
 
 type ClaudeConfig = z.infer<typeof ClaudeRuntimeConfigSchema>;
@@ -609,6 +617,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       proxyTest?: { allowPrivate: true; resolve?: (host: string) => Promise<string> };
       /** Test hook (B6): what each boxed model request used, refused or stripped; it never changes the verdict. */
       modelCapture?: ModelCapture;
+      /** Test hook (gate-fixes-3 B-1): runs right after the outer box's writer entry is added, before the pins are read. */
+      afterToolchainWriter?: () => void;
     } = {},
   ) {
     this.registry =
@@ -810,6 +820,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
      * box (the backend-model fallback), which never gets Docker. Absent: as before.
      */
     dockerRoute?: { kind: 'outer'; docker: boolean } | { kind: 'none' },
+    /** gate-fixes-3 (c): the toolchain write the outer box really got (its fds opened), else absent. */
+    toolchainWrite?: ToolchainWrite | null,
   ): { command: string; file: string; cfg: GuardConfig } | undefined {
     if (!guard || !this.paths) return undefined;
     // the guard's Docker bit can only lower the access: it is on only where a socket will be there
@@ -827,7 +839,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       tmpdir(),
       '/tmp',
       '/var/tmp',
-      ...(guard.access?.allowInstall ? detectionRoots(this.realHome()) : []),
+      // gate-fixes-3 (N3): the outer box never binds the detection roots writable, so its guard does not offer them
+      ...(guard.access?.allowInstall && dockerRoute?.kind !== 'outer' ? detectionRoots(this.realHome()) : []),
+      ...(toolchainWrite ? this.spellings(toolchainWrite.dir) : []),
     ];
     const cfg: GuardConfig = {
       sessionRef: guard.sessionRef,
@@ -849,6 +863,15 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       ...(access ? { access, writeRoots } : {}),
       ...(dockerRoute?.kind === 'outer' ? { dockerSwitchOnly: true } : {}),
       ...(guard.dockerUnavailable ? { dockerUnavailable: guard.dockerUnavailable } : {}),
+      ...(toolchainWrite
+        ? {
+            toolchainWrite: {
+              roots: this.spellings(toolchainWrite.root),
+              dirs: this.spellings(toolchainWrite.dir),
+              pinned: toolchainWrite.pinned.flatMap((p) => this.spellings(p)),
+            },
+          }
+        : {}),
       secretRoots: ['secrets', 'keys', 'config.json'].map((d) => join(this.paths?.root ?? '', d)),
       auditFile: join(this.paths.logs, 'devops-audit.jsonl'),
     };
@@ -858,6 +881,97 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     writeFileSync(file, `${JSON.stringify(cfg, null, 2)}\n`, { mode: 0o600 });
     const quote = (w: string) => `'${w.replace(/'/g, `'\\''`)}'`;
     return { command: `${[...selfCommand('aom'), 'devops-guard'].map(quote).join(' ')}`, file, cfg };
+  }
+
+  /**
+   * gate-fixes-3: every spelling of a path under the account home the guard may see: as given (passwd home), its real path,
+   * and under the home the guard resolves `~` with.
+   */
+  private spellings(p: string): string[] {
+    const out = new Set([resolve(p)]);
+    try {
+      out.add(realpathSync(p));
+    } catch {
+      /* not there yet */
+    }
+    const rel = relative(accountHome(), p);
+    if (rel && !rel.startsWith('..') && !isAbsolute(rel)) out.add(join(this.realHome(), rel));
+    return [...out];
+  }
+
+  /**
+   * gate-fixes-3 (c, B1, S4, S6): the outer box's toolchain write, Linux only. Makes `<tcRoot>` (recursively) and
+   * `<tcRoot>/devops` (never recursively), checks both are real folders owned by this account and not group- or
+   * other-writable, and opens by checked fd, in bind order:
+   * 1. `devops` read-write;
+   * 2. each `devops/<tool>` that holds a pinned version, read-write on itself (a mount point: it cannot be renamed);
+   * 3. each pinned `devops/<tool>/<version>` read-only (a mount point: it cannot be renamed, deleted or written).
+   * Any refusal drops the whole grant (fail closed) and returns null.
+   */
+  private openToolchainWrite(
+    tw: ToolchainWrite | null | undefined,
+    nl: { home: string; policyRoot: string; worktrees: string; runnerRoot: string },
+  ): { write: ToolchainWrite; folders: Array<OpenedFolder & { writable: boolean }> } | null {
+    if (!tw || (this.host.platform ?? process.platform) !== 'linux') return null;
+    const folders: Array<OpenedFolder & { writable: boolean }> = [];
+    const fail = (why: string): null => {
+      for (const f of folders.splice(0)) f.close();
+      process.stderr.write(`WARN DevOps box: no write in the tool folder: ${why}\n`);
+      return null;
+    };
+    const uid = process.geteuid?.();
+    const checkDir = (p: string): string | null => {
+      try {
+        const st = lstatSync(p);
+        if (!st.isDirectory()) return `${p} is not a real folder`;
+        if (uid !== undefined && st.uid !== uid) return `${p} belongs to another account`;
+        if ((st.mode & 0o022) !== 0) return `${p} is writable by others`;
+        return null;
+      } catch {
+        return `${p} cannot be checked`;
+      }
+    };
+    try {
+      mkdirSync(tw.root, { recursive: true, mode: 0o700 });
+      try {
+        mkdirSync(tw.dir, { mode: 0o700 });
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      }
+    } catch (err) {
+      return fail(String(err));
+    }
+    const why = checkDir(tw.root) ?? checkDir(tw.dir);
+    if (why) return fail(why);
+    let realRoot: string;
+    try {
+      realRoot = realpathSync(tw.root);
+    } catch {
+      return fail(`${tw.root} cannot be resolved`);
+    }
+    const open = (p: string, writable: boolean): string | null => {
+      const want = join(realRoot, relative(tw.root, p));
+      const bad = checkDir(p);
+      if (bad) return bad;
+      const r = openCheckedFolder(p, [realRoot], nl);
+      if (!r.ok) return r.reason;
+      if (r.folder.real !== want) {
+        r.folder.close();
+        return `${p} is really ${r.folder.real}`;
+      }
+      folders.push({ ...r.folder, writable });
+      return null;
+    };
+    const pinned = [...new Set(tw.pinned.map((p) => resolve(p)))].filter(
+      (p) => dirname(dirname(p)) === resolve(tw.dir),
+    );
+    const tools = [...new Set(pinned.map((p) => dirname(p)))];
+    const firstErr =
+      open(tw.dir, true) ??
+      tools.reduce<string | null>((e, t) => e ?? (existsSync(t) ? open(t, true) : null), null) ??
+      pinned.reduce<string | null>((e, p) => e ?? (existsSync(p) ? open(p, false) : null), null);
+    if (firstErr) return fail(firstErr);
+    return { write: { ...tw, pinned }, folders };
   }
 
   /** A start that failed after the guard file was written leaves nothing behind. */
@@ -1264,24 +1378,75 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     rmSync(guardDir, { recursive: true, force: true });
     const launchDir = `${configDir}.launch`;
     rmSync(launchDir, { recursive: true, force: true });
-    const guard =
-      level === 'outer'
-        ? this.devopsGuard(guardDir, input.devopsGuard, 'shift', input.sandbox, {
-            kind: 'outer',
-            docker: !!input.dockerGate,
-          })
-        : undefined;
-    if (level === 'outer' && !guard)
-      throw new Error('the DevOps guard could not be attached to the outer box');
-    if (guard) input = { ...input, env: { ...input.env, AOM_DEVOPS_GUARD: guard.file } };
-    const policyCtx = this.policy(input, input.cwd, false, guard?.command);
+    // REVIEW S2 (R5-B1 rule 4): a Desk folder grant inside the ceiling is bound by the fd the runner checked
+    const nl = {
+      home: this.realHome(),
+      policyRoot: localPolicyDir(),
+      worktrees: join(root, 'worktrees'),
+      runnerRoot: root,
+    };
+    // gate-fixes-3 (B1, REVIEW B-1): the writer entry FIRST, then the pinned subroots read fresh. Under the writer lock,
+    // `toolchain approve` either sees this entry and refuses, or pinned before it and that pin is read here (read-only).
+    let writerAdded = false;
+    const dropWriter = () => {
+      if (!writerAdded) return;
+      writerAdded = false;
+      try {
+        removeToolchainWriter(localPolicyDir(), input.shiftId);
+      } catch {
+        /* cleared at the next runner start */
+      }
+    };
+    let tcw: ReturnType<ClaudeCodeAdapter['openToolchainWrite']> = null;
+    if (level === 'outer' && input.toolchainWrite && (this.host.platform ?? process.platform) === 'linux') {
+      try {
+        addToolchainWriter(localPolicyDir(), input.shiftId);
+        writerAdded = true;
+        this.host.afterToolchainWriter?.();
+        const pinned = new TreePins(localPolicyDir(), () => {}, {
+          toolchainsRoot: input.toolchainWrite.root,
+        }).pinnedSubroots();
+        tcw = this.openToolchainWrite({ ...input.toolchainWrite, pinned }, nl);
+      } catch (err) {
+        process.stderr.write(`WARN DevOps box: no write in the tool folder: ${String(err)}\n`);
+        tcw = null;
+      }
+      if (!tcw) dropWriter();
+    }
+    const closeTc = () => {
+      for (const f of tcw?.folders.splice(0) ?? []) f.close();
+    };
+    let guard: ReturnType<ClaudeCodeAdapter['devopsGuard']>;
+    let policyCtx: ReturnType<ClaudeCodeAdapter['policy']>;
+    try {
+      guard =
+        level === 'outer'
+          ? this.devopsGuard(
+              guardDir,
+              input.devopsGuard,
+              'shift',
+              input.sandbox,
+              { kind: 'outer', docker: !!input.dockerGate },
+              tcw?.write ?? null,
+            )
+          : undefined;
+      if (level === 'outer' && !guard)
+        throw new Error('the DevOps guard could not be attached to the outer box');
+      if (guard) input = { ...input, env: { ...input.env, AOM_DEVOPS_GUARD: guard.file } };
+      policyCtx = this.policy(input, input.cwd, false, guard?.command);
+    } catch (err) {
+      closeTc();
+      dropWriter();
+      throw err;
+    }
     // R4-B2: Docker only through the gatekeeper; its socket sits in a runner-owned folder, read-only in the box.
     // devops-box-access: Docker and the Desk folders start before the settings (the plan binds them); from here until the
     // spawn, a throw closes both.
     let docker: { proxy: DockerProxy; dir: string; socket: string } | undefined;
-    const opened: Array<{ fd: number; real: string; close(): void }> = [];
+    const opened: Array<{ fd: number; real: string; close(): void; writable?: boolean }> = [];
     const closeFds = () => {
       for (const f of opened.splice(0)) f.close();
+      closeTc();
     };
     const closeDocker = async () => {
       if (!docker) return;
@@ -1316,19 +1481,15 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           throw err;
         }
       }
-      // REVIEW S2 (R5-B1 rule 4): a Desk folder grant inside the ceiling is bound by the fd the runner checked
-      const nl = {
-        home: this.realHome(),
-        policyRoot: localPolicyDir(),
-        worktrees: join(root, 'worktrees'),
-        runnerRoot: root,
-      };
       if (level === 'outer')
         for (const p of input.devopsGuard?.access?.allowedPaths ?? []) {
           const r = openCheckedFolder(p, input.ceilingRoots ?? [], nl);
           if (r.ok) opened.push(r.folder);
           else process.stderr.write(`WARN DevOps box: ${r.reason}\n`);
         }
+      // gate-fixes-3 (R2-3, S6): the toolchain fds come after every Desk folder grant, so a later grant covering the tool
+      // folder can never re-open a pinned version read-write (bubblewrap applies the fd binds in this order)
+      if (tcw) opened.push(...tcw.folders.splice(0));
       const baseSettings =
         level === 'inner'
           ? buildDevopsBoxSettings(input.agent.permissions, policyCtx, { ...input.sandbox, configDir })
@@ -1355,7 +1516,13 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         level,
         requestDir: input.cwd,
         ...(opened.length
-          ? { fdBinds: opened.map((f, i) => ({ fdIndex: 3 + i, real: f.real, writable: true })) }
+          ? {
+              fdBinds: opened.map((f, i) => ({
+                fdIndex: 3 + i,
+                real: f.real,
+                writable: f.writable !== false,
+              })),
+            }
           : {}),
         configDir,
         tmp,
@@ -1415,6 +1582,15 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         extraHosts: [
           ...this.cfg.extraAllowedDomains,
           ...(level === 'outer' ? (input.outerEgress?.hosts ?? []) : []),
+          // gate-fixes-3 (b, S1): GitHub's download hosts, outer box only, and only when the toolchain write grant was
+          // really opened (the "download tools" tick and the folder checks): a dropped grant gets no hosts either
+          ...(level === 'outer' && tcw
+            ? impliedHosts([
+                ...SHELL_DOMAINS,
+                ...this.cfg.extraAllowedDomains,
+                ...(input.outerEgress?.hosts ?? []),
+              ])
+            : []),
         ],
         // Rework 2 (REVIEW B4): names only at public addresses (resolved at every connect); private only for literals
         ...(level === 'outer' && input.outerEgress?.endpoints.length
@@ -1432,7 +1608,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       const l = launch;
       const dk = docker;
       // gate-fixes-2 S13: a folder the box binds writable that lies in a git clone makes this session a writer there
-      const releaseWriters = await holdWriters(opened.map((f) => f.real));
+      const releaseWriters = await holdWriters(opened.filter((f) => f.writable !== false).map((f) => f.real));
       const session = spawnSession({
         bin: l.command.bin,
         args: l.command.args,
@@ -1459,6 +1635,13 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           // the per-session bearer dies with the proxy (revoked at the session's end)
           await l.cleanup();
           await releaseWriters();
+          if (tcw) {
+            try {
+              removeToolchainWriter(localPolicyDir(), input.shiftId);
+            } catch {
+              /* cleared at the next runner start */
+            }
+          }
           if (dk) {
             await dk.proxy.close().catch(() => undefined);
             rmSync(dk.dir, { recursive: true, force: true });
@@ -1473,6 +1656,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     } catch (err) {
       await launch?.cleanup();
       await closeDocker();
+      dropWriter();
       throw err;
     } finally {
       // the child holds its own copies of the fds after spawn

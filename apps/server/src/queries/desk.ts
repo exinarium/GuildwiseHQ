@@ -220,6 +220,18 @@ export function toDeskDto(
                   ...(typeof r.data.workstationName === 'string'
                     ? { workstationName: r.data.workstationName }
                     : {}),
+                  // gate-fixes-3 (d): the data the "Allow once / Always allow" buttons need (the Desk showed only Approve)
+                  ...(typeof r.data.requestId === 'string' ? { requestId: r.data.requestId } : {}),
+                  // REVIEW S-1: never a cut command next to "Allow once" (it approves the whole stored one): a longer one
+                  // is left out, and the item keeps the plain Approve and the full text in its body
+                  ...(typeof r.data.exactCommand === 'string' && r.data.exactCommand.length <= 8000
+                    ? { exactCommand: r.data.exactCommand }
+                    : {}),
+                  ...(typeof r.data.allowOnce === 'boolean' ? { allowOnce: r.data.allowOnce } : {}),
+                  ...(typeof r.data.allowAlways === 'boolean' ? { allowAlways: r.data.allowAlways } : {}),
+                  ...(typeof r.data.alwaysPath === 'string'
+                    ? { alwaysPath: r.data.alwaysPath.slice(0, 4000) }
+                    : {}),
                   ...(typeof r.data.command === 'string' && localCommandOk(r.data.command)
                     ? { command: r.data.command, stepKind: 'devops.install' }
                     : {}),

@@ -35,7 +35,7 @@ import { underRoot } from './folder-check.ts';
  */
 
 export type TreeResult =
-  | { kind: 'ok'; hash: string; manifest?: Manifest }
+  | { kind: 'ok'; hash: string; manifest?: Manifest; empty?: boolean }
   | { kind: 'fail'; reason: string }
   | { kind: 'pending'; reason: string }
   | { kind: 'absent' };
@@ -124,6 +124,12 @@ export interface TreeHashOptions {
   manifest?: boolean;
   now?: () => number;
   racyMs?: number;
+  /**
+   * gate-fixes-3: folders directly in the root that the walk leaves out (a real directory only; a link of that name is
+   * hashed and checked as usual). For the link rule they count as outside the folder, so a link into one fails. With none
+   * of them present the hash is exactly as without the option.
+   */
+  exclude?: readonly string[];
 }
 
 class Pending extends Error {}
@@ -145,7 +151,13 @@ function trustedOutside(p: string, st: BigIntStats, realRoot: string): boolean {
  * it. Every component outside the folder must be a trusted system path; a missing component is fine only inside the
  * folder. Returns null when allowed, else the reason.
  */
-export function linkRefusal(link: string, realDir: string, realRoot: string): string | null {
+export function linkRefusal(
+  link: string,
+  realDir: string,
+  realRoot: string,
+  excluded: readonly string[] = [],
+): string | null {
+  const inRoot = (p: string): boolean => underRoot(p, realRoot) && !excluded.some((e) => underRoot(p, e));
   let target: string;
   try {
     target = readlinkSync(link);
@@ -167,11 +179,9 @@ export function linkRefusal(link: string, realDir: string, realRoot: string): st
     try {
       st = lstatSync(next, { bigint: true });
     } catch {
-      return underRoot(cur, realRoot)
-        ? null
-        : `${link} points to ${next}, which does not exist and is outside the folder`;
+      return inRoot(cur) ? null : `${link} points to ${next}, which does not exist and is outside the folder`;
     }
-    const inside = underRoot(next, realRoot);
+    const inside = inRoot(next);
     if (!inside && !trustedOutside(next, st, realRoot))
       return `${link} points to ${next}, outside the folder and not a read-only system path`;
     if (st.isSymbolicLink()) {
@@ -191,7 +201,19 @@ export function linkRefusal(link: string, realDir: string, realRoot: string): st
   // review B2: the folders above the tool folder may only be passed on the way back in, never be where a link ends
   if (!underRoot(cur, realRoot) && cur !== sep && underRoot(realRoot, cur))
     return `${link} points to ${cur}, a folder above the tool folder`;
+  if (excluded.some((e) => underRoot(cur, e)))
+    return `${link} points into ${cur}, a folder pinned on its own`;
   return null;
+}
+
+/** gate-fixes-3: the excluded folders as direct children of the real root (a name elsewhere is never excluded). */
+function excludedIn(realRoot: string, exclude: readonly string[] | undefined): string[] {
+  const out: string[] = [];
+  for (const e of exclude ?? []) {
+    const name = e.slice(e.lastIndexOf(sep) + 1);
+    if (name && name !== '.' && name !== '..') out.push(join(realRoot, name));
+  }
+  return out;
 }
 
 const digestOf = (buf: Buffer): string => createHash('sha256').update(buf).digest('hex');
@@ -235,6 +257,8 @@ export function rootTreeHash(root: string, o: TreeHashOptions): TreeResult {
   const manifest: Manifest | undefined = o.manifest ? {} : undefined;
   // the cache is pruned only by a full hash (pin time), not by every per-spawn check
   const seen = o.manifest ? new Set<string>() : null;
+  const excluded = excludedIn(realRoot, o.exclude);
+  let entries = 0;
 
   const walk = (dir: string, rel: string): string => {
     const h = createHash('sha256');
@@ -253,6 +277,8 @@ export function rootTreeHash(root: string, o: TreeHashOptions): TreeResult {
       } catch {
         throw new Pending(`${p} disappeared while it was checked`);
       }
+      if (st.isDirectory() && excluded.includes(p)) continue;
+      entries++;
       if (st.dev !== rootSt.dev)
         throw new Refused(`${p} is on another filesystem (a mount inside the folder)`);
       const mode = (st.mode & 0o7777n).toString(8);
@@ -261,7 +287,7 @@ export function rootTreeHash(root: string, o: TreeHashOptions): TreeResult {
         if (manifest) manifest[r] = `d ${mode}`;
         line = `d\0${mode}\0${walk(p, r)}`;
       } else if (st.isSymbolicLink()) {
-        const why = linkRefusal(p, dir, realRoot);
+        const why = linkRefusal(p, dir, realRoot, excluded);
         if (why) throw new Refused(why);
         const t = readlinkSync(p);
         if (manifest) manifest[r] = `l ${t}`;
@@ -298,7 +324,12 @@ export function rootTreeHash(root: string, o: TreeHashOptions): TreeResult {
     if (seen) o.cache.prune(realRoot, seen);
     o.cache.save();
     const hash = createHash('sha256').update(`guildwise-tree-v2\0${root}\0${top}`).digest('hex');
-    return manifest ? { kind: 'ok', hash, manifest } : { kind: 'ok', hash };
+    return {
+      kind: 'ok',
+      hash,
+      ...(manifest ? { manifest } : {}),
+      ...(entries === 0 ? { empty: true } : {}),
+    };
   } catch (err) {
     o.cache.save();
     if (err instanceof Pending) return { kind: 'pending', reason: err.message };
@@ -314,7 +345,12 @@ export function rootTreeHash(root: string, o: TreeHashOptions): TreeResult {
 export async function warmTree(
   root: string,
   cache: DigestCache,
-  o: { now?: () => number; racyMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+  o: {
+    now?: () => number;
+    racyMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+    exclude?: readonly string[];
+  } = {},
 ): Promise<void> {
   let realRoot: string;
   try {
@@ -326,6 +362,7 @@ export async function warmTree(
   const racyMs = o.racyMs ?? DEFAULT_RACY_MS;
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms).unref?.()));
   let youngest = 0;
+  const excluded = excludedIn(realRoot, o.exclude);
   const walk = async (dir: string): Promise<void> => {
     let names: string[];
     try {
@@ -341,8 +378,9 @@ export async function warmTree(
       } catch {
         continue;
       }
-      if (st.isDirectory()) await walk(p);
-      else if (st.isFile() && !cache.get(p, statKey(st))) {
+      if (st.isDirectory()) {
+        if (!excluded.includes(p)) await walk(p);
+      } else if (st.isFile() && !cache.get(p, statKey(st))) {
         const ageMs = now() - Number(st.ctimeNs / 1_000_000n);
         if (ageMs < racyMs) {
           youngest = Math.max(youngest, racyMs - ageMs);

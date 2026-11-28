@@ -1,11 +1,21 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { ReleaseSignPayloadSchema, urlHasPassword } from '@aom/shared';
 import type { Command } from 'commander';
-import { binTreeHash, type GuardRoots, guardRoots, refusedCode, TreePins } from '../box/tool-box.ts';
+import { underRoot } from '../box/folder-check.ts';
+import {
+  binTreeHash,
+  DEVOPS_TOOLCHAINS_DIR,
+  type GuardRoots,
+  guardRoots,
+  liveToolchainWriters,
+  refusedCode,
+  TreePins,
+  withNoToolchainWriter,
+} from '../box/tool-box.ts';
 import type { Manifest } from '../box/tree-hash.ts';
 import { entryDir, loadIndex } from '../pairings.ts';
 import { resolveDataDir, runnerPaths } from '../paths.ts';
@@ -631,10 +641,64 @@ export async function toolchainApprove(d: PolicyCliDeps, hash: string): Promise<
   for (const b of e.binDirs) d.out(`  on PATH:   ${b}`);
   for (const r of e.readDirs) d.out(`  readable:  ${r}`);
   for (const [k, v] of Object.entries(e.env)) d.out(`  sets:      ${k}=${v}`);
+  const sub = devopsContent(d, [...e.binDirs, ...e.readDirs]);
   d.out('Every agent on this computer would run programs from these folders.');
   if (!(await confirm(d, 'Allow this toolchain?'))) throw new Error('not approved');
+  // gate-fixes-3: the DevOps tool folders it uses are pinned with it, only while they still hold what was shown
+  if (sub && sub.roots.length) {
+    // REVIEW B-1: the writer check and the pin are one step under the writer lock (the runner adds its entry under it
+    // before it reads the pins)
+    const pinned = withNoToolchainWriter(d.store.dir, () => sub.pins.pin(sub.roots, [], sub.expect));
+    if (!pinned) throw new Error(WRITER_LIVE);
+    if (pinned.length !== sub.roots.length)
+      throw new Error(
+        'the tool folder changed while you looked: nothing was allowed. Run `toolchain approve` again to see it now.',
+      );
+  }
   d.store.update((p) => ({ ...p, toolchainPins: [...new Set([...p.toolchainPins, hash])] }));
   d.out(`Approved "${e.name}": new shifts and chats get it.`);
+}
+
+const WRITER_LIVE =
+  'a DevOps run outside the safety box may still be writing the DevOps tools: nothing was allowed. Run it again once that run has ended.';
+
+/**
+ * gate-fixes-3: `toolchain approve` of an entry whose folders lie in DevOps tool folders (`<tcRoot>/devops/<tool>/<version>`):
+ * refused while a DevOps writer lives; each such folder is hashed in full (a folder that cannot be allowed is refused with
+ * its reason) and its important entries shown. Returns what to pin after the yes, or null when the entry uses none.
+ */
+function devopsContent(
+  d: PolicyCliDeps,
+  dirs: readonly string[],
+): { pins: TreePins; roots: string[]; expect: Record<string, string> } | null {
+  const tc = toolchainsRoot();
+  const g = d.guardRoots?.() ?? guardRoots(homedir(), tc);
+  const devops = Object.values(g.exclude ?? {}).flat();
+  const subs = g.subroots ?? [];
+  const inDevops = dirs.filter((x) => devops.some((e) => underRoot(resolve(x), resolve(e))));
+  if (!inDevops.length) return null;
+  for (const x of inDevops)
+    if (!subs.some((r) => underRoot(resolve(x), resolve(r))))
+      throw new Error(
+        `${x} lies in the DevOps tools folder but not in a ${DEVOPS_TOOLCHAINS_DIR}/<tool>/<version> folder: it cannot be allowed`,
+      );
+  if (liveToolchainWriters(d.store.dir).length) throw new Error(WRITER_LIVE);
+  const pins = d.treePins?.() ?? new TreePins(d.store.dir, undefined, { toolchainsRoot: tc });
+  const roots = subs.filter((r) => inDevops.some((x) => underRoot(resolve(x), resolve(r))));
+  const expect: Record<string, string> = {};
+  for (const r of roots) {
+    const h = pins.fullHash(r);
+    if (h.kind !== 'ok')
+      throw new Error(
+        `${r} cannot be allowed as it is: ${h.kind === 'absent' ? 'it is gone' : h.reason}. Nothing was allowed.`,
+      );
+    expect[r] = h.hash;
+    const ch = treeChanges(null, h.manifest ?? {});
+    d.out(`  contents:  ${r} (${ch.added} entries)`);
+    for (const l of ch.important.slice(0, 40)) d.out(`    ${l}`);
+    if (ch.important.length > 40) d.out(`    ... and ${ch.important.length - 40} more`);
+  }
+  return { pins, roots, expect };
 }
 
 const kindOf = (desc: string | undefined): string => (desc ? (desc[0] ?? '?') : '-');
@@ -687,9 +751,24 @@ export function treeChanges(
  */
 export async function toolchainTrust(d: PolicyCliDeps, code: string): Promise<void> {
   if (!/^[0-9a-f]{64}$/.test(code)) throw new Error('usage: toolchain trust <sha256 shown on the Desk>');
-  const pins = d.treePins?.() ?? new TreePins(d.store.dir);
+  const pins = d.treePins?.() ?? new TreePins(d.store.dir, undefined, { toolchainsRoot: toolchainsRoot() });
   const g = d.guardRoots?.() ?? guardRoots(homedir(), toolchainsRoot());
+  // gate-fixes-3 (R2-2): trust is for a CHANGED root. A DevOps subroot with no pin record is allowed only by
+  // `toolchain approve` (entry and content together), and no subroot is trusted while a DevOps writer lives.
+  const known = pins.read().roots;
+  const subroots = g.subroots ?? [];
+  const writerLive = subroots.length > 0 && liveToolchainWriters(d.store.dir).length > 0;
   for (const root of g.whole) {
+    if (subroots.includes(root) && (!known[root] || writerLive)) {
+      const h = pins.fullHash(root);
+      if (h.kind === 'ok' && h.hash === code)
+        throw new Error(
+          known[root]
+            ? WRITER_LIVE
+            : `${root} is a new DevOps tool folder: \`toolchain approve\` allows it together with its toolchain entry`,
+        );
+      continue;
+    }
     const h = pins.fullHash(root);
     if (h.kind === 'fail' && refusedCode(root, h.reason) === code)
       throw new Error(

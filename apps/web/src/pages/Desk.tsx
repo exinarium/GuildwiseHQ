@@ -1091,15 +1091,18 @@ function ResolveButtons({ item }: { item: DeskItemDto }) {
                   ? 'Decline'
                   : 'Reject'}
             </Button>
-            <Button
-              variant="primary"
-              className="max-sm:order-first max-sm:col-span-2"
-              loading={resolve.isPending}
-              data-testid="desk-approve"
-              onClick={() => (mobile ? setConfirmApprove(true) : approve())}
-            >
-              {approveLabel}
-            </Button>
+            {/* gate-fixes-3 (d): a DevOps switch item answers with its own Allow once / Always allow, never a plain Approve */}
+            {devopsAllowShown(item) ? null : (
+              <Button
+                variant="primary"
+                className="max-sm:order-first max-sm:col-span-2"
+                loading={resolve.isPending}
+                data-testid="desk-approve"
+                onClick={() => (mobile ? setConfirmApprove(true) : approve())}
+              >
+                {approveLabel}
+              </Button>
+            )}
           </>
         ) : item.subkind === 'budget_paused' && item.budgetProject ? (
           <BudgetActions item={item} />
@@ -1185,6 +1188,21 @@ export function AgentAnsweredBy({ item }: { item: DeskItemDto }) {
       <Badge tone={item.answeredByAgentRole === 'ceo' ? 'violet' : 'neutral'}>{label}</Badge>
       <span>(without reaching the desk)</span>
     </span>
+  );
+}
+
+/**
+ * gate-fixes-3 (d): does `DevopsSwitchBlock` show its Allow once / Always allow buttons for this item (then the plain
+ * Approve is hidden: approving the request without the switch data opened nothing the box needed)?
+ */
+export function devopsAllowShown(item: Pick<DeskItemDto, 'kind' | 'subkind' | 'data'>): boolean {
+  const d = item.data as Record<string, unknown> | undefined;
+  return (
+    item.kind === 'approval' &&
+    item.subkind === 'devops' &&
+    typeof d?.devopsSwitch === 'string' &&
+    typeof d.requestId === 'string' &&
+    typeof d.exactCommand === 'string'
   );
 }
 

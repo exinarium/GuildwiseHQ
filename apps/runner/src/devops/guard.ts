@@ -87,6 +87,13 @@ export interface GuardConfig {
    * folders; with installs on also the toolchain detection roots). `access.allowedPaths` are added to these.
    */
   writeRoots?: string[];
+  /**
+   * gate-fixes-3 (c, S3): an approved outside run with the local "download tools" tick. `roots`: the Guildwise tool folder
+   * (every spelling); `dirs`: its `devops` folder, where new `<tool>/<version>` folders may be written; `pinned`: the DevOps
+   * subroots already pinned (read-only). Any other write in `roots` is `toolchain_fixed`, which no switch and no approval
+   * opens. Absent: the tool folder is like any other path (the paths switch).
+   */
+  toolchainWrite?: { roots: string[]; dirs: string[]; pinned: string[] };
 }
 
 /** Lookups the classifier needs from the machine, injected so `classifyCommand` stays pure. */
@@ -627,9 +634,62 @@ function pathsVerdict(cmd: string, words: string[], c: Ctx, seg: Segment): Guard
   else if (cmd === 'dd') for (const w of words) if (w.startsWith('of=')) targets.push(w.slice(3));
   for (const t of targets) {
     const abs = resolveArg(t, c.cwd, c.cfg.home);
-    if (abs === null || writable(abs, c)) continue;
+    if (abs === null) continue;
+    const tc = toolchainVerdict(abs, t, c);
+    if (tc === 'ok') continue;
+    if (tc) return tc;
+    if (writable(abs, c)) continue;
     if (approvedHere(c, seg)) return ok('paths_approved');
     return switchRefusal(c, seg, 'paths', `Writing ${t}`, abs);
+  }
+  return null;
+}
+
+/**
+ * gate-fixes-3 (S3): a write in the Guildwise tool folder of an outside run with `toolchainWrite`: 'ok' inside its `devops`
+ * folder but outside every pinned subroot, `toolchain_fixed` (a hard refusal, no switch) anywhere else in the tool folder;
+ * null when the path is not in the tool folder at all (the usual rules).
+ */
+function toolchainVerdict(abs: string, written: string, c: Ctx): GuardVerdict | 'ok' | null {
+  const tw = c.cfg.toolchainWrite;
+  if (!tw) return null;
+  const within = (p: string, r: string): boolean => p === resolve(r) || inside(p, resolve(r));
+  if (!tw.roots.some((r) => within(abs, r))) return null;
+  if (tw.dirs.some((d) => within(abs, d)) && !tw.pinned.some((p) => within(abs, p))) return 'ok';
+  return refuse('toolchain_fixed', toolchainFixedReason(written, tw.dirs[0]));
+}
+
+/** gate-fixes-3: the `toolchain_fixed` message (the guard's and the runner's own check of an approval ask). */
+export function toolchainFixedReason(written: string, devopsDir: string | undefined): string {
+  const dir = devopsDir ?? 'the DevOps tools folder';
+  return `Writing ${written}: the Guildwise tool folder is fixed outside ${dir}, and an approved tool version there is read-only. No approval opens it (do not ask with \`aom devops-approval\`): install into a new ${dir}/<tool>/<version> folder, then register it with \`aom toolchain add\`.`;
+}
+
+/**
+ * gate-fixes-3 (REVIEW S-2): a path in the Guildwise tool folder outside the writable DevOps folder (or in a pinned version)
+ * that a command NAMES anywhere, also where the guard does not parse a write target (`curl -o`, `tar -C`, `unzip -d`). The
+ * runner rejects an approval ask naming one: the box refuses the write and no click can open it. Null when none.
+ */
+export function toolchainFixedPath(
+  command: string,
+  cfg: Pick<GuardConfig, 'home' | 'toolchainWrite'>,
+): string | null {
+  const tw = cfg.toolchainWrite;
+  if (!tw) return null;
+  const within = (p: string, r: string): boolean => p === resolve(r) || inside(p, resolve(r));
+  const text = command
+    .replace(/(^|[\s='"(:])~(?=\/|$|[\s'"])/g, `$1${cfg.home}`)
+    .replace(/\$\{?HOME\}?(?=\/|$|[\s'"])/g, cfg.home);
+  for (const root of tw.roots) {
+    const r = resolve(root);
+    let at = text.indexOf(r);
+    while (at !== -1) {
+      const m = /^[^\s'"`;|&<>()]*/.exec(text.slice(at));
+      const p = resolve(m?.[0] ?? r);
+      if (within(p, r) && !(tw.dirs.some((d) => within(p, d)) && !tw.pinned.some((x) => within(p, x))))
+        return m?.[0] ?? r;
+      at = text.indexOf(r, at + 1);
+    }
   }
   return null;
 }

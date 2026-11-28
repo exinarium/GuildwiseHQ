@@ -192,6 +192,12 @@ export interface ShiftStartInput {
   dockerGate?: { upstream: string; instance: string; containerEgress: boolean };
   /** Rework 1 (REVIEW S3): the outer box's way out besides the model and the registries (git remotes, deploy targets). */
   outerEgress?: { hosts: string[]; endpoints: string[]; privateEndpoints: string[] };
+  /**
+   * gate-fixes-3 (c): outer box only, with the local "download tools" tick: the DevOps tools folder `dir`
+   * (`<tcRoot>/devops`, under `root` = `<tcRoot>`) the session may create new `<tool>/<version>` folders in, and the
+   * pinned subroots that stay read-only. Absent or null: no toolchain write.
+   */
+  toolchainWrite?: ToolchainWrite | null;
   /** Rework 1 (REVIEW S2): the local ceiling's folder roots; a Desk folder grant is bound by fd only under one of them. */
   ceilingRoots?: string[];
   /** The Claude account this shift runs on (absent: `main`). Its config dir is `sandbox.configDir`, one per account per agent. */
@@ -402,4 +408,11 @@ export interface RuntimeAdapter {
   startChat?(input: ChatStartInput): Promise<RuntimeSession>;
   /** The CEO's full-power turn (never used for a shift): only `ChatManager` calls it, after `selectChatProfile`. */
   startOwnerTurn?(input: OwnerTurnInput): Promise<RuntimeSession>;
+}
+
+/** gate-fixes-3: the toolchain write of an outer box (see `ShiftStartInput.toolchainWrite`). */
+export interface ToolchainWrite {
+  root: string;
+  dir: string;
+  pinned: string[];
 }

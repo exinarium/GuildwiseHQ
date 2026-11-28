@@ -85,6 +85,29 @@ export function outerEgress(remotes: readonly string[], deployHosts: readonly st
   };
 }
 
+/**
+ * gate-fixes-3 (b): GitHub's download hosts. A release download on github.com redirects to `release-assets` (the newer
+ * host), `objects.githubusercontent.com` or `codeload.github.com`. A fixed, named list: never `*.githubusercontent.com`
+ * (that would open raw and gist), never built from the model's `--needs`.
+ */
+export const GITHUB_ASSET_HOSTS: readonly string[] = [
+  'release-assets.githubusercontent.com',
+  'objects.githubusercontent.com',
+  'codeload.github.com',
+];
+
+/**
+ * The hosts a list implies: GitHub's download hosts for an exact (case-folded) `github.com`, nothing for `*.github.com`
+ * or anything else.
+ *
+ * DESIGN S1, stated plainly: github.com is on every box's base list (REGISTRY_DOMAINS), so the gate that matters is the
+ * caller's: only the OUTER box (an approved outside run) adds these, and only with the "download tools" tick
+ * (`toolchainWrite`, DESIGN-REVIEW nit). The github.com check here only matters if the base list changes.
+ */
+export function impliedHosts(list: readonly string[]): string[] {
+  return list.some((h) => h.trim().toLowerCase() === 'github.com') ? [...GITHUB_ASSET_HOSTS] : [];
+}
+
 /** The ssh command git uses in the outer box: every connection through the egress proxy's bridge. */
 export const sshThroughProxy = (bridgePort: number): string =>
   `ssh -o ProxyCommand='socat - PROXY:127.0.0.1:%h:%p,proxyport=${bridgePort}'`;

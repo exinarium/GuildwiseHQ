@@ -22,6 +22,7 @@ import {
   type ShiftBrief,
 } from '@aom/shared';
 import type { DevopsGuardInput } from '../adapters/types.ts';
+import { versionPinnedToolNames } from '../toolchain/stacks.ts';
 
 type ShiftStartMsg = ServerToRunnerOf<'shift.start'>;
 
@@ -229,6 +230,8 @@ This request runs inside a sandbox like a builder's, without asking the owner:
 - You can read the project's clones (read-only), and write only in your working folder and your scratch folder.
 - You have a shell with package registries reachable, but no web tools, no Docker, no ssh keys and no publishing to a git host.
 - \`aom toolchain ensure <tool>\` downloads a tool the project needs (checksum-verified), when this computer allows it.
+  For a catalogued tool (${versionPinnedToolNames().join(', ')}) use it FIRST, even when the project does not use the tool:
+  it needs no question. Any other download (a GitHub release, an installer script) goes to \`aom devops-outside\` at once.
 - Inspections, reading logs and configuration, and preparing changes all work here.
 
 If the request needs something the box does not allow (Docker, a deploy, git writes in a clone, publishing a branch, an
@@ -248,7 +251,7 @@ export const DEVOPS_ALREADY_OUTSIDE =
  * it is already outside, and whether Docker is there (`yes`: through the runner's gatekeeper; `switch`: off by the
  * workstation's switch; otherwise the reason it cannot be reached at all).
  */
-export function devopsOutsideNote(docker: 'yes' | 'switch' | string): string {
+export function devopsOutsideNote(docker: 'yes' | 'switch' | string, toolchainDir?: string | null): string {
   const dockerLine =
     docker === 'yes'
       ? "- Docker: yes, through the runner's Docker gatekeeper (`DOCKER_HOST` is set; the real socket is never here)."
@@ -259,5 +262,10 @@ export function devopsOutsideNote(docker: 'yes' | 'switch' | string): string {
 
 The owner said yes on this computer: this request already runs outside the box. Do not call \`aom devops-outside\`.
 ${dockerLine}
+${
+  toolchainDir
+    ? `- Tools: install a downloaded tool into a NEW folder ${toolchainDir}/<tool>/<version> (GitHub's download hosts are reachable), then register it with \`aom toolchain add\`; it waits for the owner's \`toolchain approve\`. Nothing else in the Guildwise tool folder can be written, and no approval opens it.`
+    : '- Tools: this computer does not let DevOps download tools into the Guildwise tool folder.'
+}
 Report with \`aom devops-done\`, \`aom devops-question\` and \`aom devops-comment\` as usual.`;
 }

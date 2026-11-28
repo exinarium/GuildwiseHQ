@@ -403,6 +403,24 @@ export async function ceoRpc(ctx: Ctx, shift: Row, params: Record<string, unknow
         return [true, r];
       }
       case 'notify': {
+        // gate-fixes-3 (S5): a notice about an open DevOps approval is a second copy of the owner's own item (the CEO cannot
+        // approve DevOps actions): never sent.
+        if (
+          rpc.item &&
+          (await one(
+            ctx.pool,
+            `SELECT 1 FROM desk_items WHERE id::text=$1 AND org_id=$2 AND status='open'
+                AND kind='approval' AND subkind='devops'`,
+            [rpc.item, orgId],
+          ))
+        )
+          return [
+            true,
+            {
+              status: 'duplicate',
+              message: "Already on the owner's Desk; the CEO cannot approve DevOps actions.",
+            },
+          ];
         // The dedupe key is the subject (a card, a desk item, a task) and its state, not the wording: the CEO rewording
         // a reminder about a subject it already handled raises nothing. Only a notice about no subject falls back to the text.
         const subject = rpc.key ? undefined : await noticeSubject(ctx, orgId, rpc);

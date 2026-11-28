@@ -1193,7 +1193,7 @@ describe('gate-fixes-1 F3 (B1): Docker for an approved DevOps job is decided onc
     expect(new HeldStore(r.dir).list().filter((x) => x.state === 'held')).toEqual([]);
   }, 120_000);
 
-  it('the ceiling off: no gatekeeper, the guard refuses Docker as unavailable (no website ask)', async () => {
+  it('the ceiling off: no gatekeeper, the guard refuses Docker as unavailable (no website ask, gate-fixes-3 R2-1: no Desk ask either)', async () => {
     let seen: Record<string, any> = {};
     const r = await job(
       { ceiling: { docker: false, mountRoots: [], containerEgress: false } },
@@ -1213,15 +1213,20 @@ describe('gate-fixes-1 F3 (B1): Docker for an approved DevOps job is decided onc
     expect(outer.dockerGate).toBeUndefined();
     expect(outer.devopsGuard?.dockerUnavailable).toContain('off on this computer');
     expect(outer.instructionsMarkdown).toContain('Docker: not available');
-    const rep = await r.harness.server.waitFor(
-      'shift.report',
-      (m) =>
-        m.shiftId === r.msg.shiftId && (m.report as { outcomeId?: string }).outcomeId === 'devops_approval',
-      60_000,
-    );
-    // `docker_unavailable` is no switch: an ordinary approval, never the website's Docker switch
-    expect((rep.report as { data: Record<string, unknown> }).data.blockedBy).toBeUndefined();
-    expect(seen).toBeDefined();
+    // `docker_unavailable` is no switch and no approval opens it (gate-fixes-3 R2-1): the runner answers the helper with the
+    // guard's own message and nothing reaches the Desk
+    await waitUntil(() => seen.json !== undefined, 60_000, 'the approval report was answered');
+    expect(seen.json.accepted).toBe(false);
+    expect(String(seen.json.message ?? seen.json.error)).toContain('Docker cannot be used here');
+    expect(
+      r.harness.server
+        .of('shift.report')
+        .filter(
+          (m) =>
+            m.shiftId === r.msg.shiftId &&
+            (m.report as { outcomeId?: string }).outcomeId === 'devops_approval',
+        ),
+    ).toEqual([]);
   }, 120_000);
 
   it('the website switch off: an approved docker command gets no gatekeeper and no DOCKER_HOST; the guard refuses it verbatim; the ask names the switch with no Allow once', async () => {
