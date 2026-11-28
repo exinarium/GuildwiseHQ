@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { normalizeRemoteUrl, type PostAsPlan, postAsFor } from '@aom/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppIdentityError } from '../src/git/identity.ts';
+import { recordTip } from '../src/git/pushable-tips.ts';
 import type { SupervisorDeps } from '../src/shifts/supervisor.ts';
 import { type Harness, startHarness } from './harness.ts';
 import { cleanupTmp, makeRepo, sh, type TestRepo, tmp } from './helpers.ts';
@@ -118,7 +119,7 @@ const originBranches = (repo: TestRepo) =>
 describe('aom git push|fetch --repo on an app repository (supervisor rpc)', () => {
   it('push, tag push and branch delete go out with the app token; the agent env never holds it', async () => {
     const repo = makeRepo();
-    localBranch(repo, 'aom/gwp-1-fix');
+    localBranch(repo, 'feature/gwp-1-fix');
     sh(repo.clone, 'git', ['tag', 'v1.0.0']);
     const pushes = recordPushes(repo);
     const c = fakeCredentials(false);
@@ -128,9 +129,16 @@ describe('aom git push|fetch --repo on an app repository (supervisor rpc)', () =
       c.overrides,
       { postAs: planFor(repo.remoteNormalized) },
       async (_i, ctl) => {
+        // gate-fixes-2 B4: the broker sends a tag only at a sha the runner recorded
+        await recordTip(
+          repo.clone,
+          'refs/tags/v1.0.0',
+          sh(repo.clone, 'git', ['rev-parse', 'refs/tags/v1.0.0']),
+          'tag',
+        );
         seen.push = await ctl.post('/v1/rpc', {
           method: 'git.push',
-          params: { repo: repo.clone, refspecs: ['aom/gwp-1-fix'] },
+          params: { repo: repo.clone, refspecs: ['feature/gwp-1-fix'] },
         });
         seen.tag = await ctl.post('/v1/rpc', {
           method: 'git.push',
@@ -138,7 +146,7 @@ describe('aom git push|fetch --repo on an app repository (supervisor rpc)', () =
         });
         seen.del = await ctl.post('/v1/rpc', {
           method: 'git.push',
-          params: { repo: repo.clone, refspecs: ['aom/gwp-1-fix'], delete: true },
+          params: { repo: repo.clone, refspecs: ['feature/gwp-1-fix'], delete: true },
         });
         seen.fetch = await ctl.post('/v1/rpc', { method: 'git.fetch', params: { repo: repo.clone } });
       },
@@ -160,7 +168,7 @@ describe('aom git push|fetch --repo on an app repository (supervisor rpc)', () =
     const repo = makeRepo();
     localBranch(repo, 'aom/gwp-2-fix');
     sh(repo.clone, 'git', ['push', '-q', 'origin', 'aom/gwp-2-fix']);
-    localBranch(repo, 'aom/gwp-3-fix');
+    localBranch(repo, 'feature/gwp-3-fix');
     sh(repo.clone, 'git', ['tag', 'v2.0.0']);
     const pushes = recordPushes(repo);
     const before = originBranches(repo);
@@ -169,11 +177,12 @@ describe('aom git push|fetch --repo on an app repository (supervisor rpc)', () =
     await runDevops(repo, c.overrides, { postAs: planFor(repo.remoteNormalized) }, async (_i, ctl) => {
       seen.push = await ctl.post('/v1/rpc', {
         method: 'git.push',
-        params: { repo: repo.clone, refspecs: ['aom/gwp-3-fix'] },
+        params: { repo: repo.clone, refspecs: ['feature/gwp-3-fix'] },
       });
       seen['push tag'] = await ctl.post('/v1/rpc', {
         method: 'git.push',
-        params: { repo: repo.clone, refspecs: [], tags: true },
+        // gate-fixes-2 B4: one tag by name (`--tags` is refused before anything else)
+        params: { repo: repo.clone, refspecs: ['refs/tags/v2.0.0'] },
       });
       seen['delete branch'] = await ctl.post('/v1/rpc', {
         method: 'git.push',
@@ -212,7 +221,7 @@ describe('aom git push|fetch --repo on an app repository (supervisor rpc)', () =
 
   it('a repository not on an app pushes with plain git, exactly as before (no app auth, no owner helper)', async () => {
     const repo = makeRepo();
-    localBranch(repo, 'aom/gwp-4-fix');
+    localBranch(repo, 'feature/gwp-4-fix');
     const pushes = recordPushes(repo);
     const c = fakeCredentials(true);
     const seen: Record<string, any> = {};
@@ -223,7 +232,7 @@ describe('aom git push|fetch --repo on an app repository (supervisor rpc)', () =
       async (_i, ctl) => {
         seen.push = await ctl.post('/v1/rpc', {
           method: 'git.push',
-          params: { repo: repo.clone, refspecs: ['aom/gwp-4-fix'] },
+          params: { repo: repo.clone, refspecs: ['feature/gwp-4-fix'] },
         });
       },
     );

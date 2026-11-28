@@ -17,7 +17,7 @@ import { execa } from 'execa';
 import { materializeSkills } from '../capabilities/materialize.ts';
 import type { CodexRuntimeConfig } from '../config.ts';
 import type { ProviderStore } from '../direct/store.ts';
-import { protectedGitPaths } from '../git/harden.ts';
+import { protectedGitPaths, refFence } from '../git/harden.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { proxyEnv } from '../sandbox/harness-sandbox.ts';
 import { DOTNET_SHM_DIR, usablePnpmLockDirs, userNugetPackages } from '../sandbox/sandbox.ts';
@@ -263,6 +263,9 @@ export function codexFilesystem(i: CodexProfileInput): Record<string, unknown> {
         set(p, 'write');
     }
   }
+  // gate-fixes-2 S7: the ref fence is read-only inside the writable refs (more specific paths win)
+  if (i.gitDirs.length)
+    for (const p of refFence(i.cwd)) fs[resolve(p)] = fs[resolve(p)] === 'deny' ? 'deny' : 'read';
   // The same git paths the harness box and the claude policy keep read-only (git, run later outside the sandbox, reads them and
   // some of what they hold starts programs): the worktree's `.git` file and the admin dir's commondir, gitdir, config,
   // config.worktree and hooks. More specific than the writable admin dir / working folder above, so they win there; never

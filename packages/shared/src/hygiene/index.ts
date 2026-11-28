@@ -214,6 +214,17 @@ export const HygieneRepoResultSchema = z.object({
     )
     .default([]),
   /**
+   * gate-fixes-2 F6a: local steps that waited because a card shift runs in the clone (fixed strings: `stash unsaved
+   * edits`, `migrate saved-work branches`, `realign rewritten <wb>`, `update <wb> from origin`, `worktree prune`). The
+   * next run does them; fetch, conflict detection and the push ran anyway.
+   */
+  deferred: z.array(z.string()).optional(),
+  /**
+   * gate-fixes-2 P1: the working branch was not pushed because the runner did not make or record its tip (an agent
+   * session could write the clone); the problem is an `error` finding saying NOT PUSHED.
+   */
+  notPushed: z.string().optional(),
+  /**
    * The user's uncommitted edits were stored in a local stash entry (`stash` = its message, see `git stash list`); their
    * checkout is untouched and nothing is pushed. `branch` is empty (older runners used a saved-work branch).
    */
@@ -254,7 +265,7 @@ export function renderHygieneRequest(spec: HygieneSpec, workstationName: string)
   const lines = [
     `Repository hygiene on ${workstationName} (${spec.trigger === 'schedule' ? 'scheduled' : spec.trigger === 'branch_confirmed' ? 'the working branch was just confirmed' : 'started by the manager'}).`,
     '',
-    'For each repository below: fetch and pull, store uncommitted edits in a stash entry (never pushed, no branch; secret-looking files are skipped; nothing lands on the working branch), push unpushed commits, and remove merged branches of finished cards. Run `aom hygiene run`: it does exactly that, refuses to commit or push to a repository whose working branch is not confirmed, logs what it did and ends this request.',
+    'For each repository below: fetch and pull, store uncommitted edits in a stash entry (never pushed, no branch; secret-looking files are skipped; nothing lands on the working branch), push unpushed commits the runner made or you made while no agent session ran (anything else shows as NOT PUSHED), and remove merged branches of finished cards. While a card shift runs in a clone, its local branch moves, stashes and pruning wait for the next run; fetching, conflict checks and pushes still run. Run `aom hygiene run`: it does exactly that, refuses to commit or push to a repository whose working branch is not confirmed, logs what it did and ends this request.',
     '',
     ...spec.repos.map(
       (r) =>

@@ -19,9 +19,12 @@ async function dropLegacyBranch(repoPath: string, tempBranch: string): Promise<v
 }
 
 /**
- * Runs `fn` inside a throwaway worktree of the clone on `tempBranch`, cut from `startPoint` (a merge into the working
- * branch is made here, never in the card's worktree or the user's checkout). The worktree and the temporary branch are
- * removed afterwards, whatever `fn` did. Returns `{ ok: false, error }` when the worktree could not be created.
+ * Runs `fn` inside a throwaway worktree of the clone, DETACHED at `startPoint` (a merge into the working branch is made
+ * here, never in the card's worktree or the user's checkout). gate-fixes-2 Rework 2 (B3): no branch in the shared refs,
+ * which an agent session could rewrite between the runner's merge and its `rev-parse HEAD`; the detached HEAD lives in
+ * this worktree's own admin dir, which no session can write. `tempBranch` only names leftovers of older runners (a
+ * temporary branch of that name, and the legacy prefix), removed before and after. The worktree is removed afterwards,
+ * whatever `fn` did. Returns `{ ok: false, error }` when the worktree could not be created.
  */
 export async function withIntegrationWorktree<T>(
   input: { repoPath: string; dir: string; root: string; tempBranch: string; startPoint: string },
@@ -38,16 +41,7 @@ export async function withIntegrationWorktree<T>(
   };
   await cleanup();
   await mkdir(dirname(input.dir), { recursive: true });
-  const add = await git(input.repoPath, [
-    'worktree',
-    'add',
-    '--no-track',
-    '-B',
-    input.tempBranch,
-    '--',
-    input.dir,
-    input.startPoint,
-  ]);
+  const add = await git(input.repoPath, ['worktree', 'add', '--detach', '--', input.dir, input.startPoint]);
   if (add.exitCode !== 0)
     return { ok: false, error: `could not create the integration worktree: ${add.stderr.trim()}` };
   try {

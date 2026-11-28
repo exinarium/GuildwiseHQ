@@ -12,10 +12,13 @@ import {
   currentBranch,
   git,
   gitOk,
+  hasCommit,
   hasRemote,
+  originTip,
   resolveDefaultBranch,
   revParse,
 } from './git.ts';
+import { recordTip } from './pushable-tips.ts';
 import { withRepoLock } from './repo-lock.ts';
 import { type FindRepo, fillSubmodules, type SubmoduleFill } from './submodule-fill.ts';
 
@@ -230,8 +233,11 @@ async function ensureWorktreeLocked(input: EnsureWorktreeInput): Promise<Worktre
     const url = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
     const a = input.auth && url ? await input.auth(url) : { args: [], env: {} };
     await git(repoPath, [...a.args, 'fetch', '--', 'origin', branch], { env: a.env });
-    if (await revParse(repoPath, `refs/remotes/origin/${branch}`)) {
-      await addWorktreeOnBranch(repoPath, branch, path, `origin/${branch}`, fail);
+    // gate-fixes-2 Rule B: origin's copy by its ls-remote sha (never refs/remotes), recorded as the runner's start
+    const onOrigin = await originTip(repoPath, branch, a).catch(() => null);
+    if (onOrigin && (await hasCommit(repoPath, onOrigin))) {
+      if (await addWorktreeOnBranch(repoPath, branch, path, onOrigin, fail))
+        await recordTip(repoPath, `refs/heads/${branch}`, onOrigin, 'created');
       return { ...(await result(false)), added: true };
     }
   }
@@ -247,9 +253,9 @@ async function ensureWorktreeLocked(input: EnsureWorktreeInput): Promise<Worktre
     const url = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
     const a = input.auth && url ? await input.auth(url) : { args: [], env: {} };
     const f = await git(repoPath, [...a.args, 'fetch', '--', 'origin', base], { env: a.env });
-    if (f.exitCode === 0 || (await revParse(repoPath, `refs/remotes/origin/${base}`))) {
-      if (await revParse(repoPath, `refs/remotes/origin/${base}`)) startPoint = `origin/${base}`;
-    }
+    // gate-fixes-2 Rule B: the card starts at origin's tip of the base read with ls-remote (a sha)
+    const baseTip = await originTip(repoPath, base, a).catch(() => null);
+    if (baseTip && (await hasCommit(repoPath, baseTip))) startPoint = baseTip;
     if (f.exitCode === 0 && input.onFetched) await input.onFetched(base).catch(() => undefined);
   }
   let createdBranch: WorktreeResult['createdBranch'];
@@ -261,7 +267,10 @@ async function ensureWorktreeLocked(input: EnsureWorktreeInput): Promise<Worktre
     createdBranch = made.created;
     startPoint = base;
   }
-  const madeHere = await addWorktreeOnBranch(repoPath, branch, path, startPoint, fail);
+  const startSha = await revParse(repoPath, startPoint);
+  const madeHere = await addWorktreeOnBranch(repoPath, branch, path, startSha ?? startPoint, fail);
+  // the runner made the card branch here: its start is the first record (Rule D)
+  if (madeHere && startSha) await recordTip(repoPath, `refs/heads/${branch}`, startSha, 'created');
   // T1: a branch this runner cut itself (never one it found, here or on origin) goes into its ledger.
   if (madeHere && input.ledger) await input.ledger.recordFor(repoPath, branch, 'created');
   return {
@@ -314,24 +323,35 @@ async function createWorkingBranchLocked(
   if (!def || !isSafeGitRef(def)) return { ok: false, defaultBranch: null, branches };
   const failed = (error: string) => ({ ok: false as const, defaultBranch: def, branches, error });
   const remote = await hasRemote(repoPath);
+  // gate-fixes-2 S10: the new working branch starts at origin's tip of the default branch read with ls-remote (a sha),
+  // never `origin/<def>` or the local `<def>` an agent session could have moved; without a remote, the local branch
+  let from: string = def;
   if (remote) {
     const url = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
     const a = opts.auth && url ? await opts.auth(url) : { args: [], env: {} };
     await git(repoPath, [...a.args, 'fetch', '--', 'origin', def], { env: a.env });
+    const sha = await originTip(repoPath, def, a).catch(() => null);
+    if (sha && (await hasCommit(repoPath, sha))) from = sha;
+    else if (sha !== null)
+      return failed(`origin's '${def}' could not be read, so '${base}' cannot be created from it yet`);
   }
-  const from = (await revParse(repoPath, `refs/remotes/origin/${def}`)) ? `origin/${def}` : def;
   if (!(await revParse(repoPath, from)))
     return failed(
       opts.mainBranch
         ? `the main branch '${def}' does not exist in this repository, so '${base}' cannot be created from it`
         : `the default branch '${def}' has no commits`,
     );
-  const b = await git(repoPath, ['branch', '--no-track', '--', base, from]);
+  const start = (await revParse(repoPath, from)) as string;
+  const b = await git(repoPath, ['branch', '--no-track', '--', base, start]);
   if (b.exitCode !== 0) return failed(`git branch failed: ${b.stderr.trim()}`);
+  await recordTip(repoPath, `refs/heads/${base}`, start, 'created');
   if (remote) {
     const url = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
     const a = opts.auth && url ? await opts.auth(url) : { args: [], env: {} };
-    const push = await git(repoPath, [...a.args, 'push', 'origin', `${base}:${base}`], { env: a.env });
+    // by the recorded sha, never the branch name
+    const push = await git(repoPath, [...a.args, 'push', 'origin', `${start}:refs/heads/${base}`], {
+      env: a.env,
+    });
     if (push.exitCode !== 0) {
       await git(repoPath, ['branch', '-D', '--', base]);
       return failed(

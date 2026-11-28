@@ -1,7 +1,8 @@
 import { basename } from 'node:path';
 import { isSafeGitRef, type RepoOpenPrPayload, type RepoOpenPrResult } from '@aom/shared';
 import type { PrCreator } from './gh.ts';
-import { ambiguousMainMessage, git, hasRemote, resolveDefaultBranch, revParse } from './git.ts';
+import { ambiguousMainMessage, git, hasRemote, originTip, resolveDefaultBranch, revParse } from './git.ts';
+import { ruleA } from './pushable-tips.ts';
 import type { GitAuth } from './worktrees.ts';
 
 export interface ReleasePrInput {
@@ -76,7 +77,17 @@ export async function openReleasePr(input: ReleasePrInput): Promise<RepoOpenPrRe
   const baseRef = (await revParse(repoPath, `refs/remotes/origin/${base}`)) ? `origin/${base}` : base;
   if (!(await revParse(repoPath, baseRef)))
     return { ok: false, base, error: `the main branch '${base}' does not exist in this repository` };
-  const remoteHead = await revParse(repoPath, `refs/remotes/origin/${head}`);
+  // gate-fixes-2 Rule B: origin's tip of the head branch from ls-remote, never `refs/remotes/origin/<head>`
+  let remoteHead: string | null;
+  try {
+    remoteHead = await originTip(repoPath, head, a);
+  } catch (err) {
+    return {
+      ok: false,
+      base,
+      error: `origin could not be asked about '${head}': ${errMsg(err).slice(0, 300)}`,
+    };
+  }
   const localHead = await revParse(repoPath, `refs/heads/${head}`);
   if (!remoteHead && !localHead)
     return {
@@ -84,8 +95,18 @@ export async function openReleasePr(input: ReleasePrInput): Promise<RepoOpenPrRe
       base,
       error: `the working branch '${head}' does not exist yet. It is created from '${base}' when the first card starts.`,
     };
-  if (!remoteHead) {
-    const push = await git(repoPath, [...a.args, 'push', 'origin', `${head}:${head}`], { env: a.env });
+  if (!remoteHead && localHead) {
+    // Rule A: only a tip the runner made or recorded (or the user's own idle commit) goes out, by sha
+    const decision = await ruleA(repoPath, head, localHead, null);
+    if (!decision.push)
+      return {
+        ok: false,
+        base,
+        error: `NOT PUSHED: ${'notPushed' in decision ? decision.notPushed : head}. If that commit is yours, push it yourself`,
+      };
+    const push = await git(repoPath, [...a.args, 'push', 'origin', `${localHead}:refs/heads/${head}`], {
+      env: a.env,
+    });
     if (push.exitCode !== 0)
       return {
         ok: false,
@@ -93,7 +114,7 @@ export async function openReleasePr(input: ReleasePrInput): Promise<RepoOpenPrRe
         error: `could not push '${head}' to origin: ${(push.stderr || push.stdout).trim().slice(0, 300)}`,
       };
   }
-  const headRef = remoteHead ? `origin/${head}` : head;
+  const headRef = remoteHead ?? localHead ?? head;
   const ahead = (await git(repoPath, ['rev-list', '--count', `${baseRef}..${headRef}`])).stdout.trim();
   if (ahead === '0')
     return {

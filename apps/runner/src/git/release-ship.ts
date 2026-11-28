@@ -18,7 +18,7 @@ import {
 } from '@aom/shared';
 import { detectSignOff } from './dco.ts';
 import { appOfPlan, isProtectedBranchRejection, withPushReport } from './gh.ts';
-import { advanceLocalBranch, git, hasRemote, revParse } from './git.ts';
+import { advanceLocalBranch, git, hasRemote, revParse, ruleBTip } from './git.ts';
 import {
   type AppTokenProbe,
   boundPostAsFor,
@@ -108,8 +108,8 @@ async function shipLocked(input: ReleaseShipInput): Promise<ReleaseShipResult> {
     [...a.args, 'fetch', '--no-recurse-submodules', '--', 'origin', 'refs/tags/*:refs/tags/*'],
     authEnv,
   );
-  const originRef = `refs/remotes/origin/${wb}`;
-  const tip = await revParse(repoPath, originRef);
+  // gate-fixes-2 Rule B: origin's tip from ls-remote, never refs/remotes/origin/<wb>
+  const tip = await ruleBTip(repoPath, wb, a);
   if (!tip) return fail('prepare', `the working branch '${wb}' does not exist on origin`);
 
   // 2. already released: the version section is on the working branch

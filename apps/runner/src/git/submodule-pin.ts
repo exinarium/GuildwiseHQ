@@ -6,7 +6,7 @@ import {
   type RepoBumpSubmoduleResult,
 } from '@aom/shared';
 import { appOfPlan, isProtectedBranchRejection, withPushReport } from './gh.ts';
-import { advanceLocalBranch, git, hasRemote, revParse } from './git.ts';
+import { advanceLocalBranch, git, hasRemote, ruleBTip } from './git.ts';
 import {
   AppIdentityError,
   type AppTokenProbe,
@@ -152,9 +152,9 @@ async function attemptBump(input: BumpSubmoduleInput): Promise<RepoBumpSubmodule
     return fail(
       `could not fetch ${branch} from origin: ${(fetched.stderr || fetched.stdout).trim().slice(0, 300)}`,
     );
-  const startPoint = `origin/${branch}`;
-  if (!(await revParse(repoPath, startPoint)))
-    return fail(`the working branch '${branch}' does not exist on origin`);
+  // gate-fixes-2 Rule B: the pin commit is cut from origin's tip read with ls-remote (a sha)
+  const startPoint = await ruleBTip(repoPath, branch, a);
+  if (!startPoint) return fail(`the working branch '${branch}' does not exist on origin`);
 
   const tempBranch = integrationBranchName(`pin-${p.repoId.slice(0, 8)}`);
   const dir = join(input.integrationDir, `pin-${p.repoId.slice(0, 8)}`);
@@ -209,7 +209,9 @@ async function attemptBump(input: BumpSubmoduleInput): Promise<RepoBumpSubmodule
           path: found.path,
         });
       const newHead = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
-      const push = await git(wt, [...a.args, 'push', 'origin', `HEAD:refs/heads/${branch}`], { env: a.env });
+      const push = await git(wt, [...a.args, 'push', 'origin', `${newHead}:refs/heads/${branch}`], {
+        env: a.env,
+      });
       if (push.exitCode !== 0) {
         const why = (push.stderr || push.stdout).trim();
         // checked first: a host that declines a push through a hook words the lost race the same way

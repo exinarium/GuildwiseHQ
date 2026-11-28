@@ -2,7 +2,7 @@ import { lstatSync, readlinkSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { gitAdminDirOf } from '../adapters/codex.ts';
 import { scanMasksFor } from '../adapters/read-only-dirs.ts';
-import { protectedGitPaths } from '../git/harden.ts';
+import { protectedGitPaths, refFence } from '../git/harden.ts';
 
 /**
  * An OS sandbox for a whole agent CLI (Gemini CLI, opencode): bubblewrap around the CLI process itself, so the CLI, its tools and
@@ -73,6 +73,8 @@ export interface HarnessSandboxInput {
    * fd is passed to bubblewrap at `fdIndex`.
    */
   fdBinds?: Array<{ fdIndex: number; real: string; writable: boolean }>;
+  /** gate-fixes-2 Rework 1 (S7 for S13): paths inside writable fd-bound folders bound read-only after them (the ref fence). */
+  fdFence?: string[];
 }
 
 /** System folders every program needs. Links (merged /usr) are recreated as links, real folders are bound read-only. */
@@ -191,6 +193,7 @@ export function harnessBwrapArgs(i: HarnessSandboxInput): string[] {
     else args.push('--tmpfs', m.dest);
   }
   args.push(...fdArgs);
+  for (const p of i.fdFence ?? []) if (exists(p)) args.push('--ro-bind', p, p);
   return args;
 }
 
@@ -233,6 +236,8 @@ export function harnessMounts(i: HarnessMountInput): Mount[] {
       for (const p of [admin, `${common}/objects`, `${common}/refs`, `${common}/logs`]) bind(p, true);
     }
   }
+  // gate-fixes-2 S7: the ref fence, read-only over the writable refs (bound after them)
+  if (i.gitDirs.length) for (const p of refFence(i.cwd)) bind(p, false);
   // The pointers and the configuration git reads (the worktree's `.git` file, `commondir`, `gitdir`, `config`, `hooks` of its
   // administrative folder) are read-only in the box whatever else is writable: git runs later outside the box and a
   // configuration the agent wrote (core.fsmonitor, a hook) would run there (security review, finding 9). A file bound read-only

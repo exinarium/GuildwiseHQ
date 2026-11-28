@@ -11,8 +11,9 @@ import {
 } from '@aom/shared';
 import { type BranchLedger, ledgerRepoKey } from '../git/branch-ledger.ts';
 import { recordWorkingConflict } from '../git/conflict-record.ts';
-import { currentBranch, git, hasRemote, revParse } from '../git/git.ts';
+import { currentBranch, git, hasCommit, hasRemote, moveBranchAt, originTip, revParse } from '../git/git.ts';
 import { AppIdentityError, committerEnv, inContext } from '../git/identity.ts';
+import { markTipPushed, recordTip, ruleA } from '../git/pushable-tips.ts';
 import { changedFiles } from '../git/sweep.ts';
 import { type ChangeStateLookup, cleanFinishedCards } from './branch-cleanup.ts';
 import { migrateSavedWorkBranches, saveCommitsStash, saveUncommittedWork } from './saved-work.ts';
@@ -72,6 +73,13 @@ class Repo {
     const full = [...config.flatMap((c) => ['-c', c]), ...args];
     if (log) this.commands.push(`git -C ${this.path} ${args.join(' ')}`);
     return git(this.path, full);
+  }
+
+  /** A local command that rewrites commits (a rebase): the committer is the app's or the shift's identity. */
+  async rewrite(args: string[]) {
+    this.commands.push(`git -C ${this.path} ${args.join(' ')}`);
+    const who = this.net ? this.net.identity : this.plainIdentity;
+    return git(this.path, args, who ? { env: committerEnv(who) } : {});
   }
 
   /** A command that talks to origin (fetch, pull, push): with the app's auth on an app repository. */
@@ -162,7 +170,8 @@ async function realignRewritten(
   wb: string,
   unique: string[],
   checkedOutHere: boolean,
-  remote: boolean,
+  /** Rule B: origin's tip from ls-remote, never `refs/remotes/origin/<wb>`. */
+  originSha: string,
 ): Promise<void> {
   const info: NonNullable<HygieneRepoResult['rewritten']> = {
     branch: wb,
@@ -192,8 +201,8 @@ async function realignRewritten(
     info.savedStash = kept.stash;
   }
   const moved = checkedOutHere
-    ? await repo.git(['reset', '--keep', `refs/remotes/origin/${wb}`], true)
-    : await repo.git(['branch', '-f', wb, `origin/${wb}`], true);
+    ? await repo.git(['reset', '--keep', originSha], true)
+    : await repo.git(['branch', '-f', wb, originSha], true);
   if (moved.exitCode === 0) {
     info.realigned = true;
     res.actions.push(
@@ -295,7 +304,11 @@ export async function hygieneRepo(
   spec: HygieneRepoSpec,
   busyWorktrees: string[] = [],
   deps: HygieneDeps = {},
-): Promise<{ result: HygieneRepoResult; commands: string[] }> {
+): Promise<{
+  result: HygieneRepoResult;
+  commands: string[];
+  conflict?: { head: string; originHead: string };
+}> {
   const res: HygieneRepoResult = {
     repoId: spec.repoId,
     actions: [],
@@ -307,7 +320,9 @@ export async function hygieneRepo(
     cleaned: [],
   };
   const repo = new Repo(spec.localPath, deps.identity);
-  const done = () => ({ result: res, commands: repo.commands });
+  /** B2: the shas a working-branch conflict was seen at (outside the wire result), for conflict-record.ts. */
+  let conflict: { head: string; originHead: string } | undefined;
+  const done = (c = conflict) => ({ result: res, commands: repo.commands, ...(c ? { conflict: c } : {}) });
 
   if (deps.repoRoots && !insideRepoRoots(spec.localPath, deps.repoRoots)) {
     mark(res, 'missing', `${spec.localPath} is not inside this computer's code folders`);
@@ -317,14 +332,16 @@ export async function hygieneRepo(
     mark(res, 'missing', `no git clone at ${spec.localPath}`);
     return done();
   }
-  // Branches and saved-work refs live in the .git a running shift shares: do not move any while a card shift works here.
+  // gate-fixes-2 F6a: branches, stashes and saved-work refs live in the .git a running shift shares, so while a card
+  // shift works here the local moves wait for the next run (`deferred`). Fetch, the rewritten and conflict checks and the
+  // push still run: a resolution moved onto the working branch reaches origin without waiting for idle shifts.
   const running = await busyShiftWorktrees(repo, busyWorktrees);
-  if (running.length > 0) {
-    res.actions.push(
-      `deferred: ${running.length} card shift(s) are running in this repository; nothing was changed, the next run tidies it`,
-    );
-    return done();
-  }
+  const shiftBusy = running.length > 0;
+  const deferred: string[] = [];
+  const defer = (step: string) => {
+    if (!deferred.includes(step)) deferred.push(step);
+  };
+  const stashOrDefer = async () => (shiftBusy ? defer('stash unsaved edits') : saveWork(repo, res, remote));
   const remote = await hasRemote(spec.localPath);
   let reachable = remote;
   if (remote && deps.appAuth) {
@@ -352,7 +369,16 @@ export async function hygieneRepo(
     }
   }
   // Saved work of older runners sat on `guildwise/saved-work/*` branches (some on origin): move them into stashes.
-  {
+  if (shiftBusy) {
+    const old = await repo.git([
+      'for-each-ref',
+      '--count=1',
+      '--format=%(refname)',
+      'refs/heads/guildwise/saved-work/',
+      'refs/remotes/origin/guildwise/saved-work/',
+    ]);
+    if (old.stdout.trim()) defer('migrate saved-work branches');
+  } else {
     const mig = await migrateSavedWorkBranches(spec.localPath, {
       remote: remote && fetched,
       log: (c) => repo.commands.push(c),
@@ -389,104 +415,157 @@ export async function hygieneRepo(
     return done();
   }
 
-  // A remote that was force-updated is followed, never merged back (and the dropped commits are never pushed again).
+  // gate-fixes-2 Rule B: origin's tip from the network (`ls-remote`), read once and used as a sha everywhere below, never
+  // `refs/remotes/origin/<wb>` (an agent session can change it). The local tip is read once too (B2, B3).
+  let originSha: string | null = null;
+  let online = false;
+  if (remote && fetched) {
+    try {
+      originSha = await originTip(spec.localPath, wb, repo.net ?? undefined);
+      if (originSha && !(await hasCommit(spec.localPath, originSha)))
+        mark(res, 'error', `origin's ${wb} (${originSha.slice(0, 10)}) is not in this clone after the fetch`);
+      else online = true;
+    } catch (err) {
+      const why = err instanceof Error ? err.message : String(err);
+      mark(res, AUTH_RE.test(why) ? 'auth_failed' : 'error', `git ls-remote failed: ${first(why)}`);
+    }
+  }
+  const ref = `refs/heads/${wb}`;
+  const tip = hasLocal ? await revParse(spec.localPath, ref) : null;
+  const notPushed = (why: string) => {
+    res.notPushed = why;
+    res.actions.push(`did not push ${wb}: ${why}`);
+    mark(res, 'error', `NOT PUSHED: ${why}. If that commit is yours, push it yourself`);
+  };
+  /** Rule A: sends `t` by sha only when the runner made or recorded it (or the user did while no session ran). */
+  const pushTip = async (t: string) => {
+    const a = await ruleA(spec.localPath, wb, t, originSha);
+    if (!a.push) {
+      if ('notPushed' in a) notPushed(a.notPushed);
+      return;
+    }
+    const sent = await repo.remote(['push', 'origin', `${t}:${ref}`]);
+    if (sent.exitCode === 0) {
+      res.pushed = true;
+      res.actions.push(`pushed ${wb}`);
+      await markTipPushed(spec.localPath, ref, t);
+    } else
+      mark(
+        res,
+        AUTH_RE.test(sent.stderr)
+          ? 'auth_failed'
+          : /rejected|non-fast-forward/i.test(sent.stderr)
+            ? 'conflict'
+            : 'error',
+        `git push failed: ${failText(sent)}`,
+      );
+  };
+  /** B2: a diverged working branch is a conflict only on a tip the runner trusts; an untrusted one is NOT PUSHED. */
+  const divergedTrusted = async (t: string): Promise<boolean> => {
+    const a = await ruleA(spec.localPath, wb, t, originSha);
+    if (!a.push && 'notPushed' in a) {
+      notPushed(a.notPushed);
+      return false;
+    }
+    return true;
+  };
+
+  // A remote that was force-updated is followed, never merged back (and the dropped commits are never sent again).
   let rewritten = false;
-  if (remote && fetched && hasLocal && hasRemoteRef) {
+  if (online && originSha && tip && hasRemoteRef) {
     const rw = await rewrittenRemote(repo, wb);
     if (rw) {
       rewritten = true;
-      if (dirty.length > 0) await saveWork(repo, res, remote);
+      if (dirty.length > 0) await stashOrDefer();
       const here = cur === wb;
-      if (!here && (await checkedOut(repo)).has(wb)) {
+      if (shiftBusy) defer(`realign rewritten ${wb}`);
+      else if (!here && (await checkedOut(repo)).has(wb)) {
         res.actions.push(
           `origin/${wb} was rewritten, but ${wb} is checked out in another worktree: left alone`,
         );
         res.rewritten = { branch: wb, realigned: false, commits: [], pushed: false };
-      } else await realignRewritten(repo, res, wb, rw.unique, here, remote);
+      } else await realignRewritten(repo, res, wb, rw.unique, here, originSha);
     }
   }
 
   if (rewritten) {
-    // handled above: nothing to pull, push or combine
+    // handled above: nothing to pull, send or combine
   } else if (cur === wb) {
-    if (dirty.length > 0) await saveWork(repo, res, remote);
-    if (remote && fetched) {
-      if (hasRemoteRef) {
-        const pull = await repo.remote(['pull', '--ff-only', 'origin', wb], true, true);
-        if (pull.exitCode === 0) {
-          if (!/already up to date/i.test(pull.stdout)) res.actions.push(`pulled ${wb}`);
-        } else if (dirty.length > 0) {
-          // Unsaved edits stay in the checkout: do not rebase over them, update again once they are committed.
-          res.actions.push(`${wb} not updated yet: your own unsaved edits are in the way`);
-        } else {
-          const rebase = await repo.remote(['pull', '--rebase', 'origin', wb], true, true);
-          if (rebase.exitCode === 0) res.actions.push(`rebased ${wb} onto origin/${wb}`);
-          else {
-            await repo.git(['rebase', '--abort']);
-            mark(
-              res,
-              AUTH_RE.test(rebase.stderr) ? 'auth_failed' : 'conflict',
-              `${wb} and origin/${wb} could not be combined: ${failText(rebase)}`,
-            );
-            return done();
-          }
+    if (dirty.length > 0) await stashOrDefer();
+    if (online && tip) {
+      if (!originSha) await pushTip(tip);
+      else if (tip === originSha) {
+        // in order
+      } else if (await isAncestor(repo, tip, originSha)) {
+        // behind: fast-forward onto the Rule B sha (B3: detached, compare-and-swap), recorded as the runner's move
+        if (shiftBusy) defer(`update ${wb} from origin`);
+        else {
+          const target = originSha;
+          const m = await moveBranchAt(spec.localPath, wb, tip, () =>
+            repo.git(['merge', '--ff-only', target], true),
+          );
+          if (m.ok) {
+            await recordTip(spec.localPath, ref, m.sha, 'merged');
+            res.actions.push(`pulled ${wb}`);
+          } else if (dirty.length > 0)
+            res.actions.push(`${wb} not updated yet: your own unsaved edits are in the way`);
+          else mark(res, 'error', `${wb} could not be moved forward to origin/${wb}: ${m.reason}`);
         }
-      }
-      const ahead = hasRemoteRef
-        ? !(await isAncestor(repo, `refs/heads/${wb}`, `refs/remotes/origin/${wb}`))
-        : true;
-      if (ahead) {
-        const push = await repo.remote(['push', 'origin', `${wb}:${wb}`]);
-        if (push.exitCode === 0) {
-          res.pushed = true;
-          res.actions.push(`pushed ${wb}`);
-        } else
+      } else if (await isAncestor(repo, originSha, tip)) await pushTip(tip);
+      else if (shiftBusy) {
+        // F6a: diverged while a card shift runs: the update waits, never a conflict here
+        defer(`update ${wb} from origin`);
+      } else if (dirty.length > 0) {
+        // Unsaved edits stay in the checkout: do not rebase over them, update again once they are committed.
+        res.actions.push(`${wb} not updated yet: your own unsaved edits are in the way`);
+      } else if (await divergedTrusted(tip)) {
+        // B3: rebase the trusted local commits onto the Rule B sha, detached and compare-and-swap; then Rule A sends it
+        const target = originSha;
+        const m = await moveBranchAt(spec.localPath, wb, tip, () => repo.rewrite(['rebase', target]), [
+          'rebase',
+          '--abort',
+        ]);
+        if (m.ok) {
+          await recordTip(spec.localPath, ref, m.sha, 'rebased');
+          res.actions.push(`rebased ${wb} onto origin/${wb}`);
+          await pushTip(m.sha);
+        } else if (!m.opFailed) {
+          // the branch moved under the runner (compare-and-swap failed): not a content conflict, nothing recorded
+          mark(res, 'error', `${wb} was not updated: ${m.reason}`);
+        } else {
           mark(
             res,
-            AUTH_RE.test(push.stderr)
-              ? 'auth_failed'
-              : /rejected|non-fast-forward/i.test(push.stderr)
-                ? 'conflict'
-                : 'error',
-            `git push failed: ${failText(push)}`,
+            AUTH_RE.test(m.opFailed.stderr) ? 'auth_failed' : 'conflict',
+            `${wb} and origin/${wb} could not be combined: ${m.reason}`,
           );
+          return done({ head: tip, originHead: target });
+        }
       }
     }
   } else {
     // The checkout is on another branch: its working tree is not ours to touch.
-    if (dirty.length > 0) await saveWork(repo, res, remote);
-    if (hasLocal && hasRemoteRef) {
-      const local = `refs/heads/${wb}`;
-      const origin = `refs/remotes/origin/${wb}`;
-      if (!(await isAncestor(repo, local, origin))) {
-        if (await isAncestor(repo, origin, local)) {
-          if (remote && fetched) {
-            const push = await repo.remote(['push', 'origin', wb]);
-            if (push.exitCode === 0) {
-              res.pushed = true;
-              res.actions.push(`pushed ${wb}`);
-            } else
-              mark(
-                res,
-                AUTH_RE.test(push.stderr) ? 'auth_failed' : 'error',
-                `git push failed: ${failText(push)}`,
-              );
+    if (dirty.length > 0) await stashOrDefer();
+    if (online && tip) {
+      if (!originSha) await pushTip(tip);
+      else if (tip === originSha) {
+        // in order
+      } else if (await isAncestor(repo, originSha, tip)) await pushTip(tip);
+      else if (await isAncestor(repo, tip, originSha)) {
+        if (shiftBusy) defer(`update ${wb} from origin`);
+        else if (!(await checkedOut(repo)).has(wb)) {
+          // compare-and-swap onto the Rule B sha, recorded as the runner's move
+          const moved = await repo.git(['update-ref', ref, originSha, tip], true);
+          if (moved.exitCode === 0) {
+            await recordTip(spec.localPath, ref, originSha, 'merged');
+            res.actions.push(`moved ${wb} forward to origin/${wb}`);
           }
-        } else mark(res, 'conflict', `${wb} and origin/${wb} have diverged; combine them by hand`);
-      } else if (!(await isAncestor(repo, origin, local))) {
-        const moved = await repo.git(['branch', '-f', wb, `origin/${wb}`], true);
-        if (moved.exitCode === 0) res.actions.push(`moved ${wb} forward to origin/${wb}`);
+        }
+      } else if (await divergedTrusted(tip)) {
+        mark(res, 'conflict', `${wb} and origin/${wb} have diverged; combine them by hand`);
+        conflict = { head: tip, originHead: originSha };
       }
-    } else if (hasLocal && !hasRemoteRef && remote && fetched) {
-      const push = await repo.remote(['push', 'origin', `${wb}:${wb}`]);
-      if (push.exitCode === 0) {
-        res.pushed = true;
-        res.actions.push(`pushed ${wb}`);
-      } else
-        mark(res, AUTH_RE.test(push.stderr) ? 'auth_failed' : 'error', `git push failed: ${failText(push)}`);
     }
   }
-
   // Branches of finished cards that are merged into the working branch.
   const target = hasRemoteRef ? `refs/remotes/origin/${wb}` : `refs/heads/${wb}`;
   const busy = await checkedOut(repo);
@@ -533,7 +612,14 @@ export async function hygieneRepo(
       );
     res.actions.push(...swept.notes);
   }
-  await repo.git(['worktree', 'prune'], true);
+  if (shiftBusy) defer('worktree prune');
+  else await repo.git(['worktree', 'prune'], true);
+  if (deferred.length) {
+    res.deferred = deferred;
+    res.actions.push(
+      `deferred while ${running.length} card shift(s) run in this repository: ${deferred.join(', ')}; the next run does them`,
+    );
+  }
   if (res.actions.filter((a) => a !== 'fetched origin').length === 0) res.actions.push(`${wb} is in order`);
   return done();
 }
@@ -546,7 +632,8 @@ export function summarizeHygiene(spec: HygieneSpec, report: HygieneReport): stri
     const problem = r.problem
       ? ` PROBLEM ${HYGIENE_PROBLEM_LABEL[r.problem.kind]}: ${r.problem.detail}.`
       : '';
-    return `- ${head}: ${r.actions.join('; ') || 'nothing to do'}.${problem}`;
+    const deferred = r.deferred?.length ? ` DEFERRED (card shift running): ${r.deferred.join(', ')}.` : '';
+    return `- ${head}: ${r.actions.join('; ') || 'nothing to do'}.${problem}${deferred}`;
   });
   const bad = report.repos.filter((r) => r.problem).length;
   return [
@@ -563,10 +650,11 @@ export async function runHygiene(
   const repos: HygieneRepoResult[] = [];
   const commands: string[] = [];
   for (const r of spec.repos) {
-    const { result, commands: cmds } = await hygieneRepo(r, busyWorktrees, deps);
-    // T7: the runner saw this conflict itself; a DevOps resolution may later be moved onto the working branch by it
-    if (result.problem?.kind === 'conflict' && r.workingBranch && isSafeGitRef(r.workingBranch))
-      await recordWorkingConflict(r.localPath, r.workingBranch);
+    const { result, commands: cmds, conflict } = await hygieneRepo(r, busyWorktrees, deps);
+    // T7: the runner saw this conflict itself; a DevOps resolution may later be moved onto the working branch by it.
+    // B2: recorded at the shas hygiene used (its trusted local tip and the Rule B origin tip), never re-read from refs.
+    if (result.problem?.kind === 'conflict' && conflict && r.workingBranch && isSafeGitRef(r.workingBranch))
+      await recordWorkingConflict(r.localPath, r.workingBranch, conflict);
     result.uncommitted = result.uncommitted.slice(0, MAX_FILES);
     repos.push(result);
     commands.push(...cmds);

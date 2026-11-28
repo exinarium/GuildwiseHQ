@@ -41,6 +41,7 @@ import type { ClaudeRuntimeConfigSchema } from '../config.ts';
 import { alwaysPathRefusal, deleteRootsFor, type GuardConfig } from '../devops/guard.ts';
 import type { ProviderStore } from '../direct/store.ts';
 import { holdSandboxRepo } from '../git/config-lock.ts';
+import { holdWriters } from '../git/pushable-tips.ts';
 import { discoverPluginMcpServers, mcpConfigFor, type PluginMcpServer } from '../mcp/plugins.ts';
 import type { RunnerPaths } from '../paths.ts';
 import { policyDir as localPolicyDir } from '../policy/store.ts';
@@ -1430,6 +1431,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       const parser = new ClaudeStreamParser();
       const l = launch;
       const dk = docker;
+      // gate-fixes-2 S13: a folder the box binds writable that lies in a git clone makes this session a writer there
+      const releaseWriters = await holdWriters(opened.map((f) => f.real));
       const session = spawnSession({
         bin: l.command.bin,
         args: l.command.args,
@@ -1455,6 +1458,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
             );
           // the per-session bearer dies with the proxy (revoked at the session's end)
           await l.cleanup();
+          await releaseWriters();
           if (dk) {
             await dk.proxy.close().catch(() => undefined);
             rmSync(dk.dir, { recursive: true, force: true });

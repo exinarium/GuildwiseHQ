@@ -36,7 +36,13 @@ function renderChatVaultSection(v: ChatVaultNotes): string | undefined {
 export function renderChatInstructions(
   agent: Pick<AgentRuntimeSpec, 'name' | 'roleKey' | 'seniority' | 'packAgent'>,
   ctx: ChatContext,
-  opts: { jiraSkill?: string; readFolders?: ReadableFolder[]; vault?: ChatVaultNotes } = {},
+  opts: {
+    jiraSkill?: string;
+    readFolders?: ReadableFolder[];
+    vault?: ChatVaultNotes;
+    /** gate-fixes-2 F7b: a work mention (the comment gave edit or shell on the card): the card's working folder. */
+    work?: { folder: string };
+  } = {},
 ): string {
   const out: string[] = [];
   out.push('# Who you are');
@@ -54,7 +60,9 @@ export function renderChatInstructions(
       where.length ? `Context: ${where.join(', ')}.` : 'There is no project or card context.',
       agent.roleKey === 'devops'
         ? 'You are not working a card in this conversation: do not claim cards or report outcomes. You may run commands on this workstation to do what the manager asks.'
-        : 'You are not working a card in this conversation: do not claim cards, do not report outcomes and do not change files outside your scratch directory.',
+        : opts.work
+          ? `You are not working a card in this conversation: do not claim cards and do not report outcomes. This comment gave you work on this card: change files only inside the card's working folder (\`${opts.work.folder}\`), only as the comment asks; do not change files outside the card's folder, your scratch folder and temporary files, and do not switch branches or push.`
+          : 'You are not working a card in this conversation: do not claim cards, do not report outcomes and do not change files outside your scratch directory.',
     ].join('\n'),
   );
   out.push('# Tools');

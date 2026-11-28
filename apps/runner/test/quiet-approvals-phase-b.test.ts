@@ -161,7 +161,7 @@ describe('R4-B2: the Docker gatekeeper', () => {
       { Image: 'x', HostConfig: { NetworkMode: 'host' } },
       { Image: 'x', HostConfig: { NetworkMode: 'container:abc' } },
       { Image: 'x', HostConfig: { PidMode: 'host' } },
-      { Image: 'x', HostConfig: { Devices: [{}] } },
+      { Image: 'x', HostConfig: { Devices: [{ PathOnHost: '/dev/kvm' }] } },
       { Image: 'x', HostConfig: { Links: ['a:b'] } },
       { Image: 'x', HostConfig: { VolumesFrom: ['a'] } },
       { Image: 'x', HostConfig: { SecurityOpt: ['seccomp=unconfined'] } },

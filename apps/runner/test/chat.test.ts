@@ -507,7 +507,7 @@ describe('claude code chat adapter', () => {
 
 describe('an @mention that works', () => {
   const run = async (over: Record<string, unknown>, tools: string[], withWorktree = true) => {
-    const seen: { input?: ChatStartInput } = {};
+    const seen: { input?: ChatStartInput; instructions?: string } = {};
     h = await startHarness();
     const wt = join(h.dataDir, 'worktrees', 'TOY', 'TOY-1');
     if (withWorktree) {
@@ -516,6 +516,11 @@ describe('an @mention that works', () => {
     }
     const chatAdapter = h.runner.chat.deps.adapters.get('mock') as MockAdapter;
     const orig = chatAdapter.startChat.bind(chatAdapter);
+    const origWrite = chatAdapter.writeInstructions.bind(chatAdapter);
+    chatAdapter.writeInstructions = async (s: Parameters<typeof origWrite>[0], md: string) => {
+      seen.instructions = md;
+      return origWrite(s, md);
+    };
     chatAdapter.startChat = async (input: ChatStartInput) => {
       seen.input = input;
       return orig(input);
@@ -537,6 +542,9 @@ describe('an @mention that works', () => {
     expect(seen.input?.cwd).toBe(wt);
     expect(seen.input?.work).toBe(true);
     expect(seen.input?.readOnly).toBe(false);
+    // gate-fixes-2 F7b: the written instructions name the card folder instead of the scratch-only rule
+    expect(seen.instructions).not.toContain('do not change files outside your scratch directory');
+    expect(seen.instructions).toContain(`change files only inside the card's working folder (\`${wt}\`)`);
   });
 
   it('stays read only without the flag, or when the permissions hold no edit and no shell', async () => {
@@ -544,6 +552,7 @@ describe('an @mention that works', () => {
     await h?.server.waitFor('chat.done', (d) => d.chatId === a.msg.chatId);
     expect(a.seen.input?.work).toBeUndefined();
     expect(a.seen.input?.readOnly).toBe(true);
+    expect(a.seen.instructions).toContain('do not change files outside your scratch directory');
     await h?.stop();
     const b = await run({ mentionWork: true }, ['read']);
     await h?.server.waitFor('chat.done', (d) => d.chatId === b.msg.chatId);

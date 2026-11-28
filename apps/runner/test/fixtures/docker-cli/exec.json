@@ -1,0 +1,44 @@
+{
+  "command": "docker exec gwcap-b true",
+  "exit": 0,
+  "requests": [
+    {
+      "method": "HEAD",
+      "path": "/_ping"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/containers/gwcap-b/json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/gwcap-b/exec"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/exec/13d88536b6c0a835f5c586b519db393bc96a92f361c57d5b04f94cb51f795cf3/json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/exec/13d88536b6c0a835f5c586b519db393bc96a92f361c57d5b04f94cb51f795cf3/start"
+    }
+  ],
+  "bodies": [
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/gwcap-b/exec",
+      "body": {
+        "User": "",
+        "Privileged": false,
+        "Tty": false,
+        "AttachStdin": false,
+        "AttachStderr": true,
+        "AttachStdout": true,
+        "DetachKeys": "",
+        "Env": null,
+        "WorkingDir": "",
+        "Cmd": ["true"]
+      }
+    }
+  ]
+}

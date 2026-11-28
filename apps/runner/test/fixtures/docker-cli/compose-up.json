@@ -1,0 +1,399 @@
+{
+  "command": "docker compose -p gwcap -f compose.test-services.yml up -d --wait",
+  "exit": 0,
+  "requests": [
+    {
+      "method": "HEAD",
+      "path": "/_ping"
+    },
+    {
+      "method": "HEAD",
+      "path": "/_ping"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/images/postgres:16/json?manifests=1"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/containers/json?all=1&filters=%7B%22label%22%3A%7B%22com.docker.compose.config-hash%22%3Atrue%2C%22com.docker.compose.project%3Dgwcap%22%3Atrue%7D%7D"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/networks?filters=%7B%22label%22%3A%7B%22com.docker.compose.project%3Dgwcap%22%3Atrue%7D%7D"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/volumes?filters=%7B%22label%22%3A%7B%22com.docker.compose.project%3Dgwcap%22%3Atrue%7D%7D"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/networks/gwcap_default"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/volumes/gwcap_gwcapdata"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/networks/create"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/create?name=gwcap-db-1"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/containers/07f3ef84aa02d0e355523b5c88ef2453ac00d1e38621c0cd915d0177bff97388/json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/create?name=gwcap-waiter-1"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/containers/26bbac8327f6d7f1b00b37164f362d5a27ec3cab6288b19ddff043d4b4f21599/json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/07f3ef84aa02d0e355523b5c88ef2453ac00d1e38621c0cd915d0177bff97388/start"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/containers/07f3ef84aa02d0e355523b5c88ef2453ac00d1e38621c0cd915d0177bff97388/json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/containers/07f3ef84aa02d0e355523b5c88ef2453ac00d1e38621c0cd915d0177bff97388/json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/containers/07f3ef84aa02d0e355523b5c88ef2453ac00d1e38621c0cd915d0177bff97388/json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/containers/07f3ef84aa02d0e355523b5c88ef2453ac00d1e38621c0cd915d0177bff97388/json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/26bbac8327f6d7f1b00b37164f362d5a27ec3cab6288b19ddff043d4b4f21599/start"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/containers/json?all=1&filters=%7B%22label%22%3A%7B%22com.docker.compose.config-hash%22%3Atrue%2C%22com.docker.compose.oneoff%3DFalse%22%3Atrue%2C%22com.docker.compose.project%3Dgwcap%22%3Atrue%7D%7D"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/containers/26bbac8327f6d7f1b00b37164f362d5a27ec3cab6288b19ddff043d4b4f21599/json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/volumes/create"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/containers/07f3ef84aa02d0e355523b5c88ef2453ac00d1e38621c0cd915d0177bff97388/json"
+    }
+  ],
+  "bodies": [
+    {
+      "method": "POST",
+      "path": "/v1.57/networks/create",
+      "body": {
+        "Name": "gwcap_default",
+        "Driver": "",
+        "Scope": "",
+        "IPAM": null,
+        "Internal": false,
+        "Attachable": false,
+        "Ingress": false,
+        "ConfigOnly": false,
+        "ConfigFrom": null,
+        "Options": null,
+        "Labels": {
+          "com.docker.compose.config-hash": "fd1e927ede039d11863792fdb81ef1e48e8f58ef6b9421319f20423be8f42f30",
+          "com.docker.compose.network": "default",
+          "com.docker.compose.project": "gwcap",
+          "com.docker.compose.version": "5.8.0"
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/create?name=gwcap-db-1",
+      "body": {
+        "Hostname": "",
+        "Domainname": "",
+        "User": "",
+        "AttachStdin": false,
+        "AttachStdout": true,
+        "AttachStderr": true,
+        "ExposedPorts": {
+          "5432/tcp": {}
+        },
+        "Tty": false,
+        "OpenStdin": false,
+        "StdinOnce": false,
+        "Env": ["POSTGRES_PASSWORD=test"],
+        "Cmd": null,
+        "Healthcheck": {
+          "Test": ["CMD", "pg_isready", "-U", "postgres"],
+          "Interval": 1000000000,
+          "Timeout": 3000000000,
+          "Retries": 30
+        },
+        "Image": "postgres:16",
+        "Volumes": null,
+        "WorkingDir": "",
+        "Entrypoint": null,
+        "Labels": {
+          "com.docker.compose.config-hash": "9a04a9ac381e3a5b8f450df0bfcbe509868b6208e9666f1f13647fc1cd704f6b",
+          "com.docker.compose.container-number": "1",
+          "com.docker.compose.depends_on": "",
+          "com.docker.compose.image": "sha256:a026aff735540e5492c2ac4a782edd7dffa9b3b816dbda710d63b7a84f2c9b82",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "gwcap",
+          "com.docker.compose.project.config_files": "/tmp/gwcap-577104/compose.test-services.yml",
+          "com.docker.compose.project.working_dir": "/tmp/gwcap-577104",
+          "com.docker.compose.service": "db",
+          "com.docker.compose.version": "5.8.0"
+        },
+        "HostConfig": {
+          "Binds": ["gwcap_gwcapdata:/var/lib/postgresql/data:rw"],
+          "ContainerIDFile": "",
+          "LogConfig": {
+            "Type": "",
+            "Config": null
+          },
+          "NetworkMode": "gwcap_default",
+          "PortBindings": {
+            "5432/tcp": [
+              {
+                "HostIp": "127.0.0.1",
+                "HostPort": "15433"
+              }
+            ]
+          },
+          "RestartPolicy": {
+            "Name": "",
+            "MaximumRetryCount": 0
+          },
+          "AutoRemove": false,
+          "VolumeDriver": "",
+          "VolumesFrom": null,
+          "ConsoleSize": [0, 0],
+          "CapAdd": null,
+          "CapDrop": null,
+          "CgroupnsMode": "",
+          "Dns": null,
+          "DnsOptions": null,
+          "DnsSearch": null,
+          "ExtraHosts": [],
+          "GroupAdd": null,
+          "IpcMode": "",
+          "Cgroup": "",
+          "Links": null,
+          "OomScoreAdj": 0,
+          "PidMode": "",
+          "Privileged": false,
+          "PublishAllPorts": false,
+          "ReadonlyRootfs": false,
+          "SecurityOpt": null,
+          "UTSMode": "",
+          "UsernsMode": "",
+          "ShmSize": 0,
+          "Isolation": "",
+          "CpuShares": 0,
+          "Memory": 0,
+          "NanoCpus": 0,
+          "CgroupParent": "",
+          "BlkioWeight": 0,
+          "BlkioWeightDevice": null,
+          "BlkioDeviceReadBps": null,
+          "BlkioDeviceWriteBps": null,
+          "BlkioDeviceReadIOps": null,
+          "BlkioDeviceWriteIOps": null,
+          "CpuPeriod": 0,
+          "CpuQuota": 0,
+          "CpuRealtimePeriod": 0,
+          "CpuRealtimeRuntime": 0,
+          "CpusetCpus": "",
+          "CpusetMems": "",
+          "Devices": null,
+          "DeviceCgroupRules": null,
+          "DeviceRequests": null,
+          "MemoryReservation": 0,
+          "MemorySwap": 0,
+          "MemorySwappiness": null,
+          "OomKillDisable": false,
+          "PidsLimit": null,
+          "Ulimits": null,
+          "CpuCount": 0,
+          "CpuPercent": 0,
+          "IOMaximumIOps": 0,
+          "IOMaximumBandwidth": 0,
+          "MaskedPaths": null,
+          "ReadonlyPaths": null
+        },
+        "NetworkingConfig": {
+          "EndpointsConfig": {
+            "gwcap_default": {
+              "IPAMConfig": null,
+              "Links": null,
+              "Aliases": ["gwcap-db-1", "db"],
+              "DriverOpts": null,
+              "GwPriority": 0,
+              "NetworkID": "",
+              "EndpointID": "",
+              "Gateway": "",
+              "IPAddress": "",
+              "MacAddress": "",
+              "IPPrefixLen": 0,
+              "IPv6Gateway": "",
+              "GlobalIPv6Address": "",
+              "GlobalIPv6PrefixLen": 0,
+              "DNSNames": null
+            }
+          }
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/create?name=gwcap-waiter-1",
+      "body": {
+        "Hostname": "",
+        "Domainname": "",
+        "User": "",
+        "AttachStdin": false,
+        "AttachStdout": true,
+        "AttachStderr": true,
+        "Tty": false,
+        "OpenStdin": false,
+        "StdinOnce": false,
+        "Env": null,
+        "Cmd": null,
+        "Image": "postgres:16",
+        "Volumes": null,
+        "WorkingDir": "",
+        "Entrypoint": ["sleep", "300"],
+        "Labels": {
+          "com.docker.compose.config-hash": "73845d469f32e5edd92ae2c506e871e2acaae676c705247139eae849e9ae0a36",
+          "com.docker.compose.container-number": "1",
+          "com.docker.compose.depends_on": "db:service_healthy:false",
+          "com.docker.compose.image": "sha256:a026aff735540e5492c2ac4a782edd7dffa9b3b816dbda710d63b7a84f2c9b82",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "gwcap",
+          "com.docker.compose.project.config_files": "/tmp/gwcap-577104/compose.test-services.yml",
+          "com.docker.compose.project.working_dir": "/tmp/gwcap-577104",
+          "com.docker.compose.service": "waiter",
+          "com.docker.compose.version": "5.8.0"
+        },
+        "HostConfig": {
+          "Binds": null,
+          "ContainerIDFile": "",
+          "LogConfig": {
+            "Type": "",
+            "Config": null
+          },
+          "NetworkMode": "gwcap_default",
+          "PortBindings": {},
+          "RestartPolicy": {
+            "Name": "",
+            "MaximumRetryCount": 0
+          },
+          "AutoRemove": false,
+          "VolumeDriver": "",
+          "VolumesFrom": null,
+          "ConsoleSize": [0, 0],
+          "CapAdd": null,
+          "CapDrop": null,
+          "CgroupnsMode": "",
+          "Dns": null,
+          "DnsOptions": null,
+          "DnsSearch": null,
+          "ExtraHosts": [],
+          "GroupAdd": null,
+          "IpcMode": "",
+          "Cgroup": "",
+          "Links": null,
+          "OomScoreAdj": 0,
+          "PidMode": "",
+          "Privileged": false,
+          "PublishAllPorts": false,
+          "ReadonlyRootfs": false,
+          "SecurityOpt": null,
+          "UTSMode": "",
+          "UsernsMode": "",
+          "ShmSize": 0,
+          "Isolation": "",
+          "CpuShares": 0,
+          "Memory": 0,
+          "NanoCpus": 0,
+          "CgroupParent": "",
+          "BlkioWeight": 0,
+          "BlkioWeightDevice": null,
+          "BlkioDeviceReadBps": null,
+          "BlkioDeviceWriteBps": null,
+          "BlkioDeviceReadIOps": null,
+          "BlkioDeviceWriteIOps": null,
+          "CpuPeriod": 0,
+          "CpuQuota": 0,
+          "CpuRealtimePeriod": 0,
+          "CpuRealtimeRuntime": 0,
+          "CpusetCpus": "",
+          "CpusetMems": "",
+          "Devices": null,
+          "DeviceCgroupRules": null,
+          "DeviceRequests": null,
+          "MemoryReservation": 0,
+          "MemorySwap": 0,
+          "MemorySwappiness": null,
+          "OomKillDisable": false,
+          "PidsLimit": null,
+          "Ulimits": null,
+          "CpuCount": 0,
+          "CpuPercent": 0,
+          "IOMaximumIOps": 0,
+          "IOMaximumBandwidth": 0,
+          "MaskedPaths": null,
+          "ReadonlyPaths": null
+        },
+        "NetworkingConfig": {
+          "EndpointsConfig": {
+            "gwcap_default": {
+              "IPAMConfig": null,
+              "Links": null,
+              "Aliases": ["gwcap-waiter-1", "waiter"],
+              "DriverOpts": null,
+              "GwPriority": 0,
+              "NetworkID": "",
+              "EndpointID": "",
+              "Gateway": "",
+              "IPAddress": "",
+              "MacAddress": "",
+              "IPPrefixLen": 0,
+              "IPv6Gateway": "",
+              "GlobalIPv6Address": "",
+              "GlobalIPv6PrefixLen": 0,
+              "DNSNames": null
+            }
+          }
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/volumes/create",
+      "body": {
+        "Labels": {
+          "com.docker.compose.config-hash": "66081292cebef17f0794d836695fb8066c2bc01179825ae56db17b082b5b7511",
+          "com.docker.compose.project": "gwcap",
+          "com.docker.compose.version": "5.8.0",
+          "com.docker.compose.volume": "gwcapdata"
+        },
+        "Name": "gwcap_gwcapdata"
+      }
+    }
+  ]
+}

@@ -6,6 +6,7 @@ import { userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { execa } from 'execa';
 import { afterAll, describe, expect, it } from 'vitest';
+import { writerStart } from '../src/git/pushable-tips.ts';
 import { hostAllowed, isPrivateAddress, startEgressProxy } from '../src/sandbox/egress-proxy.ts';
 import {
   type HarnessSandboxInput,
@@ -316,6 +317,65 @@ describe.skipIf(!ok || !probe)('the harness sandbox (real bubblewrap)', () => {
     await w.proxy.close();
   });
 });
+
+describe.skipIf(!ok || !probe)(
+  'gate-fixes-2 S7/B1: the git fence in the harness box (real bubblewrap)',
+  () => {
+    it('a card session commits on its own branch, but cannot move main, remote-tracking refs, tags or packed-refs', async () => {
+      const dir = join(root, 'fence-repo');
+      mkdirSync(dir, { recursive: true });
+      const g = (cwd: string, ...a: string[]) =>
+        spawnSync('git', ['-C', cwd, ...a], {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            GIT_AUTHOR_NAME: 't',
+            GIT_AUTHOR_EMAIL: 't@x.test',
+            GIT_COMMITTER_NAME: 't',
+            GIT_COMMITTER_EMAIL: 't@x.test',
+          },
+        });
+      const repo = join(dir, 'repo');
+      spawnSync('git', ['init', '-q', '-b', 'main', repo]);
+      writeFileSync(join(repo, 'a'), 'a\n');
+      g(repo, 'add', '-A');
+      g(repo, 'commit', '-qm', 'a');
+      g(repo, 'tag', 'v1');
+      g(repo, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+      g(repo, 'branch', 'other');
+      const card = join(dir, 'card');
+      g(repo, 'worktree', 'add', '-q', '-b', 'aom/toy-1-x', card);
+      const common = join(repo, '.git');
+      const main = g(repo, 'rev-parse', 'main').stdout.trim();
+      // the supervisor counts the writer before the box is built (refs/replace exists from then on, loose refs too)
+      const release = await writerStart(card);
+      const w = await world('fence', { cwd: card, gitDirs: [common], mayCommit: true });
+      const id =
+        'export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@x.test GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@x.test;';
+      const commit = await w.run(
+        `${id} cd ${card} && echo b > b && git add b && git commit -qm b && echo COMMITTED`,
+      );
+      expect(commit.out).toContain('COMMITTED');
+      const forged = g(card, 'rev-parse', 'HEAD').stdout.trim();
+      for (const [what, script] of [
+        ['main', `git update-ref refs/heads/main ${forged}`],
+        ['another branch', `git update-ref refs/heads/other ${forged}`],
+        ['origin/main', `git update-ref refs/remotes/origin/main ${forged}`],
+        ['a tag', `git update-ref refs/tags/v1 ${forged}`],
+        ['packed-refs', `echo "${forged} refs/heads/main" >> ${common}/packed-refs`],
+        ['a replace ref', `git replace ${main} ${forged}`],
+      ] as const) {
+        await w.run(`${id} cd ${card} && ${script}`);
+        expect(g(repo, 'rev-parse', 'main').stdout.trim(), what).toBe(main);
+      }
+      expect(g(repo, 'rev-parse', 'other').stdout.trim()).toBe(main);
+      expect(g(repo, 'rev-parse', 'refs/remotes/origin/main').stdout.trim()).toBe(main);
+      expect(g(repo, 'rev-parse', 'refs/tags/v1').stdout.trim()).toBe(main);
+      expect(g(repo, 'for-each-ref', 'refs/replace').stdout.trim()).toBe('');
+      await release();
+    }, 60_000);
+  },
+);
 
 describe('the egress proxy rules', () => {
   it('matches exact hosts and subdomains of a wildcard', () => {

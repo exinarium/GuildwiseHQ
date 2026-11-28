@@ -5,8 +5,20 @@ import { isSafeGitRef, REBASE_ERROR_STDERR_MAX } from '@aom/shared';
 import { restoreTrackedSandboxStubs, withWorktreeHeld } from '../adapters/sandbox-placeholders.ts';
 import { redactSecrets } from '../secrets/redact.ts';
 import { recordCardConflict } from './conflict-record.ts';
-import { type GitResult, git, hasRemote, originAuth, type RemoteAuth, revParse } from './git.ts';
+import {
+  GitError,
+  type GitResult,
+  git,
+  hasCommit,
+  hasRemote,
+  moveBranchAt,
+  originAuth,
+  originTip,
+  type RemoteAuth,
+  revParse,
+} from './git.ts';
 import { type BoundPostAs, committerEnv, requireCommitIdentity } from './identity.ts';
+import { knowClone, latestTip, recordTip } from './pushable-tips.ts';
 
 /**
  * Rebasing rewrites commits, which needs a committer; the author of each commit is kept. The committer is the resolved
@@ -152,12 +164,32 @@ async function rebaseOntoBaseUnheld(
   if (!isSafeGitRef(baseBranch)) throw new Error(`refusing unsafe base branch ${JSON.stringify(baseBranch)}`);
   // a committed placeholder the sandbox took away is an unstaged deletion git rebase refuses on (REVIEW S2)
   await restoreTrackedSandboxStubs(worktree).catch(() => []);
-  // Best effort: a failed fetch leaves the last fetched origin/<base>, which is still a valid base.
+  // gate-fixes-2 Rule B: the base is origin's tip from ls-remote (fetched, then checked to be here), used as a sha; never
+  // `origin/<base>` or `FETCH_HEAD`, which an agent session can change. Without a remote: the local base branch.
+  let target = baseBranch;
   if (await hasRemote(worktree)) {
     const a = await originAuth(worktree, auth);
     if (a) await git(worktree, [...a.args, 'fetch', '--', 'origin', baseBranch], { env: a.env });
+    const ruleB = await originTip(worktree, baseBranch, a ?? undefined).catch((err: unknown) => {
+      throw new RebaseError({
+        baseRef: `origin/${baseBranch}`,
+        command: `git ls-remote origin refs/heads/${baseBranch}`,
+        exitCode: err instanceof GitError ? err.result.exitCode : 128,
+        stderr: err instanceof Error ? err.message.slice(0, REBASE_ERROR_STDERR_MAX) : String(err),
+      });
+    });
+    if (ruleB && !(await hasCommit(worktree, ruleB)))
+      throw new RebaseError({
+        baseRef: `origin/${baseBranch}`,
+        command: `git cat-file -e ${ruleB}`,
+        exitCode: 128,
+        stderr: `origin's ${baseBranch} (${ruleB}) is not in this clone after the fetch`,
+      });
+    if (ruleB) target = ruleB;
   }
-  const target = await baseTarget(worktree, baseBranch);
+  // what messages show: `origin/<base>` (its tip from ls-remote is what git ran with)
+  const label = target === baseBranch ? baseBranch : `origin/${baseBranch}`;
+  const shown = (args: string[]) => args.map((a) => (a === target ? label : a));
   if (!(await revParse(worktree, target)))
     throw new RebaseError({
       baseRef: target,
@@ -170,15 +202,45 @@ async function rebaseOntoBaseUnheld(
   const ancestorArgs = ['merge-base', '--is-ancestor', target, 'HEAD'];
   const anc = await git(worktree, ancestorArgs);
   if (anc.exitCode === 0) return 'up_to_date';
-  if (anc.exitCode !== 1) throw rebaseError(target, ancestorArgs, anc);
+  if (anc.exitCode !== 1) throw rebaseError(label, shown(ancestorArgs), anc);
   const renv = await rebaseEnv(worktree, commitAs, postAs);
   // T7: a conflict the runner saw itself is recorded with the head it had, for the later runner-run fast-forward
   const headBefore = (await git(worktree, ['rev-parse', 'HEAD'])).stdout.trim();
+  // gate-fixes-2 B3: the move is detached at the head read here and compare-and-swap; the result is recorded only when
+  // that head was the branch's latest record (a runner move never makes an untrusted tip trusted)
+  const branch = (await git(worktree, ['symbolic-ref', '--quiet', '--short', 'HEAD'])).stdout.trim();
+  if (!branch || !isSafeGitRef(branch))
+    throw rebaseError(label, ['symbolic-ref', 'HEAD'], {
+      stdout: '',
+      stderr: 'the card worktree is not on a branch',
+      exitCode: 128,
+    });
+  await knowClone(worktree);
+  const trustedBefore = (await latestTip(worktree, `refs/heads/${branch}`))?.sha === headBefore;
+  const moved = async (args: string[], how: 'rebased' | 'merged', env: Record<string, string>) => {
+    let failure: unknown;
+    const m = await moveBranchAt(
+      worktree,
+      branch,
+      headBefore,
+      () => git(worktree, args, { env }),
+      // the conflicted files are read, then the rebase or merge is aborted (failRebase), then the branch re-attached
+      async (r) => {
+        failure = await failAndRecord(args, r).catch((e: unknown) => e);
+      },
+    );
+    if (m.ok) {
+      if (trustedBefore) await recordTip(worktree, `refs/heads/${branch}`, m.sha, how);
+      return how;
+    }
+    if (failure) throw failure;
+    throw rebaseError(label, shown(args), { stdout: '', stderr: m.reason, exitCode: 128 });
+  };
   const failAndRecord = async (args: string[], res: Awaited<ReturnType<typeof git>>): Promise<never> => {
     try {
-      return await failRebase(worktree, target, args, res);
+      return await failRebase(worktree, label, shown(args), res);
     } catch (err) {
-      if (err instanceof RebaseConflictError) await recordCardConflict(worktree, headBefore);
+      if (err instanceof RebaseConflictError) await recordCardConflict(worktree, headBefore, branch);
       throw err;
     }
   };
@@ -188,14 +250,7 @@ async function rebaseOntoBaseUnheld(
   const merges = mergeBase
     ? (await git(worktree, ['rev-list', '--merges', '--count', `${mergeBase}..HEAD`])).stdout.trim()
     : '0';
-  if (merges !== '' && merges !== '0') {
-    const mergeArgs = ['merge', '--no-edit', '--', target];
-    const m = await git(worktree, mergeArgs, { env: { ...renv, ...authorEnv(renv) } });
-    if (m.exitCode === 0) return 'merged';
-    return failAndRecord(mergeArgs, m);
-  }
-  const rebaseArgs = ['rebase', target];
-  const r = await git(worktree, rebaseArgs, { env: renv });
-  if (r.exitCode === 0) return 'rebased';
-  return failAndRecord(rebaseArgs, r);
+  if (merges !== '' && merges !== '0')
+    return moved(['merge', '--no-edit', '--', target], 'merged', { ...renv, ...authorEnv(renv) });
+  return moved(['rebase', target], 'rebased', renv);
 }

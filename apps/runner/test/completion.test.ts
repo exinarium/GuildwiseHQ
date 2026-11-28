@@ -4,6 +4,7 @@ import type { FinalizeExecutePayload } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { executeCompletion } from '../src/git/completion.ts';
 import type { PrCreator, PrInput } from '../src/git/gh.ts';
+import { recordTip } from '../src/git/pushable-tips.ts';
 import { ensureWorktree } from '../src/git/worktrees.ts';
 import { cleanupTmp, makeRepo, sh, tmp } from './helpers.ts';
 
@@ -114,7 +115,9 @@ describe('completion: merge', () => {
       },
     });
     expect(r.ok).toBe(true);
-    expect(during).toContain('[guildwise/integration/toy-1]');
+    // gate-fixes-2 Rework 2 (B3): the integration worktree is detached, no temporary branch in the shared refs
+    expect(during).toMatch(/integration\/TOY-1\s+[0-9a-f]+ \(detached HEAD\)/);
+    expect(during).not.toContain('[guildwise/integration/');
     expect(during).not.toContain('[aom-integration/');
     const left = sh(repo.clone, 'git', ['branch', '--list', 'aom-integration/*', 'guildwise/integration/*']);
     expect(left).not.toContain('guildwise/integration');
@@ -369,6 +372,8 @@ describe('completion: pull request branch name on origin', () => {
     writeFileSync(join(path, 'more.txt'), 'more\n');
     sh(path, 'git', ['add', '-A']);
     sh(path, 'git', ['commit', '-m', 'address review']);
+    // gate-fixes-2 Rule D: the rework shift's end records the branch (here by hand)
+    await recordTip(path, `refs/heads/${BRANCH}`, sh(path, 'git', ['rev-parse', 'HEAD']), 'shift-end');
     const pr = new FakePr({ url: 'u' });
     const again = await run(repo, withPr(repo, path, { remoteBranch: first.pushedBranch }), pr);
     expect(again.pushedBranch).toBe('pieter/DCPL-4276');
@@ -432,7 +437,7 @@ describe('completion: intake card uses the work reference, never the internal re
     const top = originLog(repo).split('\n')[0]!;
     expect(top).toBe('Merge ABC-1: Add thing');
     expect(top).not.toMatch(/TOY-1/i);
-    expect(during).toContain('[guildwise/integration/toy-1]');
+    expect(during).toMatch(/integration\/TOY-1\s+[0-9a-f]+ \(detached HEAD\)/);
   });
 
   it('refuses to land a branch whose commits name the internal ref: nothing pushed, merged or opened', async () => {

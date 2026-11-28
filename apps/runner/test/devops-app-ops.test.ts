@@ -169,7 +169,8 @@ describe('DevOps hygiene on an app repository (AC2)', () => {
       sh(repo.clone, 'git', ['commit', '-m', 'mine']);
       const r = await hygieneRepo(spec(repo), [], withDeps ? { appAuth: async () => null } : {});
       return {
-        commands: r.commands.map((c) => c.replace(repo.clone, '<clone>')),
+        // gate-fixes-2 Rules A and B: hygiene rebases onto origin's sha and sends the tip by sha (new commits per run)
+        commands: r.commands.map((c) => c.replace(repo.clone, '<clone>').replace(/[0-9a-f]{40}/g, '<sha>')),
         pushes: pushes(),
         identity: tipIdentity(repo),
       };
@@ -223,13 +224,13 @@ describe('DevOps card request on an app repository: conflict resolution as the a
     // A conflict between the card branch and origin/main, resolved in the engineer's environment (bot identity).
     const repo = makeRepo();
     const pushes = recordPushes(repo);
-    sh(repo.clone, 'git', ['checkout', '-b', 'aom/gwp-1']);
+    sh(repo.clone, 'git', ['checkout', '-b', 'feature/gwp-1']);
     writeFileSync(join(repo.clone, 'README.md'), '# card\n');
     sh(repo.clone, 'git', ['commit', '-am', 'card']);
     sh(repo.clone, 'git', ['checkout', 'main']);
     writeFileSync(join(repo.clone, 'README.md'), '# main\n');
     sh(repo.clone, 'git', ['commit', '-am', 'main']);
-    sh(repo.clone, 'git', ['checkout', 'aom/gwp-1']);
+    sh(repo.clone, 'git', ['checkout', 'feature/gwp-1']);
     const env = commitEnv(ident);
     const merge = await git(repo.clone, ['merge', 'main'], { env });
     expect(merge.exitCode).not.toBe(0);
@@ -238,12 +239,13 @@ describe('DevOps card request on an app repository: conflict resolution as the a
     expect((await git(repo.clone, ['commit', '--no-edit'], { env })).exitCode).toBe(0);
 
     // `aom git push --repo`: the runner pushes with the app auth.
-    const p = devopsPushPlan('push', ['aom/gwp-1'], false, false);
+    // gate-fixes-2 B4: not a card branch (those go out only through the card's finalize)
+    const p = devopsPushPlan('push', ['feature/gwp-1'], false, false);
     if ('error' in p) throw new Error(p.error);
     const pushed = await git(repo.clone, [...appNet.args, ...p.args], { env: appNet.env });
     expect(pushed.exitCode).toBe(0);
     expect(pushes()).toEqual([APP_TOKEN_MARK]);
-    expect(sh(repo.origin, 'git', ['log', '-1', '--format=%an|%ae|%cn|%ce', 'aom/gwp-1']).trim()).toBe(
+    expect(sh(repo.origin, 'git', ['log', '-1', '--format=%an|%ae|%cn|%ce', 'feature/gwp-1']).trim()).toBe(
       `${BOT.name}|${BOT.email}|${BOT.name}|${BOT.email}`,
     );
   });
@@ -273,10 +275,8 @@ describe('aom git push|fetch --repo (runner side plan)', () => {
     expect(devopsPushPlan('push', ['refs/tags/v1.2.0'], false, false)).toMatchObject({
       operation: 'push tag',
     });
-    expect(devopsPushPlan('push', [], false, true)).toEqual({
-      args: ['push', '--tags', 'origin'],
-      operation: 'push tag',
-    });
+    // gate-fixes-2 B4: never all tags at once
+    expect(devopsPushPlan('push', [], false, true)).toHaveProperty('error');
     expect(devopsPushPlan('push', ['aom/gwp-1'], true, false)).toEqual({
       args: ['push', '--delete', 'origin', '--', 'aom/gwp-1'],
       operation: 'delete branch',

@@ -32,7 +32,8 @@ describe('sandbox config.lock stub (hotfix #78)', () => {
       },
       async (dir) => sh(dir, 'git', ['rev-parse', '--abbrev-ref', 'HEAD']).trim(),
     );
-    expect(probe).toEqual({ ok: true, value: 'guildwise/integration/x' });
+    // gate-fixes-2 Rework 2 (B3): detached, no temporary branch in the shared refs
+    expect(probe).toEqual({ ok: true, value: 'HEAD' });
     // no tracking was configured, so nothing touched the config (and the stub was not even in the way)
     expect(existsSync(lock)).toBe(true);
     expect((await git(r.clone, ['config', '--get-regexp', '^branch\\.guildwise'])).stdout.trim()).toBe('');

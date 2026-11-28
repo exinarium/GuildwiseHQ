@@ -471,6 +471,124 @@ describe('repository hygiene: defers while a card shift runs in the repository',
   });
 });
 
+describe('gate-fixes-2 F6a: while a card shift runs, hygiene still fetches, checks and pushes', () => {
+  /** A linked worktree with a running shift (the busy list the supervisor gives). */
+  const busyCard = (repo: TestRepo) => {
+    const wt = join(tmp(), 'card-wt');
+    sh(repo.clone, 'git', ['worktree', 'add', '-b', 'aom/toy-1-x', wt]);
+    return wt;
+  };
+  const localCommit = (repo: TestRepo, file: string) => {
+    write(repo, file, file);
+    sh(repo.clone, 'git', ['add', '-A']);
+    sh(repo.clone, 'git', ['commit', '-m', `local ${file}`]);
+  };
+
+  it('busy, current branch ahead of origin (a moved-forward resolution): pushed', async () => {
+    const repo = makeRepo();
+    const wt = busyCard(repo);
+    localCommit(repo, 'resolution.txt');
+    const tip = sh(repo.clone, 'git', ['rev-parse', 'main']);
+
+    const { result } = await hygieneRepo(spec(repo), [wt]);
+
+    expect(result.problem).toBeNull();
+    expect(result.pushed).toBe(true);
+    expect(originHead(repo)).toBe(tip);
+    expect(result.deferred).toEqual(['worktree prune']);
+  });
+
+  it('busy, another branch checked out, the working branch ahead: pushed', async () => {
+    const repo = makeRepo();
+    const wt = busyCard(repo);
+    localCommit(repo, 'resolution.txt');
+    const tip = sh(repo.clone, 'git', ['rev-parse', 'main']);
+    sh(repo.clone, 'git', ['checkout', '-b', 'feature/x']);
+
+    const { result } = await hygieneRepo(spec(repo), [wt]);
+
+    expect(result.problem).toBeNull();
+    expect(result.pushed).toBe(true);
+    expect(originHead(repo)).toBe(tip);
+  });
+
+  it('busy, another branch checked out, the working branch diverged: still a conflict, nothing pushed', async () => {
+    const repo = makeRepo();
+    const wt = busyCard(repo);
+    localCommit(repo, 'local.txt');
+    remoteCommit(repo, 'theirs.txt', 't');
+    const before = originHead(repo);
+    sh(repo.clone, 'git', ['checkout', '-b', 'feature/x']);
+
+    const { result, commands } = await hygieneRepo(spec(repo), [wt]);
+
+    expect(result.problem?.kind).toBe('conflict');
+    expect(originHead(repo)).toBe(before);
+    expect(commands.join('\n')).not.toMatch(/push/);
+  });
+
+  it('busy, current branch behind origin with unsaved edits: no push, no pull, no stash; the update waits', async () => {
+    const repo = makeRepo();
+    const wt = busyCard(repo);
+    remoteCommit(repo, 'theirs.txt', 't');
+    write(repo, 'wip.txt', 'unsaved');
+    const head = sh(repo.clone, 'git', ['rev-parse', 'HEAD']);
+
+    const { result, commands } = await hygieneRepo(spec(repo), [wt]);
+
+    expect(result.problem).toBeNull();
+    expect(result.deferred).toEqual(['stash unsaved edits', 'update main from origin', 'worktree prune']);
+    expect(commands.join('\n')).not.toMatch(/ push | pull |stash|worktree prune/);
+    expect(commands.join('\n')).toMatch(/fetch/);
+    expect(sh(repo.clone, 'git', ['rev-parse', 'HEAD'])).toBe(head);
+    expect(sh(repo.clone, 'git', ['stash', 'list'])).toBe('');
+    expect(result.actions.join(' ')).toContain('deferred while 1 card shift(s) run in this repository');
+  });
+
+  it('busy, current branch diverged: no push attempt and no conflict; the update waits', async () => {
+    const repo = makeRepo();
+    const wt = busyCard(repo);
+    localCommit(repo, 'local.txt');
+    remoteCommit(repo, 'theirs.txt', 't');
+    const before = originHead(repo);
+    const head = sh(repo.clone, 'git', ['rev-parse', 'HEAD']);
+
+    const { result, commands } = await hygieneRepo(spec(repo), [wt]);
+
+    expect(result.problem).toBeNull();
+    expect(result.deferred).toContain('update main from origin');
+    expect(commands.join('\n')).not.toMatch(/push|pull|rebase/);
+    expect(originHead(repo)).toBe(before);
+    expect(sh(repo.clone, 'git', ['rev-parse', 'HEAD'])).toBe(head);
+  });
+
+  it('busy, working branch rewritten on origin: not realigned, nothing pushed', async () => {
+    const repo = makeRepo();
+    pushedCommit(repo, 'stale1.txt', 'a');
+    forceRewrite(repo, 1);
+    const rewritten = originHead(repo);
+    const wt = busyCard(repo);
+    const head = sh(repo.clone, 'git', ['rev-parse', 'main']);
+
+    const { result, commands } = await hygieneRepo(spec(repo), [wt]);
+
+    expect(result.problem).toBeNull();
+    expect(result.deferred).toContain('realign rewritten main');
+    expect(result.pushed).toBe(false);
+    expect(commands.join('\n')).not.toMatch(/push/);
+    expect(originHead(repo)).toBe(rewritten);
+    expect(sh(repo.clone, 'git', ['rev-parse', 'main'])).toBe(head);
+  });
+
+  it('the summary shows what waited', async () => {
+    const repo = makeRepo();
+    const wt = busyCard(repo);
+    remoteCommit(repo, 'theirs.txt', 't');
+    const run = await runHygiene({ trigger: 'schedule', repos: [spec(repo)] }, [wt]);
+    expect(run.summary).toContain('DEFERRED (card shift running): update main from origin, worktree prune.');
+  });
+});
+
 describe('repository hygiene: old saved-work branches are migrated away', () => {
   it('stores local and origin guildwise/saved-work branches in stashes and deletes them', async () => {
     const repo = makeRepo();

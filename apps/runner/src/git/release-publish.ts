@@ -18,7 +18,7 @@ import { forgeForUrl } from '../forge/index.ts';
 import type { ChangeState, ForgeEnv } from '../forge/types.ts';
 import { detectSignOff } from './dco.ts';
 import { appOfPlan, isProtectedBranchRejection, type PrCreator, withPushReport } from './gh.ts';
-import { advanceLocalBranch, git, hasRemote, revParse } from './git.ts';
+import { advanceLocalBranch, git, hasRemote, revParse, ruleBTip } from './git.ts';
 import {
   type AppTokenProbe,
   boundPostAsFor,
@@ -30,6 +30,7 @@ import {
 } from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import { isAncestor } from './merged.ts';
+import { recordTip } from './pushable-tips.ts';
 import { resolveReleaseBase } from './release-pr.ts';
 import { pushFastForward } from './release-ship.ts';
 import { withRepoLock } from './repo-lock.ts';
@@ -89,11 +90,17 @@ async function publishLocked(input: ReleasePublishInput): Promise<ReleasePublish
   );
   if (!resolved.ok) return failed('land', resolved.error);
   const base = resolved.base;
-  const baseRef = `refs/remotes/origin/${base}`;
   const fetchBase = () => git(repoPath, [...a.args, 'fetch', '--', 'origin', base], authEnv);
   const f1 = await fetchBase();
   if (f1.exitCode !== 0) return failed('land', `could not fetch ${base}: ${(f1.stderr || f1.stdout).trim()}`);
   await git(repoPath, [...a.args, 'fetch', '--', 'origin', p.workingBranch], authEnv);
+  // gate-fixes-2 Rule B: origin's tip of the main branch from ls-remote (a sha), never refs/remotes/origin/<base>
+  const baseRef = await ruleBTip(repoPath, base, a);
+  if (!baseRef) return failed('land', `the main branch '${base}' could not be read from origin`);
+  const freshBase = async () => {
+    await fetchBase();
+    return ruleBTip(repoPath, base, a);
+  };
 
   // 1. land
   const R = p.releaseCommitSha;
@@ -114,7 +121,7 @@ async function publishLocked(input: ReleasePublishInput): Promise<ReleasePublish
       ...(p.land.mode === 'pr' && p.land.prUrl ? { prUrl: p.land.prUrl } : {}),
     };
   } else if (p.land.mode === 'pr') {
-    const out = await landByPr(input, base, baseRef, fetchBase);
+    const out = await landByPr(input, base, freshBase);
     if ('result' in out) return out.result;
     target = out.sha;
     landed = { mode: 'pr', mergeSha: out.sha, by: 'forge', ...(p.land.prUrl ? { prUrl: p.land.prUrl } : {}) };
@@ -182,7 +189,19 @@ async function publishLocked(input: ReleasePublishInput): Promise<ReleasePublish
       return failed('tag', `git tag failed: ${(made.stderr || made.stdout).trim()}`, carry);
   }
   if (decision.action === 'create' || decision.action === 'push') {
-    const push = await git(repoPath, [...a.args, 'push', 'origin', `refs/tags/${p.tag}`], authEnv);
+    // gate-fixes-2 B4: the tag object is read once and must point at the target; it is sent by that sha and recorded
+    const tagSha = (await git(repoPath, ['rev-parse', '-q', '--verify', `refs/tags/${p.tag}`])).stdout.trim();
+    const peeled = tagSha
+      ? (await git(repoPath, ['rev-parse', '-q', '--verify', `${tagSha}^{commit}`])).stdout.trim()
+      : '';
+    if (!tagSha || peeled !== target)
+      return failed(
+        'tag',
+        `the local tag ${p.tag} does not point at ${target.slice(0, 10)}: delete it and Retry`,
+        carry,
+      );
+    await recordTip(repoPath, `refs/tags/${p.tag}`, tagSha, 'tag');
+    const push = await git(repoPath, [...a.args, 'push', 'origin', `${tagSha}:refs/tags/${p.tag}`], authEnv);
     if (push.exitCode !== 0)
       return failed(
         'tag',
@@ -304,8 +323,8 @@ async function carriesRelease(repoPath: string, R: string, sha: string): Promise
 async function landByPr(
   input: ReleasePublishInput,
   base: string,
-  baseRef: string,
-  refetch: () => Promise<unknown>,
+  /** Fetches and reads origin's tip of the base again (Rule B). */
+  refetch: () => Promise<string | null>,
 ): Promise<Landing> {
   const { payload: p, repoPath } = input;
   const waiting = (reason: string, prState: ChangeState | null): Landing => ({
@@ -331,8 +350,8 @@ async function landByPr(
     : null;
   if (!sha)
     return waiting(`the release pull request is merged; waiting for its merge commit on ${base}`, 'merged');
-  await refetch();
-  if (!(await isAncestor(repoPath, sha, baseRef)))
+  const baseRef = await refetch();
+  if (!baseRef || !(await isAncestor(repoPath, sha, baseRef)))
     return waiting(`the release pull request is merged; waiting for ${base} to show it`, 'merged');
   if (!(await carriesRelease(repoPath, p.releaseCommitSha, sha)))
     return {
@@ -411,7 +430,7 @@ async function landByMerge(
         };
       }
       const sha = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
-      const push = await git(wt, [...a.args, 'push', 'origin', `HEAD:refs/heads/${base}`], { env: a.env });
+      const push = await git(wt, [...a.args, 'push', 'origin', `${sha}:refs/heads/${base}`], { env: a.env });
       if (push.exitCode !== 0) {
         const why = (push.stderr || push.stdout).trim();
         if (isProtectedBranchRejection(why) && input.pr) {
@@ -474,7 +493,7 @@ async function mergeBack(
   const app = appOfPlan(p.postAs, p.remoteUrlNormalized);
   try {
     const fetched = await git(repoPath, [...a.args, 'fetch', '--', 'origin', wb], { env: a.env });
-    const tip = await revParse(repoPath, `refs/remotes/origin/${wb}`);
+    const tip = await ruleBTip(repoPath, wb, a);
     if (!tip)
       return failedWith(
         fetched.exitCode !== 0

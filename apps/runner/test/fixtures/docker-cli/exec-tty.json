@@ -1,0 +1,49 @@
+{
+  "command": "script -qc \"stty rows 24 cols 80; docker exec -it gwcap-b true\" /dev/null",
+  "exit": 0,
+  "requests": [
+    {
+      "method": "HEAD",
+      "path": "/_ping"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/containers/gwcap-b/json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/gwcap-b/exec"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/exec/ec991b04e572a4f647c011bde895c7b39245a61b1f552fe9c53d132728333719/resize?h=24&w=80"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/exec/ec991b04e572a4f647c011bde895c7b39245a61b1f552fe9c53d132728333719/json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/exec/ec991b04e572a4f647c011bde895c7b39245a61b1f552fe9c53d132728333719/start"
+    }
+  ],
+  "bodies": [
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/gwcap-b/exec",
+      "body": {
+        "User": "",
+        "Privileged": false,
+        "Tty": true,
+        "ConsoleSize": [24, 80],
+        "AttachStdin": true,
+        "AttachStderr": true,
+        "AttachStdout": true,
+        "DetachKeys": "",
+        "Env": null,
+        "WorkingDir": "",
+        "Cmd": ["true"]
+      }
+    }
+  ]
+}

@@ -1,6 +1,9 @@
 import { CHANGED_PATHS_MAX, capDiff, type DiffUpload } from '@aom/shared';
 import { baseRef, cardPlaceholders, ownChangedPaths, scoped } from './diffstat.ts';
-import { git, gitOk, revParse } from './git.ts';
+import { git, gitOk, hasCommit, hasRemote, originTip, revParse } from './git.ts';
+
+/** gate-fixes-2 S9 (R3-S3): the review diff base could not be read from origin; the handoff is refused (fail closed). */
+export class DiffBaseError extends Error {}
 
 export interface CardDiff {
   headSha: string;
@@ -14,8 +17,33 @@ export interface CardDiff {
  * the paths the card changes and the unified diff `<base>...HEAD`, capped at 2 MB with a note (`capDiff`). Taken after the
  * shift's autocommit, so what is measured is what the reviewers read.
  */
-export async function computeCardDiff(worktree: string, baseBranch: string): Promise<CardDiff> {
-  const base = await baseRef(worktree, baseBranch);
+export async function computeCardDiff(
+  worktree: string,
+  baseBranch: string,
+  /** The host's credentials for origin (the project's app when it posts as one); absent: git's own. */
+  auth?: { args: string[]; env: Record<string, string> },
+): Promise<CardDiff> {
+  const label = await baseRef(worktree, baseBranch);
+  // gate-fixes-2 S9: with a remote the base is origin's tip read with ls-remote (a sha), so a `refs/remotes/origin/<base>`
+  // an agent session forged cannot change what the reviewers read; it fails closed (R3-S3)
+  let base = label;
+  if (await hasRemote(worktree)) {
+    let sha: string | null;
+    try {
+      sha = await originTip(worktree, baseBranch, auth);
+    } catch (err) {
+      throw new DiffBaseError(`origin could not be asked for ${baseBranch}: ${String(err).slice(0, 300)}`);
+    }
+    if (sha) {
+      if (!(await hasCommit(worktree, sha)))
+        await git(worktree, [...(auth?.args ?? []), 'fetch', '--', 'origin', baseBranch], {
+          ...(auth ? { env: auth.env } : {}),
+        });
+      if (!(await hasCommit(worktree, sha)))
+        throw new DiffBaseError(`origin's ${baseBranch} (${sha.slice(0, 10)}) could not be fetched`);
+      base = sha;
+    }
+  }
   const headSha = await gitOk(worktree, ['rev-parse', 'HEAD']);
   // A branch that merged `main` (or the working branch) in: only what the card itself changed, not what the merge brought.
   // sandbox placeholders a commit put on the branch are not the card's change: not shown to the reviewers
@@ -43,7 +71,7 @@ export async function computeCardDiff(worktree: string, baseBranch: string): Pro
       text: capped.text,
       bytes: capped.bytes,
       truncated: capped.truncated,
-      base,
+      base: label,
       ...((await revParse(worktree, base)) ? { baseSha: await gitOk(worktree, ['rev-parse', base]) } : {}),
     },
   };

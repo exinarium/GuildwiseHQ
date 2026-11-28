@@ -4,6 +4,7 @@ import type { FinalizeExecutePayload } from '@aom/shared';
 import { describe, expect, it } from 'vitest';
 import { executeCompletion } from '../src/git/completion.ts';
 import type { PrCreator } from '../src/git/gh.ts';
+import { recordTip } from '../src/git/pushable-tips.ts';
 import { ensureWorktree, removeWorktree } from '../src/git/worktrees.ts';
 import { cleanupTmp, makeRepo, sh, tmp } from './helpers.ts';
 
@@ -93,6 +94,8 @@ describe('rework after a merged finalize (manual QA send back)', () => {
     expect(readFileSync(join(path, 'thing.txt'), 'utf8')).toBe('v1\n');
     expect(sh(path, 'git', ['rev-parse', 'HEAD'])).toBe(first.mergeCommit);
     commit(path, 'thing.txt', 'v2 (fixed after QA)\n', 'fix after QA');
+    // gate-fixes-2 Rule D: the rework shift's end records the branch (here by hand)
+    await recordTip(path, `refs/heads/${BRANCH}`, sh(path, 'git', ['rev-parse', 'HEAD']), 'shift-end');
 
     // round 2: the second finalize merges the fix, once, on top of the first merge
     const second = await finalize(repo, path);

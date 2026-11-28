@@ -112,12 +112,19 @@ export const setConflictRecords = (r: ConflictRecords | null): void => {
 };
 export const conflictRecords = (): ConflictRecords | null => current;
 
-/** After a card rebase conflicted (and was aborted): records the card branch at `head`. Never throws. */
-export async function recordCardConflict(worktree: string, head: string): Promise<void> {
+/**
+ * After a card rebase conflicted (and was aborted): records the card branch at `head`. gate-fixes-2: the caller passes
+ * the branch it checked (the worktree may be detached during the runner's move). Never throws.
+ */
+export async function recordCardConflict(
+  worktree: string,
+  head: string,
+  checkedBranch?: string,
+): Promise<void> {
   const store = current;
   if (!store || !/^[0-9a-f]{40,64}$/.test(head)) return;
   try {
-    const branch = await currentBranch(worktree);
+    const branch = checkedBranch ?? (await currentBranch(worktree));
     if (!branch) return;
     store.record({
       repo: await ledgerRepoKey(worktree),
@@ -131,15 +138,20 @@ export async function recordCardConflict(worktree: string, head: string): Promis
   }
 }
 
-/** Hygiene could not combine `wb` with `origin/<wb>`: records both heads. Never throws. */
-export async function recordWorkingConflict(repoPath: string, wb: string): Promise<void> {
+/**
+ * Hygiene could not combine `wb` with origin's: records both heads. gate-fixes-2 B2: the shas are the ones hygiene used
+ * (its trusted local tip, read once, and origin's Rule B tip from ls-remote), never re-read from refs an agent session
+ * could have moved meanwhile. Never throws.
+ */
+export async function recordWorkingConflict(
+  repoPath: string,
+  wb: string,
+  shas: { head: string; originHead: string },
+): Promise<void> {
   const store = current;
   if (!store) return;
   try {
-    const head = (await git(repoPath, ['rev-parse', '--verify', '-q', `refs/heads/${wb}`])).stdout.trim();
-    const originHead = (
-      await git(repoPath, ['rev-parse', '--verify', '-q', `refs/remotes/origin/${wb}`])
-    ).stdout.trim();
+    const { head, originHead } = shas;
     if (!/^[0-9a-f]{40,64}$/.test(head) || !/^[0-9a-f]{40,64}$/.test(originHead)) return;
     store.record({
       repo: await ledgerRepoKey(repoPath),

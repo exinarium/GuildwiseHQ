@@ -6,6 +6,7 @@ import { type CommitAs, NO_COMMIT_IDENTITY_MESSAGE } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { saveUncommittedWork } from '../src/devops/saved-work.ts';
 import { executeCompletion } from '../src/git/completion.ts';
+import { recordTip } from '../src/git/pushable-tips.ts';
 import { RebaseConflictError, rebaseOntoBase } from '../src/git/rebase.ts';
 import { mergeMainIntoCard, syncMainIntoWorking } from '../src/git/sync-main.ts';
 import { ensureWorktree } from '../src/git/worktrees.ts';
@@ -331,6 +332,8 @@ describe('runner-made git operations use the resolver', () => {
       writeFileSync(join(wt, `${branch}.txt`), 'p\n');
       sh(wt, 'git', ['add', '-A']);
       sh(wt, 'git', ['commit', '-m', 'Add pr']);
+      // gate-fixes-2 Rule D: the builder shift's end records the branch (here by hand)
+      await recordTip(wt, `refs/heads/${branch}`, sh(wt, 'git', ['rev-parse', 'HEAD']), 'shift-end');
       const res = await executeCompletion({
         payload: {
           cardId: '019e3f6a-7b1c-7a2d-8c3e-0123456789a1',

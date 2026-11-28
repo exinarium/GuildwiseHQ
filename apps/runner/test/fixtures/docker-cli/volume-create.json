@@ -1,0 +1,24 @@
+{
+  "command": "docker volume create gwcap-vol",
+  "exit": 0,
+  "requests": [
+    {
+      "method": "HEAD",
+      "path": "/_ping"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/volumes/create"
+    }
+  ],
+  "bodies": [
+    {
+      "method": "POST",
+      "path": "/v1.57/volumes/create",
+      "body": {
+        "Driver": "local",
+        "Name": "gwcap-vol"
+      }
+    }
+  ]
+}

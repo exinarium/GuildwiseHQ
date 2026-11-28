@@ -77,7 +77,11 @@ describe('own repository split off the read-only folders', () => {
       expect(fs?.allowRead).not.toContain(f.repo);
       expect(settings.permissions.additionalDirectories).not.toContain(f.repo);
       expect(settings.permissions.deny).not.toContain(`Edit(${ruleAbs(f.repo)}/**)`);
-      expect(fs?.allowWrite).toContain(f.common);
+      // gate-fixes-2 B1: the card's git write scope (admin dir, objects, refs, logs), never the whole git dir
+      expect(fs?.allowWrite).toEqual(
+        expect.arrayContaining([join(f.common, 'objects'), join(f.common, 'refs')]),
+      );
+      expect(fs?.allowWrite).not.toContain(f.common);
       expect(shadowedWrites(fs ?? { allowWrite: [], denyWrite: [] }, f.x)).toEqual([]);
       // the clone's secret files stay masked
       expect(settings.permissions.deny.some((d) => d.includes(ruleAbs(f.repo)) && d.includes('.env'))).toBe(

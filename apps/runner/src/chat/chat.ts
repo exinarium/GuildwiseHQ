@@ -69,6 +69,7 @@ import { withInstallScriptsOff } from '../devops/install-env.ts';
 import { type ExternalAdapters, formatSource, readScopedJira } from '../external/index.ts';
 import { confine } from '../fs-safe.ts';
 import { resolveCommitIdentity } from '../git/identity.ts';
+import { writerStart } from '../git/pushable-tips.ts';
 import { CHAT_GRAPH_NOTE } from '../graph/brief.ts';
 import type { GraphService } from '../graph/service.ts';
 import type { IpcServer, ShiftIpcHandler } from '../ipc/server.ts';
@@ -146,6 +147,8 @@ interface ActiveChat {
   devopsBox?: boolean;
   /** An @mention that works in a card worktree holds it for the turn (the DevOps fence never judges it, REVIEW B1). */
   releaseWorktree?: () => void;
+  /** gate-fixes-2 D2: ends a work mention's writer count on the card's clone. */
+  releaseWriter?: () => Promise<void>;
   session?: RuntimeSession;
   token?: string;
   /** The token's env file; `revoke()` ends both (see session/shift-credential.ts). */
@@ -400,6 +403,7 @@ export class ChatManager {
       if (chat.turnDir) removeTurnDir(chat.turnDir);
       this.deps.restart?.turnFinished(msg.chatId, this.terminalFrames.get(msg.chatId));
       chat.releaseWorktree?.();
+      await chat.releaseWriter?.().catch(() => undefined);
       chat.releaseTmp?.();
       if (chat.sandbox) await cleanAgentTmp(chat.sandbox.tmp);
     }
@@ -1312,6 +1316,8 @@ export class ChatManager {
     const work = asksWork && workTools && hasWt;
     const readOnly = hasWt && !work;
     if (work && wt) chat.releaseWorktree = holdWorktree(wt, `chat:${msg.chatId}`);
+    // gate-fixes-2 D2: a mention that works writes the clone's .git (its own branch): a writer until the turn ends
+    if (work && wt) chat.releaseWriter = await writerStart(wt);
     const cwd = hasWt && wt ? wt : sandbox.scratch;
     // Repositories this chat may read (read-only): the project's reference repositories, and when there is no card
     // worktree here also the project's own clones (a chat about the project, or about a card not started here). The
@@ -1400,6 +1406,8 @@ export class ChatManager {
         {
           jiraSkill: await this.jiraSkill(msg),
           readFolders: folders,
+          // gate-fixes-2 F7b: a work mention is told it may change the card's folder, not "scratch only"
+          ...(work && wt ? { work: { folder: wt } } : {}),
           ...(!devops && msg.context.vault
             ? {
                 vault: vaultCtx

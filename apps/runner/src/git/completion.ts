@@ -12,7 +12,7 @@ import type { BranchRules } from '../forge/types.ts';
 import { type BranchLedger, ledgerRepoKey } from './branch-ledger.ts';
 import { recordCardConflict } from './conflict-record.ts';
 import { describePushRejection, isProtectedBranchRejection, type PrCreator } from './gh.ts';
-import { advanceLocalBranch, git, gitOk, hasRemote, revParse } from './git.ts';
+import { advanceLocalBranch, git, gitOk, hasCommit, hasRemote, originTip, revParse } from './git.ts';
 import {
   AppIdentityError,
   type AppTokenProbe,
@@ -24,6 +24,7 @@ import {
 } from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
 import { commitsWithInternalRef, describeCommits } from './internal-ref.ts';
+import { knowClone, latestTip } from './pushable-tips.ts';
 import { baseTarget, RebaseConflictError, RebaseError, rebaseOntoBase } from './rebase.ts';
 import { withRepoLock } from './repo-lock.ts';
 import { ensureWorktree } from './worktrees.ts';
@@ -161,15 +162,29 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
   if (dirty) return fail(action, `the card worktree has uncommitted changes:\n${dirty.slice(0, 500)}`);
 
   // lean team: the review and the owner's approval were for one commit; another one is not landed.
-  if (p.expectedSha) {
-    const head = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
-    if (head && head !== p.expectedSha)
+  // gate-fixes-2 Rule D (P1b): the head is read once; it must also be the runner's latest record of this branch (the
+  // card's own shift end or a runner move), else another session moved it: back to Build, nothing merged or sent.
+  const head = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
+  if (p.expectedSha && head && head !== p.expectedSha)
+    return {
+      ok: false,
+      action,
+      headMoved: true,
+      headSha: head,
+      error: `the card branch is at ${head.slice(0, 10)} but ${p.expectedSha.slice(0, 10)} was reviewed`,
+    };
+  {
+    await knowClone(wt);
+    const rec = await latestTip(wt, `refs/heads/${p.branchName}`);
+    if (!rec || rec.sha !== head)
       return {
         ok: false,
         action,
         headMoved: true,
         headSha: head,
-        error: `the card branch is at ${head.slice(0, 10)} but ${p.expectedSha.slice(0, 10)} was reviewed`,
+        error: !rec
+          ? 'this runner has no record of the card branch (its last shift ran elsewhere); send the card back to Build so a shift here records it'
+          : `the card branch is at ${head.slice(0, 10)}, but this runner last recorded ${rec.sha.slice(0, 10)}: it was changed outside this card's shifts`,
       };
   }
 
@@ -203,31 +218,37 @@ export async function executeCompletion(input: CompletionInput): Promise<Finaliz
     return fail(action, `rebase failed: ${errMsg(err)}`);
   }
 
+  const sha = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
+  if ((await latestTip(wt, `refs/heads/${p.branchName}`))?.sha !== sha)
+    return fail(
+      action,
+      `the card branch moved during the runner's rebase (now ${sha.slice(0, 10)}): nothing was landed`,
+    );
   if (action === 'merge')
-    return merge(input, wt).catch((err) => {
+    return merge(input, wt, sha).catch((err) => {
       if (err instanceof NoCommitIdentityError) return fail(action, err.message);
       if (err instanceof AppIdentityError) return fail(action, appIdentityWire(err));
       throw err;
     });
   const remote = await hasRemote(wt);
   if (!remote) return fail(action, 'cannot open a PR: the repository has no origin remote');
-  return openChangePath(input, wt).catch((err) => {
+  return openChangePath(input, wt, sha).catch((err) => {
     if (err instanceof AppIdentityError) return fail(action, appIdentityWire(err));
     throw err;
   });
 }
 
 /** Pushes the card branch and opens its pull request (an app that cannot mint throws AppIdentityError). */
-async function openChangePath(input: CompletionInput, wt: string): Promise<FinalizeResult> {
+async function openChangePath(input: CompletionInput, wt: string, sha: string): Promise<FinalizeResult> {
   const { payload: p } = input;
   const action = p.action;
   // A pull request goes out under <prefix>/<ticket>.
   const target = await remoteBranchFor(input, wt);
   const head = target.name;
-  const push = await pushBranch(input, wt, head);
+  const push = await pushBranch(input, wt, sha, head);
   if (push.exitCode !== 0)
     return fail(action, pushFailure(p, 'git push failed', (push.stderr || push.stdout).trim()));
-  await recordPush(input, wt, target);
+  await recordPush(input, target, sha);
 
   try {
     const r = await input.pr.create({
@@ -305,27 +326,44 @@ async function remoteBranchFor(input: CompletionInput, wt: string): Promise<{ na
  * name was free on origin before the push or is already in its ledger. A name a person uses (or reused after the forge
  * deleted the runner's copy) never becomes deletable through a server-chosen push.
  */
-async function recordPush(input: CompletionInput, wt: string, target: { name: string; free: boolean }) {
+async function recordPush(input: CompletionInput, target: { name: string; free: boolean }, sha: string) {
   const ledger = input.ledger;
   if (!ledger) return;
   try {
     const repo = await ledgerRepoKey(input.repoPath);
     if (!target.free && !ledger.has(repo, target.name)) return;
-    const sha = (await git(wt, ['rev-parse', `refs/heads/${input.payload.branchName}`])).stdout.trim();
+    // gate-fixes-2: the sha the runner sent, never the branch re-read
     if (/^[0-9a-f]{40,64}$/.test(sha)) ledger.record(repo, target.name, 'pushed', sha);
   } catch {
     // a failed ledger write never fails finalize: the branch is only kept by the tidy-up
   }
 }
 
-/** `git push origin <local>:<remote>` (never -u: it writes .git/config, which the sandbox locks) with the host's credentials when the runner has any. */
-async function pushBranch(input: CompletionInput, wt: string, remoteName?: string) {
+/**
+ * `git push origin <sha>:refs/heads/<remote>` (never -u: it writes .git/config, which the sandbox locks) with the host's
+ * credentials when the runner has any. gate-fixes-2 Rule D: by the sha the runner checked, never the branch name.
+ */
+async function pushBranch(input: CompletionInput, wt: string, sha: string, remoteName?: string) {
   const { payload: p } = input;
   const url = (await git(wt, ['remote', 'get-url', 'origin'])).stdout.trim();
   const a = input.auth && url ? await input.auth(url, p.forge) : { args: [], env: {} };
-  const spec =
-    remoteName && remoteName !== p.branchName ? `${p.branchName}:refs/heads/${remoteName}` : p.branchName;
-  return git(wt, [...a.args, 'push', 'origin', '--', spec], { env: a.env });
+  return git(wt, [...a.args, 'push', 'origin', '--', `${sha}:refs/heads/${remoteName ?? p.branchName}`], {
+    env: a.env,
+  });
+}
+
+/**
+ * gate-fixes-2 Rule B: the base to merge into, as a sha: origin's tip from ls-remote (fetched first, and here), or the
+ * local base branch without a remote. Null when it cannot be read.
+ */
+async function baseSha(input: CompletionInput, base: string): Promise<string | null> {
+  const repo = input.repoPath;
+  if (!(await hasRemote(repo))) return revParse(repo, `refs/heads/${base}`);
+  await fetchBase(input, repo, base);
+  const url = (await git(repo, ['remote', 'get-url', 'origin'])).stdout.trim();
+  const a = input.auth && url ? await input.auth(url, input.payload.forge) : undefined;
+  const sha = await originTip(repo, base, a).catch(() => null);
+  return sha && (await hasCommit(repo, sha)) ? sha : null;
 }
 
 /**
@@ -333,37 +371,33 @@ async function pushBranch(input: CompletionInput, wt: string, remoteName?: strin
  * Fetches the base first; a failed fetch just means the local view is used.
  */
 async function alreadyLanded(input: CompletionInput, wt: string): Promise<string | null> {
-  const base = input.payload.baseBranch;
-  if (await hasRemote(input.repoPath)) await fetchBase(input, input.repoPath, base);
-  const target = await baseTarget(input.repoPath, base);
-  const tip = await revParse(input.repoPath, target);
+  const tip = await baseSha(input, input.payload.baseBranch);
   const head = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
   if (!tip || !head) return null;
   return (await git(input.repoPath, ['merge-base', '--is-ancestor', head, tip])).exitCode === 0 ? tip : null;
 }
 
-async function merge(input: CompletionInput, wt: string): Promise<FinalizeResult> {
+async function merge(input: CompletionInput, wt: string, sha: string): Promise<FinalizeResult> {
   // One integration into the working branch at a time per clone (the "merge latest main first" step shares the lock).
-  return withRepoLock(input.repoPath, () => mergeLocked(input, wt));
+  return withRepoLock(input.repoPath, () => mergeLocked(input, wt, sha));
 }
 
-async function mergeLocked(input: CompletionInput, wt: string): Promise<FinalizeResult> {
+async function mergeLocked(input: CompletionInput, wt: string, sha: string): Promise<FinalizeResult> {
   const { payload: p, repoPath } = input;
   const base = p.baseBranch;
   const remote = await hasRemote(repoPath);
   // A protected working branch refuses direct pushes: open a change instead of failing on the push (C9).
   if (remote && input.rules) {
     const rules = await input.rules(repoPath, base, p.forge).catch(() => null);
-    if (rules && !rules.directPushAllowed) return viaChange(input, wt, base);
+    if (rules && !rules.directPushAllowed) return viaChange(input, wt, base, sha);
   }
-  if (remote) await fetchBase(input, repoPath, base);
-  const startPoint = await baseTarget(repoPath, base);
-  if (!(await revParse(repoPath, startPoint))) return fail('merge', `base branch ${base} not found`);
+  // gate-fixes-2 Rule B: the base as a sha read from origin; the card side is the checked sha (Rule D)
+  const startPoint = await baseSha(input, base);
+  if (!startPoint) return fail('merge', `base branch ${base} not found`);
 
   // Already merged (a redelivered command): report the existing result.
-  const merged = await git(repoPath, ['merge-base', '--is-ancestor', p.branchName, startPoint]);
-  if (merged.exitCode === 0)
-    return { ok: true, action: 'merge', mergeCommit: (await revParse(repoPath, startPoint)) ?? undefined };
+  const merged = await git(repoPath, ['merge-base', '--is-ancestor', sha, startPoint]);
+  if (merged.exitCode === 0) return { ok: true, action: 'merge', mergeCommit: startPoint };
 
   const env = commitEnv(
     await requireCommitIdentity(
@@ -377,7 +411,7 @@ async function mergeLocked(input: CompletionInput, wt: string): Promise<Finalize
   const result = await withIntegrationWorktree(
     { repoPath, dir: integration, root: input.integrationDir, tempBranch, startPoint },
     async (): Promise<FinalizeResult> => {
-      const m = await git(integration, ['merge', '--no-ff', '-m', mergeMessage(p), p.branchName], { env });
+      const m = await git(integration, ['merge', '--no-ff', '-m', mergeMessage(p), sha], { env });
       if (m.exitCode !== 0) {
         const files = (await git(integration, ['diff', '--name-only', '--diff-filter=U'])).stdout
           .split('\n')
@@ -405,13 +439,17 @@ async function mergeLocked(input: CompletionInput, wt: string): Promise<Finalize
       if (remote) {
         const url = (await git(repoPath, ['remote', 'get-url', 'origin'])).stdout.trim();
         const a = input.auth && url ? await input.auth(url, p.forge) : { args: [], env: {} };
-        const push = await git(integration, [...a.args, 'push', 'origin', `HEAD:refs/heads/${base}`], {
-          env: a.env,
-        });
+        const push = await git(
+          integration,
+          [...a.args, 'push', 'origin', `${mergeCommit}:refs/heads/${base}`],
+          {
+            env: a.env,
+          },
+        );
         if (push.exitCode !== 0) {
           const why = (push.stderr || push.stdout).trim();
           // The host refused (branch policy we could not read beforehand): fall back to a change.
-          if (isProtectedBranchRejection(why)) return viaChange(input, wt, base, why);
+          if (isProtectedBranchRejection(why)) return viaChange(input, wt, base, sha, why);
           return fail('merge', pushFailure(p, `pushing ${base} failed`, why));
         }
       }
@@ -432,15 +470,16 @@ async function viaChange(
   input: CompletionInput,
   wt: string,
   base: string,
+  sha: string,
   reason?: string,
 ): Promise<FinalizeResult> {
   const { payload: p } = input;
   const target = await remoteBranchFor(input, wt);
   const head = target.name;
-  const push = await pushBranch(input, wt, head);
+  const push = await pushBranch(input, wt, sha, head);
   if (push.exitCode !== 0)
     return fail('pr', pushFailure(p, 'git push failed', (push.stderr || push.stdout).trim()));
-  await recordPush(input, wt, target);
+  await recordPush(input, target, sha);
   const why = reason ? `${base} refused a direct push` : `${base} is protected on the git host`;
   try {
     const r = await input.pr.create({

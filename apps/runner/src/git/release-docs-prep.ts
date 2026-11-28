@@ -12,7 +12,7 @@ import {
 } from '@aom/shared';
 import { detectSignOff } from './dco.ts';
 import { appOfPlan } from './gh.ts';
-import { advanceLocalBranch, git, hasRemote, revParse } from './git.ts';
+import { advanceLocalBranch, git, hasRemote, revParse, ruleBTip } from './git.ts';
 import {
   type AppTokenProbe,
   boundPostAsFor,
@@ -23,6 +23,7 @@ import {
   requireCommitIdentity,
 } from './identity.ts';
 import { integrationBranchName, withIntegrationWorktree } from './integration.ts';
+import { dropTip, latestTip, recordTip } from './pushable-tips.ts';
 import {
   type DocsPrepExec,
   type DocsPrepExecFactory,
@@ -155,7 +156,8 @@ async function prelude(
     if (/couldn't find remote ref|no such remote ref/i.test(why)) return stop(missing());
     return stop(failed(`could not fetch ${b}: ${why}`));
   }
-  const tip = await revParse(repoPath, `refs/remotes/origin/${b}`);
+  // gate-fixes-2 Rule B: origin's tip from ls-remote, never refs/remotes/origin/<branch>
+  const tip = await ruleBTip(repoPath, b, a);
   if (!tip) return stop(missing());
   return { tip, a };
 }
@@ -208,18 +210,13 @@ async function analyse(
     .filter((r) => r && !r.startsWith(`${KEPT}/${p.runId}/`));
   for (const r of refs) await git(repoPath, ['update-ref', '-d', r]);
 
-  const mainRef = main
-    ? (await revParse(repoPath, `refs/remotes/origin/${main}`))
-      ? `origin/${main}`
-      : main
-    : null;
-  const mainSha = mainRef ? await revParse(repoPath, mainRef) : null;
+  const mainSha = main ? ((await ruleBTip(repoPath, main, a)) ?? (await revParse(repoPath, main))) : null;
   // the range starts where the last release ended on this branch, also when main was not merged back
   const last = await lastReleaseTagAt(repoPath, tip, mainSha);
   let base: ReleaseDocsPrepSummary['base'];
   if (last) base = { kind: 'tag', tag: last.name, sha: last.from };
   else {
-    const mb = mainRef ? (await git(repoPath, ['merge-base', mainRef, tip])).stdout.trim() : '';
+    const mb = mainSha ? (await git(repoPath, ['merge-base', mainSha, tip])).stdout.trim() : '';
     if (!mb)
       return failed(
         `cannot find where '${p.releaseBranch}' starts: set the main branch in the project settings`,
@@ -348,10 +345,9 @@ async function workStart(
       ),
     };
   }
-  const kept = await revParse(repoPath, workRef(p.runId));
+  const kept = await keptRef(repoPath, workRef(p.runId));
   const start = kept ?? p.summary?.headSha ?? tip;
-  if (!kept && !(await revParse(repoPath, startRef(p.runId))))
-    await git(repoPath, ['update-ref', startRef(p.runId), start]);
+  if (!kept && !(await keptRef(repoPath, startRef(p.runId)))) await keep(repoPath, startRef(p.runId), start);
   return { identity, start };
 }
 
@@ -433,7 +429,7 @@ async function keepWork(
   if (commit.exitCode !== 0)
     return failed(`git commit failed: ${(commit.stderr || commit.stdout).trim()}`, report);
   const sha = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
-  await git(repoPath, ['update-ref', workRef(p.runId), sha]);
+  await keep(repoPath, workRef(p.runId), sha);
   return passed({ files: status, ...report });
 }
 
@@ -516,8 +512,8 @@ async function commitPrepare(input: ReleaseDocsPrepInput, tip: string): Promise<
   const { payload: p, repoPath } = input;
   // The commit the work chain was built on. The release branch may have moved since; the newer commits are carried
   // over below, never reverted.
-  const analysed = p.summary?.headSha ?? (await revParse(repoPath, startRef(p.runId))) ?? tip;
-  const work = await revParse(repoPath, workRef(p.runId));
+  const analysed = p.summary?.headSha ?? (await keptRef(repoPath, startRef(p.runId))) ?? tip;
+  const work = await keptRef(repoPath, workRef(p.runId));
   // Nothing produced a change: no commit (the repository is left as it is).
   if (!work || (await treeOf(repoPath, work)) === (await treeOf(repoPath, analysed)))
     return passed({ notices: ['no changes'] });
@@ -535,7 +531,7 @@ async function commitPrepare(input: ReleaseDocsPrepInput, tip: string): Promise<
       err instanceof NoCommitIdentityError ? NO_IDENTITY_WIRE : (identityErrorWire(err) ?? errMsg(err)),
     );
   }
-  const kept = await revParse(repoPath, commitRef(p.runId));
+  const kept = await keptRef(repoPath, commitRef(p.runId));
   if (kept) {
     const parent = (await git(repoPath, ['rev-parse', '--verify', '--quiet', `${kept}^`])).stdout.trim();
     if (parent === tip) return passed({ commit: kept, files: await changedFiles(repoPath, parent, kept) });
@@ -581,7 +577,7 @@ async function commitPrepare(input: ReleaseDocsPrepInput, tip: string): Promise<
     if (!moved.value.sha) return passed({ notices: ['no changes'] });
     sha = moved.value.sha;
   }
-  await git(repoPath, ['update-ref', commitRef(p.runId), sha]);
+  await keep(repoPath, commitRef(p.runId), sha);
   return passed({ commit: sha, files: await changedFiles(repoPath, `${sha}^`, sha) });
 }
 
@@ -597,21 +593,19 @@ async function commitPush(
   a: { args: string[]; env: Record<string, string> },
 ): Promise<ReleaseDocsPrepResult> {
   const { payload: p, repoPath } = input;
-  const sha = await revParse(repoPath, commitRef(p.runId));
+  const sha = await keptRef(repoPath, commitRef(p.runId));
   if (!sha) return passed({ notices: ['no changes'] });
   // Redelivered, or pushed by an earlier attempt: it is on origin already.
-  const onOrigin = await git(repoPath, [
-    'merge-base',
-    '--is-ancestor',
-    sha,
-    `refs/remotes/origin/${p.releaseBranch}`,
-  ]);
+  const originSha = await ruleBTip(repoPath, p.releaseBranch, a);
+  const onOrigin = originSha
+    ? await git(repoPath, ['merge-base', '--is-ancestor', sha, originSha])
+    : { exitCode: 1 };
   if (onOrigin.exitCode === 0) {
     await cleanup(repoPath, p.runId);
     return passed({ commit: sha, pushed: true, alreadyPushed: true });
   }
   const parent = (await git(repoPath, ['rev-parse', '--verify', '--quiet', `${sha}^`])).stdout.trim();
-  const tip = await revParse(repoPath, `refs/remotes/origin/${p.releaseBranch}`);
+  const tip = originSha;
   // Never push prepared docs over a release commit that landed after the analysed head.
   if (tip && (await releasedSince(repoPath, parent === tip ? (p.summary?.headSha ?? parent) : parent, tip)))
     return failed(releasedWhilePreparing(p.releaseBranch), { commit: sha });
@@ -634,6 +628,27 @@ async function commitPush(
 }
 
 async function cleanup(repoPath: string, runId: string): Promise<void> {
-  for (const r of [workRef(runId), commitRef(runId), startRef(runId)])
+  for (const r of [workRef(runId), commitRef(runId), startRef(runId)]) {
     await git(repoPath, ['update-ref', '-d', r]);
+    await dropTip(repoPath, r);
+  }
+}
+
+/** gate-fixes-2 Rule C: a kept ref is written and recorded together. */
+async function keep(repoPath: string, ref: string, sha: string): Promise<void> {
+  const u = await git(repoPath, ['update-ref', ref, sha]);
+  if (u.exitCode !== 0) throw new Error(`could not keep ${ref}: ${(u.stderr || u.stdout).trim()}`);
+  await recordTip(repoPath, ref, sha, 'docs-prep');
+}
+
+/**
+ * gate-fixes-2 Rule C: a kept ref read back must equal what this runner recorded for it (an agent session can write
+ * `refs/guildwise`); otherwise the run stops ("run prep again"). Null when it does not exist.
+ */
+async function keptRef(repoPath: string, ref: string): Promise<string | null> {
+  const sha = await revParse(repoPath, ref);
+  if (!sha) return null;
+  if ((await latestTip(repoPath, ref))?.sha !== sha)
+    throw new Error(`${ref} was changed outside the runner since the last prep step: run prep again`);
+  return sha;
 }

@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { delimiter, dirname, join, relative, resolve, sep } from 'node:path';
 import { type AgentPermissions, TEST_SERVICE_HOSTS, testServiceDomain } from '@aom/shared';
 import { HOME_SECRET_ENTRIES } from '../devops/home-secrets.ts';
-import { protectedGitPaths } from '../git/harden.ts';
+import { gitWriteScope, protectedGitPaths, refFence } from '../git/harden.ts';
 import {
   TEST_SERVICE_ROLES,
   TEST_SERVICES_SETTING,
@@ -398,7 +398,16 @@ const ALWAYS_DENIED = [
 export const BRANCH_MOVING_DENIED = ['Bash(git rebase:*)', 'Bash(git checkout:*)', 'Bash(git switch:*)'];
 
 /** gate-fixes-1 F1b: the git verbs every Claude role is denied in all their written forms (push, reset --hard, stash). */
-export const GIT_ALWAYS_VERBS = ['push', 'reset --hard', 'stash drop', 'stash pop', 'stash clear'] as const;
+export const GIT_ALWAYS_VERBS = [
+  'push',
+  'reset --hard',
+  'stash drop',
+  'stash pop',
+  'stash clear',
+  // gate-fixes-2 S7: no ref surgery and no packing (the fence binds the loose ref files)
+  'update-ref',
+  'pack-refs',
+] as const;
 /** gate-fixes-1 F1b: the branch-moving verbs, denied in all their forms to every role but the builder and the inner box. */
 export const GIT_BRANCH_VERBS = ['checkout', 'switch', 'rebase', 'symbolic-ref'] as const;
 
@@ -560,7 +569,8 @@ function sandboxBlock(
         agentHome,
         scratch,
         tmp,
-        ...ctx.gitDirs,
+        // gate-fixes-2 B1: only this worktree's admin dir, objects, refs and logs, and only for a role that may commit
+        ...(profile.readOnlyWorktree ? [] : gitWriteScope(ctx.cwd, ctx.gitDirs)),
         ...(ctx.sharedCacheDir ? [ctx.sharedCacheDir] : []),
         ...(ctx.dotnetShmDir ? [ctx.dotnetShmDir] : []),
         ...(ctx.pnpmLockDirs ?? []),
@@ -577,6 +587,8 @@ function sandboxBlock(
         ...protectedGitPaths(ctx.cwd),
         // gate-fixes-1 F1b (the OS fence behind the git deny rules): the HEAD files a branch switch writes
         ...headFence(ctx.cwd, profile.movesBranch === true),
+        // gate-fixes-2 S7: packed-refs, remote-tracking refs, tags, replace refs, the runner's refs and the other branches
+        ...(ctx.gitDirs.length ? refFence(ctx.cwd) : []),
         ...ctx.addDirs,
         ...readDirs,
         ...runnerPrivate,

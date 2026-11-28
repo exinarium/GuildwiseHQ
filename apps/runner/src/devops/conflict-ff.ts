@@ -2,7 +2,8 @@ import { isSafeGitRef } from '@aom/shared';
 import { statusLinesWithoutStubs } from '../adapters/sandbox-placeholders.ts';
 import { type BranchLedger, ledgerRepoKey } from '../git/branch-ledger.ts';
 import { type ConflictRecords, conflictRefSnapshot } from '../git/conflict-record.ts';
-import { git } from '../git/git.ts';
+import { git, moveBranchAt } from '../git/git.ts';
+import { knowClone, latestTip, recordTip, ruleA } from '../git/pushable-tips.ts';
 import { hasRunnerPrefix, tidyUpRefusal } from './tidy-up-rules.ts';
 
 /**
@@ -80,6 +81,11 @@ export async function applyConflictResolution(o: {
   before: ConflictRefSnapshot;
   records: ConflictRecords | null;
   ledger?: BranchLedger;
+  /**
+   * gate-fixes-2 B2: the resolution the runner checked (`quarantineResolution`'s sha). When given, the checks and the
+   * move use exactly this sha; `refs/heads/conflict/*` only names the scratch branch (an agent session can move it).
+   */
+  tip?: string;
 }): Promise<ConflictResolution> {
   const t = o.target;
   const keep = (why: string): ConflictResolution => ({
@@ -101,6 +107,16 @@ export async function applyConflictResolution(o: {
   const record = o.records?.find(repo, t.branch, t.kind) ?? null;
   if (!record) return keep('this runner did not see a conflict on it');
   if (record.head !== head) return keep('it moved since the conflict was seen');
+  // gate-fixes-2 B2: the head must still be a tip the runner trusts (a card branch: its latest record, Rule D; the
+  // working branch: Rule A), so a resolution is never moved onto content an agent session left
+  if (t.kind === 'card') {
+    await knowClone(t.repoPath);
+    if ((await latestTip(t.repoPath, `refs/heads/${t.branch}`))?.sha !== head)
+      return keep('its head is not the one this runner last recorded');
+  } else {
+    const a = await ruleA(t.repoPath, t.branch, head, record.originHead ?? null);
+    if (!a.push && 'notPushed' in a) return keep(a.notPushed);
+  }
 
   // the refs as they were when the runner recorded the conflict (older records: the shift-start snapshot)
   const before: ConflictRefSnapshot = record.refs ? new Map(Object.entries(record.refs)) : o.before;
@@ -116,7 +132,9 @@ export async function applyConflictResolution(o: {
         ? `no ${prefix.slice('refs/heads/'.length)}<n> branch was made in this shift`
         : `more than one ${prefix.slice('refs/heads/'.length)}<n> branch was made in this shift`,
     );
-  const [scratchRef, tip] = candidates[0] as [string, string];
+  const [scratchRef, refTip] = candidates[0] as [string, string];
+  if (o.tip && !SHA.test(o.tip)) return keep('the checked resolution is not a commit id');
+  const tip = o.tip ?? refTip;
   const scratch = scratchRef.slice('refs/heads/'.length);
   if (tip === head) return keep(`${scratch} holds no resolution`);
   if ((await git(t.repoPath, ['merge-base', '--is-ancestor', head, tip])).exitCode !== 0)
@@ -151,13 +169,18 @@ export async function applyConflictResolution(o: {
   if (at) {
     const dirty = (await statusLinesWithoutStubs(at.path)).lines.join('\n').trim();
     if (dirty) return keep(`it is checked out in ${at.path} with uncommitted changes`);
-    const ff = await git(at.path, ['merge', '--ff-only', tip]);
-    if (ff.exitCode !== 0)
-      return keep(`the fast-forward failed: ${(ff.stderr || ff.stdout).trim().split('\n')[0]}`);
+    // B3: detached at the checked head, fast-forward to the checked sha, compare-and-swap
+    const ff = await moveBranchAt(at.path, t.branch, head, () => git(at.path, ['merge', '--ff-only', tip]), [
+      'merge',
+      '--abort',
+    ]);
+    if (!ff.ok) return keep(`the fast-forward failed: ${ff.reason}`);
+    if (ff.sha !== tip) return keep('the fast-forward did not end at the checked resolution');
   } else {
     const u = await git(t.repoPath, ['update-ref', `refs/heads/${t.branch}`, tip, head]);
     if (u.exitCode !== 0) return keep('it moved meanwhile');
   }
+  await recordTip(t.repoPath, `refs/heads/${t.branch}`, tip, 'conflict-ff');
   o.records?.drop(repo, t.branch, t.kind);
   // the scratch branch and its worktree go (a worktree with changes stays, and so does its branch)
   const scratchWt = wts.find((w) => w.branch === scratch);

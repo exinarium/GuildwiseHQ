@@ -1,0 +1,152 @@
+{
+  "command": "docker run --rm --network gwcap-net -p 127.0.0.1:15432:5432 --mount type=volume,src=gwcap-vol,dst=/q --mount type=bind,src=/tmp/gwcap-bind,dst=/w,readonly -v /anon postgres:16 true",
+  "exit": 0,
+  "requests": [
+    {
+      "method": "HEAD",
+      "path": "/_ping"
+    },
+    {
+      "method": "HEAD",
+      "path": "/_ping"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/create"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/af4833e9cee14b3b35e7e0d1e1709e41527347628113906ce74b1ea6e844eac6/wait?condition=removed"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/af4833e9cee14b3b35e7e0d1e1709e41527347628113906ce74b1ea6e844eac6/attach?stderr=1&stdout=1&stream=1"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/af4833e9cee14b3b35e7e0d1e1709e41527347628113906ce74b1ea6e844eac6/start"
+    }
+  ],
+  "bodies": [
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/create",
+      "body": {
+        "Hostname": "",
+        "Domainname": "",
+        "User": "",
+        "AttachStdin": false,
+        "AttachStdout": true,
+        "AttachStderr": true,
+        "ExposedPorts": {
+          "5432/tcp": {}
+        },
+        "Tty": false,
+        "OpenStdin": false,
+        "StdinOnce": false,
+        "Env": null,
+        "Cmd": ["true"],
+        "Image": "postgres:16",
+        "Volumes": {
+          "/anon": {}
+        },
+        "WorkingDir": "",
+        "Entrypoint": null,
+        "Labels": {},
+        "HostConfig": {
+          "Binds": null,
+          "ContainerIDFile": "",
+          "LogConfig": {
+            "Type": "",
+            "Config": {}
+          },
+          "NetworkMode": "gwcap-net",
+          "PortBindings": {
+            "5432/tcp": [
+              {
+                "HostIp": "127.0.0.1",
+                "HostPort": "15432"
+              }
+            ]
+          },
+          "RestartPolicy": {
+            "Name": "no",
+            "MaximumRetryCount": 0
+          },
+          "AutoRemove": true,
+          "VolumeDriver": "",
+          "VolumesFrom": null,
+          "ConsoleSize": [0, 0],
+          "CapAdd": null,
+          "CapDrop": null,
+          "CgroupnsMode": "",
+          "Dns": null,
+          "DnsOptions": [],
+          "DnsSearch": [],
+          "ExtraHosts": null,
+          "GroupAdd": null,
+          "IpcMode": "",
+          "Cgroup": "",
+          "Links": null,
+          "OomScoreAdj": 0,
+          "PidMode": "",
+          "Privileged": false,
+          "PublishAllPorts": false,
+          "ReadonlyRootfs": false,
+          "SecurityOpt": null,
+          "UTSMode": "",
+          "UsernsMode": "",
+          "ShmSize": 0,
+          "Isolation": "",
+          "CpuShares": 0,
+          "Memory": 0,
+          "NanoCpus": 0,
+          "CgroupParent": "",
+          "BlkioWeight": 0,
+          "BlkioWeightDevice": [],
+          "BlkioDeviceReadBps": [],
+          "BlkioDeviceWriteBps": [],
+          "BlkioDeviceReadIOps": [],
+          "BlkioDeviceWriteIOps": [],
+          "CpuPeriod": 0,
+          "CpuQuota": 0,
+          "CpuRealtimePeriod": 0,
+          "CpuRealtimeRuntime": 0,
+          "CpusetCpus": "",
+          "CpusetMems": "",
+          "Devices": [],
+          "DeviceCgroupRules": null,
+          "DeviceRequests": null,
+          "MemoryReservation": 0,
+          "MemorySwap": 0,
+          "MemorySwappiness": -1,
+          "OomKillDisable": false,
+          "PidsLimit": 0,
+          "Ulimits": null,
+          "CpuCount": 0,
+          "CpuPercent": 0,
+          "IOMaximumIOps": 0,
+          "IOMaximumBandwidth": 0,
+          "Mounts": [
+            {
+              "Type": "volume",
+              "Source": "gwcap-vol",
+              "Target": "/q"
+            },
+            {
+              "Type": "bind",
+              "Source": "/tmp/gwcap-bind",
+              "Target": "/w",
+              "ReadOnly": true
+            }
+          ],
+          "MaskedPaths": null,
+          "ReadonlyPaths": null
+        },
+        "NetworkingConfig": {
+          "EndpointsConfig": {}
+        }
+      }
+    }
+  ]
+}

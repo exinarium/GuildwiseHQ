@@ -189,6 +189,7 @@ export async function git(cwd: string, args: string[], opts: GitOptions = {}): P
       ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}),
     });
     const res = { stdout: String(r.stdout ?? ''), stderr: String(r.stderr ?? ''), exitCode: r.exitCode ?? 1 };
+    if (afterHook) await afterHook(args, cwd, res);
     const delay = lockRetry.delaysMs[attempt];
     // A sandbox's empty read-only config.lock stub (never a real lock) is removed; the command then runs again.
     if (
@@ -203,6 +204,105 @@ export async function git(cwd: string, args: string[], opts: GitOptions = {}): P
     if (res.exitCode === 0 || delay === undefined || !LOCK_ERROR.test(res.stderr)) return res;
     await new Promise((resolve) => setTimeout(resolve, delay));
   }
+}
+
+/**
+ * gate-fixes-2 S8: a test seam called after every git command the runner runs (unset in production). `GIT_HARDEN_ARGS`
+ * turns hooks off, so race tests change a ref here, right after the named command.
+ */
+type AfterHook = (args: string[], cwd: string, res: GitResult) => void | Promise<void>;
+let afterHook: AfterHook | null = null;
+export const setGitAfterHook = (h: AfterHook | null): void => {
+  afterHook = h;
+};
+
+/**
+ * gate-fixes-2 Rule B: origin's tip of `branch`, read from the network (`ls-remote`), never from `refs/remotes`,
+ * `FETCH_HEAD` or a local ref a writer could have changed. Null when origin has no such branch. Throws `GitError` when
+ * origin cannot be asked. The caller fetches and checks the commit is here (`hasCommit`) before it uses the sha.
+ */
+export async function originTip(
+  cwd: string,
+  branch: string,
+  auth?: { args: string[]; env: Record<string, string> },
+): Promise<string | null> {
+  const args = [...(auth?.args ?? []), 'ls-remote', '--exit-code', 'origin', `refs/heads/${branch}`];
+  const r = await git(cwd, args, { ...(auth ? { env: auth.env } : {}), timeoutMs: 120_000 });
+  if (r.exitCode === 2) return null;
+  if (r.exitCode !== 0) throw new GitError(args, r);
+  const line = r.stdout.split('\n').find((l) => l.trim().endsWith(`\trefs/heads/${branch}`));
+  const sha = line?.split('\t')[0]?.trim() ?? '';
+  if (!/^[0-9a-f]{40,64}$/.test(sha)) throw new GitError(args, { ...r, stderr: 'ls-remote gave no sha' });
+  return sha;
+}
+
+/**
+ * Rule B in one call: origin's tip of `branch` from ls-remote when it is a commit in this clone (fetched), else null
+ * (no such branch, not fetched, or origin could not be asked).
+ */
+export async function ruleBTip(
+  cwd: string,
+  branch: string,
+  auth?: { args: string[]; env: Record<string, string> },
+): Promise<string | null> {
+  const sha = await originTip(cwd, branch, auth).catch(() => null);
+  return sha && (await hasCommit(cwd, sha)) ? sha : null;
+}
+
+/** Is `sha` a commit in this clone's object store? */
+export async function hasCommit(cwd: string, sha: string): Promise<boolean> {
+  return (await git(cwd, ['cat-file', '-e', `${sha}^{commit}`])).exitCode === 0;
+}
+
+/**
+ * gate-fixes-2 B3: every runner move of a branch is detached, pinned and compare-and-swap. `refs/heads/<branch>` must
+ * equal `checked`; the worktree is detached at `checked` (the detached HEAD lives in the worktree's own admin dir), `op`
+ * runs there (a rebase or merge onto a Rule B sha), the result is read once, and the branch is moved with
+ * `update-ref <ref> <new> <checked>`: a ref that moved meanwhile fails the move, the worktree is re-attached and nothing
+ * moves. Returns the new sha.
+ */
+export async function moveBranchAt(
+  worktree: string,
+  branch: string,
+  checked: string,
+  op: () => Promise<GitResult>,
+  /**
+   * When `op` fails, before re-attaching: git arguments (`['rebase', '--abort']`) or a callback that reads what it needs
+   * (the conflicted files) and aborts.
+   */
+  onFail?: string[] | ((r: GitResult) => Promise<void>),
+): Promise<{ ok: true; sha: string } | { ok: false; reason: string; opFailed?: GitResult }> {
+  const ref = `refs/heads/${branch}`;
+  // HEAD (detached) equals the branch tip in both uses below, so re-attaching needs no checkout (no index, no files)
+  const reattach = () => git(worktree, ['symbolic-ref', 'HEAD', ref]);
+  const now = (await git(worktree, ['rev-parse', '--verify', '-q', ref])).stdout.trim();
+  if (now !== checked) return { ok: false, reason: `${branch} moved since it was checked` };
+  const det = await git(worktree, ['checkout', '--detach', checked]);
+  if (det.exitCode !== 0)
+    return { ok: false, reason: `could not detach at ${checked.slice(0, 10)}: ${det.stderr.trim()}` };
+  const r = await op();
+  if (r.exitCode !== 0) {
+    if (typeof onFail === 'function') await onFail(r);
+    else if (onFail) await git(worktree, onFail);
+    const at = (await git(worktree, ['rev-parse', '--verify', '-q', 'HEAD'])).stdout.trim();
+    if (at === checked) await reattach();
+    else await git(worktree, ['checkout', branch]);
+    return { ok: false, reason: (r.stderr || r.stdout).trim().split('\n')[0] ?? 'failed', opFailed: r };
+  }
+  const sha = (await git(worktree, ['rev-parse', '--verify', '-q', 'HEAD'])).stdout.trim();
+  if (!/^[0-9a-f]{40,64}$/.test(sha)) {
+    await git(worktree, ['checkout', branch]);
+    return { ok: false, reason: 'the result could not be read' };
+  }
+  const cas = await git(worktree, ['update-ref', ref, sha, checked]);
+  if (cas.exitCode !== 0) {
+    // the branch moved meanwhile: it is not moved by the runner, the worktree goes back onto it as it is now
+    await git(worktree, ['checkout', branch]);
+    return { ok: false, reason: `${branch} moved while the runner worked on it` };
+  }
+  const back = await reattach();
+  if (back.exitCode !== 0) return { ok: false, reason: `moved, but could not check ${branch} out again` };
+  return { ok: true, sha };
 }
 
 /** Like `git` but throws `GitError` on failure and returns trimmed stdout. */

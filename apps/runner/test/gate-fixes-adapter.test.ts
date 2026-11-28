@@ -183,7 +183,11 @@ describe('F4: a working @mention commits in the card worktree', () => {
     for await (const e of s.events()) ev.push(e);
     const settings = JSON.parse(readFileSync(join(sandbox.configDir, 'settings.json'), 'utf8'));
     const fs = settings.sandbox.filesystem as { allowWrite: string[]; denyWrite: string[] };
-    expect(fs.allowWrite).toContain(common);
+    // gate-fixes-2 B1: the card's admin dir, objects, refs and logs are writable (commits work), not the whole git dir
+    expect(fs.allowWrite).toEqual(
+      expect.arrayContaining([admin, join(common, 'objects'), join(common, 'refs'), join(common, 'logs')]),
+    );
+    expect(fs.allowWrite).not.toContain(common);
     // nothing equal to or above the git dir or the card's admin dir is denied (only files and folders inside it)
     for (const d of fs.denyWrite) {
       const r = resolve(d);

@@ -7,6 +7,7 @@ import {
 } from '@aom/shared';
 import { git } from './git.ts';
 import { type BoundPostAs, commitEnv, identityErrorWire, requireCommitIdentity } from './identity.ts';
+import { recordTip } from './pushable-tips.ts';
 import { withRepoLock } from './repo-lock.ts';
 
 /**
@@ -108,6 +109,8 @@ export async function finishPrepTask(
       return { ok: false, reason: 'the release work moved while the script was written' };
     const upd = await git(wt.repoPath, ['update-ref', rp.workRef, sha]);
     if (upd.exitCode !== 0) return { ok: false, reason: `could not keep the work: ${upd.stderr.trim()}` };
+    // gate-fixes-2 Rule C: the kept ref is recorded with the runner's commit (the prep steps check it on read)
+    await recordTip(wt.repoPath, rp.workRef, sha, 'docs-prep');
     return { ok: true, commit: sha, files };
   });
 }

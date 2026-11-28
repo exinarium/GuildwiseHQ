@@ -84,3 +84,24 @@ describe('the card diff of a branch that merged main', () => {
     expect(highRiskPaths(cd.changedPaths).length).toBe(1);
   });
 });
+
+describe('gate-fixes-2 S9: the review diff base is origin’s tip from the network', () => {
+  it('a forged refs/remotes/origin/<base> does not change the reviewed paths', async () => {
+    const { c } = setup();
+    write(c, 'card.txt', 'the card\n');
+    commit(c, 'card change');
+    const honest = await computeCardDiff(c, 'work');
+    expect(honest.changedPaths).toEqual(['card.txt']);
+    // a session points the remote-tracking ref at the card's own commit: the card would look empty
+    sh(c, 'git', ['update-ref', 'refs/remotes/origin/work', 'HEAD']);
+    const after = await computeCardDiff(c, 'work');
+    expect(after.changedPaths).toEqual(['card.txt']);
+    expect(after.diff.baseSha).toBe(honest.diff.baseSha);
+  });
+
+  it('fails closed when origin cannot be asked', async () => {
+    const { c } = setup();
+    sh(c, 'git', ['remote', 'set-url', 'origin', join(c, 'no-such-origin.git')]);
+    await expect(computeCardDiff(c, 'work')).rejects.toThrow(/could not be asked/);
+  });
+});

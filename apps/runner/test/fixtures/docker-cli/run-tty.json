@@ -1,0 +1,149 @@
+{
+  "command": "script -qc \"stty rows 24 cols 80; docker run --rm -it postgres:16 true\" /dev/null",
+  "exit": 0,
+  "requests": [
+    {
+      "method": "HEAD",
+      "path": "/_ping"
+    },
+    {
+      "method": "HEAD",
+      "path": "/_ping"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/create"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/df59192c965c8f4f1a4cbd20c4147d36030d341c6612eb658db2da4ca33bfb29/wait?condition=removed"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/df59192c965c8f4f1a4cbd20c4147d36030d341c6612eb658db2da4ca33bfb29/attach?stderr=1&stdin=1&stdout=1&stream=1"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/df59192c965c8f4f1a4cbd20c4147d36030d341c6612eb658db2da4ca33bfb29/start"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/df59192c965c8f4f1a4cbd20c4147d36030d341c6612eb658db2da4ca33bfb29/resize?h=24&w=80"
+    }
+  ],
+  "bodies": [
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/create",
+      "body": {
+        "Hostname": "",
+        "Domainname": "",
+        "User": "",
+        "AttachStdin": true,
+        "AttachStdout": true,
+        "AttachStderr": true,
+        "Tty": true,
+        "OpenStdin": true,
+        "StdinOnce": true,
+        "Env": null,
+        "Cmd": ["true"],
+        "Image": "postgres:16",
+        "Volumes": {},
+        "WorkingDir": "",
+        "Entrypoint": null,
+        "Labels": {},
+        "HostConfig": {
+          "Binds": null,
+          "ContainerIDFile": "",
+          "LogConfig": {
+            "Type": "",
+            "Config": {}
+          },
+          "NetworkMode": "default",
+          "PortBindings": {},
+          "RestartPolicy": {
+            "Name": "no",
+            "MaximumRetryCount": 0
+          },
+          "AutoRemove": true,
+          "VolumeDriver": "",
+          "VolumesFrom": null,
+          "ConsoleSize": [24, 80],
+          "CapAdd": null,
+          "CapDrop": null,
+          "CgroupnsMode": "",
+          "Dns": null,
+          "DnsOptions": [],
+          "DnsSearch": [],
+          "ExtraHosts": null,
+          "GroupAdd": null,
+          "IpcMode": "",
+          "Cgroup": "",
+          "Links": null,
+          "OomScoreAdj": 0,
+          "PidMode": "",
+          "Privileged": false,
+          "PublishAllPorts": false,
+          "ReadonlyRootfs": false,
+          "SecurityOpt": null,
+          "UTSMode": "",
+          "UsernsMode": "",
+          "ShmSize": 0,
+          "Isolation": "",
+          "CpuShares": 0,
+          "Memory": 0,
+          "NanoCpus": 0,
+          "CgroupParent": "",
+          "BlkioWeight": 0,
+          "BlkioWeightDevice": [],
+          "BlkioDeviceReadBps": [],
+          "BlkioDeviceWriteBps": [],
+          "BlkioDeviceReadIOps": [],
+          "BlkioDeviceWriteIOps": [],
+          "CpuPeriod": 0,
+          "CpuQuota": 0,
+          "CpuRealtimePeriod": 0,
+          "CpuRealtimeRuntime": 0,
+          "CpusetCpus": "",
+          "CpusetMems": "",
+          "Devices": [],
+          "DeviceCgroupRules": null,
+          "DeviceRequests": null,
+          "MemoryReservation": 0,
+          "MemorySwap": 0,
+          "MemorySwappiness": -1,
+          "OomKillDisable": false,
+          "PidsLimit": 0,
+          "Ulimits": null,
+          "CpuCount": 0,
+          "CpuPercent": 0,
+          "IOMaximumIOps": 0,
+          "IOMaximumBandwidth": 0,
+          "MaskedPaths": null,
+          "ReadonlyPaths": null
+        },
+        "NetworkingConfig": {
+          "EndpointsConfig": {
+            "default": {
+              "IPAMConfig": null,
+              "Links": null,
+              "Aliases": null,
+              "DriverOpts": null,
+              "GwPriority": 0,
+              "NetworkID": "",
+              "EndpointID": "",
+              "Gateway": "",
+              "IPAddress": "",
+              "MacAddress": "",
+              "IPPrefixLen": 0,
+              "IPv6Gateway": "",
+              "GlobalIPv6Address": "",
+              "GlobalIPv6PrefixLen": 0,
+              "DNSNames": null
+            }
+          }
+        }
+      }
+    }
+  ]
+}

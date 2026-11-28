@@ -2048,7 +2048,7 @@ const VERBS: Record<string, Verb> = {
    */
   git: async (ctx, p) => {
     const usage =
-      'usage: aom git status [<provider>] [--host <host>] | aom git connect <github|gitlab|azure-devops|bitbucket-cloud> [--host <host>]\n       aom git push --repo <dir> [--delete] [--tags] <refspec>... | aom git fetch --repo <dir>   (the DevOps engineer: the runner pushes and fetches)\n       aom git fetch | merge-main | verify-merge   (the architect: the runner fetches origin, merges the latest main, checks a conflict resolution; agents never push)';
+      'usage: aom git status [<provider>] [--host <host>] | aom git connect <github|gitlab|azure-devops|bitbucket-cloud> [--host <host>]\n       aom git push --repo <dir> [--delete] <refspec>... | aom git fetch --repo <dir>   (the DevOps engineer: the runner pushes and fetches)\n       aom git fetch | merge-main | verify-merge   (the architect: the runner fetches origin, merges the latest main, checks a conflict resolution; agents never push)';
     const sub = p.positionals[0];
     const host = one(p, 'host');
     // The DevOps engineer's push and fetch of a repository: the runner talks to origin (an app repository with the app's

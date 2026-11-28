@@ -1,4 +1,5 @@
 import { isSafeGitRef, type PostAsPlan } from '@aom/shared';
+import { git, hasCommit, originTip } from '../git/git.ts';
 import {
   AppIdentityError,
   type AppTokenProbe,
@@ -9,7 +10,8 @@ import {
   repoNameOf,
   resolveCommitIdentity,
 } from '../git/identity.ts';
-import { PROTECTED_BRANCHES } from './guard.ts';
+import { latestTip, ruleA } from '../git/pushable-tips.ts';
+import { isCardBranch, PROTECTED_BRANCHES } from './guard.ts';
 
 /**
  * The git argv of the DevOps engineer's `aom git push|fetch --repo <dir>` (run by the runner with the repository's
@@ -28,8 +30,9 @@ export function devopsPushPlan(
     if (refspecs.length > 0 || del || tags) return { error: 'aom git fetch --repo <dir> takes no refspec' };
     return { args: ['fetch', '--prune', 'origin'], operation: 'fetch' };
   }
-  if (refspecs.length === 0 && !tags)
-    return { error: 'aom git push --repo <dir> needs at least one refspec' };
+  // gate-fixes-2 B4: never all tags at once; a tag goes by name and only at a sha the runner recorded (resolveBrokerPush)
+  if (tags) return { error: 'aom git push --tags is not available: push one tag by name (refs/tags/<tag>)' };
+  if (refspecs.length === 0) return { error: 'aom git push --repo <dir> needs at least one refspec' };
   for (const r of refspecs) {
     if (r.startsWith('+') || r.startsWith('-'))
       return { error: `refusing ${JSON.stringify(r)}: aom git push never forces and takes no options` };
@@ -45,6 +48,11 @@ export function devopsPushPlan(
     if (del && (dst === 'HEAD' || PROTECTED_BRANCHES.includes(dst) || protectedBranches.includes(dst)))
       return { error: `refusing to delete ${dst} from origin: it is a protected branch` };
     if (!del && parts[0] === '') return { error: 'use --delete to remove a branch from origin' };
+    // gate-fixes-2 B4: a card branch reaches origin only through the card's own finalize
+    if (!del && !dst.startsWith('refs/tags/') && isCardBranch(dst))
+      return {
+        error: `refusing to push ${dst}: card branches go to origin only through the card's finalize`,
+      };
   }
   const operation = del
     ? 'delete branch'
@@ -61,6 +69,71 @@ export function devopsPushPlan(
     ],
     operation,
   };
+}
+
+/**
+ * gate-fixes-2 B4 and Rule A for the broker: the push refspecs rewritten to the shas the runner checked. A protected
+ * branch takes only its local branch's tip when that is a fast-forward of origin (Rule B) and the runner made or
+ * recorded it (Rule A); a tag only the tag object the runner recorded. Other branches are passed as they are.
+ */
+export async function resolveBrokerPush(
+  dir: string,
+  refspecs: string[],
+  protectedBranches: readonly string[],
+  auth: { args: string[]; env: Record<string, string> },
+): Promise<{ refspecs: string[] } | { error: string }> {
+  const out: string[] = [];
+  for (const r of refspecs) {
+    const [src = '', dstRaw] = r.split(':');
+    const dst = dstRaw ?? src;
+    if (dst.startsWith('refs/tags/') || src.startsWith('refs/tags/')) {
+      const tag = (dstRaw ?? src).replace(/^refs\/tags\//, '');
+      const t = (await git(dir, ['rev-parse', '--verify', '-q', `refs/tags/${tag}`])).stdout.trim();
+      const rec = await latestTip(dir, `refs/tags/${tag}`);
+      if (!t || rec?.sha !== t)
+        return {
+          error: `refusing to push the tag ${tag}: the runner did not make or record it at ${t.slice(0, 10)}`,
+        };
+      out.push(`${t}:refs/tags/${tag}`);
+      continue;
+    }
+    const name = dst.replace(/^refs\/heads\//, '');
+    if (!PROTECTED_BRANCHES.includes(name) && !protectedBranches.includes(name)) {
+      out.push(r);
+      continue;
+    }
+    const local = src.replace(/^refs\/heads\//, '');
+    const tip = (
+      await git(dir, ['rev-parse', '--verify', '-q', `refs/heads/${local}^{commit}`])
+    ).stdout.trim();
+    if (!tip) return { error: `refusing to push ${name}: ${local} is not a local branch` };
+    // Rework 2 (B4): a protected branch goes out only from itself (`card:main` would land a card without its finalize);
+    // Rule A is checked against the destination's own record
+    if (local !== name) {
+      const own = (
+        await git(dir, ['rev-parse', '--verify', '-q', `refs/heads/${name}^{commit}`])
+      ).stdout.trim();
+      if (own !== tip)
+        return { error: `refusing to push ${local} to ${name}: push ${name} from its own branch` };
+    }
+    let origin: string | null;
+    try {
+      origin = await originTip(dir, name, auth);
+    } catch (err) {
+      return { error: `refusing to push ${name}: origin could not be asked (${String(err).slice(0, 200)})` };
+    }
+    if (origin && !(await hasCommit(dir, origin)))
+      return { error: `refusing to push ${name}: fetch first (origin's tip is not in this clone)` };
+    if (origin && (await git(dir, ['merge-base', '--is-ancestor', origin, tip])).exitCode !== 0)
+      return { error: `refusing to push ${name}: it is not a fast-forward of origin` };
+    const a = await ruleA(dir, name, tip, origin);
+    if (!a.push) {
+      if ('notPushed' in a) return { error: `refusing to push ${name}: ${a.notPushed}` };
+      continue; // nothing to push
+    }
+    out.push(`${tip}:refs/heads/${name}`);
+  }
+  return { refspecs: out };
 }
 
 /** Where a raw push to an app repository goes from the DevOps engineer's shell: nowhere (the host does not resolve). */

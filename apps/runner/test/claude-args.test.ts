@@ -289,11 +289,12 @@ describe('claude settings.json: OS sandbox per role (review H2)', () => {
 
   it('writes: own home and scratch plus the repo git dir, never its hooks/config or the vault', () => {
     const fs = settings(builder.permissions, { addDirs: ['/data/vaults/v1'] }).sandbox?.filesystem;
+    // gate-fixes-2 B1: never the whole git dir; a real linked worktree gets its admin dir, objects, refs and logs
+    // (git-deny-forms.test.ts); this fixture's worktree is not on disk, so it gets no git write at all
     expect(fs?.allowWrite).toEqual([
       '/data/agents/a1/home',
       '/data/agents/a1/scratch',
       '/data/agents/a1/tmp',
-      '/home/me/toy/.git',
     ]);
     expect(fs?.denyWrite).toEqual(
       expect.arrayContaining([
@@ -320,8 +321,9 @@ describe('claude settings.json: OS sandbox per role (review H2)', () => {
 
   it('the worktree and the main repo git dir (which holds .git/worktrees/<name>) are writable; hooks and config are not', () => {
     const fs = settings(builder.permissions).sandbox?.filesystem;
-    // the worktree itself is the session cwd, which Claude Code always makes writable; its admin dir is under the git dir
-    expect(fs?.allowWrite).toContain('/home/me/toy/.git');
+    // the worktree itself is the session cwd, which Claude Code always makes writable; gate-fixes-2 B1: the git dir as a
+    // whole is never writable (a real worktree gets its admin dir, objects, refs and logs: git-deny-forms.test.ts)
+    expect(fs?.allowWrite).not.toContain('/home/me/toy/.git');
     expect(fs?.denyWrite).toEqual(
       expect.arrayContaining(['/home/me/toy/.git/hooks', '/home/me/toy/.git/config']),
     );

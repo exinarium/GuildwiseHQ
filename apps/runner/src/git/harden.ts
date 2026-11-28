@@ -1,5 +1,14 @@
-import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 
 /**
  * The runner runs git in folders an agent could write to (a card's worktree), after the agent is gone. A repository's configuration
@@ -48,12 +57,21 @@ export const GIT_HARDEN_ARGS: readonly string[] = [
   'rebase.autoStash=false',
   '-c',
   'merge.autoStash=false',
+  // gate-fixes-2 B1: an agent session can write `refs/replace`, `info/grafts` and a commit-graph file in the shared
+  // `.git`; none of them may change what the runner sees as a commit's parents or content.
+  '-c',
+  'core.useReplaceRefs=false',
+  '-c',
+  'core.commitGraph=false',
 ];
 
 /** Environment of every git the runner starts: no system-wide configuration, no prompts. */
 export const GIT_HARDEN_ENV: Readonly<Record<string, string>> = {
   GIT_CONFIG_NOSYSTEM: '1',
   GIT_TERMINAL_PROMPT: '0',
+  // gate-fixes-2 B1: no replace objects and no graft file, whatever the shared `.git` holds
+  GIT_NO_REPLACE_OBJECTS: '1',
+  GIT_GRAFT_FILE: '/nonexistent',
 };
 
 /** `git <hardening> <args>`. */
@@ -230,6 +248,169 @@ export function submoduleGitDirs(cwd: string): string[] {
   };
   walk(join(admin, 'modules'), 0);
   return out;
+}
+
+/** A linked worktree's admin dir (`<common>/worktrees/<name>`) and its common dir, from its `.git` file; else undefined. */
+function linkedAdmin(cwd: string): { admin: string; common: string } | undefined {
+  try {
+    const st = lstatSync(join(cwd, '.git'));
+    if (!st.isFile()) return undefined;
+  } catch {
+    return undefined;
+  }
+  const m = /^gitdir:\s*(.+)$/m.exec(readSmall(join(cwd, '.git')) ?? '');
+  if (!m?.[1]) return undefined;
+  const admin = resolve(cwd, m[1].trim());
+  if (!/[\\/]worktrees[\\/][^\\/]+$/.test(admin)) return undefined;
+  return { admin, common: resolve(admin, '..', '..') };
+}
+
+/**
+ * gate-fixes-2 B1: the parts of the shared `.git` a session that may commit writes: per common git dir, this worktree's
+ * own admin dir, `objects`, `refs` and `logs`. Everything else there (`shallow`, `info/`, `FETCH_HEAD`, `packed-refs`,
+ * the main checkout's `index`, `rebase-merge/`, config, hooks) stays read-only. Not a linked worktree: nothing.
+ */
+export function gitWriteScope(cwd: string, gitDirs: readonly string[]): string[] {
+  const l = linkedAdmin(cwd);
+  if (!l) return [];
+  return gitDirs.flatMap((g) =>
+    resolve(g) === resolve(l.common)
+      ? [l.admin, join(g, 'objects'), join(g, 'refs'), join(g, 'logs')]
+      : [join(g, 'objects'), join(g, 'refs'), join(g, 'logs')],
+  );
+}
+
+/** The siblings along the path from `root` down to `keep` (claude-policy `denyAround`, for files and folders). */
+function aroundPath(root: string, keep: string): string[] {
+  const parts = relative(root, keep).split(sep).filter(Boolean);
+  const out: string[] = [];
+  let dir = root;
+  try {
+    for (const next of parts) {
+      for (const e of readdirSync(dir)) if (e !== next) out.push(join(dir, e));
+      dir = join(dir, next);
+    }
+  } catch {
+    return [root];
+  }
+  return out;
+}
+
+/**
+ * gate-fixes-2 S7: the existing ref paths a session must not write, for every writer's sandbox: `packed-refs`,
+ * `refs/remotes`, `refs/guildwise`, `refs/tags`, `refs/replace`, `refs/heads/conflict`, and every branch file and folder
+ * under `refs/heads` except the path to this worktree's own branch. Only what exists (a branch made later is not
+ * covered; reftable clones have no files): Rules A-D are the protection, this is the fence in front of them.
+ */
+export function refFence(cwd: string): string[] {
+  const l = linkedAdmin(cwd);
+  if (!l) return [];
+  return fenceOf(l.common, l.admin);
+}
+
+/**
+ * gate-fixes-2 Rework 1 (D5): the file the runner writes in a clone's common `.git` before its first writer starts.
+ * A clone that has it but no TipStore entry had a writer the store does not know about: it is never seeded (fail closed).
+ * Writers cannot remove it (the common dir itself is outside every writer's write scope, and the fence lists it).
+ */
+export const WRITER_MARK = 'guildwise-writers';
+
+/** The fence of a common dir, sparing the branch the checkout at `adminOrCommon` (its `HEAD`) is on. */
+function fenceOf(c: string, adminOrCommon: string): string[] {
+  const own = /^ref:\s*refs\/heads\/(.+)$/m.exec(readSmall(join(adminOrCommon, 'HEAD')) ?? '')?.[1]?.trim();
+  const fixed = [
+    join(c, WRITER_MARK),
+    join(c, 'packed-refs'),
+    join(c, 'refs', 'remotes'),
+    join(c, 'refs', 'guildwise'),
+    join(c, 'refs', 'tags'),
+    join(c, 'refs', 'replace'),
+    join(c, 'refs', 'heads', 'conflict'),
+  ];
+  const heads = join(c, 'refs', 'heads');
+  const branches = own ? aroundPath(heads, join(heads, own)) : [heads];
+  return [...new Set([...fixed, ...branches])].filter((p) => existsSync(p));
+}
+
+/**
+ * gate-fixes-2 Rework 1 (S7 for S13): the fence for a folder a DevOps outer box binds writable: every clone at the folder
+ * or up to two levels below it (`<folder>/.git`, `<folder>/*\/.git`, `<folder>/*\/*\/.git`), linked worktrees and plain
+ * clones alike, keeping only paths inside the folder that are not links (the box binds them read-only by path after the
+ * folder's fd bind). A clone whose `.git` lies outside the folder is not in the box at all.
+ */
+export function folderRefFence(folder: string): string[] {
+  const out = new Set<string>();
+  for (const r of clonesUnder(folder)) {
+    let paths: string[] = [];
+    try {
+      const st = lstatSync(join(r, '.git'));
+      if (st.isFile()) paths = refFence(r);
+      else if (st.isDirectory())
+        paths = fenceOf(join(r, '.git'), join(r, '.git')).filter((p) => existsSync(p));
+    } catch {}
+    for (const p of paths)
+      try {
+        if (inside(real(folder), p) && !lstatSync(p).isSymbolicLink()) out.add(p);
+      } catch {}
+  }
+  return [...out];
+}
+
+/**
+ * gate-fixes-2 Rework 2: the clones at `folder` or up to two levels below it (a `.git` file or folder there), the same set
+ * `folderRefFence` fences and `holdWriters` counts (S13).
+ */
+export function clonesUnder(folder: string): string[] {
+  const roots: string[] = [];
+  const look = (dir: string, depth: number) => {
+    let st: ReturnType<typeof lstatSync>;
+    try {
+      st = lstatSync(join(dir, '.git'));
+      roots.push(dir);
+      if (st.isFile() || st.isDirectory()) return;
+    } catch {
+      // not a clone here
+    }
+    if (depth >= 2) return;
+    let names: string[] = [];
+    try {
+      names = readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const n of names) {
+      const d = join(dir, n);
+      try {
+        if (lstatSync(d).isDirectory()) look(d, depth + 1);
+      } catch {}
+    }
+  };
+  look(folder, 0);
+  return roots;
+}
+
+/**
+ * gate-fixes-2 S7: before a writer starts, every local branch that is only in `packed-refs` gets its loose ref file, so
+ * the fence can bind it (a session could otherwise create a loose file that overrides the packed one), and `refs/replace`
+ * exists (empty) so it can be bound too. Atomic writes; a name whose path is taken by a folder or file is skipped.
+ */
+export function materializeLooseRefs(commonDir: string, tips: Record<string, string>): void {
+  try {
+    mkdirSync(join(commonDir, 'refs', 'replace'), { recursive: true });
+  } catch {}
+  for (const [ref, sha] of Object.entries(tips)) {
+    if (!ref.startsWith('refs/heads/') || ref.includes('..')) continue;
+    const file = join(commonDir, ...ref.split('/'));
+    if (existsSync(file)) continue;
+    try {
+      mkdirSync(dirname(file), { recursive: true });
+      const tmp = `${file}.gw-${process.pid}.tmp`;
+      writeFileSync(tmp, `${sha}\n`, { mode: 0o644 });
+      renameSync(tmp, file);
+    } catch {
+      // the fence then just does not cover this one branch (Rules A-D still do)
+    }
+  }
 }
 
 /**

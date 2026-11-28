@@ -2,6 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll } from 'vitest';
+import { setTipStore, TipStore } from '../src/git/pushable-tips.ts';
 import { FILE_PREFIX, killProcsUnder, removeTree, useTmp } from './tmp-root.ts';
 
 /*
@@ -14,6 +15,8 @@ import { FILE_PREFIX, killProcsUnder, removeTree, useTmp } from './tmp-root.ts';
 const runRoot = tmpdir();
 const fileTmp = mkdtempSync(join(runRoot, FILE_PREFIX));
 useTmp(fileTmp, process.env.AOM_AGENT_TMP_ROOT === runRoot ? runRoot : fileTmp);
+// gate-fixes-2 P1: the runner's push records, one store per test file (a Runner a test starts sets its own)
+setTipStore(TipStore.forRoot(mkdtempSync(join(fileTmp, 'tips-'))));
 afterAll(async () => {
   await killProcsUnder(fileTmp);
   removeTree(fileTmp);

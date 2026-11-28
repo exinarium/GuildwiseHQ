@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { HarnessLaunch } from '../adapters/harness-session.ts';
+import { folderRefFence } from '../git/harden.ts';
 import type { EgressRoute, RouteObserver } from '../sandbox/egress-proxy.ts';
 import { harnessMounts, systemRoBinds } from '../sandbox/harness-sandbox.ts';
 import type { BoxLevel } from './config-dir.ts';
@@ -227,6 +228,9 @@ export function boxSandbox(i: BoxPlanInput): HarnessLaunch['sandbox'] {
     ...(node && !node.startsWith('/usr/') ? [node] : []),
     ...i.toolchainReadDirs,
   ];
+  const fence = [
+    ...new Set((i.fdBinds ?? []).filter((f) => f.writable).flatMap((f) => folderRefFence(f.real))),
+  ];
   if (i.outer) {
     ro.push(i.outer.cardWorktrees);
     for (const f of ['.ssh', '.gitconfig']) {
@@ -248,6 +252,8 @@ export function boxSandbox(i: BoxPlanInput): HarnessLaunch['sandbox'] {
     ...(i.ipcSocket ? { ipcSocket: i.ipcSocket } : {}),
     devopsBox: true,
     ...(i.fdBinds?.length ? { fdBinds: i.fdBinds } : {}),
+    // gate-fixes-2 Rework 1 (S7 for S13): a clone inside a writable folder keeps its refs fenced like a card worktree's
+    ...(fence.length ? { fdFence: fence } : {}),
   };
 }
 

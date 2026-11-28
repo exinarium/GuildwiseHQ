@@ -1,0 +1,48 @@
+{
+  "command": "docker compose -p gwcap -f compose.test-services.yml exec -T db true",
+  "exit": 0,
+  "requests": [
+    {
+      "method": "HEAD",
+      "path": "/_ping"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/containers/json?filters=%7B%22label%22%3A%7B%22com.docker.compose.config-hash%22%3Atrue%2C%22com.docker.compose.project%3Dgwcap%22%3Atrue%2C%22com.docker.compose.service%3Ddb%22%3Atrue%7D%7D"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/containers/07f3ef84aa02d0e355523b5c88ef2453ac00d1e38621c0cd915d0177bff97388/json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/07f3ef84aa02d0e355523b5c88ef2453ac00d1e38621c0cd915d0177bff97388/exec"
+    },
+    {
+      "method": "GET",
+      "path": "/v1.57/exec/0b9bc41aba3608975b56038fe3e8c27f6f2428b949a230590d97f81c09160d65/json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/exec/0b9bc41aba3608975b56038fe3e8c27f6f2428b949a230590d97f81c09160d65/start"
+    }
+  ],
+  "bodies": [
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/07f3ef84aa02d0e355523b5c88ef2453ac00d1e38621c0cd915d0177bff97388/exec",
+      "body": {
+        "User": "",
+        "Privileged": false,
+        "Tty": false,
+        "AttachStdin": true,
+        "AttachStderr": true,
+        "AttachStdout": true,
+        "DetachKeys": "",
+        "Env": null,
+        "WorkingDir": "",
+        "Cmd": ["true"]
+      }
+    }
+  ]
+}

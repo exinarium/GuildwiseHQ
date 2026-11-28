@@ -233,6 +233,7 @@ import {
   resolveCommitIdentity,
 } from './git/identity.ts';
 import { checkBranchMerged } from './git/merged.ts';
+import { recoverActiveClones, seedOnce, setTipStore, TipStore, tipStore } from './git/pushable-tips.ts';
 import { runReleaseDocsPrep } from './git/release-docs-prep.ts';
 import { sandboxedDocsPrepExec } from './git/release-docs-prep-exec.ts';
 import { readReleaseFacts } from './git/release-facts.ts';
@@ -315,6 +316,7 @@ import { DeploySecrets } from './secrets/deploy.ts';
 import { RunnerKeys } from './secrets/keys.ts';
 import { TargetSecrets } from './secrets/targets.ts';
 import { sweepSessionEnvFiles } from './session/shift-credential.ts';
+import { killOrphanSessions } from './shifts/orphans.ts';
 import { clearServerLimit, loadServerLimit, saveServerLimit } from './shifts/server-limit.ts';
 import {
   devopsRequestDir,
@@ -683,6 +685,8 @@ export class Runner {
     this.paths = runnerPaths(opts.dataDir);
     // T7: conflicts this runner sees itself (a later runner-run fast-forward needs one)
     setConflictRecords(ConflictRecords.forRoot(this.paths.root));
+    // gate-fixes-2 P1: the tips this runner made or recorded (the only ones it pushes or merges)
+    setTipStore(TipStore.forRoot(this.paths.root, (m) => this.log.warn(m)));
     const pdir = opts.policyDir ?? policyDir();
     this.authority =
       opts.authority ??
@@ -1742,6 +1746,27 @@ export class Runner {
     await this.ipc.startSocket().catch((err) => this.log.warn(`IPC socket unavailable: ${String(err)}`));
     this.repairPdfRenderer();
     await this.scan();
+    // gate-fixes-2 P1, before any writer starts: clones a session was running in when the runner stopped get untrusted
+    // idle tips (R3-B1), then the one-time seeding of this version (D3)
+    {
+      const store = tipStore();
+      if (store) {
+        // R3-B1: sessions an earlier runner process left running are killed first, so none writes after the recovery
+        const killed = killOrphanSessions(this.paths.root);
+        if (killed === null)
+          this.log.warn('push records: orphaned agent sessions cannot be looked for on this platform');
+        else if (killed > 0)
+          this.log.warn(`killed ${killed} process(es) of agent sessions an earlier runner left`);
+        await recoverActiveClones(store, (m) => this.log.warn(m)).catch((err) =>
+          this.log.warn(`push records: recovery failed: ${String(err)}`),
+        );
+        await seedOnce(
+          store,
+          this.catalog.map((r) => r.localPath),
+          (m) => this.log.info(m),
+        ).catch((err) => this.log.warn(`push records: seeding failed: ${String(err)}`));
+      }
+    }
     // reviewer runs left by a crash: their checkouts and tmp dirs are removed (a new run always starts fresh)
     await sweepReviewRuns(this.paths, this.prReviews.liveRunIds())
       .then(async (n) => {

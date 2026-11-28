@@ -1,0 +1,37 @@
+{
+  "command": "docker network create gwcap-net",
+  "exit": 0,
+  "requests": [
+    {
+      "method": "HEAD",
+      "path": "/_ping"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/networks/create"
+    }
+  ],
+  "bodies": [
+    {
+      "method": "POST",
+      "path": "/v1.57/networks/create",
+      "body": {
+        "Name": "gwcap-net",
+        "Driver": "bridge",
+        "Scope": "",
+        "IPAM": {
+          "Driver": "default",
+          "Options": {},
+          "Config": []
+        },
+        "Internal": false,
+        "Attachable": false,
+        "Ingress": false,
+        "ConfigOnly": false,
+        "ConfigFrom": null,
+        "Options": {},
+        "Labels": {}
+      }
+    }
+  ]
+}

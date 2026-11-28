@@ -1,0 +1,127 @@
+{
+  "command": "docker run --rm --network none postgres:16 true",
+  "exit": 0,
+  "requests": [
+    {
+      "method": "HEAD",
+      "path": "/_ping"
+    },
+    {
+      "method": "HEAD",
+      "path": "/_ping"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/create"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/fd2a9db898fcb6ca9095a7e240b863a86f1b8e3cf07e1dcac5fe7ce05cf012ef/wait?condition=removed"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/fd2a9db898fcb6ca9095a7e240b863a86f1b8e3cf07e1dcac5fe7ce05cf012ef/attach?stderr=1&stdout=1&stream=1"
+    },
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/fd2a9db898fcb6ca9095a7e240b863a86f1b8e3cf07e1dcac5fe7ce05cf012ef/start"
+    }
+  ],
+  "bodies": [
+    {
+      "method": "POST",
+      "path": "/v1.57/containers/create",
+      "body": {
+        "Hostname": "",
+        "Domainname": "",
+        "User": "",
+        "AttachStdin": false,
+        "AttachStdout": true,
+        "AttachStderr": true,
+        "Tty": false,
+        "OpenStdin": false,
+        "StdinOnce": false,
+        "Env": null,
+        "Cmd": ["true"],
+        "Image": "postgres:16",
+        "Volumes": {},
+        "WorkingDir": "",
+        "Entrypoint": null,
+        "Labels": {},
+        "HostConfig": {
+          "Binds": null,
+          "ContainerIDFile": "",
+          "LogConfig": {
+            "Type": "",
+            "Config": {}
+          },
+          "NetworkMode": "none",
+          "PortBindings": {},
+          "RestartPolicy": {
+            "Name": "no",
+            "MaximumRetryCount": 0
+          },
+          "AutoRemove": true,
+          "VolumeDriver": "",
+          "VolumesFrom": null,
+          "ConsoleSize": [0, 0],
+          "CapAdd": null,
+          "CapDrop": null,
+          "CgroupnsMode": "",
+          "Dns": null,
+          "DnsOptions": [],
+          "DnsSearch": [],
+          "ExtraHosts": null,
+          "GroupAdd": null,
+          "IpcMode": "",
+          "Cgroup": "",
+          "Links": null,
+          "OomScoreAdj": 0,
+          "PidMode": "",
+          "Privileged": false,
+          "PublishAllPorts": false,
+          "ReadonlyRootfs": false,
+          "SecurityOpt": null,
+          "UTSMode": "",
+          "UsernsMode": "",
+          "ShmSize": 0,
+          "Isolation": "",
+          "CpuShares": 0,
+          "Memory": 0,
+          "NanoCpus": 0,
+          "CgroupParent": "",
+          "BlkioWeight": 0,
+          "BlkioWeightDevice": [],
+          "BlkioDeviceReadBps": [],
+          "BlkioDeviceWriteBps": [],
+          "BlkioDeviceReadIOps": [],
+          "BlkioDeviceWriteIOps": [],
+          "CpuPeriod": 0,
+          "CpuQuota": 0,
+          "CpuRealtimePeriod": 0,
+          "CpuRealtimeRuntime": 0,
+          "CpusetCpus": "",
+          "CpusetMems": "",
+          "Devices": [],
+          "DeviceCgroupRules": null,
+          "DeviceRequests": null,
+          "MemoryReservation": 0,
+          "MemorySwap": 0,
+          "MemorySwappiness": -1,
+          "OomKillDisable": false,
+          "PidsLimit": 0,
+          "Ulimits": null,
+          "CpuCount": 0,
+          "CpuPercent": 0,
+          "IOMaximumIOps": 0,
+          "IOMaximumBandwidth": 0,
+          "MaskedPaths": null,
+          "ReadonlyPaths": null
+        },
+        "NetworkingConfig": {
+          "EndpointsConfig": {}
+        }
+      }
+    }
+  ]
+}

@@ -12,6 +12,7 @@ import { runHygiene } from '../src/devops/hygiene.ts';
 import { devopsGuardFor } from '../src/devops/requests.ts';
 import { BranchLedger } from '../src/git/branch-ledger.ts';
 import { ConflictRecords, setConflictRecords } from '../src/git/conflict-record.ts';
+import { recordTip } from '../src/git/pushable-tips.ts';
 import { RebaseConflictError, rebaseOntoBase } from '../src/git/rebase.ts';
 import { ensureWorktree } from '../src/git/worktrees.ts';
 import { type Harness, startHarness } from './harness.ts';
@@ -383,6 +384,8 @@ describe('AC9: the supervisor runs the runner step after a terminal "Resolved:" 
     });
     writeFileSync(join(wt, 'README.md'), '# toy (card)\n');
     sh(wt, 'git', ['commit', '-am', 'card change']);
+    // gate-fixes-2 Rule D: the builder shift's end records the card branch (here by hand)
+    await recordTip(wt, `refs/heads/${CARD}`, rev(wt), 'shift-end');
     theirs(repo, 'README.md', '# toy (main)\n');
     await expect(
       rebaseOntoBase(wt, 'main', { name: 'Toy Dev', email: 'dev@toy.test' }),
@@ -493,6 +496,8 @@ describe('Rework 1 (B2): installs off, "npm ci" asks, the request resumes, then 
     });
     writeFileSync(join(wt, 'README.md'), '# toy (card)\n');
     sh(wt, 'git', ['commit', '-am', 'card change']);
+    // gate-fixes-2 Rule D: the builder shift's end records the card branch (here by hand)
+    await recordTip(wt, `refs/heads/${CARD}`, rev(wt), 'shift-end');
     theirs(repo, 'README.md', '# toy (main)\n');
     await expect(
       rebaseOntoBase(wt, 'main', { name: 'Toy Dev', email: 'dev@toy.test' }),
@@ -583,6 +588,8 @@ describe('quiet-approvals S7: conflict work in the box, in the runner-made scrat
     });
     writeFileSync(join(wt, 'README.md'), '# toy (card)\n');
     sh(wt, 'git', ['commit', '-am', 'card change']);
+    // gate-fixes-2 Rule D: the builder shift's end records the card branch (here by hand)
+    await recordTip(wt, `refs/heads/${CARD}`, rev(wt), 'shift-end');
     theirs(repo, 'README.md', '# toy (main)\n');
     await expect(
       rebaseOntoBase(wt, 'main', { name: 'Toy Dev', email: 'dev@toy.test' }),

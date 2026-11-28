@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { uuidv7 } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { PrCreator } from '../src/git/gh.ts';
+import { recordTip } from '../src/git/pushable-tips.ts';
 import { ensureWorktree } from '../src/git/worktrees.ts';
 import { defaultEnvChecker, needsTestEnvironment } from '../src/testing/environment.ts';
 import { makeShiftStart } from './fixtures.ts';
@@ -190,6 +191,13 @@ describe('finalize.execute command', () => {
     writeFileSync(join(path, file), 'thing\n');
     sh(path, 'git', ['add', '-A']);
     sh(path, 'git', ['commit', '-m', 'add thing']);
+    // gate-fixes-2 Rule D: the builder shift's end records the branch (here by hand)
+    await recordTip(
+      path,
+      'refs/heads/aom/toy-1-add-thing',
+      sh(path, 'git', ['rev-parse', 'HEAD']),
+      'shift-end',
+    );
     return path;
   }
 

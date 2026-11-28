@@ -168,11 +168,11 @@ describe('sandbox policy: caches, dotnet and the read-only worktree', () => {
 
   it('nothing is shared when the runner passes no cache dirs (unit fixtures)', () => {
     const fs = buildShiftSettings(role('builder').permissions, policyCtx(), POLICY_PATHS).sandbox?.filesystem;
+    // gate-fixes-2 B1: the git dir as a whole is never writable (this fixture's worktree is not on disk)
     expect(fs?.allowWrite).toEqual([
       '/data/agents/a1/home',
       '/data/agents/a1/scratch',
       '/data/agents/a1/tmp',
-      '/home/me/toy/.git',
     ]);
   });
 

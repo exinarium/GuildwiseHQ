@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import { BUILTIN_ROLES } from '@aom/shared';
@@ -20,8 +20,9 @@ import {
   STASH_REMOVING_DENIED,
   shadowedWrites,
 } from '../src/adapters/claude-policy.ts';
-import { codexRules } from '../src/adapters/codex.ts';
+import { codexFilesystem, codexRules } from '../src/adapters/codex.ts';
 import { deniedShellPrefixes } from '../src/adapters/denied-shell.ts';
+import { gitWriteScope, materializeLooseRefs, refFence } from '../src/git/harden.ts';
 import { POLICY_PATHS, policyCtx } from './policy-fixtures.ts';
 
 /**
@@ -240,8 +241,12 @@ describe('F1b: read-only HEAD files (the OS fence)', () => {
       POLICY_PATHS,
     ).sandbox?.filesystem;
     expect(mention?.denyWrite).toEqual(expect.arrayContaining([join(common, 'HEAD'), join(admin, 'HEAD')]));
-    // the git dir itself stays writable (commits work: probe P1)
-    expect(mention?.allowWrite).toContain(common);
+    // gate-fixes-2 B1: only the card's own admin dir, objects, refs and logs are writable (commits still work there,
+    // the Codex and harness box set); the rest of the git dir (packed-refs, info/, shallow, the main index) is not
+    expect(mention?.allowWrite).toEqual(
+      expect.arrayContaining([admin, join(common, 'objects'), join(common, 'refs'), join(common, 'logs')]),
+    );
+    expect(mention?.allowWrite).not.toContain(common);
     expect(mention?.denyWrite).not.toContain(common);
     expect(mention?.denyWrite).not.toContain(admin);
   });
@@ -280,5 +285,108 @@ describe('F4: shadowedWrites', () => {
     expect(shadowedWrites({ allowWrite: ['/r/.git'], denyWrite: ['/r'] }, '/w')).toEqual(['/r']);
     expect(shadowedWrites({ allowWrite: ['/h'], denyWrite: ['/w'] }, '/w')).toEqual([]);
     expect(shadowedWrites({ allowWrite: ['/r/.git'], denyWrite: ['/r/.git/HEAD'] }, '/w')).toEqual([]);
+  });
+});
+
+describe('gate-fixes-2 S7/B1: the ref fence and the narrow git write scope for every writer', () => {
+  const root = realpathSync(mkdtempSync(join(userInfo().homedir, '.aom-ref-fence-')));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 't',
+    GIT_AUTHOR_EMAIL: 't@example.test',
+    GIT_COMMITTER_NAME: 't',
+    GIT_COMMITTER_EMAIL: 't@example.test',
+  };
+  const g = (cwd: string, ...a: string[]) => spawnSync('git', ['-C', cwd, ...a], { env, encoding: 'utf8' });
+  const repo = join(root, 'repo');
+  mkdirSync(repo);
+  spawnSync('git', ['init', '-q', '-b', 'main', repo], { env });
+  writeFileSync(join(repo, 'a'), 'a\n');
+  g(repo, 'add', '-A');
+  g(repo, 'commit', '-q', '-m', 'a');
+  g(repo, 'tag', 'v1');
+  g(repo, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+  g(repo, 'branch', 'aom/toy-2-other');
+  g(repo, 'pack-refs', '--all');
+  const card = join(root, 'card');
+  g(repo, 'worktree', 'add', '-q', '-b', 'aom/toy-1-x', card);
+  const common = join(repo, '.git');
+  const admin = join(common, 'worktrees', 'card');
+
+  it('loose files for packed-only branches and an empty refs/replace exist before a writer starts', () => {
+    const tips = Object.fromEntries(
+      g(repo, 'for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads/')
+        .stdout.trim()
+        .split('\n')
+        .map((l) => l.split(' ')),
+    );
+    materializeLooseRefs(common, tips);
+    expect(existsSync(join(common, 'refs', 'heads', 'main'))).toBe(true);
+    expect(existsSync(join(common, 'refs', 'heads', 'aom', 'toy-2-other'))).toBe(true);
+    expect(existsSync(join(common, 'refs', 'replace'))).toBe(true);
+    expect(g(repo, 'rev-parse', 'main').stdout.trim()).toBe(tips['refs/heads/main']);
+  });
+
+  it('the fence: packed-refs, remotes, tags, replace, other branches; never the own branch', () => {
+    const fence = refFence(card);
+    for (const p of [
+      join(common, 'packed-refs'),
+      join(common, 'refs', 'remotes'),
+      join(common, 'refs', 'tags'),
+      join(common, 'refs', 'replace'),
+      join(common, 'refs', 'heads', 'main'),
+      join(common, 'refs', 'heads', 'aom', 'toy-2-other'),
+    ])
+      expect(fence).toContain(p);
+    expect(fence).not.toContain(join(common, 'refs', 'heads', 'aom', 'toy-1-x'));
+    expect(fence).not.toContain(join(common, 'refs', 'heads', 'aom'));
+    expect(gitWriteScope(card, [common])).toEqual([
+      admin,
+      join(common, 'objects'),
+      join(common, 'refs'),
+      join(common, 'logs'),
+    ]);
+  });
+
+  it('Claude: the narrow write scope and the fence for a committing role; no git writes for a read-only role', () => {
+    const fs = (key: string) =>
+      buildShiftSettings(perms(key), policyCtx({ cwd: card, gitDirs: [common] }), POLICY_PATHS, key).sandbox
+        ?.filesystem;
+    const b = fs('builder');
+    expect(b?.allowWrite).toEqual(expect.arrayContaining(gitWriteScope(card, [common])));
+    expect(b?.allowWrite).not.toContain(common);
+    expect(b?.denyWrite).toEqual(expect.arrayContaining(refFence(card)));
+    expect(shadowedWrites(b ?? { allowWrite: [], denyWrite: [] }, card)).toEqual([]);
+    const r = fs('reviewer');
+    expect((r?.allowWrite ?? []).filter((p) => p.startsWith(common))).toEqual([]);
+    // the work mention gets the same
+    const m = buildMentionWorkSettings(
+      perms('builder'),
+      policyCtx({ cwd: card, gitDirs: [common] }),
+      POLICY_PATHS,
+    ).sandbox?.filesystem;
+    expect(m?.denyWrite).toEqual(expect.arrayContaining(refFence(card)));
+  });
+
+  it('Codex: the fence is read-only inside the writable refs', () => {
+    const fs = codexFilesystem({
+      cwd: card,
+      readOnlyCwd: false,
+      sandbox: { home: '/r/a/home', scratch: '/r/a/scratch', tmp: '/tmp/aom-x', cacheRoot: '/r/cache' },
+      gitDirs: [common],
+      mayCommit: true,
+      readDirs: [],
+      addDirs: [],
+      toolchainReadPaths: [],
+      aomReadPaths: [],
+      codexReadPaths: [],
+    } as unknown as Parameters<typeof codexFilesystem>[0]);
+    expect(fs[join(common, 'refs')]).toBe('write');
+    for (const p of refFence(card)) expect(fs[p], p).toBe('read');
+  });
+
+  it('update-ref and pack-refs are denied to every Claude role, in their written forms', () => {
+    expect(GIT_ALWAYS_VERBS).toEqual(expect.arrayContaining(['update-ref', 'pack-refs']));
   });
 });

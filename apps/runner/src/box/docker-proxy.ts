@@ -78,13 +78,116 @@ const refuse = (reason: string, status = 403): Verdict => ({ ok: false, status, 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);
 
-/** Keeps exactly the allowed keys (exact case); any other key refuses the request. */
-function only(o: unknown, allowed: readonly string[], where: string): Obj | string {
-  if (o === undefined || o === null) return {};
-  if (!isObj(o)) return `${where} is not an object`;
-  for (const k of Object.keys(o)) if (!allowed.includes(k)) return `${where}.${k} is not allowed`;
-  return o;
+/** gate-fixes-2 F5: a refusal thrown by the filters below; `checked()` turns it into a Verdict. */
+class Refusal extends Error {
+  constructor(
+    readonly reason: string,
+    readonly status: number,
+  ) {
+    super(reason);
+  }
 }
+function no(reason: string, status = 403): never {
+  throw new Refusal(reason, status);
+}
+function checked(f: () => Verdict): Verdict {
+  try {
+    return f();
+  } catch (e) {
+    if (e instanceof Refusal) return refuse(e.reason, e.status);
+    throw e;
+  }
+}
+
+/** gate-fixes-2 F5 (S2): how deep `isZero` looks; a deeper value refuses the request (400). */
+export const ZERO_DEPTH = 32;
+
+/**
+ * gate-fixes-2 F5: "", false, 0, null, or an array or object whose values are all zero values. "0" and "false" are not.
+ * The daemon decodes bodies into Go structs, where an absent field and its zero value decode the same.
+ */
+export function isZero(v: unknown, depth = 0): boolean {
+  if (v === null || v === '' || v === false || v === 0) return true;
+  if (typeof v !== 'object') return false;
+  if (depth >= ZERO_DEPTH) no('a value is nested too deeply', 400);
+  return (Array.isArray(v) ? v : Object.values(v as Obj)).every((x) => isZero(x, depth + 1));
+}
+
+/** Daemon defaults the real CLI sends for keys off the allowlist: accepted and dropped, never forwarded. */
+type Defaults = ReadonlyMap<string, (v: unknown) => boolean>;
+const NO_DEFAULTS: Defaults = new Map();
+const HOST_DEFAULTS: Defaults = new Map([['MemorySwappiness', (v: unknown) => v === -1]]);
+const NETWORK_DEFAULTS: Defaults = new Map([
+  ['Driver', (v: unknown) => v === 'bridge'],
+  [
+    'IPAM',
+    (v: unknown) =>
+      isObj(v) &&
+      (v.Driver === undefined || v.Driver === 'default' || v.Driver === '') &&
+      Object.keys(v).every((k) => k === 'Driver' || isZero(v[k])),
+  ],
+]);
+const VOLUME_DEFAULTS: Defaults = new Map([['Driver', (v: unknown) => v === 'local']]);
+
+/**
+ * gate-fixes-2 F5: a NEW object of exactly the allowed keys (exact case). A key off the list is dropped when its value is a
+ * zero value or a listed daemon default; any other value refuses the request. `__proto__` is refused anywhere.
+ */
+function only(o: unknown, allowed: readonly string[], where: string, defaults: Defaults = NO_DEFAULTS): Obj {
+  if (o === undefined || o === null) return {};
+  if (!isObj(o)) no(`${where} is not an object`);
+  const kept: [string, unknown][] = [];
+  for (const k of Object.keys(o)) {
+    if (k === '__proto__') no(`${where}.__proto__ is not allowed`);
+    if (allowed.includes(k)) kept.push([k, o[k]]);
+    else if (!isZero(o[k]) && !(defaults.has(k) && defaults.get(k)?.(o[k])))
+      no(`${where}.${k} is not allowed`);
+  }
+  return Object.fromEntries(kept);
+}
+
+/** A map position (Labels, ExposedPorts, Tmpfs, PortBindings, EndpointsConfig): the keys are names, each value is rebuilt. */
+function map(o: unknown, where: string, each: (v: unknown, k: string) => unknown): Obj {
+  if (o === undefined || o === null) return {};
+  if (!isObj(o)) no(`${where} is not an object`);
+  return Object.fromEntries(
+    Object.keys(o).map((k) => {
+      if (k === '__proto__') no(`${where}.__proto__ is not allowed`);
+      return [k, each(o[k], k)];
+    }),
+  );
+}
+
+const isScalar = (v: unknown) =>
+  v === null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean';
+/** An allowlisted leaf: a scalar or a list of scalars (a copy), never an object. */
+function plain(v: unknown, where: string): unknown {
+  if (isScalar(v)) return v;
+  if (Array.isArray(v) && v.every(isScalar)) return [...v];
+  return no(`${where} must be a plain value`);
+}
+const str = (v: unknown, where: string): string =>
+  typeof v === 'string' ? v : no(`${where} must be a string`);
+const strs = (v: unknown, where: string): string[] | null =>
+  v === null
+    ? null
+    : Array.isArray(v) && v.every((x) => typeof x === 'string')
+      ? [...v]
+      : no(`${where} must be a list of strings`);
+/** `only()` whose kept values are all plain leaves. */
+const flat = (o: unknown, allowed: readonly string[], where: string): Obj =>
+  Object.fromEntries(Object.entries(only(o, allowed, where)).map(([k, v]) => [k, plain(v, `${where}.${k}`)]));
+/** null, or two integers 0..65535. */
+const consoleSize = (v: unknown, where: string): unknown =>
+  v === null ||
+  (Array.isArray(v) && v.length === 2 && v.every((n) => Number.isInteger(n) && n >= 0 && n < 65536))
+    ? plain(v, where)
+    : no(`${where} is two integers`);
+const labelsOf = (v: unknown, instance: string): Obj => ({
+  ...map(v, 'Labels', (x, k) => str(x, `Labels.${k}`)),
+  [LABEL]: instance,
+});
+const VOLUME_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 
 const CREATE_KEYS = [
   'Image',
@@ -120,6 +223,7 @@ const HOST_KEYS = [
   'Tmpfs',
   'Init',
   'ShmSize',
+  'ConsoleSize',
 ] as const;
 const MOUNT_KEYS = [
   'Type',
@@ -130,6 +234,40 @@ const MOUNT_KEYS = [
   'TmpfsOptions',
   'BindOptions',
 ] as const;
+const HEALTH_KEYS = ['Test', 'Interval', 'Timeout', 'StartPeriod', 'StartInterval', 'Retries'] as const;
+const RESTART_KEYS = ['Name', 'MaximumRetryCount'] as const;
+const ENDPOINT_KEYS = ['Aliases', 'DNSNames'] as const;
+const PORT_KEYS = ['HostIp', 'HostPort'] as const;
+const VOLUME_OPT_KEYS = ['NoCopy', 'Labels'] as const;
+const BIND_OPT_KEYS = ['CreateMountpoint'] as const;
+const TMPFS_OPT_KEYS = ['SizeBytes', 'Mode'] as const;
+
+/** An endpoint (create's EndpointsConfig entry, connect's EndpointConfig): aliases and DNS names only. */
+const endpoint = (v: unknown, where: string): Obj =>
+  Object.fromEntries(
+    Object.entries(only(v, ENDPOINT_KEYS, where)).map(([k, x]) => [k, strs(x, `${where}.${k}`)]),
+  );
+
+/** A `HostConfig` value other than Binds, Mounts and NetworkMode, rebuilt (gate-fixes-2 F5). */
+function hostValue(k: string, v: unknown): unknown {
+  if (k === 'PortBindings')
+    return map(v, 'PortBindings', (list, port) =>
+      list === null
+        ? null
+        : Array.isArray(list)
+          ? list.map((pb) => {
+              const o = flat(pb, PORT_KEYS, `PortBindings.${port}[]`);
+              // "" means every interface: still refused
+              if (o.HostIp !== '127.0.0.1') no('ports are bound on 127.0.0.1 only');
+              return o;
+            })
+          : no(`PortBindings.${port} is not a list`),
+    );
+  if (k === 'RestartPolicy') return v === null ? null : flat(v, RESTART_KEYS, 'RestartPolicy');
+  if (k === 'Tmpfs') return map(v, 'Tmpfs', (x, t) => str(x, `Tmpfs.${t}`));
+  if (k === 'ConsoleSize') return consoleSize(v, 'HostConfig.ConsoleSize');
+  return plain(v, `HostConfig.${k}`);
+}
 
 export class DockerGate {
   /** Networks this proxy made successfully (by name and by the id the daemon returned): the only ones allowed. */
@@ -173,134 +311,251 @@ export class DockerGate {
     return null;
   }
 
-  /** POST /containers/create */
+  /**
+   * POST /containers/create. gate-fixes-2 F5: every level is rebuilt from filtered objects; the real CLI's zero values
+   * (and `MemorySwappiness: -1`) off the allowlist are dropped, anything else off it is refused.
+   */
   createContainer(body: unknown): Verdict {
-    const b = only(body, CREATE_KEYS, 'body');
-    if (typeof b === 'string') return refuse(b);
-    if (typeof b.Image !== 'string' || !b.Image) return refuse('an image is needed');
-    const host = only(b.HostConfig, HOST_KEYS, 'HostConfig');
-    if (typeof host === 'string') return refuse(host);
-    const mode = host.NetworkMode;
-    const defaultNetwork = mode === undefined || mode === '' || mode === 'default';
-    if (
-      !defaultNetwork &&
-      mode !== 'none' &&
-      !(typeof mode === 'string' && !PREDEFINED_NETWORKS.includes(mode) && this.networks.has(mode))
-    )
-      return refuse(`NetworkMode ${String(mode)}: only a network made through this gatekeeper (or none)`);
-    const binds: string[] = [];
-    for (const bind of Array.isArray(host.Binds) ? host.Binds : host.Binds === undefined ? [] : [null]) {
-      if (typeof bind !== 'string') return refuse('HostConfig.Binds must be strings');
-      const [src, dst, opts] = bind.split(':');
-      if (!src?.startsWith('/')) return refuse('named volumes go through Mounts');
-      const kind = this.bindKind(src);
-      if (!kind)
-        return refuse(`bind ${src}: only a card worktree or the request's scratch folder, as a whole`);
-      if (!dst) return refuse(`bind ${src}: a target is needed`);
-      // a card worktree is read-only in a container, whatever was asked
-      const o = (opts ?? '').split(',').filter((x) => x && x !== 'rw' && x !== 'ro');
-      binds.push(
-        `${src}:${dst}:${[kind === 'ro' || (opts ?? '').split(',').includes('ro') ? 'ro' : 'rw', ...o].join(',')}`,
+    return checked(() => {
+      const b = only(body, CREATE_KEYS, 'body');
+      if (typeof b.Image !== 'string' || !b.Image) no('an image is needed');
+      const host = only(b.HostConfig, HOST_KEYS, 'HostConfig', HOST_DEFAULTS);
+      const mode = host.NetworkMode;
+      const defaultNetwork = mode === undefined || mode === '' || mode === 'default';
+      if (
+        !defaultNetwork &&
+        mode !== 'none' &&
+        !(typeof mode === 'string' && !PREDEFINED_NETWORKS.includes(mode) && this.networks.has(mode))
+      )
+        no(`NetworkMode ${String(mode)}: only a network made through this gatekeeper (or none)`);
+      const volumes: string[] = [];
+      // null Binds and Mounts are the same as absent (the CLI sends `Binds: null`)
+      const binds =
+        host.Binds === undefined || host.Binds === null
+          ? undefined
+          : Array.isArray(host.Binds)
+            ? host.Binds.map((x) => this.bind(x, volumes))
+            : no('HostConfig.Binds must be a list');
+      const mounts =
+        host.Mounts === undefined || host.Mounts === null
+          ? undefined
+          : Array.isArray(host.Mounts)
+            ? host.Mounts.map((x) => this.mount(x, volumes))
+            : no('HostConfig.Mounts must be a list');
+      const hostRest = Object.fromEntries(
+        Object.entries(host)
+          .filter(([k]) => k !== 'Binds' && k !== 'Mounts' && k !== 'NetworkMode')
+          .map(([k, v]) => [k, hostValue(k, v)]),
       );
+      const hostOut: Obj = {
+        ...hostRest,
+        NetworkMode: defaultNetwork ? this.defaultNetworkName : mode,
+        ...(binds ? { Binds: binds } : {}),
+        ...(mounts ? { Mounts: mounts } : {}),
+      };
+      const rest = Object.fromEntries(
+        Object.entries(b).map(([k, v]): [string, unknown] => {
+          if (k === 'ExposedPorts')
+            return [k, map(v, k, (x, p) => (isZero(x) ? {} : no(`ExposedPorts.${p} is not allowed`)))];
+          if (k === 'Healthcheck')
+            return [
+              k,
+              v === null
+                ? null
+                : Object.fromEntries(
+                    Object.entries(flat(v, HEALTH_KEYS, k)).map(([hk, hv]) => [
+                      hk,
+                      hk === 'Test' ? strs(hv, 'Healthcheck.Test') : hv,
+                    ]),
+                  ),
+            ];
+          if (k === 'NetworkingConfig') return [k, v === null ? null : this.networking(v, defaultNetwork)];
+          if (k === 'HostConfig' || k === 'Labels') return [k, undefined];
+          return [k, plain(v, `body.${k}`)];
+        }),
+      );
+      // canonical: the proxy's own JSON of exactly the checked fields
+      return {
+        ok: true,
+        body: JSON.parse(
+          JSON.stringify({ ...rest, HostConfig: hostOut, Labels: labelsOf(b.Labels, this.p.instance) }),
+        ),
+        ...(volumes.length ? { volumes } : {}),
+        ...(defaultNetwork ? { defaultNetwork: true } : {}),
+      };
+    });
+  }
+
+  /**
+   * One `HostConfig.Binds` entry. gate-fixes-2 F5: a named volume (Compose v5 puts them here) must be one of the gate's own
+   * labelled volumes (rw, ro, nocopy); a host path (S3) takes only rw or ro; more than 3 `:` parts are refused.
+   */
+  private bind(spec: unknown, volumes: string[]): string {
+    if (typeof spec !== 'string') no('HostConfig.Binds must be strings');
+    const parts = spec.split(':');
+    if (parts.length > 3) no(`bind ${spec}: too many parts`);
+    const [src = '', dst, opts = ''] = parts;
+    if (!dst) no(`bind ${src}: a target is needed`);
+    if (!src.startsWith('/')) {
+      if (!VOLUME_NAME.test(src)) no('a volume name');
+      if (opts !== '' && opts.split(',').some((x) => !['rw', 'ro', 'nocopy'].includes(x)))
+        no(`volume ${src}: options ${opts}`);
+      volumes.push(src);
+      return opts ? `${src}:${dst}:${opts}` : `${src}:${dst}`;
     }
-    const volumes: string[] = [];
-    const mounts: Obj[] = [];
-    for (const m of Array.isArray(host.Mounts) ? host.Mounts : host.Mounts === undefined ? [] : [null]) {
-      const mm = only(m, MOUNT_KEYS, 'Mounts[]');
-      if (typeof mm === 'string') return refuse(mm);
-      if (!['bind', 'volume', 'tmpfs'].includes(String(mm.Type)))
-        return refuse(`mount type ${String(mm.Type)}`);
-      if (isObj(mm.VolumeOptions) && mm.VolumeOptions.DriverConfig !== undefined)
-        return refuse('Mounts[].VolumeOptions.DriverConfig');
-      if (mm.Type === 'bind') {
-        const kind = typeof mm.Source === 'string' ? this.bindKind(mm.Source) : null;
-        if (!kind)
-          return refuse(
-            `bind ${String(mm.Source)}: only a card worktree or the request's scratch folder, as a whole`,
-          );
-        mounts.push(kind === 'ro' ? { ...mm, ReadOnly: true } : mm);
-        continue;
-      }
-      // a named volume must be one of the gate's own (checked against the daemon); none = an anonymous volume
-      if (mm.Type === 'volume' && mm.Source !== undefined) {
-        if (typeof mm.Source !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(mm.Source))
-          return refuse('a volume name');
-        volumes.push(mm.Source);
-      }
-      mounts.push(mm);
+    if (opts !== '' && opts !== 'rw' && opts !== 'ro') no(`bind ${src}: only rw or ro`);
+    const kind = this.bindKind(src);
+    if (!kind) no(`bind ${src}: only a card worktree or the request's scratch folder, as a whole`);
+    // a card worktree is read-only in a container, whatever was asked
+    return `${src}:${dst}:${kind === 'ro' || opts === 'ro' ? 'ro' : 'rw'}`;
+  }
+
+  /** One `HostConfig.Mounts` entry, rebuilt (gate-fixes-2 F5: nested options allowlisted too). */
+  private mount(m: unknown, volumes: string[]): Obj {
+    const mm = only(m, MOUNT_KEYS, 'Mounts[]');
+    if (!['bind', 'volume', 'tmpfs'].includes(String(mm.Type))) no(`mount type ${String(mm.Type)}`);
+    const out: Obj = Object.fromEntries(
+      Object.entries(mm).map(([k, v]): [string, unknown] => {
+        if (k === 'VolumeOptions')
+          return [
+            k,
+            v === null
+              ? null
+              : Object.fromEntries(
+                  Object.entries(only(v, VOLUME_OPT_KEYS, 'Mounts[].VolumeOptions')).map(([vk, vv]) => [
+                    vk,
+                    vk === 'Labels'
+                      ? map(vv, 'Mounts[].VolumeOptions.Labels', (x, l) => str(x, `Labels.${l}`))
+                      : plain(vv, `Mounts[].VolumeOptions.${vk}`),
+                  ]),
+                ),
+          ];
+        if (k === 'TmpfsOptions')
+          return [k, v === null ? null : flat(v, TMPFS_OPT_KEYS, 'Mounts[].TmpfsOptions')];
+        if (k === 'BindOptions')
+          return [k, v === null ? null : flat(v, BIND_OPT_KEYS, 'Mounts[].BindOptions')];
+        return [k, plain(v, `Mounts[].${k}`)];
+      }),
+    );
+    if (out.Type === 'bind') {
+      const kind = typeof out.Source === 'string' ? this.bindKind(out.Source) : null;
+      if (!kind)
+        no(`bind ${String(out.Source)}: only a card worktree or the request's scratch folder, as a whole`);
+      return kind === 'ro' ? { ...out, ReadOnly: true } : out;
     }
-    if (isObj(host.PortBindings))
-      for (const list of Object.values(host.PortBindings))
-        for (const pb of Array.isArray(list) ? list : [])
-          if (!isObj(pb) || pb.HostIp !== '127.0.0.1') return refuse('ports are bound on 127.0.0.1 only');
-    const net = only(b.NetworkingConfig, ['EndpointsConfig'], 'NetworkingConfig');
-    if (typeof net === 'string') return refuse(net);
-    if (isObj(net.EndpointsConfig))
-      for (const name of Object.keys(net.EndpointsConfig))
-        if (PREDEFINED_NETWORKS.includes(name) || !this.networks.has(name))
-          return refuse(`network ${name} was not made through this gatekeeper`);
-    const labels = isObj(b.Labels) ? { ...b.Labels } : {};
-    labels[LABEL] = this.p.instance;
-    const hostOut: Obj = {
-      ...host,
-      NetworkMode: defaultNetwork ? this.defaultNetworkName : mode,
-      ...(host.Binds !== undefined ? { Binds: binds } : {}),
-      ...(host.Mounts !== undefined ? { Mounts: mounts } : {}),
-    };
-    // canonical: the proxy's own JSON of exactly the checked fields
+    // a named volume must be one of the gate's own (checked against the daemon); none or "" = an anonymous volume
+    if (out.Type === 'volume') {
+      if (out.Source === '' || out.Source === null) {
+        const { Source: _, ...anonymous } = out;
+        return anonymous;
+      }
+      if (out.Source !== undefined) {
+        if (typeof out.Source !== 'string' || !VOLUME_NAME.test(out.Source)) no('a volume name');
+        volumes.push(out.Source);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * `NetworkingConfig`, rebuilt. Only networks the gate made; the CLI's `default` endpoint (with the default network mode)
+   * is re-keyed to the gate's internal network (forwarding `default` makes the container fail to start).
+   */
+  private networking(v: unknown, defaultNetwork: boolean): Obj {
+    const n = only(v, ['EndpointsConfig'], 'NetworkingConfig');
+    if (n.EndpointsConfig === undefined || n.EndpointsConfig === null) return n;
+    if (!isObj(n.EndpointsConfig)) no('NetworkingConfig.EndpointsConfig is not an object');
+    const eps = n.EndpointsConfig;
     return {
-      ok: true,
-      body: JSON.parse(JSON.stringify({ ...b, HostConfig: hostOut, Labels: labels })),
-      ...(volumes.length ? { volumes } : {}),
-      ...(defaultNetwork ? { defaultNetwork: true } : {}),
+      EndpointsConfig: Object.fromEntries(
+        Object.keys(eps).map((name) => {
+          if (name === '__proto__') no('EndpointsConfig.__proto__ is not allowed');
+          const ep = endpoint(eps[name], `EndpointsConfig.${name}`);
+          if (name === 'default' && defaultNetwork) return [this.defaultNetworkName, ep];
+          if (PREDEFINED_NETWORKS.includes(name) || !this.networks.has(name))
+            no(`network ${name} was not made through this gatekeeper`);
+          return [name, ep];
+        }),
+      ),
     };
   }
 
-  /** POST /containers/{id}/exec: the body allowlist (no Privileged, no User). */
+  /** POST /containers/{id}/exec: the body allowlist (no Privileged, no User; their zero values are dropped). */
   execCreate(body: unknown): Verdict {
-    const b = only(body, EXEC_KEYS, 'body');
-    if (typeof b === 'string') return refuse(b);
-    if (!Array.isArray(b.Cmd) || b.Cmd.length === 0 || b.Cmd.some((c) => typeof c !== 'string'))
-      return refuse('Cmd is a list of strings');
-    return { ok: true, body: JSON.parse(JSON.stringify(b)) };
+    return checked(() => {
+      const b = only(body, EXEC_KEYS, 'body');
+      if (!Array.isArray(b.Cmd) || b.Cmd.length === 0 || b.Cmd.some((c) => typeof c !== 'string'))
+        no('Cmd is a list of strings');
+      return {
+        ok: true,
+        body: Object.fromEntries(
+          Object.entries(b).map(([k, v]) => [
+            k,
+            k === 'ConsoleSize' ? consoleSize(v, 'body.ConsoleSize') : plain(v, `body.${k}`),
+          ]),
+        ),
+      };
+    });
   }
 
   /** POST /networks/{id}/connect|disconnect: the target container must be one of the gate's own. */
   networkConnect(body: unknown): Verdict {
-    const b = only(body, ['Container', 'EndpointConfig', 'Force'], 'body');
-    if (typeof b === 'string') return refuse(b);
-    if (typeof b.Container !== 'string' || !/^[A-Za-z0-9_.-]{1,128}$/.test(b.Container))
-      return refuse('a container');
-    const ep = only(b.EndpointConfig, ['Aliases'], 'EndpointConfig');
-    if (typeof ep === 'string') return refuse(ep);
-    return { ok: true, body: JSON.parse(JSON.stringify(b)), containers: [b.Container] };
+    return checked(() => {
+      const b = only(body, ['Container', 'EndpointConfig', 'Force'], 'body');
+      if (typeof b.Container !== 'string' || !/^[A-Za-z0-9_.-]{1,128}$/.test(b.Container)) no('a container');
+      return {
+        ok: true,
+        body: {
+          Container: b.Container,
+          ...(b.EndpointConfig !== undefined
+            ? {
+                EndpointConfig:
+                  b.EndpointConfig === null ? null : endpoint(b.EndpointConfig, 'EndpointConfig'),
+              }
+            : {}),
+          ...(b.Force !== undefined ? { Force: plain(b.Force, 'body.Force') } : {}),
+        },
+        containers: [b.Container],
+      };
+    });
   }
 
   /** POST /networks/create: labelled, internal (no internet) unless the local ceiling allows container egress. */
   createNetwork(body: unknown): Verdict {
-    const b = only(body, ['Name', 'Labels', 'Internal', 'Attachable', 'CheckDuplicate'], 'body');
-    if (typeof b === 'string') return refuse(b);
-    if (typeof b.Name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/.test(b.Name))
-      return refuse('a network name');
-    if (PREDEFINED_NETWORKS.includes(b.Name.toLowerCase()))
-      return refuse(`${b.Name} is one of Docker's own networks`);
-    const labels = isObj(b.Labels) ? { ...b.Labels } : {};
-    labels[LABEL] = this.p.instance;
-    return {
-      ok: true,
-      body: { Name: b.Name, Labels: labels, Internal: this.p.containerEgress ? b.Internal === true : true },
-    };
+    return checked(() => {
+      const b = only(
+        body,
+        ['Name', 'Labels', 'Internal', 'Attachable', 'CheckDuplicate'],
+        'body',
+        NETWORK_DEFAULTS,
+      );
+      if (typeof b.Name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/.test(b.Name))
+        no('a network name');
+      if (PREDEFINED_NETWORKS.includes(b.Name.toLowerCase())) no(`${b.Name} is one of Docker's own networks`);
+      return {
+        ok: true,
+        body: {
+          Name: b.Name,
+          Labels: labelsOf(b.Labels, this.p.instance),
+          Internal: this.p.containerEgress ? b.Internal === true : true,
+        },
+      };
+    });
   }
 
   /** POST /volumes/create: labelled, the local driver, no options. */
   createVolume(body: unknown): Verdict {
-    const b = only(body, ['Name', 'Labels'], 'body');
-    if (typeof b === 'string') return refuse(b);
-    const labels = isObj(b.Labels) ? { ...b.Labels } : {};
-    labels[LABEL] = this.p.instance;
-    return { ok: true, body: { ...(typeof b.Name === 'string' ? { Name: b.Name } : {}), Labels: labels } };
+    return checked(() => {
+      const b = only(body, ['Name', 'Labels'], 'body', VOLUME_DEFAULTS);
+      return {
+        ok: true,
+        body: {
+          ...(b.Name !== undefined ? { Name: str(b.Name, 'body.Name') } : {}),
+          Labels: labelsOf(b.Labels, this.p.instance),
+        },
+      };
+    });
   }
-
   /** The route, and what to check before it goes upstream. */
   classify(
     method: string,
@@ -362,9 +617,10 @@ export class DockerGate {
         check: (b) => this.networkConnect(b),
         scope: { object: 'networks', id: c[1] as string },
       };
-    c = /^\/containers\/([A-Za-z0-9_.-]+)\/(start|stop|kill|wait|logs|json|restart|attach|top|stats)$/.exec(
-      p,
-    );
+    c =
+      /^\/containers\/([A-Za-z0-9_.-]+)\/(start|stop|kill|wait|logs|json|restart|attach|top|stats|resize)$/.exec(
+        p,
+      );
     if (c) return { kind: 'scoped', object: 'containers', id: c[1] as string, upgrade: c[2] === 'attach' };
     c = /^\/containers\/([A-Za-z0-9_.-]+)$/.exec(p);
     if (c && method === 'DELETE') return { kind: 'scoped', object: 'containers', id: c[1] as string };
@@ -527,6 +783,9 @@ export async function startDockerProxy(o: {
     const up = httpRequest({ socketPath: o.upstream, path, method: req.method, headers }, (ur) => {
       if (!onAnswer) {
         res.writeHead(ur.statusCode ?? 502, ur.headers);
+        // gate-fixes-2 F5: the headers go out at once. `docker run` waits for the answer headers of
+        // `wait?condition=removed` (whose body comes only when the container is gone) before it starts the container.
+        res.flushHeaders();
         ur.pipe(res);
         return;
       }
@@ -595,7 +854,13 @@ export async function startDockerProxy(o: {
       }
       if (route.scope && !(await labelled(route.scope.object, route.scope.id)))
         return fail(res, 404, `${route.scope.object} ${route.scope.id} is not Guildwise's`);
-      const v = route.check(parsed);
+      // gate-fixes-2 F5 (S2): a check that fails in any way answers 400, so no request can hang
+      let v: Verdict;
+      try {
+        v = route.check(parsed);
+      } catch {
+        return fail(res, 400, 'the body could not be checked');
+      }
       if (!v.ok) return fail(res, v.status, v.reason);
       for (const vol of v.volumes ?? [])
         if (!(await labelled('volumes', vol))) return fail(res, 403, `volume ${vol} is not Guildwise's`);

@@ -1053,7 +1053,7 @@ const GIT_READ_ONLY = new Set([
   'name-rev',
 ]);
 
-const isCardBranch = (name: string): boolean => {
+export const isCardBranch = (name: string): boolean => {
   const n = name.replace(/^\+/, '').replace(/^refs\/heads\//, '');
   return CARD_BRANCH_PREFIXES.some((p) => n.startsWith(p));
 };

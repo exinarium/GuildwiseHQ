@@ -129,7 +129,12 @@ import {
   type DependencyChange,
   parseDependencyChange,
 } from '../devops/dependency-install.ts';
-import { devopsPushPlan, devopsRequestIdentity, withAppPushRefusal } from '../devops/devops-git.ts';
+import {
+  devopsPushPlan,
+  devopsRequestIdentity,
+  resolveBrokerPush,
+  withAppPushRefusal,
+} from '../devops/devops-git.ts';
 import { alwaysPathRefusal, classifyCommand, redactCommand } from '../devops/guard.ts';
 import { type HygieneDeps, runHygiene } from '../devops/hygiene.ts';
 import { installScriptsOffFor, withInstallScriptsOff } from '../devops/install-env.ts';
@@ -173,6 +178,7 @@ import {
   repoNameOf,
   resolveCommitIdentity,
 } from '../git/identity.ts';
+import { recordTip, writerStart } from '../git/pushable-tips.ts';
 import { finishPrepProposal } from '../git/release-prep-proposal.ts';
 import {
   addPrepTaskWorktree,
@@ -667,6 +673,8 @@ interface ActiveShift {
   releaseTmp?: () => void;
   /** Releases this shift's claim on its worktree (the sandbox stubs stay while another shift uses it). */
   releaseWorktree?: () => void;
+  /** gate-fixes-2 D2: ends this shift's writer count on its clone (after the agent process is dead). */
+  releaseWriter?: () => Promise<void>;
   /** The server accepted a terminal report of this shift (as opposed to `reportState`, which a lost claim also sets). */
   reportAccepted?: boolean;
   /** Resolves when the agent's event stream has ended (the process is gone and its result line was read). */
@@ -954,6 +962,8 @@ export class ShiftSupervisor {
       shift.checkAbort?.abort();
       shift.releaseWorktree?.();
       this.active.delete(msg.shiftId);
+      // D2: the process is dead; the writer count ends (after the shift left the active list, so nothing waits on it)
+      await shift.releaseWriter?.().catch(() => undefined);
       // every outcome (done, crash, stop, timeout): the agent's per-shift temp content goes (backlog #81)
       shift.releaseTmp?.();
       if (shift.sandbox) {
@@ -2080,6 +2090,9 @@ export class ShiftSupervisor {
       this.reject(msg.shiftId, 'internal', 'the DevOps guard could not be configured for this shift');
       return;
     }
+    // gate-fixes-2 D2: a session in a card worktree can write the clone's shared .git (Claude's, Codex's and the harness
+    // box's git write scope): it counts as a writer from before its sandbox starts until its process is dead
+    if (s.worktree && !s.releaseWriter) s.releaseWriter = await writerStart(s.worktree.path);
     try {
       s.session = await adapter.start({
         shiftId: msg.shiftId,
@@ -2346,6 +2359,14 @@ export class ShiftSupervisor {
     // a DevOps shift that changed a card worktree after its report (or without one): reverted all the same (finding 2),
     // before any early return below (usage limit, expired login: REVIEW B2)
     if (s.cardFence) await this.endCardFence(s);
+
+    // gate-fixes-2 Rule D: the card's own committing shift ended (the process is dead, the runner's own commits are
+    // made): the tip of its branch, measured here, is the record a finalize must match
+    if (msg.worktree && s.worktree && msg.agent.permissions.mayCommit) {
+      const ref = `refs/heads/${s.worktree.branchName}`;
+      const tip = (await git(s.worktree.path, ['rev-parse', '--verify', '-q', ref])).stdout.trim();
+      if (tip) await recordTip(s.worktree.path, ref, tip, 'shift-end');
+    }
 
     // quiet-approvals R1: the box session asked to leave the box. No `shift.ended`: the server keeps the claim (it saw
     // the shift start), and the runner holds the same shift start for one local yes.
@@ -3430,7 +3451,20 @@ export class ShiftSupervisor {
         );
       }
     }
-    const r = await git(dir, [...auth.args, ...plan.args], { env: auth.env });
+    // gate-fixes-2 B4 / Rule A: protected branches and tags go by the shas the runner checked
+    let args = plan.args;
+    if (op === 'push' && params.delete !== true) {
+      const resolved = await resolveBrokerPush(
+        dir,
+        refspecs,
+        devopsGuardFor(s.msg)?.protectedBranches ?? [],
+        auth,
+      );
+      if ('error' in resolved) return denied(resolved.error);
+      if (resolved.refspecs.length === 0) return { ok: true, result: { message: 'nothing to push' } };
+      args = ['push', 'origin', '--', ...resolved.refspecs];
+    }
+    const r = await git(dir, [...auth.args, ...args], { env: auth.env });
     this.addProgress(s, 'status', `aom git ${op} --repo ${repo}: ${r.exitCode === 0 ? 'done' : 'failed'}`);
     if (r.exitCode !== 0) return denied(redactGitError(r.stderr || r.stdout || `git ${op} failed`));
     return {
@@ -4065,6 +4099,7 @@ export class ShiftSupervisor {
     const summary = String((report.data as { summary?: unknown } | undefined)?.summary ?? report.note ?? '');
     if (!/^\s*resolved:/i.test(summary)) return;
     c.done = true;
+    let checkedSha: string | undefined;
     // S7: the runner checks the resolution in the scratch clone (guards, then the project's configured checks in the
     // check sandbox) and only then fetches it into the main clone (hardened git, never forced) for T7's move
     if (s.scratchClone) {
@@ -4083,12 +4118,15 @@ export class ShiftSupervisor {
       } catch (err) {
         return notMoved(String(err));
       }
+      checkedSha = q.sha;
     }
     const r = await applyConflictResolution({
       target: c.target,
       before: c.before,
       records: conflictRecords(),
       ledger: this.ledger,
+      // gate-fixes-2 B2: exactly the resolution the runner checked, never the conflict ref re-read
+      ...(checkedSha ? { tip: checkedSha } : {}),
     }).catch(
       (err): ConflictResolution => ({
         moved: false,
@@ -4484,7 +4522,18 @@ export class ShiftSupervisor {
           // lean team: the commit the evidence is bound to, the changed paths (the server computes the high-risk flag from
           // them) and the diff for the owner approval. Measured after the autocommit above, by the runner, never by the agent.
           if (outcome.data === 'buildHandoff') {
-            const cd = await computeCardDiff(s.worktree.path, s.worktree.baseBranch);
+            // gate-fixes-2 S9: the base is origin's tip from ls-remote, with the repository's credentials (fail closed)
+            let cd: Awaited<ReturnType<typeof computeCardDiff>>;
+            try {
+              const url = (await git(s.worktree.path, ['remote', 'get-url', 'origin'])).stdout.trim();
+              const creds = this.deps.shiftCredentials?.(msg.postAs);
+              const auth = url && creds?.appFor?.(url) ? await creds.auth(url) : undefined;
+              cd = await computeCardDiff(s.worktree.path, s.worktree.baseBranch, auth);
+            } catch (err) {
+              return rejected(
+                `the review diff could not be measured: ${err instanceof Error ? err.message : String(err)}. Try the handoff again`,
+              );
+            }
             attach = { ...attach, headSha: cd.headSha, changedPaths: cd.changedPaths, diff: cd.diff };
           }
         }
