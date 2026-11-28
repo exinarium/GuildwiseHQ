@@ -401,3 +401,53 @@ describe('vault.configure narrowed (easy-runner-setup, Overnight decision 4)', (
     expect(gateCommand(p, 'vault.configure', payload).action).toBe('run');
   });
 });
+
+describe('gate-fixes-1 F3: narrowAccess per Docker route', () => {
+  const access = (allowDocker: boolean) => ({
+    allowInstall: false,
+    allowDocker,
+    allowedPaths: [],
+    sudo: false,
+  });
+  it('proxy (a request shift): the server switch AND ceiling.docker; direct also needs the legacy local key', () => {
+    for (const server of [false, true])
+      for (const ceiling of [false, true])
+        for (const legacy of [false, true]) {
+          const p = set({
+            allowDocker: legacy,
+            ceiling: { docker: ceiling, mountRoots: [], containerEgress: false },
+          });
+          const name = `server=${server} ceiling=${ceiling} legacy=${legacy}`;
+          expect(narrowAccess(p, access(server), undefined, 'proxy').allowDocker, name).toBe(
+            server && ceiling,
+          );
+          expect(narrowAccess(p, access(server), undefined, 'direct').allowDocker, name).toBe(
+            server && ceiling && legacy,
+          );
+          // the default stays direct (chat, release prep, the unboxed fallback)
+          expect(narrowAccess(p, access(server)).allowDocker, name).toBe(server && ceiling && legacy);
+        }
+  });
+
+  it('at the defaults (ceiling yes, legacy key unset) a request shift with the server switch on gets Docker', () => {
+    const p = set({});
+    expect(p.ceiling.docker).toBe(true);
+    expect(p.allowDocker).toBe(false);
+    expect(narrowAccess(p, access(true), undefined, 'proxy').allowDocker).toBe(true);
+    // narrowing again can only lower it
+    const once = narrowAccess(p, access(true), undefined, 'proxy');
+    expect(narrowAccess(p, once, undefined, 'direct').allowDocker).toBe(false);
+  });
+
+  it("the held item of a request shift says Docker comes through the runner's gatekeeper", () => {
+    const d = gateDevopsShift(set({ devops: { agents: { [ORG]: AGENT } } }), {
+      orgId: ORG,
+      agentId: AGENT,
+      shiftId: 's1',
+      kind: 'devops',
+      docker: 'proxy',
+      access: access(true),
+    });
+    expect(d.action === 'hold' && d.detail).toMatch(/docker\s+yes, through the runner's Docker gatekeeper/);
+  });
+});

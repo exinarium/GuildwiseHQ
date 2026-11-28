@@ -119,6 +119,8 @@ export const devopsEvents = [
       blockedBy: z.enum(['allowInstall', 'allowDocker', 'allowedPaths']).optional(),
       /** runner-authority-fixes T10 (R4-S2): with `allowedPaths`, the folder "Always allow" adds (absent: once only). */
       alwaysPath: z.string().max(4000).optional(),
+      /** gate-fixes-1 F3: "Allow once" is not offered (only the switch helps); absent: it is. */
+      onceOffered: z.literal(false).optional(),
     }),
   ),
   /** G-Q2: DevOps tries to resolve a card's rebase/merge conflict on a branch; the card waits on the request. */

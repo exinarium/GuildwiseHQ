@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { BUILTIN_ROLES, uuidv7 } from '@aom/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ShiftStartInput } from '../src/adapters/types.ts';
-import type { GuardConfig } from '../src/devops/guard.ts';
+import { classifyCommand, type GuardConfig } from '../src/devops/guard.ts';
 import { APPROVED_REQUESTS_FILE, ApprovedRequests } from '../src/policy/approved-requests.ts';
 import { FileAuthority } from '../src/policy/authority.ts';
 import { approve, defaultCliDeps } from '../src/policy/cli.ts';
@@ -58,6 +58,8 @@ async function withRealAuthority(
   );
   return { dir, store, adapter, harness: h };
 }
+
+const DOCKER_ON = { allowInstall: false, allowDocker: true, sudo: false, allowedPaths: [] };
 
 function devopsMsg(agentId: string, summary = 'look at the logs', devops: Record<string, unknown> = {}) {
   const base = makeDevopsStart({ summary, agentId }) as Record<string, any>;
@@ -407,7 +409,8 @@ describe('S6/D9 at runner level, on this computer’s real Docker (skipped witho
         ],
         egress: true,
       });
-      const msg = devopsMsg(uuidv7(), 'bring the test services up');
+      // gate-fixes-1 S1: test services follow this job's own Docker access (the website switch) as well as the ceiling
+      const msg = devopsMsg(uuidv7(), 'bring the test services up', { access: DOCKER_ON });
       const up = (
         h.runner as unknown as { testServicesUp: (m: unknown, t: string) => Promise<any> }
       ).testServicesUp.bind(h.runner);
@@ -781,7 +784,8 @@ describe('cross-request-ids: a yes reused under a new request keeps the approved
     ).opts.config.testServicesBridgeImage = `node@sha256:${'b'.repeat(64)}`;
     const agentId = uuidv7();
     env.store.update((p) => ({ ...p, devops: { agents: { [ORG]: agentId } } }));
-    const msg = devopsMsg(agentId, 'start the app');
+    // gate-fixes-1 S1: the job carries the website's Docker switch (test services need it as well as the ceiling)
+    const msg = devopsMsg(agentId, 'start the app', { access: DOCKER_ON });
     const P0 = msg.brief.project.id as string;
     expect(P0).toBe(msg.devops.requestId);
     env.harness.server.send('shift.start', msg);
@@ -1060,4 +1064,235 @@ describe('runner-bare-bin B5, S11, S4: the runner judges a boxed switch itself a
     const audits = h.server.of('devops.audit').flatMap((m) => m.entries as Array<Record<string, unknown>>);
     expect(audits.filter((e) => e.decision === 'refused')).toEqual([]);
   }, 120_000);
+});
+
+describe('gate-fixes-1 F3 (B1): Docker for an approved DevOps job is decided once, at the runner entry', () => {
+  /** What claude-code keeps for an outer box (the guard it wrote): the Docker bit only where the gatekeeper runs. */
+  const guardOf = (input: ShiftStartInput): GuardConfig => ({
+    sessionRef: input.shiftId,
+    kind: 'shift',
+    deleteRoots: [],
+    home: homedir(),
+    protectedBranches: [],
+    approvedCommands: input.devopsGuard?.approvedCommands ?? [],
+    frozenBranches: [],
+    dockerSwitchOnly: true,
+    ...(input.devopsGuard?.dockerUnavailable
+      ? { dockerUnavailable: input.devopsGuard.dockerUnavailable }
+      : {}),
+    ...(input.devopsGuard?.access
+      ? {
+          access: {
+            ...input.devopsGuard.access,
+            allowDocker: input.devopsGuard.access.allowDocker && !!input.dockerGate,
+          },
+          writeRoots: [input.sandbox.home, input.sandbox.scratch, input.sandbox.tmp, tmpdir(), '/tmp'],
+        }
+      : {}),
+  });
+  class GuardedBox extends BoxScripted {
+    override async start(input: ShiftStartInput) {
+      const s = await super.start(input);
+      return input.devopsBox ? s : Object.assign(s, { guardConfig: guardOf(input) });
+    }
+  }
+
+  /** One job: box, `aom devops-outside`, ONE local yes; `outside` runs in the outer session. */
+  async function job(
+    policy: Record<string, unknown>,
+    access: Record<string, unknown>,
+    outside: (input: ShiftStartInput, ctl: Ctl) => Promise<void> = async (_i, ctl) => {
+      await done(ctl);
+    },
+    devops: Record<string, unknown> = {},
+  ) {
+    const dir = tmp('aom-qa-policy-');
+    const store = new PolicyStore(dir);
+    // the gate's setup: Docker shared, the ceiling at its default (yes), the legacy local `allowDocker` key unset
+    store.write({
+      ...store.get(),
+      setupDone: true,
+      docker: 'shared',
+      dockerHost: 'unix:///run/aom-gf1-test/docker.sock',
+      ...policy,
+    });
+    let calls = 0;
+    const adapter = new GuardedBox(async (input, ctl) => {
+      calls++;
+      if (calls === 1) {
+        await ctl.post('/v1/rpc', { method: 'devops.outside', params: { needs: 'docker', why: 'compose' } });
+        await new Promise<void>((r) => ctl.signal.addEventListener('abort', () => r()));
+        return;
+      }
+      await outside(input, ctl);
+    });
+    h = await startHarness(
+      {},
+      {
+        authority: new FileAuthority(store),
+        policyDir: dir,
+        approvalsPollMs: 50,
+        adapters: new Map([['mock', adapter]]),
+      },
+    );
+    const agentId = uuidv7();
+    store.update((p) => ({ ...p, devops: { agents: { [ORG]: agentId } } }));
+    const msg = devopsMsg(agentId, 'run the app in docker', {
+      access: { allowInstall: false, allowDocker: false, sudo: false, allowedPaths: [], ...access },
+      ...devops,
+    });
+    h.server.send('shift.start', msg);
+    const heldMsg = await h.server.waitFor('approvals.held', (m) =>
+      m.items.some((i) => i.kind === 'devops.task'),
+    );
+    const held = heldMsg.items.filter((i) => i.kind === 'devops.task');
+    expect(held).toHaveLength(1);
+    await approve(
+      { ...defaultCliDeps(dir), ask: async () => 'yes', out: () => undefined },
+      held[0]?.id as string,
+    );
+    await waitUntil(() => adapter.inputs.length === 2, 30_000, 'the outer session starts');
+    return { msg, adapter, store, dir, harness: h, held: held[0] };
+  }
+
+  it('website switch on, ceiling default, legacy key unset: the outer start has Docker and the gatekeeper; the R2 repeat too', async () => {
+    let outsideAgain: Record<string, any> = {};
+    const r = await job({}, { allowDocker: true }, async (_input, ctl) => {
+      // already outside: `aom devops-outside` says so (shift 36eac735 read the old refusal as "ask again")
+      outsideAgain = await ctl.post('/v1/rpc', {
+        method: 'devops.outside',
+        params: { needs: 'docker', why: 'x' },
+      });
+      await done(ctl);
+    });
+    const outer = r.adapter.inputs[1] as ShiftStartInput;
+    expect(outer.devopsBox).toBeUndefined();
+    expect(outer.devopsGuard?.access?.allowDocker).toBe(true);
+    expect(outer.dockerGate?.upstream).toBe('/run/aom-gf1-test/docker.sock');
+    expect(outer.devopsGuard?.dockerUnavailable).toBeUndefined();
+    expect(outer.instructionsMarkdown).toContain('# You work outside the safety box');
+    expect(outer.instructionsMarkdown).toContain("Docker: yes, through the runner's Docker gatekeeper");
+    expect(r.held?.summary).toContain('needs to work outside the safety box');
+    await r.harness.server.waitFor('shift.ended', (m) => m.shiftId === r.msg.shiftId, 60_000);
+    expect(String(outsideAgain.json?.error)).toContain('already runs outside the box');
+    await r.harness.runner.supervisor.whenSettled(r.msg.shiftId);
+    // R2: the identical job again runs outside without a hold, with the same Docker
+    const again = {
+      ...r.msg,
+      shiftId: uuidv7(),
+      claimId: uuidv7(),
+      brief: { ...r.msg.brief, shift: { ...r.msg.brief.shift } },
+    };
+    again.brief.shift.id = again.shiftId;
+    r.harness.server.send('shift.start', again);
+    await waitUntil(() => r.adapter.inputs.length === 3, 30_000, 'the R2 repeat starts');
+    const repeat = r.adapter.inputs[2] as ShiftStartInput;
+    expect(repeat.devopsBox).toBeUndefined();
+    expect(repeat.devopsGuard?.access?.allowDocker).toBe(true);
+    expect(repeat.dockerGate).toBeDefined();
+    expect(new HeldStore(r.dir).list().filter((x) => x.state === 'held')).toEqual([]);
+  }, 120_000);
+
+  it('the ceiling off: no gatekeeper, the guard refuses Docker as unavailable (no website ask)', async () => {
+    let seen: Record<string, any> = {};
+    const r = await job(
+      { ceiling: { docker: false, mountRoots: [], containerEgress: false } },
+      { allowDocker: true },
+      async (_input, ctl) => {
+        seen = await ctl.post('/v1/report', {
+          report: {
+            kind: 'outcome',
+            outcomeId: 'devops_approval',
+            note: 'x',
+            data: { action: 'run docker', reason: 'r', commands: ['docker ps'], blockedBy: 'allowDocker' },
+          },
+        });
+      },
+    );
+    const outer = r.adapter.inputs[1] as ShiftStartInput;
+    expect(outer.dockerGate).toBeUndefined();
+    expect(outer.devopsGuard?.dockerUnavailable).toContain('off on this computer');
+    expect(outer.instructionsMarkdown).toContain('Docker: not available');
+    const rep = await r.harness.server.waitFor(
+      'shift.report',
+      (m) =>
+        m.shiftId === r.msg.shiftId && (m.report as { outcomeId?: string }).outcomeId === 'devops_approval',
+      60_000,
+    );
+    // `docker_unavailable` is no switch: an ordinary approval, never the website's Docker switch
+    expect((rep.report as { data: Record<string, unknown> }).data.blockedBy).toBeUndefined();
+    expect(seen).toBeDefined();
+  }, 120_000);
+
+  it('the website switch off: an approved docker command gets no gatekeeper and no DOCKER_HOST; the guard refuses it verbatim; the ask names the switch with no Allow once', async () => {
+    const r = await job(
+      {},
+      { allowDocker: false },
+      async (_input, ctl) => {
+        await ctl.post('/v1/report', {
+          report: {
+            kind: 'outcome',
+            outcomeId: 'devops_approval',
+            note: 'x',
+            data: {
+              action: 'run docker',
+              reason: 'r',
+              commands: ['docker run --rm alpine true'],
+              blockedBy: 'allowDocker',
+            },
+          },
+        });
+      },
+      { approval: { action: 'run docker', reason: 'r', commands: ['docker run --rm alpine true'] } },
+    );
+    const outer = r.adapter.inputs[1] as ShiftStartInput;
+    expect(outer.dockerGate).toBeUndefined();
+    expect(outer.env.DOCKER_HOST).toBeUndefined();
+    expect(outer.devopsGuard?.access?.allowDocker).toBe(false);
+    expect(outer.devopsGuard?.approvedCommands).toEqual(['docker run --rm alpine true']);
+    expect(outer.instructionsMarkdown).toContain("off by the workstation's Docker switch");
+    const v = classifyCommand('docker run --rm alpine true', guardOf(outer), outer.cwd, {});
+    expect(v).toMatchObject({ decision: 'refused', rule: 'docker_off' });
+    const rep = await r.harness.server.waitFor(
+      'shift.report',
+      (m) =>
+        m.shiftId === r.msg.shiftId && (m.report as { outcomeId?: string }).outcomeId === 'devops_approval',
+      60_000,
+    );
+    const data = (rep.report as { data: Record<string, unknown> }).data;
+    expect(data.blockedBy).toBe('allowDocker');
+    expect(data.onceOffered).toBe(false);
+  }, 120_000);
+});
+
+describe('gate-fixes-1 S1: test services follow the website switch and the ceiling, not the legacy key', () => {
+  it('refused without the website switch or the ceiling; passes the switch check with the legacy key unset', async () => {
+    const dir = tmp('aom-qa-policy-');
+    const store = new PolicyStore(dir);
+    store.write({
+      ...store.get(),
+      setupDone: true,
+      docker: 'shared',
+      dockerHost: 'unix:///run/aom-gf1-test/docker.sock',
+    });
+    h = await startHarness({}, { authority: new FileAuthority(store), policyDir: dir });
+    const up = (
+      h.runner as unknown as { testServicesUp: (m: unknown, t: string) => Promise<any> }
+    ).testServicesUp.bind(h.runner);
+    const access = (allowDocker: boolean) => ({
+      allowInstall: false,
+      allowDocker,
+      sudo: false,
+      allowedPaths: [],
+    });
+    const off = await up(devopsMsg(uuidv7(), 'services', { access: access(false) }), '{}');
+    expect(off).toMatchObject({ ok: false });
+    expect(off.error).toContain('Docker is off for this workstation');
+    // the legacy `allowDocker` key is unset: the switch check passes, the next check (no bridge image here) answers
+    const on = await up(devopsMsg(uuidv7(), 'services', { access: access(true) }), '{}');
+    expect(on.error).toContain('no port bridge image');
+    store.update((p) => ({ ...p, ceiling: { ...p.ceiling, docker: false } }));
+    const ceiling = await up(devopsMsg(uuidv7(), 'services', { access: access(true) }), '{}');
+    expect(ceiling.error).toContain('Docker is not allowed for DevOps on this computer');
+  }, 60_000);
 });

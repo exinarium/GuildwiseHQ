@@ -53,6 +53,14 @@ export interface RouteDeps {
   crossRequestOk?: (requestId: string, agentId: string) => boolean;
 }
 
+/**
+ * gate-fixes-1 F3: a DevOps REQUEST shift (not release prep, not a read-only scan, not the hygiene routine). It runs in the
+ * box the runner builds, and outside it only in the outer box, where Docker is reached only through the runner's filtering
+ * gatekeeper: its access is narrowed in `proxy` mode (the server switch AND the local ceiling), once, at the runner's entry.
+ */
+export const isRequestShift = (msg: ShiftStartMsg): boolean =>
+  msg.kind === 'devops' && !isReadOnlyScan(msg) && !msg.devops?.hygiene;
+
 export function devopsShiftInput(msg: ShiftStartMsg): DevopsShiftInput {
   return {
     orgId: msg.orgId ?? '',
@@ -66,6 +74,7 @@ export function devopsShiftInput(msg: ShiftStartMsg): DevopsShiftInput {
     kind: msg.kind,
     ...(msg.devops?.access ? { access: msg.devops.access } : {}),
     ...(msg.devops?.approval?.commands?.length ? { approvedCommands: msg.devops.approval.commands } : {}),
+    ...(isRequestShift(msg) ? { docker: 'proxy' as const } : {}),
   };
 }
 

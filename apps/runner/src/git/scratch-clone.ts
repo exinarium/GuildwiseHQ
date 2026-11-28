@@ -169,5 +169,8 @@ export function scratchCloneNote(dir: string, branch: string): string {
 Resolve this conflict in the scratch clone at \`${dir}\` (branch \`${branch}\` is checked out there), not in a main clone or
 a card worktree. Its \`origin/<branch>\` refs are this computer's view of the git host; the main clone's own branches are
 \`local/<branch>\`. Create \`conflict/<name>-a<n>\` there, merge and resolve, commit, and finish with \`Resolved:\`. The runner
-takes your \`conflict/*\` branch from the scratch clone and moves the real branch itself.`;
+takes your \`conflict/*\` branch from the scratch clone and moves the real branch itself.
+
+Run git with \`git -C ${dir} <command>\` (for example \`git -C ${dir} status\`), not \`cd ${dir} && git ...\`: a compound
+\`cd\` plus \`git\` is refused on some runners.`;
 }

@@ -238,3 +238,26 @@ install outside your folders, a remote host), do not try to work around it. Run:
 
 That ends this session and asks the owner once on this computer; after the yes the request continues outside the box.
 Report with \`aom devops-done\`, \`aom devops-question\` and \`aom devops-comment\` as usual; \`aom devops-approval\` is not used here.`;
+
+/** gate-fixes-1 F3: the answer to `aom devops-outside` in a request that already runs outside the box. */
+export const DEVOPS_ALREADY_OUTSIDE =
+  'This request already runs outside the box (approved on this computer): run the commands directly. Do not call `aom devops-outside` again.';
+
+/**
+ * gate-fixes-1 F3: the runner's own section for a DevOps request that runs outside the box (the outer box after a local yes):
+ * it is already outside, and whether Docker is there (`yes`: through the runner's gatekeeper; `switch`: off by the
+ * workstation's switch; otherwise the reason it cannot be reached at all).
+ */
+export function devopsOutsideNote(docker: 'yes' | 'switch' | string): string {
+  const dockerLine =
+    docker === 'yes'
+      ? "- Docker: yes, through the runner's Docker gatekeeper (`DOCKER_HOST` is set; the real socket is never here)."
+      : docker === 'switch'
+        ? "- Docker: off by the workstation's Docker switch. A docker command is refused with the way to ask for the switch (`aom devops-approval --switch docker`); approving a single command cannot open it."
+        : `- Docker: not available (${docker}). Do not ask for it; finish what works without it and say in your report what needs it.`;
+  return `# You work outside the safety box
+
+The owner said yes on this computer: this request already runs outside the box. Do not call \`aom devops-outside\`.
+${dockerLine}
+Report with \`aom devops-done\`, \`aom devops-question\` and \`aom devops-comment\` as usual.`;
+}

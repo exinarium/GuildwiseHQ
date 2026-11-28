@@ -74,6 +74,8 @@ export interface DevopsGuardInput {
   installScriptsOff?: boolean;
   /** T10: the DevOps access switches (narrowed by the local policy) the guard enforces; absent: not enforced (release prep). */
   access?: { allowInstall: boolean; allowDocker: boolean; allowedPaths: string[] };
+  /** gate-fixes-1 F3: why Docker cannot be reached in this session at all (no daemon, off on this computer); absent: it can. */
+  dockerUnavailable?: string;
 }
 
 /**

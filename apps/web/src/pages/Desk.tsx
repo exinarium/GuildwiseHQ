@@ -1204,6 +1204,9 @@ export function DevopsSwitchBlock({ data }: { data: Record<string, unknown> }) {
   const requestId = typeof data.requestId === 'string' ? data.requestId : null;
   const exact = typeof data.exactCommand === 'string' ? data.exactCommand : null;
   const always = data.allowAlways === true;
+  // gate-fixes-1 F3: where only the switch helps (a boxed request's Docker), no "Allow once"; the one button turns it on
+  const once = data.allowOnce !== false;
+  const switchOnly = !once && data.devopsSwitch === 'allowDocker';
   const resolve = useResolveDevOpsApproval();
   const [error, setError] = useState<string | null>(null);
   const allow = (scope: 'once' | 'always') => {
@@ -1222,20 +1225,22 @@ export function DevopsSwitchBlock({ data }: { data: Record<string, unknown> }) {
             {exact}
           </code>
           <div className="flex flex-wrap gap-2">
-            <Button
-              onClick={() => allow('once')}
-              disabled={resolve.isPending}
-              data-testid="desk-devops-allow-once"
-            >
-              Allow once
-            </Button>
-            {always ? (
+            {once ? (
+              <Button
+                onClick={() => allow('once')}
+                disabled={resolve.isPending}
+                data-testid="desk-devops-allow-once"
+              >
+                Allow once
+              </Button>
+            ) : null}
+            {always || switchOnly ? (
               <Button
                 onClick={() => allow('always')}
                 disabled={resolve.isPending}
                 data-testid="desk-devops-allow-always"
               >
-                Always allow
+                {switchOnly ? 'Turn on Docker' : 'Always allow'}
               </Button>
             ) : null}
           </div>

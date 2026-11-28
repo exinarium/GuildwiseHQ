@@ -136,9 +136,11 @@ import { installScriptsOffFor, withInstallScriptsOff } from '../devops/install-e
 import {
   boxRefusal,
   cardPayload,
+  DEVOPS_ALREADY_OUTSIDE,
   DEVOPS_BOX_NOTE,
   type DevopsMode,
   devopsGuardFor,
+  devopsOutsideNote,
   guardedShift,
   insideBoxRpc,
   isReadOnlyScan,
@@ -376,6 +378,8 @@ export interface SupervisorDeps {
   toolchainEnsure?: (msg: ShiftStartMsg, tool: string) => Promise<IpcRpcResponse>;
   /** quiet-approvals R4-B2: the Docker gatekeeper's settings for an outer-box shift with Docker allowed (null: no Docker). */
   dockerGate?: () => { upstream: string; instance: string; containerEgress: boolean } | null;
+  /** gate-fixes-1 F3: why `dockerGate` is null (no daemon, off on this computer); null when it is not. */
+  dockerUnavailable?: () => string | null;
   /** Rework 1 (REVIEW S3): the deploy target hosts this computer deployed to (the outer box may reach them). */
   deployHosts?: () => string[];
   /** Rework 1 (REVIEW S2): the local ceiling's folder roots. */
@@ -537,12 +541,39 @@ const ticketOf = (msg: ShiftStartMsg): string | null => {
   return typeof k === 'string' && TICKET_KEY.test(k.trim()) ? k.trim() : null;
 };
 
+type DockerGate = { upstream: string; instance: string; containerEgress: boolean };
+/** gate-fixes-1 F3: see `ActiveShift.docker`. */
+export type DockerDecision =
+  | { state: 'gate'; gate: DockerGate }
+  | { state: 'switch' }
+  | { state: 'unavailable'; reason: string };
+
+/**
+ * gate-fixes-1 F3: the Docker of an outer-box run. No gatekeeper (no daemon, or off on this computer): unavailable, whatever
+ * the switch says (turning it on would not help). Otherwise the job's own access (server switch AND ceiling, narrowed at the
+ * runner's entry) decides: the gatekeeper, or the switch.
+ */
+export function dockerDecision(
+  allowDocker: boolean,
+  gate: DockerGate | null | undefined,
+  unavailable: string | null | undefined,
+): DockerDecision {
+  if (!gate)
+    return { state: 'unavailable', reason: unavailable || 'Docker is not available on this computer' };
+  return allowDocker ? { state: 'gate', gate } : { state: 'switch' };
+}
+
 interface ActiveShift {
   msg: ShiftStartMsg;
   /** quiet-approvals R1: how a DevOps request shift runs (absent: not decided here, the DevOps profile as before). */
   devopsMode?: DevopsMode;
   /** runner-bare-bin (S4, B5): the session runs in a box the runner built (inner or outer): nothing it reports is trusted. */
   boxed?: boolean;
+  /**
+   * gate-fixes-1 F3: an outside (outer box) run's Docker, decided once before the texts: through the gatekeeper (`gate`), off
+   * by the workstation switch (`switch`: the guard asks for the switch), or not reachable at all (`unavailable`).
+   */
+  docker?: DockerDecision;
   /** quiet-approvals R1: the box session asked to leave the box; at its end the runner holds the same shift. */
   devopsOutside?: { why: string; needs: string };
   /** Set at the end of such a session: the runner is told after the shift's cleanup. */
@@ -1762,6 +1793,13 @@ export class ShiftSupervisor {
         }
       }
     }
+    // gate-fixes-1 F3: an outside run's Docker is decided once, here, before the texts that tell the model about it
+    if (s.devopsMode === 'outside' && msg.devops)
+      s.docker = dockerDecision(
+        msg.devops.access.allowDocker,
+        this.deps.dockerGate?.(),
+        this.deps.dockerUnavailable?.(),
+      );
     const texts = shiftTexts(msg, s.brief);
     // The skills, playbooks and personas the role lists, as a name-and-description index (`aom skill show <key>` loads one).
     // The project's own skills and subagents (`.agents/skills`, `.claude/skills`, `.claude/agents` of its checkout) join the
@@ -1869,6 +1907,8 @@ export class ShiftSupervisor {
     }
     // quiet-approvals R1: the box's own rules and the way out, from the runner (never from the server's text)
     if (s.devopsMode === 'box') texts.instructions += `\n${DEVOPS_BOX_NOTE}\n`;
+    if (s.devopsMode === 'outside' && s.docker)
+      texts.instructions += `\n${devopsOutsideNote(s.docker.state === 'gate' ? 'yes' : s.docker.state === 'switch' ? 'switch' : s.docker.reason)}\n`;
     if (s.scratchClone && s.conflictFf)
       texts.instructions += `\n${scratchCloneNote(s.scratchClone.dir, s.conflictFf.target.branch)}\n`;
     const tc = this.deps.toolchains?.resolve();
@@ -2027,7 +2067,11 @@ export class ShiftSupervisor {
       (msg.kind === 'card' && msg.brief.shift.stage === QA_STEPS_STAGE);
     // quiet-approvals [B2]: the box has no guard and no switches (its OS sandbox is the boundary)
     const inBox = s.devopsMode === 'box';
-    const guardFor = inBox ? undefined : devopsGuardFor(msg, s.identity?.email);
+    const guardFor0 = inBox ? undefined : devopsGuardFor(msg, s.identity?.email);
+    const guardFor =
+      guardFor0 && s.docker?.state === 'unavailable'
+        ? { ...guardFor0, dockerUnavailable: s.docker.reason }
+        : guardFor0;
     const devopsGuard = guardFor && installScriptsOff ? { ...guardFor, installScriptsOff: true } : guardFor;
     const boxed = inBox || s.devopsMode === 'outside';
     if (boxed) s.boxed = true;
@@ -2062,13 +2106,7 @@ export class ShiftSupervisor {
             }
           : {}),
         // the outer box reaches Docker only through the gatekeeper, and only when the (narrowed) access allows it
-        ...(s.devopsMode === 'outside' && msg.devops?.access.allowDocker && this.deps.dockerGate?.()
-          ? {
-              dockerGate: this.deps.dockerGate() as NonNullable<
-                ReturnType<NonNullable<SupervisorDeps['dockerGate']>>
-              >,
-            }
-          : {}),
+        ...(s.devopsMode === 'outside' && s.docker?.state === 'gate' ? { dockerGate: s.docker.gate } : {}),
         cwd,
         sandbox,
         agent: msg.agent as AgentRuntimeSpec,
@@ -2676,7 +2714,10 @@ export class ShiftSupervisor {
               ? this.deps.toolchainEnsure(s.msg, tool)
               : ({ ok: false, error: boxRefusal('toolchain ensure') } as IpcRpcResponse);
           }
-        } else if (req.method === 'devops.outside' || req.method === 'toolchain.ensure')
+        } else if (req.method === 'devops.outside' && s.devopsMode === 'outside')
+          // gate-fixes-1 F3: the old refusal was right, its text was not (a shift read it as "ask again")
+          return { ok: false, error: DEVOPS_ALREADY_OUTSIDE } as IpcRpcResponse;
+        else if (req.method === 'devops.outside' || req.method === 'toolchain.ensure')
           return {
             ok: false,
             error: `\`${req.method}\` is only for a DevOps shift inside the box`,
@@ -4178,6 +4219,7 @@ export class ShiftSupervisor {
   private checkedSwitch(s: ActiveShift, data: Record<string, unknown> | undefined): Record<string, unknown> {
     const d: Record<string, unknown> = { ...(data ?? {}) };
     delete d.alwaysPath;
+    delete d.onceOffered;
     const claimed = d.blockedBy;
     delete d.blockedBy;
     const commands = Array.isArray(d.commands) ? d.commands.map(String) : [];
@@ -4233,6 +4275,8 @@ export class ShiftSupervisor {
         `shift ${s.msg.shiftId.slice(0, 8)}: --switch ${String(claimed)} corrected to ${found.sw} (${s.boxed ? "the runner's own check" : "the guard's own refusal"})`,
       );
     d.blockedBy = found.sw;
+    // gate-fixes-1 F3: in a box, only the switch opens Docker (the guard's `dockerSwitchOnly`): no "Allow once" is offered
+    if (s.boxed && found.sw === 'allowDocker') d.onceOffered = false;
     // Rework 1 (B1): a switch approval is for exactly the command the guard refused, the one the owner is shown
     if (commands.length !== 1)
       this.log.warn(

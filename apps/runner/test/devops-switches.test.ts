@@ -309,3 +309,46 @@ describe('Rework 1 (B1): the local approvals page shows every command the Desk a
     expect(d.detail).toContain(`echo ${'x'.repeat(300)} > /srv/app/conf`);
   });
 });
+
+describe('gate-fixes-1 F3: Docker in the outer box', () => {
+  it('dockerSwitchOnly: an approved docker command is still refused, even verbatim; the refusal asks for the switch', () => {
+    const g = cfg({ dockerSwitchOnly: true, approvedCommands: ['docker run --rm alpine true'] });
+    const v = judge('docker run --rm alpine true', g);
+    expect(v).toMatchObject({ decision: 'refused', rule: 'docker_off' });
+    expect(v.reason).toContain('aom devops-approval --switch docker');
+    expect(v.reason).toContain('an approval of one command cannot');
+    // the whole-line lift does not open it either
+    expect(
+      judge(
+        'cd /tmp && docker run --rm alpine true',
+        cfg({ ...g, approvedCommands: ['cd /tmp && docker run --rm alpine true'] }),
+      ).decision,
+    ).toBe('refused');
+    // without the switch-only flag (a chat, release prep) the approval still lifts it, as before
+    expect(
+      judge('docker run --rm alpine true', cfg({ approvedCommands: ['docker run --rm alpine true'] }))
+        .decision,
+    ).toBe('allowed');
+    // the switch on: allowed
+    expect(
+      judge('docker ps', cfg({ dockerSwitchOnly: true, access: { ...off, allowDocker: true } })).decision,
+    ).toBe('allowed');
+  });
+
+  it('docker_unavailable: refused whatever the switch and approvals say, with no switch route', () => {
+    const g = cfg({
+      dockerSwitchOnly: true,
+      dockerUnavailable: 'no Docker daemon was found on this computer',
+      access: { ...off, allowDocker: true },
+      approvedCommands: ['docker ps'],
+    });
+    const v = judge('docker ps', g);
+    expect(v).toMatchObject({ decision: 'refused', rule: 'docker_unavailable' });
+    expect(v.reason).toContain('no Docker daemon was found on this computer');
+    expect(v.reason).not.toContain('--switch');
+    expect(APPROVAL_LIFTS.has('docker_unavailable')).toBe(false);
+    for (const c of ['docker-compose up', 'podman ps', 'DOCKER_HOST=unix:///x docker ps'])
+      expect(judge(c, g).rule, c).toBe('docker_unavailable');
+    expect(judge('ls', g).decision).toBe('allowed');
+  });
+});

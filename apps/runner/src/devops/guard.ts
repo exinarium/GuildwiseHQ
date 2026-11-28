@@ -73,6 +73,16 @@ export interface GuardConfig {
    */
   access?: { allowInstall: boolean; allowDocker: boolean; allowedPaths: string[] };
   /**
+   * gate-fixes-1 F3 (outer box): Docker is opened only by the switch, never by the approval of a command. The socket is the
+   * authority (with it, any script reaches the whole proxied API), so `docker_off` is not lifted by `approvedCommands`.
+   */
+  dockerSwitchOnly?: boolean;
+  /**
+   * gate-fixes-1 F3: Docker cannot be reached in this session at all (no daemon, or off on this computer), with the reason.
+   * Docker commands are refused as `docker_unavailable`, which no switch and no approval opens (no website ask follows).
+   */
+  dockerUnavailable?: string;
+  /**
    * T10 `paths`: where this session may write without the paths switch (scratch, the agent's tmp and home, the OS temp
    * folders; with installs on also the toolchain detection roots). `access.allowedPaths` are added to these.
    */
@@ -514,6 +524,18 @@ function switchRefusal(
   return { ...refuse(rule, `${what}: ${sw.label} on this computer. ${ask}`), ...(target ? { target } : {}) };
 }
 
+/**
+ * gate-fixes-1 F3: `docker_off` in the outer box. An approval of the single command cannot open Docker (the socket gives the
+ * whole proxied API), so the refusal asks for the switch: the owner turns Docker on for this workstation, once.
+ */
+function dockerSwitchRefusal(c: Ctx, seg: Segment, cmd: string): GuardVerdict {
+  const line = normWs(seg.raw).replace(/"/g, '\\"');
+  return refuse(
+    'docker_off',
+    `\`${cmd}\`: Docker is off on this computer for this workstation. Only the Docker switch opens it (an approval of one command cannot). Ask with \`aom devops-approval --switch docker --command "${line}" --action "<what>" --reason "<why>"\`; the owner turns Docker on for this workstation and the request continues with Docker through the runner's gatekeeper.`,
+  );
+}
+
 /** Package managers and installers (T10 `install_off`); `toolchain.add` is not one (the D2 pin gates it). */
 const SYSTEM_PMS = new Set([
   'apt',
@@ -614,14 +636,22 @@ function pathsVerdict(cmd: string, words: string[], c: Ctx, seg: Segment): Guard
 
 /** The T10 switches for one segment (after the hard fences, before everything else): null when none applies. */
 function switchVerdict(cmd: string, words: string[], c: Ctx, seg: Segment): GuardVerdict | null {
+  if (c.cfg.dockerUnavailable && DOCKER_LIKE.has(cmd))
+    return refuse(
+      'docker_unavailable',
+      `\`${cmd}\`: Docker cannot be used here: ${c.cfg.dockerUnavailable}. Do not ask for it with \`aom devops-approval\` (no approval opens it); finish what works without Docker and say in your report what needs it.`,
+    );
   const access = c.cfg.access;
   if (!access) return null;
   if (!access.allowInstall) {
     const v = installVerdict(cmd, words, c, seg);
     if (v && v.decision === 'refused') return v;
   }
-  if (!access.allowDocker && DOCKER_LIKE.has(cmd))
+  if (!access.allowDocker && DOCKER_LIKE.has(cmd)) {
+    // gate-fixes-1 F3: in the outer box only the switch opens Docker (checked before any approval of the command)
+    if (c.cfg.dockerSwitchOnly) return dockerSwitchRefusal(c, seg, cmd);
     return approvedHere(c, seg) ? null : switchRefusal(c, seg, 'docker_off', `\`${cmd}\``);
+  }
   return pathsVerdict(cmd, words, c, seg);
 }
 

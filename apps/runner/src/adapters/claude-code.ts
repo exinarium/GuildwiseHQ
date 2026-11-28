@@ -112,8 +112,10 @@ import {
   type ClaudeSettings,
   DEPLOY_ASK_ALLOW,
   DEVOPS_INHERITED_ENV,
+  forRunnerBox,
   gitDirsOf,
   isReadOnlyWorktreeRole,
+  type LaunchSettings,
   type SandboxState,
   sandboxMissing,
   sandboxState,
@@ -281,8 +283,25 @@ export const nativeSkills = (input: {
   agent?: { isDevops?: boolean };
 }): boolean => !!input.grantedSkills?.length && input.agent?.isDevops !== true;
 
+/**
+ * gate-fixes-1 F1: writes a runner-built box's launch-only settings (`--settings`) into its own folder beside the config dir
+ * (bound read-only in the box, like the guard's). Returns the file, or undefined when there are none.
+ */
+export function writeLaunchSettings(dir: string, launch: LaunchSettings | undefined): string | undefined {
+  if (!launch) return undefined;
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const file = join(dir, 'settings.json');
+  writeFileSync(file, `${JSON.stringify(launch, null, 2)}\n`, { mode: 0o600 });
+  return file;
+}
+
 /** The exact argv/env of docs/ARCHITECTURE.md section 12.2. Pure; unit tested. */
-export function buildClaudeCommand(input: ShiftStartInput, cfg: ClaudeConfig): ClaudeCommand {
+export function buildClaudeCommand(
+  input: ShiftStartInput,
+  cfg: ClaudeConfig,
+  /** gate-fixes-1 F1: a runner-built box's host-only settings file (`--settings`, read-only in the box). */
+  opts: { launchSettings?: string } = {},
+): ClaudeCommand {
   const viaStdin = Buffer.byteLength(input.prompt) > MAX_ARGV_PROMPT_BYTES;
   const args = [
     '-p',
@@ -301,6 +320,7 @@ export function buildClaudeCommand(input: ShiftStartInput, cfg: ClaudeConfig): C
     // must not loosen the permission rules or the sandbox.
     '--setting-sources',
     'user',
+    ...(opts.launchSettings ? ['--settings', opts.launchSettings] : []),
     '--strict-mcp-config',
     '--mcp-config',
     join(input.sandbox.configDir, 'mcp.json'),
@@ -783,8 +803,23 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     guard: DevopsGuardInput | undefined,
     kind: 'shift' | 'chat',
     sandbox?: { home: string; scratch: string; tmp: string },
+    /**
+     * gate-fixes-1 F3: how this session reaches Docker. `outer`: the runner-built outer box, where Docker exists only as the
+     * gatekeeper's socket (`docker`: it starts) and only the switch opens it. `none`: a DevOps request session outside any
+     * box (the backend-model fallback), which never gets Docker. Absent: as before.
+     */
+    dockerRoute?: { kind: 'outer'; docker: boolean } | { kind: 'none' },
   ): { command: string; file: string; cfg: GuardConfig } | undefined {
     if (!guard || !this.paths) return undefined;
+    // the guard's Docker bit can only lower the access: it is on only where a socket will be there
+    const access = guard.access
+      ? {
+          ...guard.access,
+          allowDocker:
+            guard.access.allowDocker &&
+            (dockerRoute === undefined || (dockerRoute.kind === 'outer' && dockerRoute.docker)),
+        }
+      : undefined;
     // T10: where the session writes without the paths switch; with installs on, also the toolchain folders
     const writeRoots = [
       ...(sandbox ? [sandbox.home, sandbox.scratch, sandbox.tmp] : []),
@@ -810,7 +845,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       ...(guard.installScriptsOff ? { installScriptsOff: true } : {}),
       // T2: the shell never touches the local approval settings, and runs only the read-only runner CLI verbs
       policyRoot: localPolicyDir(),
-      ...(guard.access ? { access: guard.access, writeRoots } : {}),
+      ...(access ? { access, writeRoots } : {}),
+      ...(dockerRoute?.kind === 'outer' ? { dockerSwitchOnly: true } : {}),
+      ...(guard.dockerUnavailable ? { dockerUnavailable: guard.dockerUnavailable } : {}),
       secretRoots: ['secrets', 'keys', 'config.json'].map((d) => join(this.paths?.root ?? '', d)),
       auditFile: join(this.paths.logs, 'devops-audit.jsonl'),
     };
@@ -1224,8 +1261,15 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     // read-only in the box, so the session cannot rewrite its own guard.
     const guardDir = `${configDir}.guard`;
     rmSync(guardDir, { recursive: true, force: true });
+    const launchDir = `${configDir}.launch`;
+    rmSync(launchDir, { recursive: true, force: true });
     const guard =
-      level === 'outer' ? this.devopsGuard(guardDir, input.devopsGuard, 'shift', input.sandbox) : undefined;
+      level === 'outer'
+        ? this.devopsGuard(guardDir, input.devopsGuard, 'shift', input.sandbox, {
+            kind: 'outer',
+            docker: !!input.dockerGate,
+          })
+        : undefined;
     if (level === 'outer' && !guard)
       throw new Error('the DevOps guard could not be attached to the outer box');
     if (guard) input = { ...input, env: { ...input.env, AOM_DEVOPS_GUARD: guard.file } };
@@ -1294,10 +1338,12 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
               'devops',
               true,
             );
-      // the box is the boundary: Claude Code's own sandbox is off inside it (never nested)
-      delete (baseSettings as { sandbox?: unknown }).sandbox;
+      // the box is the boundary: Claude Code's own sandbox is off inside it (never nested); gate-fixes-1 F1: the inner
+      // box fences only the file tools, by a launch-only key in a read-only folder beside the config dir
+      const rb = forRunnerBox(baseSettings, level);
+      const launchFile = writeLaunchSettings(launchDir, rb.launch);
       resetBoxConfigDir(configDir, {
-        settings: baseSettings,
+        settings: rb.settings,
         mcp: { mcpServers: {} },
         instructions: input.instructionsMarkdown,
         ...(input.resumeSessionId ? { keepSession: input.resumeSessionId } : {}),
@@ -1315,6 +1361,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         aomReadPaths: policyCtx.aomReadPaths,
         plumbingReadPaths: [
           ...(guard ? [guardDir] : []),
+          ...(launchFile ? [launchDir] : []),
           ...(docker ? [docker.dir] : []),
           ...(input.boxReadOnly ?? []),
         ],
@@ -1335,7 +1382,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       const boxPlan = boxSandbox(planInput);
       const bound = new Set(boundDirsOf(boxPlan));
       const settings = withBoxWorkDirs(
-        baseSettings,
+        rb.settings,
         boxWorkDirs(planInput, (p) => bound.has(p), systemRoBinds()),
       );
       writeBoxSettings(configDir, settings);
@@ -1347,6 +1394,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       const cmd = buildClaudeCommand(
         { ...input, sandbox: boxSb, addDirs: [], readDirs: [] },
         this.noClaudeToken(this.liveFor(account)),
+        launchFile ? { launchSettings: launchFile } : {},
       );
       const env: Record<string, string> = {
         ...cmd.env,
@@ -1467,8 +1515,15 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     // the outer box keeps the DevOps guard, its file read-only beside the config dir (as on Linux)
     const guardDir = `${configDir}.guard`;
     rmSync(guardDir, { recursive: true, force: true });
+    const launchDir = `${configDir}.launch`;
+    rmSync(launchDir, { recursive: true, force: true });
     const guard =
-      level === 'outer' ? this.devopsGuard(guardDir, input.devopsGuard, 'shift', input.sandbox) : undefined;
+      level === 'outer'
+        ? this.devopsGuard(guardDir, input.devopsGuard, 'shift', input.sandbox, {
+            kind: 'outer',
+            docker: !!input.dockerGate,
+          })
+        : undefined;
     if (level === 'outer' && !guard)
       throw new Error('the DevOps guard could not be attached to the outer box');
     if (guard) input = { ...input, env: { ...input.env, AOM_DEVOPS_GUARD: guard.file } };
@@ -1483,9 +1538,10 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
             'devops',
             true,
           );
-    delete (baseSettings as { sandbox?: unknown }).sandbox;
+    const rb = forRunnerBox(baseSettings, level);
+    const launchFile = writeLaunchSettings(launchDir, rb.launch);
     resetBoxConfigDir(configDir, {
-      settings: baseSettings,
+      settings: rb.settings,
       mcp: { mcpServers: {} },
       instructions: input.instructionsMarkdown,
       ...(input.resumeSessionId ? { keepSession: input.resumeSessionId } : {}),
@@ -1500,7 +1556,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       configDir,
       tmp,
       aomReadPaths: policyCtx.aomReadPaths,
-      plumbingReadPaths: guard ? [guardDir] : [],
+      plumbingReadPaths: [...(guard ? [guardDir] : []), ...(launchFile ? [launchDir] : [])],
       claudeBin: bin.real,
       toolchainReadDirs: policyCtx.toolchainReadPaths ?? [],
       cloneDirs: input.readDirs ?? [],
@@ -1517,13 +1573,14 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     const sb = boxSandbox(planInput);
     writeBoxSettings(
       configDir,
-      withBoxWorkDirs(baseSettings, boxWorkDirs(planInput, existsSync, MAC_SYSTEM_READ)),
+      withBoxWorkDirs(rb.settings, boxWorkDirs(planInput, existsSync, MAC_SYSTEM_READ)),
     );
     const mr = this.modelRoute(level === 'outer' ? 'web_search' : 'none', this.auditOf(input));
     const plan = modelProxyPlan(cred, mr.upstream, mr.opts);
     const cmd = buildClaudeCommand(
       { ...input, sandbox: { ...input.sandbox, configDir, home, tmp }, addDirs: [], readDirs: [] },
       this.noClaudeToken(this.liveFor(account)),
+      launchFile ? { launchSettings: launchFile } : {},
     );
     // R4-B2 on macOS too: Docker Desktop (or another daemon) only through the gatekeeper
     let docker: { proxy: DockerProxy; dir: string; socket: string } | undefined;
@@ -1601,7 +1658,14 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     await mkdir(dir, { recursive: true });
     const guard =
       input.agent.isDevops && !input.devopsBox
-        ? this.devopsGuard(dir, input.devopsGuard, 'shift', input.sandbox)
+        ? this.devopsGuard(
+            dir,
+            input.devopsGuard,
+            'shift',
+            input.sandbox,
+            // gate-fixes-1 F3: a DevOps request on the unboxed fallback never reaches Docker (no gatekeeper there)
+            input.boxRequestId ? { kind: 'none' } : undefined,
+          )
         : undefined;
     if (input.agent.isDevops && input.kind === 'release_prep' && !guard)
       throw new Error(
@@ -1722,12 +1786,29 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
             ]),
           ],
     };
+    // gate-fixes-1 F4: a mention that works commits in the card's worktree. Its git dir is writable (`gitDirs`), so it is
+    // never a read-only folder of the policy as well (denyWrite is bound after allowWrite and an equal entry hid it), and
+    // the card's own main clone is split off as a shift's is (GWP-86). `--add-dir` still names the git dir.
+    let workPolicy: { readDirs: string[]; ownRepoDirs: string[] } | undefined;
+    if (input.work && !devops && !box) {
+      const git = new Set(gitDirsOf(input.cwd).map((d) => resolve(d)));
+      workPolicy = splitOwnRepository(
+        chatInput.readDirs.filter((d) => !git.has(resolve(d))),
+        input.cwd,
+        gitDirsOf(input.cwd),
+      );
+    }
     // a backend model (Bedrock, Vertex, a gateway) has no Claude login: its `account` names a credential of the backend, not a Claude account
     const account = this.account(backendOfModel(input.agent.model) ? undefined : input.account);
     const bk = this.backendSession(input.agent, input.chatId, input.orgId, input.account);
     // see `start`: the Vertex key file is removed when anything fails before the process runs
     try {
-      return await this.startChatSession(input, chatInput, devops, account, bk);
+      // REVIEW B1: the command gets the split folders too (as `start` does): the own main clone is never an `--add-dir`
+      // (Claude Code opens an added directory writable, GWP-86); the git dir stays one
+      const cmdInput = workPolicy
+        ? { ...chatInput, readDirs: [...new Set([...workPolicy.readDirs, ...gitDirsOf(input.cwd)])] }
+        : chatInput;
+      return await this.startChatSession(input, cmdInput, devops, account, bk, workPolicy);
     } catch (err) {
       bk?.cleanup();
       this.dropGuardFile(input, 'chat', input.devopsGuard?.sessionRef);
@@ -1741,6 +1822,8 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     devops: boolean,
     account: ReturnType<ClaudeCodeAdapter['account']>,
     bk: ReturnType<ClaudeCodeAdapter['backendSession']>,
+    /** gate-fixes-1 F4: a working mention's policy folders (its git dir and own main clone left out); see `startChat`. */
+    workPolicy?: { readDirs: string[]; ownRepoDirs: string[] },
   ): Promise<RuntimeSession> {
     const dir = input.sandbox.configDir;
     await mkdir(dir, { recursive: true });
@@ -1779,7 +1862,14 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
             : input.work
               ? buildMentionWorkSettings(
                   input.agent.permissions,
-                  this.policy(chatInput, input.cwd, false),
+                  {
+                    ...this.policy(
+                      workPolicy ? { ...chatInput, readDirs: workPolicy.readDirs } : chatInput,
+                      input.cwd,
+                      false,
+                    ),
+                    ...(workPolicy?.ownRepoDirs.length ? { ownRepoDirs: workPolicy.ownRepoDirs } : {}),
+                  },
                   input.sandbox,
                 )
               : buildChatSettings(
@@ -1791,6 +1881,11 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
                   this.policy(chatInput, input.cwd, true),
                   input.sandbox,
                 );
+    if (input.work && chatSettings.sandbox)
+      for (const d of shadowedWrites(chatSettings.sandbox.filesystem, input.cwd))
+        process.stderr.write(
+          `WARN sandbox: ${d} hides a writable path (denyWrite is bound after allowWrite)\n`,
+        );
     const withSkills = review
       ? chatInput
       : this.prepareSubagents(dir, this.prepareSkills(dir, chatInput, chatSettings), chatSettings);

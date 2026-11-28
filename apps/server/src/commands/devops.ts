@@ -675,9 +675,21 @@ export function blockedText(
   workstationName: string,
   agentName: string,
   command: string | null,
-  ask?: { command: string; alwaysOffered: boolean; alwaysPath?: string },
+  ask?: { command: string; alwaysOffered: boolean; alwaysPath?: string; onceOffered?: false },
 ): { title: string; body: string } {
   const label = DEVOPS_SWITCH_LABEL[sw];
+  // gate-fixes-1 F3: the runner opens Docker for a boxed request only through the switch (never for one command)
+  if (ask && ask.onceOffered === false && sw === 'allowDocker')
+    return {
+      title: `DevOps wants Docker; Docker is off for ${workstationName}`,
+      body: [
+        `${agentName} wants to run this on ${workstationName}:`,
+        ask.command,
+        `Docker is off for ${workstationName}. Turn it on to let this request use Docker through the runner's gatekeeper.`,
+        'Turn on Docker turns "Docker" on for this workstation; the request then continues by itself. A single command cannot be allowed: Docker access is the whole gatekeeper, not one command.',
+        'If you do not want this, reject the request here.',
+      ].join('\n\n'),
+    };
   // runner-authority-fixes T10: the guard refused this exact command; the owner allows it once or always
   if (ask) {
     const off = {
@@ -777,6 +789,17 @@ export async function resolveDevOpsApprovalIn(
   // paths only for the folder the runner said may be allowed for good.
   const blockedBy = (ap as { blockedBy?: DevopsSwitch }).blockedBy;
   const alwaysPath = (ap as { alwaysPath?: string }).alwaysPath;
+  // gate-fixes-1 R3-S1: where only the switch helps, a yes must turn it on ("once", or no scope, opens nothing); a
+  // rejection still passes
+  if (
+    resolution === 'approved' &&
+    scope !== 'always' &&
+    (ap as { onceOffered?: boolean }).onceOffered === false
+  )
+    throw conflict(
+      'once_not_offered',
+      'this request can only continue with the switch turned on (Turn on Docker): allowing a single command cannot open it',
+    );
   if (scope === 'always' && !blockedBy)
     throw conflict('always_not_offered', 'only a request blocked by a switch can be allowed always');
   if (scope === 'always' && blockedBy === 'allowedPaths' && !alwaysPath)
@@ -1022,7 +1045,18 @@ export async function applyDevopsReport(
     const access = DevOpsAccessSchema.parse(wsRow?.devops_access ?? {});
     // Rework 1 (B1): the "Allow once / Always allow" item is for at most one command, shown in full; more than one is an
     // ordinary approval that lists every command
-    const sw = data.data.commands.length <= 1 ? blockedSwitch(access, data.data) : null;
+    // gate-fixes-1 R3-S2: where only the switch helps (`onceOffered: false`), the switch item is raised whatever the number
+    // of commands (they are only context there)
+    const switchOnly = data.data.onceOffered === false && data.data.blockedBy === 'allowDocker';
+    // There the destructive-words check of `blockedSwitch` does not apply (`docker run --rm` is the usual form): the yes
+    // turns the switch on and approves no command at all, so nothing can hide behind it.
+    const sw = switchOnly
+      ? devopsSwitchOn(access, 'allowDocker')
+        ? null
+        : 'allowDocker'
+      : data.data.commands.length <= 1
+        ? blockedSwitch(access, data.data)
+        : null;
     if (sw) {
       const agentRow = await one(tx, 'SELECT name FROM agents WHERE id=$1', [shift.agent_id]);
       const cli = ctx.services.runners.get(ws.id)?.local?.cli;
@@ -1031,12 +1065,20 @@ export async function applyDevopsReport(
       const exact = data.data.commands[0];
       const alwaysPath = sw === 'allowedPaths' ? data.data.alwaysPath : undefined;
       const alwaysOffered = sw !== 'allowedPaths' || !!alwaysPath;
+      const onceOffered = !(switchOnly && sw === 'allowDocker');
       const text = blockedText(
         sw,
         String(wsRow?.name ?? 'this workstation'),
         String(agentRow?.name ?? 'The DevOps engineer'),
         command,
-        exact ? { command: exact, alwaysOffered, ...(alwaysPath ? { alwaysPath } : {}) } : undefined,
+        exact
+          ? {
+              command: data.data.commands.length > 1 ? data.data.commands.join('\n') : exact,
+              alwaysOffered,
+              ...(alwaysPath ? { alwaysPath } : {}),
+              ...(onceOffered ? {} : { onceOffered: false as const }),
+            }
+          : undefined,
       );
       const { deskItemId } = await raiseDeskItem(ctx, tx, {
         kind: 'approval',
@@ -1057,7 +1099,7 @@ export async function applyDevopsReport(
           workstationName: String(wsRow?.name ?? ''),
           requestId: req.id,
           ...(exact ? { exactCommand: exact } : {}),
-          allowOnce: true,
+          allowOnce: onceOffered,
           allowAlways: alwaysOffered,
           ...(alwaysPath ? { alwaysPath } : {}),
           ...(command && sw === 'allowInstall' ? { command, stepKind: 'devops.install' } : {}),
@@ -1074,9 +1116,12 @@ export async function applyDevopsReport(
                 deskItemId,
                 action: data.data.action,
                 reason: data.data.reason,
-                commands: data.data.commands,
+                // gate-fixes-1 F3: a switch-only yes turns the switch on and approves no command (a second, hidden one
+                // named beside the docker command must never ride along)
+                commands: onceOffered ? data.data.commands : [],
                 blockedBy: sw,
                 ...(alwaysPath ? { alwaysPath } : {}),
+                ...(onceOffered ? {} : { onceOffered: false as const }),
               },
             },
             actor: agentActor(shift.agent_id),

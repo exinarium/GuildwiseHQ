@@ -93,3 +93,31 @@ describe('runner-authority-fixes T10: Allow once or Always allow', () => {
     expect(screen.queryByTestId('desk-devops-allow-always')).toBeNull();
   });
 });
+
+describe('gate-fixes-1 F3: Docker of a boxed request opens only by the switch', () => {
+  it('no Allow once; the one button reads "Turn on Docker" and sends scope always', async () => {
+    const calls: Array<{ url: string; body: unknown }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : null });
+        return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+      }),
+    );
+    show({
+      devopsSwitch: 'allowDocker',
+      switchLabel: 'Docker',
+      workstationName: 'Studio',
+      requestId: REQ,
+      exactCommand: 'docker run --rm alpine true',
+      allowOnce: false,
+      allowAlways: true,
+    });
+    expect(screen.queryByTestId('desk-devops-allow-once')).toBeNull();
+    const button = screen.getByTestId('desk-devops-allow-always');
+    expect(button.textContent).toBe('Turn on Docker');
+    await userEvent.click(button);
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]?.body).toEqual({ resolution: 'approved', scope: 'always' });
+  });
+});

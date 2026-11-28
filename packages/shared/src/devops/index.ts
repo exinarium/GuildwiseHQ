@@ -46,6 +46,12 @@ export const DevopsApprovalDataSchema = z.object({
    * folder). The runner sets it only when that folder may be allowed for good; absent: the Desk offers "Allow once" only.
    */
   alwaysPath: z.string().max(4000).optional(),
+  /**
+   * gate-fixes-1 F3: `false` when an approval of the command cannot help (a boxed session's Docker: only the switch opens
+   * it, the runner's guard never lifts `docker_off` for an approved command). The Desk then offers only the switch.
+   * Absent: "Allow once" is offered as before.
+   */
+  onceOffered: z.literal(false).optional(),
 });
 /** A DevOps "approval" whose action starts with "Question:" is a question for the escalation chain, not an approval. */
 export const DEVOPS_QUESTION_PREFIX = 'Question:';

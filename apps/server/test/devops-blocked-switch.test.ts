@@ -451,3 +451,88 @@ describe('runner-authority-fixes Rework 1: the owner approves only what is shown
     await post(`/api/devops/requests/${id}/resolve`, { resolution: 'rejected' });
   });
 });
+
+describe('gate-fixes-1 F3: a boxed request’s Docker opens only by the switch (onceOffered: false)', () => {
+  beforeEach(async () => {
+    dispatcher().cooldown.clear();
+    await q(`UPDATE devops_requests SET status='done' WHERE status IN ('queued','running','needs_approval')`);
+    await ok(
+      w.t.req('PATCH', `/api/workstations/${w.workstationId}/devops-access`, {
+        cookie: w.owner.cookie,
+        body: { allowInstall: false, allowDocker: false, allowedPaths: [] },
+      }),
+    );
+  });
+  const approvalOf = async (id: string) =>
+    (await q('SELECT approval FROM devops_requests WHERE id=$1', [id]))[0]!.approval;
+  const itemOf = async (deskItemId: string) =>
+    (await q('SELECT title, body, data FROM desk_items WHERE id=$1', [deskItemId]))[0]!;
+  const dockerAsk = (commands: string[]) => ({
+    action: 'run the app in docker',
+    reason: 'the app runs in docker compose',
+    commands,
+    blockedBy: 'allowDocker',
+    onceOffered: false,
+  });
+
+  it('the item asks to turn Docker on with no Allow once; "once" (API or Desk) is refused, a rejection passes', async () => {
+    const id = await blockedRequest('run the app', dockerAsk(['docker run --rm alpine true']));
+    const ap = await approvalOf(id);
+    // persisted from the runner's payload through the event into the stored approval
+    expect(ap).toMatchObject({ blockedBy: 'allowDocker', onceOffered: false, commands: [] });
+    const item = await itemOf(ap.deskItemId);
+    expect(item.data).toMatchObject({ allowOnce: false, allowAlways: true, devopsSwitch: 'allowDocker' });
+    expect(item.body).toContain("Turn it on to let this request use Docker through the runner's gatekeeper");
+    expect(item.body).not.toContain('Allow once');
+    for (const body of [{ resolution: 'approved', scope: 'once' }, { resolution: 'approved' }]) {
+      const res = await w.t.req('POST', `/api/devops/requests/${id}/resolve`, {
+        cookie: w.owner.cookie,
+        body,
+      });
+      expect(res.status, JSON.stringify(body)).toBe(409);
+      expect(res.body.error).toMatchObject({ code: 'once_not_offered' });
+    }
+    const desk = await w.t.req('POST', `/api/desk/${ap.deskItemId}/resolve`, {
+      cookie: w.owner.cookie,
+      body: { resolution: 'approved' },
+    });
+    expect(desk.status).toBe(409);
+    expect((await approvalOf(id)).resolution).toBeNull();
+    await post(`/api/devops/requests/${id}/resolve`, { resolution: 'rejected' });
+    expect((await approvalOf(id)).resolution).toBe('rejected');
+  });
+
+  it('"Turn on Docker" turns the switch on and approves no command', async () => {
+    const id = await blockedRequest('run it', dockerAsk(['docker compose up -d']));
+    await post(`/api/devops/requests/${id}/resolve`, { resolution: 'approved', scope: 'always' });
+    const access = (await q('SELECT devops_access FROM workstations WHERE id=$1', [w.workstationId]))[0]!
+      .devops_access;
+    expect(access.allowDocker).toBe(true);
+    const mark = r.received.length;
+    await dispatcher().run();
+    const resumed = await r.waitFor(
+      'shift.start',
+      (f) => f.kind === 'devops' && f.devops?.requestId === id,
+      5000,
+      mark,
+    );
+    expect(resumed.devops?.access?.allowDocker).toBe(true);
+    expect(resumed.devops?.approval?.commands ?? []).toEqual([]);
+    await finish(resumed.shiftId);
+  });
+
+  it('R3-S2: two docker commands still raise the ONE switch item (the commands are only context, none is approved)', async () => {
+    const id = await blockedRequest(
+      'run two',
+      dockerAsk(['docker pull alpine', 'docker run --rm alpine true']),
+    );
+    const ap = await approvalOf(id);
+    expect(ap.blockedBy).toBe('allowDocker');
+    expect(ap.commands).toEqual([]);
+    const item = await itemOf(ap.deskItemId);
+    expect(item.data).toMatchObject({ allowOnce: false, devopsSwitch: 'allowDocker' });
+    expect(item.body).toContain('docker pull alpine');
+    expect(item.body).toContain('docker run --rm alpine true');
+    await post(`/api/devops/requests/${id}/resolve`, { resolution: 'rejected' });
+  });
+});

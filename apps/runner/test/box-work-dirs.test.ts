@@ -643,6 +643,30 @@ describe('boxWorkDirs rules', () => {
     expect(w.credentials).toEqual(['/home/me/.ssh', '/home/me/.gitconfig']);
   });
 
+  it('gate-fixes-1 F1: the inner launch folder is plumbing: bound read-only, never a working directory', () => {
+    const r = realpathSync(tmp());
+    const configDir = join(r, 'agents', 'a', 'config', 'inner', 'q');
+    const launch = `${configDir}.launch`;
+    for (const d of [join(configDir, 'home'), launch, join(r, 'agents', 'a', 'devops', 'q'), join(r, 'tmp')])
+      mkdirSync(d, { recursive: true });
+    const inner = base({
+      level: 'inner',
+      requestDir: join(r, 'agents', 'a', 'devops', 'q'),
+      configDir,
+      tmp: join(r, 'tmp'),
+      aomReadPaths: [],
+      plumbingReadPaths: [],
+      claudeBin: process.execPath,
+      outer: undefined,
+    });
+    const withLaunch = { ...inner, plumbingReadPaths: [launch] };
+    expect(boundDirsOf(boxSandbox(withLaunch))).toContain(launch);
+    expect(boundDirsOf(boxSandbox(inner))).not.toContain(launch);
+    // the working directories (and so the settings) are exactly as without it
+    expect(boxWorkDirs(withLaunch, all, [])).toEqual(boxWorkDirs(inner, all, []));
+    expect(boxWorkDirs(withLaunch, all, []).dirs).not.toContain(launch);
+  });
+
   it('a read-only entry that holds the request folder or a writable folder gets no Edit deny', () => {
     const w = boxWorkDirs(base({ toolchainReadDirs: ['/r/agents', '/r'] }), all, ['/usr']);
     expect(w.dirs).toEqual(expect.arrayContaining(['/r/agents', '/r']));

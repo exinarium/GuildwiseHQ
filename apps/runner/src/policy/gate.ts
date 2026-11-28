@@ -214,13 +214,19 @@ export function narrowAccess(
   access: DevOpsAccess,
   /** quiet-approvals R5-B1: checks a requested folder against the local ceiling (absent: no folder passes). */
   folderOk: (path: string, roots: readonly string[]) => boolean = () => false,
+  /**
+   * gate-fixes-1 F3: how this session would reach Docker. `proxy` (a DevOps request shift: the outer box, only through the
+   * runner's filtering gatekeeper): the server switch AND `ceiling.docker`. `direct` (everything else: chat, release prep,
+   * the unboxed fallback, which would reach the real daemon): also the legacy local `allowDocker` (R18-L).
+   */
+  docker: 'direct' | 'proxy' = 'direct',
 ): DevOpsAccess {
   const roots = policy.ceiling.mountRoots;
   return {
     ...access,
     sudo: false,
     // quiet-approvals phase B: the local ceiling caps what any Desk click (a server switch) can give
-    allowDocker: access.allowDocker && policy.allowDocker && policy.ceiling.docker,
+    allowDocker: access.allowDocker && policy.ceiling.docker && (docker === 'proxy' || policy.allowDocker),
     allowedPaths: roots.length ? access.allowedPaths.filter((p) => folderOk(p, roots)) : [],
   };
 }
@@ -457,6 +463,8 @@ export interface DevopsShiftInput {
   access?: DevOpsAccess;
   /** Rework 1 (B1): the commands the Desk approval allows in this shift, shown in full (they pass the guard's switch rules). */
   approvedCommands?: string[];
+  /** gate-fixes-1 F3: a DevOps request shift reaches Docker only through the runner's gatekeeper (`narrowAccess` mode). */
+  docker?: 'direct' | 'proxy';
 }
 
 /**
@@ -493,12 +501,14 @@ export function gateDevopsShift(
       ...(s.kind ? [line('kind', s.kind)] : []),
       ...(s.access
         ? (() => {
-            const a = narrowAccess(policy, s.access);
+            const a = narrowAccess(policy, s.access, undefined, s.docker ?? 'direct');
             return [
               line(
                 'docker',
                 a.allowDocker
-                  ? 'yes (allowed locally)'
+                  ? s.docker === 'proxy'
+                    ? "yes, through the runner's Docker gatekeeper"
+                    : 'yes (allowed locally)'
                   : s.access.allowDocker
                     ? 'asked, NOT allowed here'
                     : 'no',

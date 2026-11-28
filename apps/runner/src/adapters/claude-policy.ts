@@ -215,6 +215,11 @@ export interface SandboxProfile {
   darwinLocalBinding?: boolean;
   /** No network for the shell at all (a reviewer reads a local checkout and needs no host): `allowedDomains` holds only the runner's IPC endpoint (`ipcDomains`). */
   offline?: boolean;
+  /**
+   * gate-fixes-1 F1b: the role may move its own card branch (the builder): its worktree's own `HEAD` stays writable. Every
+   * other role gets that `HEAD` read-only too. The main clone's `HEAD` is read-only for every role in a linked worktree.
+   */
+  movesBranch?: boolean;
 }
 
 /** Hosts a shell may reach: package registries and source hosts, enough to install dependencies. */
@@ -392,6 +397,47 @@ const ALWAYS_DENIED = [
  */
 export const BRANCH_MOVING_DENIED = ['Bash(git rebase:*)', 'Bash(git checkout:*)', 'Bash(git switch:*)'];
 
+/** gate-fixes-1 F1b: the git verbs every Claude role is denied in all their written forms (push, reset --hard, stash). */
+export const GIT_ALWAYS_VERBS = ['push', 'reset --hard', 'stash drop', 'stash pop', 'stash clear'] as const;
+/** gate-fixes-1 F1b: the branch-moving verbs, denied in all their forms to every role but the builder and the inner box. */
+export const GIT_BRANCH_VERBS = ['checkout', 'switch', 'rebase', 'symbolic-ref'] as const;
+
+/**
+ * gate-fixes-1 F1b: the wildcard deny forms of git verbs (Claude Code rules only; the bare constants above stay as they are
+ * for Codex and the denied-shell list). `Bash(git push:*)` is a prefix rule, so a global option (`git -C d push`,
+ * `git --git-dir=d push`), an environment assignment (`GIT_DIR=d git push`), an absolute path (`/usr/bin/git push`), an
+ * alias (`git -c alias.p=push p`, a persistent alias or include) or the exec-path binary (`git-push`) slips past it. These
+ * forms close the ones a rule can name; wrappers, `bash -c` and scripts cannot be listed: the OS fence (read-only HEAD
+ * files, no credentials) is the protection. Over-match is accepted (`git -C d commit -m "push"` is refused).
+ */
+export function gitDenyForms(verbs: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const v of verbs) {
+    out.push(
+      `Bash(git -* ${v})`,
+      `Bash(git -* ${v} *)`,
+      `Bash(*=* git ${v})`,
+      `Bash(*=* git ${v} *)`,
+      `Bash(*=* git -* ${v} *)`,
+      `Bash(*/git ${v})`,
+      `Bash(*/git ${v} *)`,
+      `Bash(*/git -* ${v} *)`,
+      `Bash(*git-${v}*)`,
+    );
+    // `git symbolic-ref` has no bare constant: its read form is over-matched too (`git branch --show-current` reads it)
+    if (v === 'symbolic-ref') out.push('Bash(git symbolic-ref:*)');
+  }
+  out.push(
+    'Bash(git -*alias.*)',
+    'Bash(git *config *alias.*)',
+    'Bash(git *config *include*)',
+    'Bash(*GIT_CONFIG_KEY*)',
+    'Bash(*GIT_CONFIG_PARAMETERS*)',
+    'Bash(*GIT_CONFIG_GLOBAL=*)',
+  );
+  return [...new Set(out)];
+}
+
 /** `git push*` -> `Bash(git push:*)`, `rm -rf /*` -> `Bash(rm -rf /*)`. */
 export function shellDeny(pattern: string): string {
   const p = pattern.trim();
@@ -529,6 +575,8 @@ function sandboxBlock(
         // `.git` file and the worktree's admin entries `commondir`, `gitdir`, `config`, `config.worktree`, `hooks`
         // (security review, finding 9)
         ...protectedGitPaths(ctx.cwd),
+        // gate-fixes-1 F1b (the OS fence behind the git deny rules): the HEAD files a branch switch writes
+        ...headFence(ctx.cwd, profile.movesBranch === true),
         ...ctx.addDirs,
         ...readDirs,
         ...runnerPrivate,
@@ -625,6 +673,19 @@ export function splitOwnRepository(
   return { readDirs: readDirs.filter((d) => !own(d)), ownRepoDirs: readDirs.filter(own) };
 }
 
+/**
+ * gate-fixes-1 F1b: the HEAD files of a linked worktree that a branch switch writes, for `denyWrite`. `<common>/HEAD` (the
+ * main clone's checkout, which a linked worktree never writes) for every role; `<admin>/HEAD` (this card's own checkout)
+ * also, unless the role moves its own branch. Commits, amends, stash, fast-forward merges and `reset --soft` still work
+ * with both read-only (probe P1): they write the branch ref, never HEAD. Not a linked worktree: nothing.
+ */
+export function headFence(cwd: string, movesBranch: boolean): string[] {
+  const admin = gitAdminDirOf(cwd);
+  if (!admin || !/[\\/]worktrees[\\/][^\\/]+$/.test(admin)) return [];
+  const common = resolve(admin, '..', '..');
+  return [join(common, 'HEAD'), ...(movesBranch ? [] : [join(admin, 'HEAD')])];
+}
+
 /** `<common>/worktrees/<other>` of every other linked worktree: the shift may write only its own admin dir. */
 function otherWorktreeAdmins(ctx: Pick<ClaudePolicyContext, 'cwd' | 'gitDirs'>): string[] {
   const admin = gitAdminDirOf(ctx.cwd);
@@ -636,13 +697,18 @@ function otherWorktreeAdmins(ctx: Pick<ClaudePolicyContext, 'cwd' | 'gitDirs'>):
 }
 
 /**
- * Diagnostic only: `denyWrite` entries that are a strict ancestor of an `allowWrite` entry or of the working folder.
+ * Diagnostic only: `denyWrite` entries that are a strict ancestor of an `allowWrite` entry or of the working folder, or
+ * equal to an `allowWrite` entry.
  * Claude Code binds those after the allows, so they hide the writable path (GWP-86). Never used to drop denies.
  */
 export function shadowedWrites(fs: { allowWrite: string[]; denyWrite: string[] }, cwd: string): string[] {
   const targets = [...fs.allowWrite, cwd];
-  return fs.denyWrite.filter((d) =>
-    targets.some((t) => resolve(t) !== resolve(d) && inside(resolve(t), resolve(d))),
+  return fs.denyWrite.filter(
+    (d) =>
+      targets.some((t) => resolve(t) !== resolve(d) && inside(resolve(t), resolve(d))) ||
+      // gate-fixes-1 F4: a deny EQUAL to an allow hides it just the same (deny is bound last); the working folder of a
+      // read-only role is denied on purpose, so only the allow entries count here
+      fs.allowWrite.some((a) => resolve(a) === resolve(d)),
   );
 }
 
@@ -944,9 +1010,13 @@ export function buildShiftSettings(
   if (roleKey === 'ceo') return buildCeoSettings(ctx, paths);
   const tools = new Set(p.allowedTools);
   const allow: string[] = [];
+  // gate-fixes-1 F1b: the inner DevOps box creates the `conflict/*` branch in its scratch clone (its only writable
+  // repository; the runner reads it through upload-pack), so it moves branches like the builder
+  const movesBranch = roleKey === 'builder' || roleKey === 'devops-box';
   const deny: string[] = [
     ...ALWAYS_DENIED,
-    ...(roleKey === 'builder' ? [] : BRANCH_MOVING_DENIED),
+    ...(movesBranch ? [] : BRANCH_MOVING_DENIED),
+    ...gitDenyForms(movesBranch ? GIT_ALWAYS_VERBS : [...GIT_ALWAYS_VERBS, ...GIT_BRANCH_VERBS]),
     ...p.deniedShellPatterns.map(shellDeny),
   ];
   for (const tool of p.allowedTools) {
@@ -1005,6 +1075,7 @@ export function buildShiftSettings(
       browser: runsBrowsers(p, roleKey),
       readOnlyWorktree: isReadOnlyWorktreeRole(p),
       darwinLocalBinding: keepsLocalBindingOnDarwin(p, roleKey),
+      movesBranch,
       ...profileExtra,
     },
     testDomains,
@@ -1076,6 +1147,31 @@ export function buildDevopsBoxSettings(
     ];
   }
   return s;
+}
+
+/** The host-only settings a runner-built box passes with `--settings` at launch (never in the config dir's settings.json). */
+export interface LaunchSettings {
+  permissions: { blockFileToolReadsOutsideWorkingDirectories: true };
+}
+
+/**
+ * gate-fixes-1 F1: the settings of a session in a box the runner builds (inner or outer). Claude Code's own sandbox is off
+ * (the box is the boundary, never nested). Inner: `blockReadsOutsideWorkingDirectories` also binds shell commands in
+ * Claude Code 2.1.332 and turns every compound `cd <dir> && git ...` into an ask, which `dontAsk` denies; the box already
+ * fences the shell, so only the file tools are fenced, with `blockFileToolReadsOutsideWorkingDirectories`. That key is
+ * read only from `--settings` at launch, so it is returned apart (`launch`). Pure: returns new objects.
+ */
+export function forRunnerBox(
+  s: ClaudeSettings,
+  level: 'inner' | 'outer',
+): { settings: ClaudeSettings; launch?: LaunchSettings } {
+  const { sandbox: _sandbox, ...rest } = s;
+  if (level === 'outer') return { settings: { ...rest } };
+  const { blockReadsOutsideWorkingDirectories: _block, ...permissions } = s.permissions;
+  return {
+    settings: { ...rest, permissions },
+    launch: { permissions: { blockFileToolReadsOutsideWorkingDirectories: true } },
+  };
 }
 
 /**
@@ -1163,6 +1259,7 @@ export function buildChatSettings(
   const deny = [
     ...ALWAYS_DENIED,
     ...BRANCH_MOVING_DENIED,
+    ...gitDenyForms([...GIT_ALWAYS_VERBS, ...GIT_BRANCH_VERBS]),
     'WebSearch',
     // A card's worktree is read-only; a bare `Edit` deny would also beat the scratch allow, so it is path-scoped. When the
     // working folder is the agent's own scratch folder (a session turn) there is nothing to deny: it writes the files that

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { BUILTIN_ROLES } from '@aom/shared';
 import { afterAll, describe, expect, it } from 'vitest';
 import { addInstallRedirect } from '../src/adapters/claude-code.ts';
-import { buildShiftSettings, gitDirsOf } from '../src/adapters/claude-policy.ts';
+import { buildMentionWorkSettings, buildShiftSettings, gitDirsOf } from '../src/adapters/claude-policy.ts';
 import { createSandboxPlaceholders } from '../src/adapters/sandbox-placeholders.ts';
 import { runnerPaths } from '../src/paths.ts';
 import { ensureSandbox, sandboxEnv } from '../src/sandbox/sandbox.ts';
@@ -55,6 +55,8 @@ async function runBashAs(
     linkedNode?: boolean;
     env?: Record<string, string>;
     before?: (root: string) => void;
+    /** gate-fixes-1: a working @mention's settings (builder permissions, `buildMentionWorkSettings`) instead of a role's. */
+    mention?: boolean;
   } = {},
 ): Promise<{ output: string; stderr: string; settings: any; cwd: string }> {
   // Under the user's home, like the real data dir: the failure does not show with a root under /tmp.
@@ -107,7 +109,18 @@ async function runBashAs(
   // what the adapter does before a read-only shift (AOM_REAL_NOFIX=1 shows the failure without it)
   const cleanup =
     roleKey !== 'builder' && !process.env.AOM_REAL_NOFIX ? createSandboxPlaceholders(cwd) : () => {};
-  const settings = buildShiftSettings(
+  const build = opts.mention
+    ? (
+        pp: typeof p,
+        c: Parameters<typeof buildShiftSettings>[1],
+        s: Parameters<typeof buildShiftSettings>[2],
+      ) => buildMentionWorkSettings(pp, c, s)
+    : (
+        pp: typeof p,
+        c: Parameters<typeof buildShiftSettings>[1],
+        s: Parameters<typeof buildShiftSettings>[2],
+      ) => buildShiftSettings(pp, c, s, roleKey);
+  const settings = build(
     p,
     policyCtx({
       runnerRoot: root,
@@ -119,7 +132,6 @@ async function runBashAs(
       sharedCacheDir: sb.cacheRoot,
     }),
     sb,
-    roleKey,
   );
   // what the adapter adds to a scrubbed, non-DevOps session: an install in Bash is refused with the way to ask DevOps
   if (opts.scrub) addInstallRedirect(settings);
@@ -294,5 +306,47 @@ describe.skipIf(!enabled)(
       for (const n of ['scripts', 'package.json', '.env', join('.git', 'config.lock')])
         expect(existsSync(join(r.cwd, n)), n).toBe(false);
     }, 120_000);
+  },
+);
+
+describe.skipIf(!enabled)(
+  'gate-fixes-1: a working @mention in the real Claude Code sandbox (skipped without claude + bwrap)',
+  () => {
+    const heads = (cwd: string) => {
+      const admin = spawnSync('git', ['-C', cwd, 'rev-parse', '--absolute-git-dir'], {
+        encoding: 'utf8',
+      }).stdout.trim();
+      const read = (f: string) => spawnSync('cat', [f], { encoding: 'utf8' }).stdout;
+      return `${read(join(admin, 'HEAD'))}|${read(join(admin, '..', '..', 'HEAD'))}`;
+    };
+    const mention = (command: string) => runBashAs('builder', command, { linkedNode: true, mention: true });
+
+    it('F4: the mention commits in the card worktree (no "Read-only file system")', async () => {
+      const r = await mention(
+        'echo "- mention-edit" >> package.json && git add package.json && git -c user.email=a@b.c -c user.name=a commit -qm mention-edit && git log --oneline -1',
+      );
+      expect(r.output, r.stderr).not.toContain('Read-only file system');
+      expect(r.output, r.stderr).toContain('mention-edit');
+      expect(
+        spawnSync('git', ['-C', r.cwd, 'log', '-1', '--format=%s'], { encoding: 'utf8' }).stdout.trim(),
+      ).toBe('mention-edit');
+    }, 120_000);
+
+    it('F1b: the table forms are denied, and a wrapper is stopped by the read-only HEAD files', async () => {
+      for (const c of ['git -C . switch -c gate-m1', 'GIT_DIR=.git git checkout -b gate-m2']) {
+        const r = await mention(c);
+        expect(r.output, `${c}: ${r.stderr}`).toMatch(/denied/i);
+      }
+      // a wrapper no rule can name: the OS fence (read-only HEAD files) stops it, and nothing moved
+      const w = await mention('sh -c "git switch -c gate-m3"; echo EXIT=$?');
+      const before = heads(w.cwd);
+      expect(w.output, w.stderr).toMatch(/unable to update HEAD|denied/i);
+      expect(before).toContain('ref: refs/heads/X-1');
+      const repo = join(w.cwd, '..', '..', '..', 'repos', 'P-1');
+      const m = await mention(`sh -c "git -C ${repo} symbolic-ref HEAD refs/heads/gate-m4"; echo EXIT=$?`);
+      expect(m.output, m.stderr).not.toContain('EXIT=0');
+      expect(heads(m.cwd)).toContain('ref: refs/heads/main');
+      expect(heads(m.cwd)).not.toContain('gate-m');
+    }, 300_000);
   },
 );

@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { BUILTIN_ROLES } from '@aom/shared';
 import { afterAll, describe, expect, it } from 'vitest';
 import { sessionEnv } from '../src/adapters/claude-code.ts';
-import { buildDevopsBoxSettings } from '../src/adapters/claude-policy.ts';
+import { buildDevopsBoxSettings, forRunnerBox } from '../src/adapters/claude-policy.ts';
 import { runnerPaths } from '../src/paths.ts';
 import { ensureSandbox, sandboxEnv } from '../src/sandbox/sandbox.ts';
 import { cleanupTmp } from './helpers.ts';
@@ -139,6 +139,12 @@ async function fakeToolApi(calls: Call[]): Promise<{ url: string; results: strin
 
 async function runBox(
   calls: (w: World) => Call[],
+  /**
+   * gate-fixes-1 F1: the settings of the box the RUNNER builds (Claude's own sandbox off: the box fences the shell).
+   * `fixed`: as the runner writes them now (`forRunnerBox`, the file-tool block in a `--settings` launch file); `old`: as
+   * cfbc8864 wrote them (only the sandbox block removed, `blockReadsOutsideWorkingDirectories` kept).
+   */
+  runnerBuilt?: 'fixed' | 'old',
 ): Promise<{ results: string[]; world: World; stderr: string }> {
   mkdirSync(HOME_BASE, { recursive: true });
   const root = realpathSync(mkdtempSync(join(HOME_BASE, 'r-')));
@@ -152,6 +158,9 @@ async function runBox(
   mkdirSync(join(clone, 'src'), { recursive: true });
   spawnSync('git', ['init', '-q', '-b', 'main', clone]);
   writeFileSync(join(clone, 'package.json'), '{"name":"toy"}\n');
+  // the runner's own CLI (readable to the box's shell, never to Claude's file tools)
+  mkdirSync(paths.bin, { recursive: true });
+  writeFileSync(join(paths.bin, 'aom'), '#!/bin/sh\necho AOM-SHIM-CONTENT\n');
   writeFileSync(join(clone, '.npmrc'), 'registry=https://registry.npmjs.org/\n');
   const policyDir = join(root, 'policy');
   mkdirSync(policyDir, { recursive: true });
@@ -177,7 +186,17 @@ async function runBox(
     sb,
   );
   mkdirSync(sb.configDir, { recursive: true });
-  writeFileSync(join(sb.configDir, 'settings.json'), JSON.stringify(settings, null, 2));
+  const launchFile = `${sb.configDir}.launch.json`;
+  let written: unknown = settings;
+  if (runnerBuilt === 'fixed') {
+    const rb = forRunnerBox(settings, 'inner');
+    written = rb.settings;
+    writeFileSync(launchFile, JSON.stringify(rb.launch));
+  } else if (runnerBuilt === 'old') {
+    const { sandbox: _sb, ...rest } = settings;
+    written = rest;
+  }
+  writeFileSync(join(sb.configDir, 'settings.json'), JSON.stringify(written, null, 2));
   writeFileSync(join(sb.configDir, 'mcp.json'), '{"mcpServers":{}}');
   const api = await fakeToolApi(calls(world));
   const env = {
@@ -205,6 +224,7 @@ async function runBox(
       'dontAsk',
       '--setting-sources',
       'user',
+      ...(runnerBuilt === 'fixed' ? ['--settings', launchFile] : []),
       '--strict-mcp-config',
       '--mcp-config',
       join(sb.configDir, 'mcp.json'),
@@ -284,6 +304,41 @@ describe.skipIf(!enabled)(
       expect(existsSync(join(world.toolchains, 'evil'))).toBe(false);
       expect(results[3]).not.toContain('kkkkkkkk');
       expect(readFileSync(join(world.cwd, 'notes.md'), 'utf8')).toBe('mine\n');
+    }, 180_000);
+  },
+);
+
+describe.skipIf(!enabled)(
+  'gate-fixes-1 F1: the runner-built inner box settings with the real Claude Code (skipped without claude + bwrap)',
+  () => {
+    // the scratch clone of a conflict request sits in the request folder (the cwd); the gate's shift ran `cd <clone> && git`
+    const calls = (w: World): Call[] => [
+      { name: 'Bash', input: { command: 'git init -q -b main clone && echo MADE', description: 'probe' } },
+      { name: 'Bash', input: { command: 'cd clone && git status | head -3', description: 'probe' } },
+      { name: 'Bash', input: { command: 'cd /tmp && git --version', description: 'probe' } },
+      { name: 'Bash', input: { command: 'git -C clone status | head -1', description: 'probe' } },
+      { name: 'Read', input: { file_path: join(w.root, 'bin', 'aom') } },
+      { name: 'Read', input: { file_path: join(w.clone, 'package.json') } },
+    ];
+
+    it('fixed: `cd <clone> && git status` runs; the Read tool still refuses the runner bin outside the working dirs', async () => {
+      const { results, stderr } = await runBox(calls, 'fixed');
+      expect(results, stderr).toHaveLength(6);
+      expect(results[0]).toContain('MADE');
+      expect(results[1]).toContain('On branch main');
+      expect(results[2]).toContain('git version');
+      expect(results[3]).toContain('On branch main');
+      expect(results[4]).not.toContain('AOM-SHIM-CONTENT');
+      expect(results[5]).toContain('"name":"toy"');
+    }, 180_000);
+
+    it('old (cfbc8864): the same compound `cd` plus `git` is denied (gate items 7 and 8)', async () => {
+      const { results, stderr } = await runBox(calls, 'old');
+      expect(results, stderr).toHaveLength(6);
+      expect(results[1]).not.toContain('On branch main');
+      expect(results[1]).toContain('blockReadsOutsideWorkingDirectories');
+      expect(results[2]).toContain('blockReadsOutsideWorkingDirectories');
+      expect(results[3]).toContain('On branch main');
     }, 180_000);
   },
 );

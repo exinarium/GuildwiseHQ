@@ -104,6 +104,7 @@ export const devopsProjectors: Record<string, Projector> = {
           ...(p.question ? { question: true } : {}),
           ...(p.blockedBy ? { blockedBy: p.blockedBy } : {}),
           ...(p.alwaysPath ? { alwaysPath: p.alwaysPath } : {}),
+          ...(p.onceOffered === false ? { onceOffered: false } : {}),
           resolution: null,
         }),
       ],

@@ -269,7 +269,7 @@ import { Approvals } from './policy/approvals.ts';
 import { ApprovedRequests } from './policy/approved-requests.ts';
 import { defaultAuthority, FileAuthority, type LocalAuthority } from './policy/authority.ts';
 import { ApprovedBundles, describeBundle } from './policy/deploy-detail.ts';
-import { boxBrokenText, devopsShiftInput, routeDevopsShift } from './policy/devops-route.ts';
+import { boxBrokenText, devopsShiftInput, isRequestShift, routeDevopsShift } from './policy/devops-route.ts';
 import { daemonSocket } from './policy/docker-env.ts';
 import {
   beyondCeiling,
@@ -1058,12 +1058,22 @@ export class Runner {
       dockerGate: () => {
         const p = this.authority.policy();
         const upstream = daemonSocket(p, process.getuid?.() ?? null);
-        if (!upstream || !p.ceiling.docker || !p.allowDocker) return null;
+        // gate-fixes-1 F3: the local Docker gate of a DevOps request is `ceiling.docker` (default yes); the legacy
+        // `allowDocker` key (R18-L, set by nothing) no longer closes it. The access the shift carries decides as well.
+        if (!upstream || !p.ceiling.docker) return null;
         return {
           upstream,
           instance: createHash('sha256').update(this.paths.root).digest('hex').slice(0, 16),
           containerEgress: p.ceiling.containerEgress,
         };
+      },
+      dockerUnavailable: () => {
+        const p = this.authority.policy();
+        if (!p.ceiling.docker)
+          return 'Docker is off on this computer (the limit set in Approvals on this computer, "The most DevOps may get")';
+        if (!daemonSocket(p, process.getuid?.() ?? null))
+          return 'no Docker daemon was found on this computer';
+        return null;
       },
       windowPort: () => this.windowState?.port,
       capabilities: this.capabilities,
@@ -3215,7 +3225,9 @@ export class Runner {
       this.log.info(
         `DevOps request ${msg.devops?.requestId?.slice(0, 8)}: ${beyond.join(', ')} needs a change on this computer (Approvals on this computer, "The most DevOps may get"); it runs without it`,
       );
-    msg = this.narrowShift(msg);
+    // gate-fixes-1 F3 (B1): decided ONCE, here: a request shift reaches Docker only through the gatekeeper (`proxy`), so held
+    // bodies and remembered (R2) jobs carry that value; the later re-narrowing can only lower it
+    msg = this.narrowShift(msg, isRequestShift(msg) ? 'proxy' : 'direct');
     // e2e-found-fixes B1 (b): first sight, recorded synchronously before routing (two starts never both pass)
     const requestId = msg.kind === 'devops' ? msg.devops?.requestId : undefined;
     const firstSight = !!requestId && !this.seenDevopsRequests.has(requestId);
@@ -3278,7 +3290,7 @@ export class Runner {
               `could not forget the approved DevOps job of a request that ran in the box: ${String(err)}`,
             );
           }
-        void this.supervisor.handleStart(this.narrowShift(msg), undefined, { devopsMode: 'box' });
+        void this.supervisor.handleStart(this.narrowShift(msg, 'proxy'), undefined, { devopsMode: 'box' });
         return;
       case 'outside':
         this.log.info(
@@ -3291,7 +3303,9 @@ export class Runner {
             this.log.warn(`could not note the approved DevOps job under its new request: ${String(err)}`);
           }
         this.outsideRuns.set(msg.shiftId, route.key);
-        void this.supervisor.handleStart(this.narrowShift(route.msg), undefined, { devopsMode: 'outside' });
+        void this.supervisor.handleStart(this.narrowShift(route.msg, 'proxy'), undefined, {
+          devopsMode: 'outside',
+        });
         return;
       case 'hygiene':
         if (
@@ -3480,7 +3494,7 @@ export class Runner {
     }
     if (d.action === 'run' || this.authority.autoApprove?.(d.kind)) {
       if (this.busyRequest(msg)) return;
-      void this.supervisor.handleStart(this.narrowShift(msg), undefined, {
+      void this.supervisor.handleStart(this.narrowShift(msg, 'proxy'), undefined, {
         devopsMode: 'outside',
         startedSent: true,
       });
@@ -3508,8 +3522,19 @@ export class Runner {
     const policy = this.authority.policy();
     const socket = daemonSocket(policy, process.getuid?.() ?? null);
     const bridgeImage = this.opts.config.testServicesBridgeImage;
-    if (!socket || !policy.allowDocker || !policy.ceiling.docker)
+    // gate-fixes-1 S1: this job's own Docker access (the website switch AND the local ceiling, re-checked now); the legacy
+    // `policy.allowDocker` key is not consulted
+    const access = msg.devops?.access
+      ? narrowAccess(policy, msg.devops.access, this.ceilingFolderOk, 'proxy')
+      : undefined;
+    if (!socket || !policy.ceiling.docker)
       return { ok: false, error: 'Docker is not allowed for DevOps on this computer' };
+    if (!access?.allowDocker)
+      return {
+        ok: false,
+        error:
+          'Docker is off for this workstation (the Docker switch of the DevOps engineer on the Workstations page)',
+      };
     if (!bridgeImage)
       return {
         ok: false,
@@ -3786,14 +3811,20 @@ export class Runner {
     });
   }
 
-  /** The server's DevOps access flags narrowed to what policy.json grants (Docker; never sudo); never widened. */
-  private narrowShift(msg: Extract<ServerToRunner, { type: 'shift.start' }>): typeof msg {
+  /**
+   * The server's DevOps access flags narrowed to what policy.json grants (Docker; never sudo); never widened. `docker`:
+   * see `narrowAccess` (gate-fixes-1 F3: `proxy` for a request shift, `direct` for everything else).
+   */
+  private narrowShift(
+    msg: Extract<ServerToRunner, { type: 'shift.start' }>,
+    docker: 'direct' | 'proxy' = 'direct',
+  ): typeof msg {
     if (!msg.devops) return msg;
     return {
       ...msg,
       devops: {
         ...msg.devops,
-        access: narrowAccess(this.authority.policy(), msg.devops.access, this.ceilingFolderOk),
+        access: narrowAccess(this.authority.policy(), msg.devops.access, this.ceilingFolderOk, docker),
       },
     };
   }
@@ -3839,7 +3870,7 @@ export class Runner {
         }
       const startedSent = this.leftBox.delete(msg.shiftId);
       await this.supervisor.handleStart(
-        this.narrowShift(msg),
+        this.narrowShift(msg, request && isRequestShift(msg) ? 'proxy' : 'direct'),
         undefined,
         request ? { devopsMode: 'outside', ...(startedSent ? { startedSent: true } : {}) } : {},
       );
